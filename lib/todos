@@ -1,0 +1,221 @@
+//-- release öncesi
+
+Icon resource ic_notification not found -> notification icon ekle
+user session timeout
+
+// acelesi yok--
+apt tab renk yuzyuze vs
+
+Excel içe aktarım yaptıktan sonra randevular tabını yenilemek gerekiyor eklenenleri göremk için, paymenstta gerekmiyor
+paymentı bi subsmodel ile ilişkileyince o subsmodeldeki ödenen miktarın güncellenmesi için yenileye basmak gerekiyor
+kull detayları ısdım guncelleyınce appbackbar sol üstteki gözükenin yenilenemsi için anasf gidip gelmek ge rkeiyor
+
+resimsiz mealları da gosterıyoruz ımgtabda, ama saat timestampi yok ilerde gerekeblr
+
+yeni diet eklemek gıcık gozukuyor sımdılık editlerle ilerlesinler
+
+filtre seçince tum fıltre dıalog refreş atıyo rebuıld
+
+timeslot oluştururken boş olmasını istenilen aralıklar?
+
+pbler için bi status bişe?
+ön görüşmeler?
+
+APPOINTMENT: kaç dk süreceği bilgisi olabilir?
+// acelesi yok --
+
+// ACELESİ OLABİLİR:::::
+Edit appt dialog calendar exceptino aldım ama yok suan?
+cancel edilen apptler seçıleblıo muy user tarafında??
+1-2 tane appt gelirse aynı wıdgeta nası sıgcak admınde? BENCE BU OLMAMALI ZTN!!
+
+time conflict
+yine dfe uyarı verip oklatıp ok
+gog calendar gibi event ekleme
+
+admin appt page duzenleme
+MEAS IMPORT EDILIRKEN GERCEKTEN SAYI GIRILDIGI DURUMLARI KONTROL
+YAG TARIH OLAN SUTUNDA 35 FLN GIRILMIYO? KIZA SOLENMELİ
+img tab kucultunce pixeloverflow?
+DATELER CONSISTENT GOZUKSUN
+GUN AY (YAZI HALINDE) YIL GOZUKSUN!!!
+zaman yonetımı mobılde overflow
+mealupload page overflow, ama debug şeyinden de olabılır
+// ACELESİ OLABİLİR:::::
+
+
+
+
+DEBIUG=false yap loglar için
+meal page upload customö date seçiliyo kağpat
+
+_showFullImage implement
+--- 20 kasım ---
+images tab filtering
+
+//3 aralık
+
+apptstab paymentstab, nullSubs olması durumunda ne yapılacak tam?Edit diyalogları açıldığında ne olacak?
+
+--- 21 kasım        ---
+ big query olan yerler, mesela deletetimeslots, firebase ile optimize edilmeli bi şekil
+
+--23 kasım --
+login olduktan sonra homepage navigasyonunda neden cok bekliyor?
+
+
+--25 ksm
+ADMIN APPTS PAGE ISTEST VAR!!!!!!!!
+User changes filter
+    ↓
+buildFilterParams() creates FilterParams object
+    ↓
+refreshData() called (triggers Firebase query)
+    ↓
+Provider receives FilterParams
+    ↓
+Firebase Query with WHERE clauses
+    ↓
+Only filtered data transferred
+    ↓
+UI displays results
+--
+
+1) SUBS ACILINCA OZET TUM BILGILER!!!!
+2) meas tab scrollable cok içerde apptstab gibi olmuyo mu?
+3) import yapınca apptler için subs seçiyo muyuz?
+4) 3 dğruysa için de geçerli: appt eklerken substa appt kalmamışsa ne yapalım? kırmızı backgrund yapalım yıne de ızın verelım
+
+
+
+5) subsmodel editlenememeli appt edit dialogta.
+null handle edilmiş olmalı düzgün
+subsmodeli silip apptse noluyo bakalım
+
+6) acelesi yıo kgibi ama windows debugda şu hata verdi uzun sure idle kaldıktan snra:
+[MyApp] [2025-08-25 22:49:27.223] [INFO] [MyApp] User is logged in, showing HomePage
+[ERROR:flutter/shell/common/shell.cc(1065)] The 'firebase_auth_plugin/id-token/[DEFAULT]' channel sent a message from native to Flutter on a non-platform thread. Platform channel messages must be sent on the platform thread. Failure to do so may result in data loss or crashes, and must be fixed in the plugin or application code creating that channel.
+See https://docs.flutter.dev/platform-integration/platform-channels#channels-and-platform-threading for more information.
+
+
+
+8)
+admin randevular sf butonlar kayıyo baya kötü. bi de vertical cok uzun olunca nolacak?
+
+9) gunluk adım ve su, dailyData olarak mı giriyor? cursor yapmıştı en son onu
+appts alınınca appts isbooked=?True falan yapalım, timeslots bakarken skntı olablr kasar mı? ıuserda da adminde d e?
+
+tests tab'da loading indicator kullanımı doğru, await olmada kullanılmalı, ordan ornek alarak diğer yerlere de koyulabilir gereken yerler emesela import vs.
+Upload edilen douımanlar indirilebilmeli
+
+
+ ------------- OVERFLOW ÇÖZÜM CHATGPT 2 EYLUL -------------------
+
+ Flutter overflow playbook (what we learned)
+
+ Bound things: give content a max width/height when needed (ConstrainedBox/SizedBox).
+
+ Dialogs specifically: AlertDialog uses intrinsic sizing → don’t put LayoutBuilder inside. Use
+ ConstrainedBox(maxWidth: ~520) → SingleChildScrollView → Column(mainAxisSize: min).
+
+ Horizontal controls: long rows (e.g. ToggleButtons / action bars)
+
+ drop fixed minWidth
+
+ wrap in SizedBox(height: 40) + SingleChildScrollView(scrollDirection: Axis.horizontal)
+
+ shorten labels on narrow screens; let text ellipsis.
+
+ Expanded/Flexible: avoid inside a Column that lives in a scroll view (unbounded height). Only use them when the axis is bounded.
+
+ If still tight: switch rows to Wrap, reduce paddings, or show icon-only variants.
+
+ that generalizes what caused the last 3 errors and how we fixed them. if you want me to tweak the saved note, tell me the exact phrasing you prefer.
+
+ ---------------- OVERFLOW ÇÖZÜM ---------------------------------------------
+
+payments tab kasma sebebi:
+
+Here’s the clear picture—what was wrong, and what we changed to fix it.
+
+What was the problem?
+
+#1 source of jank: a build → post-frame → setState feedback loop
+In PaymentsTab.buildList(...) you scheduled:
+
+WidgetsBinding.instance.addPostFrameCallback(...)
+
+which called onFilterApplied(...) → setState(...)
+
+which triggered another build, which scheduled another callback…
+This loop was firing every time you switched tabs or filtered, making the UI “stutter”.
+
+Heavy work inside build/row builders
+
+Creating DateFormat('dd.MM.yyyy') and other formatting work per item.
+
+Sorting the whole list every rebuild.
+
+These costs stack up when 20+ items re-render.
+
+Stale item sticking after delete (from console)
+
+Firestore often serves from cache; your UI could see old data.
+
+Flutter can also reuse list elements if keys aren’t stable, so the “ghost” card might linger visually even when the new list is shorter.
+
+Not a hierarchy/dataFuture problem
+
+BaseTab was fine: FutureBuilder gets fresh data and passes it to buildList.
+
+The real issue was side effects during render and reconciliation, not the Future flow.
+
+What did we change to fix it?
+
+Removed the feedback loop entirely
+
+No more addPostFrameCallback in buildList.
+
+onFilterApplied is now a no-op.
+
+We compute summaries (totals/counts) inline during build—pure derivation from filteredItems.
+→ Result: one build per data/filter change; no extra frames.
+
+Reduced per-frame/per-row cost
+
+Cached NumberFormat and DateFormat as state fields (created once).
+
+Kept sorting to a single place per build (acceptable), and you can later move it earlier if needed.
+→ Result: less work during list paints.
+
+Ensured fresh data & clean reconciliation
+
+Provider now uses query.get(const GetOptions(source: Source.server)) to bypass cache when refreshing.
+
+ListView.builder gets a stable key derived from visible paymentIds; each card uses ValueKey(payment.paymentId).
+→ Result: Flutter reliably drops removed items; no “ghost” cards after refresh.
+
+Kept keep-alive, avoided forced remounts
+
+We preserved AutomaticKeepAliveClientMixin so tab switching doesn’t reconstruct everything.
+
+We avoided UniqueKey() remounts (those are a last resort and add work).
+→ Result: smoother tab switches.
+
+Why did filtering feel “overcomplicated”?
+
+Filtering itself is simple. The complexity came from where it happened:
+
+You mixed state updates into the render phase (build → schedule callback → setState), which causes unnecessary rebuilds and jank.
+
+A clean model is:
+
+Single source of truth: the data from BaseTab’s FutureBuilder.
+
+Filter state: lives in the tab (e.g., _tempStatus, date range, search text).
+
+Filtered list: a pure function of (data, filter state) calculated in build (or a small helper) without setState.
+
+Summaries: computed directly from the filtered list (no extra state).
+
+That’s exactly what we implemented. Now the UI simply reflects (data, filters)—no side-effects and no redundant frames—so it stays smooth even with 20+ items.

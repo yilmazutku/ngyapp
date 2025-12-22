@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Default FCM notification channel -->
+    <string name="notification_channel_id" translatable="false">chat_messages_v2</string>
+    
+    <!-- Chat notifications channel settings -->
+    <string name="chat_channel_name">Sohbet Mesajları</string>
+    <string name="chat_channel_description">Yeni sohbet mesajı bildirimleri</string>
+    
+    <!-- News/Announcements notification channel -->
+    <string name="news_channel_id" translatable="false">news_announcements</string>
+    <string name="news_channel_name">Duyurular</string>
+    <string name="news_channel_description">Yeni duyuru bildirimleri</string>
+</resources>
