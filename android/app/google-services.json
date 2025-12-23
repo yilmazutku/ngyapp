@@ -7,28 +7,6 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:49616297399:android:18224109b20d14500e5c32",
-        "android_client_info": {
-          "package_name": "com.example.untitled"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyD5TJtwhUHcA1zwq_9N2vE_F_L6-TjHSEA"
-        },
-        {
-          "current_key": "AIzaSyDP59A_Bp2zz2Hp2Hf6EPrBGF3puoBKovc"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
         "mobilesdk_app_id": "1:49616297399:android:466d76c4b7231b390e5c32",
         "android_client_info": {
           "package_name": "com.utkuyilmaz.ngy_app"
@@ -36,9 +14,6 @@
       },
       "oauth_client": [],
       "api_key": [
-        {
-          "current_key": "AIzaSyD5TJtwhUHcA1zwq_9N2vE_F_L6-TjHSEA"
-        },
         {
           "current_key": "AIzaSyDP59A_Bp2zz2Hp2Hf6EPrBGF3puoBKovc"
         }
