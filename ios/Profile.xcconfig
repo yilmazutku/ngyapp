@@ -1,0 +1,9 @@
+//
+//  Profile.xcconfig
+//  Runner
+//
+//  Created by Nilay GÖKTEPE on 24.12.2025.
+//
+
+#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"
+#include "Generated.xcconfig"
