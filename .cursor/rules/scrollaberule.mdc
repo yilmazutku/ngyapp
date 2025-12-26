@@ -1,0 +1,48 @@
+---
+description: Scrollbar & ScrollController rule
+alwaysApply: false
+---
+  Scrollbar & ScrollController rule
+
+  Short rule:
+  Always attach a ScrollPosition to Scrollbar:
+  - Share the same ScrollController between Scrollbar and its ScrollView
+    OR
+  - Set the child scroll view primary: true with a valid PrimaryScrollController in scope.
+
+  Applies to:
+  - Scrollbar, RawScrollbar, CupertinoScrollbar around ListView, GridView, CustomScrollView,
+    SingleChildScrollView, etc., including inside TabBarView, dialogs, and conditional UIs.
+
+  Must flag as WRONG when:
+  - Scrollbar has no controller, child has no controller, and child.primary is not true.
+  - Scrollbar.controller != child.controller (mismatched controllers).
+  - One ScrollController is reused across multiple lists/tabs.
+
+  Correct patterns:
+  - Explicit shared controller:
+      final controller = ScrollController();
+      return Scrollbar(
+        controller: controller,
+        child: ListView.builder(
+          controller: controller,
+          /* ... */
+        ),
+      );
+
+  - Primary scrollable (only where a PrimaryScrollController exists and makes sense):
+      Scrollbar(
+        child: ListView.builder(
+          primary: true,
+          /* ... */
+        ),
+      );
+
+  Multi-tab / multi-list UIs:
+  - Create one ScrollController per list/tab.
+  - Dispose all controllers in dispose().
+  - Do NOT reuse the same controller for different scrollables.
+
+  Notes:
+  - In dialogs, nested scrollables, TabBarView, prefer explicit controllers over relying on primary:true.
+  - CupertinoScrollbar and RawScrollbar follow the exact same rules.

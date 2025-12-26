@@ -1,0 +1,15 @@
+---
+alwaysApply: true
+---
+ Don’t use BuildContext across async gaps without mounted checks.
+
+  After any await, check mounted before using context (e.g. showDialog, Navigator).
+
+  Wrong:
+    await showDialog(context: context, ...); // no mounted check
+
+  Correct:
+    if (mounted) {
+      await showDialog(context: context, ...);
+    }
+

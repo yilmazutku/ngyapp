@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+ For user confirmations, always use:
+    await DialogUtils.showConfirmationDialogWithResult(...);
+
+  Use the proper DialogUtils methods:
+  - confirmation dialogs for actions
+  - error/info dialogs for errors/notifications
+  Ensure dialogs are used where needed and not duplicated manually.

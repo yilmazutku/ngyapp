@@ -1,0 +1,27 @@
+---
+alwaysApply: true
+---
+ General coding & UI guidelines:
+
+  - Prefer real solutions over quick workarounds.
+  - Put constant strings near the top of the class; reuse instead of duplicating.
+  - Don’t add unused methods; refactor existing code when extracting helpers.
+  - Fix linter issues in touched files.
+  - For admin-side features, design like an ERP: clear labels, good UX, and clean layout.
+
+  Architecture:
+  - Separate UI and business logic (providers / ChangeNotifier for logic).
+  - Follow SOLID and DRY: no duplicated widgets/logic; reuse existing project components.
+  - Keep code modular, small, and focused (single-responsibility widgets/classes).
+
+  UI & performance:
+  - Use responsive layouts (MediaQuery, LayoutBuilder); no hardcoded pixel sizes.
+  - Design for mobile and desktop.
+  - Prefer Material 3 widgets and theming.
+  - Optimize builds (const widgets where possible) and avoid jank.
+
+  Scope & quality:
+  - Implement only what the task requires; no unrequested features.
+  - Handle empty/error states thoughtfully.
+  - Use official Flutter/Dart APIs when possible.
+  - Add comments only where logic or decisions are non-obvious.

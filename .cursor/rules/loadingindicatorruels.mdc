@@ -1,0 +1,41 @@
+---
+description:Safe loading indicator guidelines
+globs:
+alwaysApply: true
+---
+S  Safe loading indicator guidelines:
+
+  - Prefer local loading state:
+    - Use StatefulBuilder or local state for self-contained loaders.
+    - Avoid depending on parent BuildContext for loading state updates.
+
+  - Capture context-dependent objects early: 
+    - Store navigator, scaffoldMessenger, etc. at the start of async methods.
+    - Use these stored refs later instead of reusing context.
+
+  - Prefer overlays for persistent loaders:
+    - Use OverlayEntry for global/long-running loaders instead of showDialog.
+    - Manually insert/remove overlay entries.
+
+  - Use a global LoadingService when needed:
+    - Manage global loading state via a service (e.g. Stream/ValueNotifier).
+    - Widgets listen to this state instead of passing BuildContext around.
+
+  - Always check mounted before UI updates:
+    - After async operations, do:
+        if (!mounted) return;
+        setState(...);
+    - Return early if widget is no longer mounted.
+
+  - Prefer inline UI feedback:
+    - Use in-place spinners/placeholder widgets instead of full-screen dialogs
+      when possible.
+
+  - Ensure cleanup of loaders:
+    - Use whenComplete()/then() to hide loaders even on errors.
+    - Example:
+        myAsyncOperation().whenComplete(() => LoadingOverlay.hide());
+
+  - Separate UI from business logic:
+    - Business logic returns results; UI decides when/how to show loaders.
+    - Use Provider/other state management for loading flags where appropriate.

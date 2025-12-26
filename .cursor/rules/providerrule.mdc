@@ -1,0 +1,8 @@
+---
+alwaysApply: true
+---
+When dealing with firestore database/storage, make sure you use the relevant provider if exists. Firebase CRUD operations must be done in provider classes (classes that extend changenotifier, found under /providers path).
+
+If making a widget listen to a provider, use 
+
+Provider.of<SomeDummyProvider>(context, listen: false);, do not use listen:true. It causes errors.

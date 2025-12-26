@@ -33,6 +33,28 @@ migrate_working_dir/
 .pub/
 /build/
 
+# iOS specific - machine-generated files
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/ios/Podfile.lock
+
+# macOS specific - machine-generated files
+**/macos/Pods/
+**/macos/Flutter/ephemeral/
+**/macos/Flutter/Flutter-Generated.xcconfig
+**/macos/Flutter/flutter_export_environment.sh
+
+# Mac Finder duplicate files (files with " 2" in name)
+**/* 2.*
+**/* 2 *
+
 # Symbolication related
 app.*.symbols
 

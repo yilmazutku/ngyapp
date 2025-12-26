@@ -1,0 +1,37 @@
+---
+description: Loading indicator pattern (DialogUtils)
+alwaysApply: true
+---
+ Loading indicator pattern (DialogUtils):
+
+  When implementing async operations with a loading dialog:
+
+  - Open loading without await and track with a boolean:
+      bool loadingOpen = false;
+      if (mounted) {
+        DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
+        loadingOpen = true;
+      }
+
+  - Always close the loading BEFORE showing info/error dialogs:
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+  - Wrap async work in try / catch / finally:
+    - In try: perform the operation.
+    - On success:
+        - close loading (if open)
+        - show info dialog (DialogUtils.openInfo)
+        - refresh data/state if needed.
+    - On error:
+        - close loading (if open)
+        - show error dialog (DialogUtils.openError)
+    - In finally:
+        - reset local busy flags with setState if mounted.
+
+  - Always use mounted checks before:
+    - opening/closing dialogs
+    - calling setState
+    - using context-dependent APIs.

@@ -1,0 +1,47 @@
+---
+description: Layout & overflow guidelines
+globs: *.dart
+alwaysApply: false
+---
+
+
+ Layout & overflow guidelines ("Bottom overflowed by pixels"):
+
+  Goal: Avoid bottom overflow and build responsive layouts.
+
+  When designing layouts:
+
+  - Make content scrollable when needed:
+    - Wrap tall content (e.g. Column) with:
+        SingleChildScrollView(
+          child: Column(/* children */),
+        );
+    - Use ListView for lists instead of big Columns.
+
+  - Use responsive & flexible layout:
+    - Use MediaQuery / LayoutBuilder to adapt to screen size.
+    - Use Expanded / Flexible inside Row / Column to share space.
+    - Prefer percentage / constraints over fixed pixel heights.
+
+  - Handle oversized content:
+    - Text:
+        Text(
+          text,
+          maxLines: N,
+          overflow: TextOverflow.ellipsis,
+        );
+    - Images:
+        Image.network(
+          url,
+          fit: BoxFit.contain, // or BoxFit.cover as needed
+        );
+    - Wrap in Container / SizedBox with max height/width when needed.
+
+  - Correct widget nesting:
+    - Put vertical children in Column, horizontal in Row.
+    - Use SizedBox / Container for spacing and fixed sizes instead of magic numbers.
+    - Use LayoutBuilder for special cases that depend on available space.
+
+  - Small screens:
+    - Test on small devices/emulators.
+    - Prefer scroll + flexible widgets instead of stacking too many fixed-height widgets.

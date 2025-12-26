@@ -1,0 +1,55 @@
+---
+description: Reactive UI pattern for filters / sorting / selections
+globs: *.dart
+alwaysApply: false
+---
+Reactive UI pattern for filters / sorting / selections:
+
+  Goal: Immediate visual feedback, no null crashes, and proper data refresh.
+
+  1. Immediate UI updates (local state)
+     - Use StatefulBuilder when the selection is inside a dialog/bottom sheet/popup:
+       StatefulBuilder(
+         builder: (context, setLocalState) {
+           return SelectionWidget(
+             value: _selectedValue,
+             onSelected: (option) {
+               if (option == null) return;
+
+               setState(() {
+                 _selectedValue = option;
+               });
+               setLocalState(() {}); // force local rebuild if needed
+
+               _fetchData(); // apply changes
+             },
+           );
+         },
+       );
+
+  2. Null-safe handling
+     - Always check for null in callbacks:
+       onSelected: (option) {
+         if (option == null) return;
+         // update state + refresh
+       };
+
+  3. Mandatory selections
+     - If selection cannot be null:
+       - Disable "All"/null options (e.g. showAllOption: false).
+       - Set and keep a sensible default.
+       - Reflect this in widget parameters / docs.
+
+  4. Trigger data updates after selection
+     - After updating state, immediately refresh data/UI:
+       onSelected: (option) {
+         if (option == null) return;
+         setState(() { _selected = option; });
+         _fetchData(); // or notify provider, etc.
+       };
+
+  5. General rules
+     - Use local state (StatefulBuilder) for instant visual feedback where needed.
+     - Keep filter/sort state in a clear source of truth (page state or provider).
+     - Avoid "null check operator used on a null value" by always guarding inputs.
+
