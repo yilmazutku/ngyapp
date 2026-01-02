@@ -464,7 +464,9 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
 
     const sizedBox = SizedBox(width: 12);
 
-    final content = filteredItems.isEmpty
+    // Always show buildFilteredContent when we have a date range selected,
+    // even if there are no meals - this ensures daily data cards are displayed
+    final content = (filteredItems.isEmpty && selectedDateRange == null)
         ? buildEmptyState()
         : buildFilteredContent(context, filteredItems);
 
@@ -682,8 +684,22 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       groupedMeals.putIfAbsent(dateKey, () => []).add(meal);
     }
 
-    // Collect all dates that have any data (meals, dailyData, or meal states)
-    Set<String> allDates = groupedMeals.keys.toSet();
+    // Collect ALL dates in the selected date range to always show daily data
+    Set<String> allDates = {};
+
+    // Add all dates from the selected date range
+    if (selectedDateRange != null) {
+      DateTime currentDate = selectedDateRange!.start;
+      while (currentDate.isBefore(selectedDateRange!.end) ||
+          currentDate.isAtSameMomentAs(selectedDateRange!.end)) {
+        final dateKey = dateFormat.format(currentDate);
+        allDates.add(dateKey);
+        currentDate = currentDate.add(const Duration(days: 1));
+      }
+    }
+
+    // Also add dates from meals (in case they're outside the current range)
+    allDates.addAll(groupedMeals.keys);
 
     // Add dates from dailyDataMap
     for (var date in _dailyDataMap.keys) {
@@ -1017,39 +1033,35 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
         ),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.max,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Placeholder image area
-          Padding(
-            padding: EdgeInsets.only(top: kMealCardTopPadding),
-            child: Center(
-              child: Container(
-                width: thumbSize,
-                height: thumbSize,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.image_not_supported,
-                      size: thumbSize * 0.3,
-                      color: Colors.grey.shade400,
+          // Placeholder image area - flexible to fill available space
+          Expanded(
+            child: Container(
+              margin: EdgeInsets.all(kMealCardPadding),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.image_not_supported,
+                    size: 24 * kSizeReductionMultiplier,
+                    color: Colors.grey.shade400,
+                  ),
+                  SizedBox(height: 4 * kSizeReductionMultiplier),
+                  Text(
+                    'Görsel Yok',
+                    style: TextStyle(
+                      fontSize: 10 * kSizeReductionMultiplier,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w500,
                     ),
-                    SizedBox(height: 4 * kSizeReductionMultiplier),
-                    Text(
-                      'Görsel Yok',
-                      style: TextStyle(
-                        fontSize: 11 * kSizeReductionMultiplier,
-                        color: Colors.grey.shade600,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1066,7 +1078,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                   color: typeColor,
                 ),
                 SizedBox(width: kMealCardSpacing),
-                Expanded(
+                Flexible(
                   child: Text(
                     mealType.label,
                     style: TextStyle(
@@ -1099,109 +1111,105 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cardWidth =
-        constraints.maxWidth.isFinite ? constraints.maxWidth : 200.0;
         final dpr = MediaQuery.of(context).devicePixelRatio;
         final int cache = (thumbSize * dpr).round();
 
-        return SizedBox(
-          width: cardWidth,
-          child: Card(
-            elevation: 2,
-            margin: EdgeInsets.all(kMealCardMargin),
-            clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-              side: BorderSide(
-                color: typeColor.withOpacity(0.5),
-                width: 1,
-              ),
+        return Card(
+          elevation: 2,
+          margin: EdgeInsets.all(kMealCardMargin),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: typeColor.withOpacity(0.5),
+              width: 1,
             ),
-            child: InkWell(
-              onTap: () =>
-                  _showMealDetails(context, meal, dialogImageHeight, heroTag),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Small square thumbnail
-                  Padding(
-                    padding: EdgeInsets.only(top: kMealCardTopPadding),
-                    child: Center(
-                      child: Hero(
-                        tag: heroTag,
-                        child: ChatImagePreview(
-                          imageUrl: meal.imageUrl,
-                          width: thumbSize,
-                          height: thumbSize,
-                          borderRadius: 8,
-                          cacheWidth: cache,
-                          cacheHeight: cache,
-                          onTap: () => _showMealDetails(
-                            context,
-                            meal,
-                            dialogImageHeight,
-                            heroTag,
-                          ),
+          ),
+          child: InkWell(
+            onTap: () =>
+                _showMealDetails(context, meal, dialogImageHeight, heroTag),
+            child: Column(
+              mainAxisSize: MainAxisSize.max,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Thumbnail - flexible to fill available space
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.all(kMealCardPadding),
+                    child: Hero(
+                      tag: heroTag,
+                      child: ChatImagePreview(
+                        imageUrl: meal.imageUrl,
+                        borderRadius: 8,
+                        cacheWidth: cache,
+                        cacheHeight: cache,
+                        fit: BoxFit.cover,
+                        onTap: () => _showMealDetails(
+                          context,
+                          meal,
+                          dialogImageHeight,
+                          heroTag,
                         ),
                       ),
                     ),
                   ),
+                ),
 
-                  // Compact info section with meal type and time
-                  Padding(
-                    padding: EdgeInsets.all(kMealCardPadding),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Meal type with icon
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Icon(
-                                _getMealTypeIcon(meal.mealType),
-                                size: kMealCardIconSize,
-                                color: typeColor,
-                              ),
-                              SizedBox(width: kMealCardSpacing),
-                              Expanded(
-                                child: Text(
-                                  meal.mealType.label,
-                                  style: TextStyle(
-                                    fontSize: kMealCardLabelFontSize,
-                                    fontWeight: FontWeight.bold,
-                                    color: typeColor,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // Time in 24h format
-                        Row(
+                // Compact info section with meal type and time
+                Padding(
+                  padding: EdgeInsets.all(kMealCardPadding),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Meal type with icon
+                      Flexible(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              Icons.access_time,
-                              size: kMealCardTimeIconSize,
-                              color: Colors.grey[600],
+                              _getMealTypeIcon(meal.mealType),
+                              size: kMealCardIconSize,
+                              color: typeColor,
                             ),
-                            SizedBox(width: 2 * kSizeReductionMultiplier),
-                            Text(
-                              timeStr,
-                              style: TextStyle(
-                                fontSize: kMealCardTimeFontSize,
-                                color: Colors.grey[600],
+                            SizedBox(width: kMealCardSpacing),
+                            Flexible(
+                              child: Text(
+                                meal.mealType.label,
+                                style: TextStyle(
+                                  fontSize: kMealCardLabelFontSize,
+                                  fontWeight: FontWeight.bold,
+                                  color: typeColor,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
+                      ),
+
+                      // Time in 24h format
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.access_time,
+                            size: kMealCardTimeIconSize,
+                            color: Colors.grey[600],
+                          ),
+                          SizedBox(width: 2 * kSizeReductionMultiplier),
+                          Text(
+                            timeStr,
+                            style: TextStyle(
+                              fontSize: kMealCardTimeFontSize,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -1226,10 +1234,11 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
 
   DateTime _parseDateKey(String dateStr) {
     try {
-      final parts = dateStr.split('-');
+      // Parse format "d MMMM y" (e.g., "2 Ocak 2026")
+      final parts = dateStr.split(' ');
       if (parts.length == 3) {
         final day = int.parse(parts[0]);
-        final month = int.parse(parts[1]);
+        final month = _getMonthNumber(parts[1]);
         final year = int.parse(parts[2]);
         return DateTime(year, month, day);
       }
@@ -1237,7 +1246,8 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       logger.err('Error parsing date string: {}', [e]);
     }
     // Return today as fallback
-    return DateTime.now();
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
   }
 
   int _getMonthNumber(String monthName) {
