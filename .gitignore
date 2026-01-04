@@ -45,6 +45,21 @@ migrate_working_dir/
 **/ios/Runner/GeneratedPluginRegistrant.*
 **/ios/Podfile.lock
 
+# iOS build artifacts
+**/ios/build/
+**/ios/DerivedData/
+
+# Xcode user-specific data (don't commit!)
+**/ios/**/*.xcworkspace/xcuserdata/
+**/ios/**/*.xcodeproj/xcuserdata/
+**/ios/**/xcuserdata/
+*.xcuserstate
+
+# Duplicate config files (from pod install issues)
+**/ios/Flutter/Generated*.xcconfig
+**/ios/Flutter/flutter_export_environment*.sh
+**/ios/Flutter/Flutter*.podspec
+
 # macOS specific - machine-generated files
 **/macos/Pods/
 **/macos/Flutter/ephemeral/
