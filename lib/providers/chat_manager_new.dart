@@ -235,7 +235,8 @@ class ChatManager extends ChangeNotifier {
       logger.info('Sending text message. chatId={} senderId={} length={}', [chatId, userId, text.length]);
       
       // Update chat document with latest message info
-      await _ensureChatDoc(chatId, lastMessage: text, lastAt: Timestamp.now());
+      // Clear lastImageUrl since this is a text-only message
+      await _ensureChatDoc(chatId, lastMessage: text, lastImageUrl: '', lastAt: Timestamp.now());
       
       // Add message to subcollection
       final ref = await _chatDoc(chatId).collection('messages').add({

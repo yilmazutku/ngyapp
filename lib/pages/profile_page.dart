@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:ngy_app/pages/reset_password_page.dart';
 import 'package:intl/intl.dart';
-import 'package:ngy_app/services/notification_service.dart';
 import 'package:ngy_app/services/meal_reminder_service.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -23,6 +22,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final _ageController = TextEditingController();
   bool _isLoading = true;
   bool _mealNotificationsEnabled = false;
+  bool _announcementNotificationsEnabled = true; // Default to true
   DateTime? _createDate;
 
   String _formatTimestamp(Timestamp timestamp) {
@@ -56,6 +56,7 @@ class _ProfilePageState extends State<ProfilePage> {
               : null);
         setState(() {
           _mealNotificationsEnabled = data['mealNotificationsEnabled'] ?? false;
+          _announcementNotificationsEnabled = data['announcementNotificationsEnabled'] ?? true;
         });
       } else {
         print('No data found for userId: ${widget.userId}');
@@ -93,6 +94,7 @@ class _ProfilePageState extends State<ProfilePage> {
         'surname': _surnameController.text,
         'age': age,
         'mealNotificationsEnabled': _mealNotificationsEnabled,
+        'announcementNotificationsEnabled': _announcementNotificationsEnabled,
       }, SetOptions(merge: true));
       print('User data saved for userId: ${widget.userId}');
     } catch (e) {
@@ -227,23 +229,29 @@ class _ProfilePageState extends State<ProfilePage> {
                     },
                   ),
                   const SizedBox(height: 8),
-                  ListTile(
-                    title: const Text('Test Bildirimi'),
-                    subtitle:
-                        const Text('5 saniye içinde bir test bildirimi al'),
-                    trailing: const Icon(Icons.notifications),
-                    onTap: () async {
-                      final notificationService = NotificationService();
-                      if (!notificationService.isSupported) {
-                        if (!mounted) return;
-                        _showInfoDialog(
-                            'Yerel bildirimler bu platformda desteklenmiyor.');
-                        return;
-                      }
-                      await notificationService.scheduleTestNotification();
+                  SwitchListTile(
+                    title: const Text('Duyuru Bildirimleri'),
+                    subtitle: const Text('Yeni duyurular için bildirim al'),
+                    value: _announcementNotificationsEnabled,
+                    onChanged: (bool value) async {
+                      setState(() {
+                        _announcementNotificationsEnabled = value;
+                      });
+                      
+                      // Save preference immediately
+                      await FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(widget.userId)
+                          .set({
+                        'announcementNotificationsEnabled': value,
+                      }, SetOptions(merge: true));
+                      
                       if (!mounted) return;
-                      _showInfoDialog(
-                          'Test bildirimi 5 saniye içinde gelecektir.');
+                      if (value) {
+                        _showInfoDialog('Duyuru bildirimleri etkinleştirildi.');
+                      } else {
+                        _showInfoDialog('Duyuru bildirimleri devre dışı bırakıldı.');
+                      }
                     },
                   ),
                   const SizedBox(height: 24),

@@ -412,14 +412,11 @@ class _ChatPageState extends State<ChatPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(PushNotificationReference.chatAdminToUserTitle),
-        // Show chat user name in subtitle if admin is viewing another user's chat
-        bottom: widget.overrideChatId != null && _isAdminUser
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(24),
-                child: _buildUserNameSubtitle(_chatId),
-              )
-            : null,
+        // If admin is viewing a user's chat, show user's name as title
+        // Otherwise show the default chat title
+        title: widget.overrideChatId != null && _isAdminUser
+            ? _buildUserNameTitle(_chatId)
+            : Text(PushNotificationReference.chatAdminToUserTitle),
       ),
       body: Column(
         children: [
@@ -493,50 +490,36 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  /// Build a subtitle widget displaying the user's full name.
+  /// Build a title widget displaying the user's full name.
   /// 
   /// Fetches user details from Firestore and displays name + surname.
-  /// Shows a loading indicator while fetching, and falls back to UID on error.
-  Widget _buildUserNameSubtitle(String userId) {
+  /// Shows loading text while fetching, and falls back to "Sohbet" on error.
+  Widget _buildUserNameTitle(String userId) {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     
     return FutureBuilder(
       future: userProvider.fetchUserDetails(userId: userId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.only(bottom: 4),
-            child: SizedBox(
-              height: 12,
-              width: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white70,
-              ),
-            ),
-          );
+          return const Text('Yükleniyor...');
         }
         
-        String displayName = userId; // Fallback to UID
+        String displayName = 'Sohbet'; // Fallback
         
         if (snapshot.hasData && snapshot.data != null) {
           final user = snapshot.data!;
           final firstName = user.name.trim();
-          final lastName = user.surname.trim() ?? '';
+          final lastName = user.surname.trim();
           displayName = lastName.isNotEmpty ? '$firstName $lastName' : firstName;
-          logger.debug('User name loaded for chatId={}: {}', [userId, displayName]);
+          logger.debug('User name loaded for chat title: {}', [displayName]);
         } else if (snapshot.hasError) {
-          logger.warn('Failed to load user name for chatId={}: {}', [userId, snapshot.error]);
+          logger.warn('Failed to load user name for chat title: {}', [snapshot.error]);
         }
         
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(
-            'Kullanıcı: $displayName',
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+        return Text(
+          displayName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         );
       },
     );

@@ -355,9 +355,11 @@ function buildAndroidConfigForNews(title, body) {
 /**
  * Collects all FCM tokens from all users (including admins).
  * Uses single fcmToken field per user.
+ * @param {boolean} checkAnnouncementPreference - If true, only returns tokens
+ *   for users who have announcementNotificationsEnabled !== false.
  * @return {Promise<string[]>} Array of FCM tokens.
  */
-async function getAllUserTokens() {
+async function getAllUserTokens(checkAnnouncementPreference = false) {
   const usersSnapshot = await admin.firestore()
       .collection('users')
       .get();
@@ -366,9 +368,19 @@ async function getAllUserTokens() {
 
   usersSnapshot.docs.forEach((doc) => {
     const userData = doc.data();
-    if (userData?.fcmToken) {
-      allTokens.push(userData.fcmToken);
+    if (!userData?.fcmToken) return;
+
+    // If checking announcement preference, skip users who disabled it
+    if (checkAnnouncementPreference) {
+      // Default to true if field doesn't exist (new users get notifications)
+      const announcementsEnabled =
+          userData.announcementNotificationsEnabled !== false;
+      if (!announcementsEnabled) {
+        return;
+      }
     }
+
+    allTokens.push(userData.fcmToken);
   });
 
   return allTokens;
@@ -441,14 +453,15 @@ exports.notifyUsersOnNewsCreated = onDocumentCreated(
 
       logger.info(`Sending notification for new news: ${title}`);
 
-      // Get all user tokens
-      const tokens = await getAllUserTokens();
+      // Get tokens only for users who have announcements enabled
+      const tokens = await getAllUserTokens(true);
       if (tokens.length === 0) {
-        logger.info('No user tokens found, skipping notification');
+        logger.info('No eligible user tokens found, skipping notification');
         return;
       }
 
-      logger.info(`Sending news notification to ${tokens.length} devices`);
+      logger.info(`Sending news notification to ${tokens.length} devices ` +
+          `(users with announcements enabled)`);
 
       // Send notification in batches (FCM limit is 500 per request)
       const batchSize = 500;
@@ -527,14 +540,15 @@ exports.notifyUsersOnNewsPublished = onDocumentUpdated(
 
       logger.info(`Sending notification for newly published news: ${title}`);
 
-      // Get all user tokens
-      const tokens = await getAllUserTokens();
+      // Get tokens only for users who have announcements enabled
+      const tokens = await getAllUserTokens(true);
       if (tokens.length === 0) {
-        logger.info('No user tokens found, skipping notification');
+        logger.info('No eligible user tokens found, skipping notification');
         return;
       }
 
-      logger.info(`Sending news notification to ${tokens.length} devices`);
+      logger.info(`Sending news notification to ${tokens.length} devices ` +
+          `(users with announcements enabled)`);
 
       // Send notification in batches
       const batchSize = 500;
