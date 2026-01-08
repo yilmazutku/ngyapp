@@ -48,7 +48,8 @@ class MealFormatter {
   /// 
   /// Each option starts with content item that has "Veya" prefix
   /// Returns a list of widgets with Text widgets for content and Dividers with "Veya" text
-  static List<Widget> formatMealContentWithOptions(List<dynamic> contentList) {
+  /// [fontSize] - optional font size for content text (default: 16)
+  static List<Widget> formatMealContentWithOptions(List<dynamic> contentList, {double fontSize = 16}) {
     List<Widget> formattedContent = [];
     List<int> optionStartIndices = [];
     
@@ -133,7 +134,7 @@ class MealFormatter {
             padding: const EdgeInsets.symmetric(vertical: 4.0),
             child: Text(
               displayContent,
-              style: const TextStyle(fontSize: 16),
+              style: TextStyle(fontSize: fontSize),
             ),
           ),
         );

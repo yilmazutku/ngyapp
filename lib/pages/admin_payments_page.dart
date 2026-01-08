@@ -353,92 +353,28 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            String searchQuery = '';
-            List<UserModel> filteredUsers = _users;
-
-            void filterUsers(String query) {
-              setState(() {
-                searchQuery = query.toLowerCase();
-                if (searchQuery.isEmpty) {
-                  filteredUsers = _users;
-                } else {
-                  filteredUsers = _users.where((user) {
-                    return user.name.toLowerCase().contains(searchQuery) ||
-                        (user.surname ?? '').toLowerCase().contains(searchQuery) ||
-                        '${user.name} ${user.surname ?? ''}'.toLowerCase().contains(searchQuery);
-                  }).toList();
-                }
-              });
-            }
-
-            return AlertDialog(
-              title: const Text('Kullanıcı Seçin'),
-              content: SizedBox(
-                width: double.maxFinite,
-                height: 400,
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
-                      child: TextField(
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.search),
-                          hintText: 'Kullanıcı ara...',
-                          border: OutlineInputBorder(),
-                          contentPadding:
-                          EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-                        ),
-                        onChanged: filterUsers,
-                      ),
-                    ),
-                    Expanded(
-                      child: filteredUsers.isEmpty
-                          ? const Center(child: Text('Kullanıcı bulunamadı'))
-                          : ListView.builder(
-                        itemCount: filteredUsers.length,
-                        itemBuilder: (context, index) {
-                          final user = filteredUsers[index];
-                          return ListTile(
-                            title: Text(user.name),
-                            subtitle: Text(user.email),
-                            onTap: () {
-                              logger.info(
-                                  'User selected for payment: ${user.name} (${user.userId})');
-                              Navigator.pop(context); // close user picker
-                              showDialog(
-                                context: context,
-                                builder: (context) {
-                                  return AddPaymentDialog(
-                                    userId: user.userId,
-                                    onPaymentAdded: () {
-                                      logger.info(
-                                          'Payment added successfully for user ${user.name}');
-                                      _loadData();
-                                    },
-                                  );
-                                },
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    logger.info('User selection canceled');
-                    Navigator.pop(context);
+      builder: (dialogContext) {
+        return _UserSelectionDialog(
+          users: _users,
+          onUserSelected: (user) {
+            logger.info('User selected for payment: ${user.name} (${user.userId})');
+            Navigator.pop(dialogContext); // close user picker
+            showDialog(
+              context: context,
+              builder: (context) {
+                return AddPaymentDialog(
+                  userId: user.userId,
+                  onPaymentAdded: () {
+                    logger.info('Payment added successfully for user ${user.name}');
+                    _loadData();
                   },
-                  child: const Text('İptal'),
-                ),
-              ],
+                );
+              },
             );
+          },
+          onCancel: () {
+            logger.info('User selection canceled');
+            Navigator.pop(dialogContext);
           },
         );
       },
@@ -997,6 +933,111 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
         message: 'Ödeme silinirken bir hata oluştu: $e',
       );
     }
+  }
+}
+
+/// Stateful dialog for user selection with working search functionality
+class _UserSelectionDialog extends StatefulWidget {
+  final List<UserModel> users;
+  final Function(UserModel) onUserSelected;
+  final VoidCallback onCancel;
+
+  const _UserSelectionDialog({
+    required this.users,
+    required this.onUserSelected,
+    required this.onCancel,
+  });
+
+  @override
+  State<_UserSelectionDialog> createState() => _UserSelectionDialogState();
+}
+
+class _UserSelectionDialogState extends State<_UserSelectionDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  List<UserModel> _filteredUsers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filteredUsers = widget.users;
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filterUsers(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredUsers = widget.users;
+      } else {
+        final searchQuery = query.toLowerCase();
+        _filteredUsers = widget.users.where((user) {
+          final name = user.name.toLowerCase();
+          final surname = (user.surname ?? '').toLowerCase();
+          final fullName = '$name $surname'.trim();
+          final email = user.email.toLowerCase();
+          return name.contains(searchQuery) ||
+              surname.contains(searchQuery) ||
+              fullName.contains(searchQuery) ||
+              email.contains(searchQuery);
+        }).toList();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Kullanıcı Seçin'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 400,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Kullanıcı ara...',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+                ),
+                onChanged: _filterUsers,
+              ),
+            ),
+            Expanded(
+              child: _filteredUsers.isEmpty
+                  ? const Center(child: Text('Kullanıcı bulunamadı'))
+                  : ListView.builder(
+                      itemCount: _filteredUsers.length,
+                      itemBuilder: (context, index) {
+                        final user = _filteredUsers[index];
+                        return ListTile(
+                          leading: CircleAvatar(
+                            child: Text(user.name.isNotEmpty ? user.name[0].toUpperCase() : '?'),
+                          ),
+                          title: Text('${user.name} ${user.surname ?? ''}'.trim()),
+                          subtitle: Text(user.email),
+                          onTap: () => widget.onUserSelected(user),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: widget.onCancel,
+          child: const Text('İptal'),
+        ),
+      ],
+    );
   }
 }
 

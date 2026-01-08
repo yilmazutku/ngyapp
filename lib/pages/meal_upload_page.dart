@@ -19,6 +19,9 @@ import 'dart:async';
 
 final Logger logger = Logger.forClass(MealUploadPage);
 
+/// Set to false to hide font size adjustment controls
+const bool IS_TESTING = true;
+
 class MealUploadPage extends StatefulWidget {
   final String userId;
   final String subscriptionId;
@@ -59,10 +62,19 @@ class _MealUploadPageState extends State<MealUploadPage> {
   DateTime? _debugSelectedDate;
   double _waterIntakeLiters = 0.0; // Water intake in liters
   final TextEditingController _stepsController = TextEditingController();
-  bool _isSavingWater = false;
-  bool _isSavingSteps = false;
+  bool _isSavingDailyData = false;
   final NotificationService _notificationService = NotificationService();
   final MealReminderService _mealReminderService = MealReminderService();
+  
+  // Track which meals are expanded (all collapsed by default)
+  final Map<Meals, bool> _expandedMeals = {
+    for (var meal in Meals.values) meal: false,
+  };
+  
+  // Font size adjustments for testing
+  double _titleFontSize = 14.0;
+  double _contentFontSize = 13.0;
+  bool _showFontSizeControls = false;
 
   @override
   void initState() {
@@ -281,82 +293,52 @@ class _MealUploadPageState extends State<MealUploadPage> {
     }
   }
 
-  Future<void> _saveWaterIntake() async {
-    setState(() {
-      _isSavingWater = true;
-    });
-
-    try {
-      final dailyDataProvider =
-          Provider.of<DailyDataProvider>(context, listen: false);
-      await dailyDataProvider.saveWaterIntake(
-          widget.userId, now, _waterIntakeLiters);
-
-      if (!mounted) return;
-
-      await DialogUtils.openInfo(
-        context,
-        title: 'Başarılı',
-        message: 'Su tüketimi başarıyla kaydedildi.',
-      );
-    } catch (e) {
-      logger.err('Error saving water intake: {}', [e.toString()]);
+  Future<void> _saveDailyData() async {
+    // Validate steps input first
+    int? steps = int.tryParse(_stepsController.text);
+    if (steps == null && _stepsController.text.isNotEmpty) {
       if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Su tüketimi kaydedilirken bir hata oluştu.',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSavingWater = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _saveSteps() async {
-    try {
-      int? steps = int.tryParse(_stepsController.text);
-      if (steps == null) {
-        if (!mounted) return;
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message:
-              'Girilen sayı geçerli değildir. Lütfen sayıyı kontrol edip tekrar giriniz.',
+        message: 'Girilen adım sayısı geçerli değildir. Lütfen kontrol ediniz.',
         );
         return;
       }
 
       setState(() {
-        _isSavingSteps = true;
+      _isSavingDailyData = true;
       });
 
+    try {
       final dailyDataProvider =
           Provider.of<DailyDataProvider>(context, listen: false);
-      await dailyDataProvider.saveSteps(widget.userId, now, steps);
+      
+      // Save both water intake and steps
+      await Future.wait([
+        dailyDataProvider.saveWaterIntake(widget.userId, now, _waterIntakeLiters),
+        dailyDataProvider.saveSteps(widget.userId, now, steps ?? 0),
+      ]);
 
       if (!mounted) return;
 
       await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
-        message: 'Adım sayısı başarıyla kaydedildi.',
+        message: 'Günlük verileriniz başarıyla kaydedildi.',
       );
     } catch (e) {
-      logger.err('Error saving steps: {}', [e.toString()]);
+      logger.err('Error saving daily data: {}', [e.toString()]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Adım sayısı kaydedilirken bir hata oluştu.',
+        message: 'Veriler kaydedilirken bir hata oluştu.',
       );
     } finally {
       if (mounted) {
         setState(() {
-          _isSavingSteps = false;
+          _isSavingDailyData = false;
         });
       }
     }
@@ -369,7 +351,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
     return Scaffold(
       appBar: const AppBarWithBack(
-        title: 'Yemek Listesi Yükleme', 
+        title: 'Planım',
         actions: [
           // Keep any existing actions here
         ],
@@ -391,231 +373,16 @@ class _MealUploadPageState extends State<MealUploadPage> {
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
                       children: [
-                        // Water Intake and Steps Sections in a Row
-                        // Water Intake and Steps Sections (overflow-proof)
-                        // Water Intake and Steps Sections (overflow-proof + no Expanded in Column)
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final bool isNarrow = constraints.maxWidth < 720; // tweak if you want
-
-                            // Build cards WITHOUT Expanded
-                            Widget waterCard = Card(
-                              elevation: 4,
-                              child: Padding(
-                                padding: const EdgeInsets.all(16.0),
-                                child: Column(
-                                  children: [
-                                    // Title uses Wrap so it can break if tight
-                                    Wrap(
-                                      alignment: WrapAlignment.center,
-                                      crossAxisAlignment: WrapCrossAlignment.center,
-                                      spacing: 8,
-                                      children: const [
-                                        Icon(Icons.local_drink, color: Colors.blue, size: 30),
-                                        Text(
-                                          'Su Tüketimi',
-                                          style: TextStyle(
-                                            fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      'Bugün: ${_waterIntakeLiters.toStringAsFixed(2)} Litre',
-                                      style: const TextStyle(fontSize: 20),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Slider(
-                                      value: _waterIntakeLiters,
-                                      min: 0, max: 5, divisions: 20,
-                                      label: '${_waterIntakeLiters.toStringAsFixed(2)} L',
-                                      onChanged: (value) => setState(() => _waterIntakeLiters = value),
-                                      activeColor: Colors.blue,
-                                      inactiveColor: Colors.blue[100],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    ElevatedButton(
-                                      onPressed: _isSavingWater ? null : _saveWaterIntake,
-                                      style: ElevatedButton.styleFrom(
-                                        foregroundColor: Colors.white, backgroundColor: Colors.blue,
-                                        visualDensity: VisualDensity.compact,
-                                      ),
-                                      child: _isSavingWater
-                                          ? const CircularProgressIndicator(
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                      )
-                                          : const Text('Kaydet'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-
-                            Widget stepsCard = Card(
-                              elevation: 4,
-                              child: Padding(
-                                padding: const EdgeInsets.all(16.0),
-                                child: Column(
-                                  children: [
-                                    Wrap(
-                                      alignment: WrapAlignment.center,
-                                      crossAxisAlignment: WrapCrossAlignment.center,
-                                      spacing: 8,
-                                      children: const [
-                                        Icon(Icons.directions_walk, color: Colors.green, size: 30),
-                                        Text(
-                                          'Adım Sayısı',
-                                          style: TextStyle(
-                                            fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      'Bugün: ${_stepsController.text.isNotEmpty ? _stepsController.text : '0'}',
-                                      style: const TextStyle(fontSize: 20),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    TextField(
-                                      controller: _stepsController,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Adım sayısını giriniz',
-                                        border: OutlineInputBorder(),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    ElevatedButton(
-                                      onPressed: _isSavingSteps ? null : _saveSteps,
-                                      style: ElevatedButton.styleFrom(
-                                        foregroundColor: Colors.white, backgroundColor: Colors.green,
-                                        visualDensity: VisualDensity.compact,
-                                      ),
-                                      child: _isSavingSteps
-                                          ? const CircularProgressIndicator(
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                      )
-                                          : const Text('Kaydet'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-
-                            if (isNarrow) {
-                              // IMPORTANT: no Expanded inside Column (it’s inside a SingleChildScrollView)
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  waterCard,
-                                  const SizedBox(height: 16),
-                                  stepsCard,
-                                ],
-                              );
-                            } else {
-                              // Wide layout: side-by-side with Expanded is fine
-                              return Row(
-                                children: [
-                                  Expanded(child: waterCard),
-                                  const SizedBox(width: 16),
-                                  Expanded(child: stepsCard),
-                                ],
-                              );
-                            }
-                          },
-                        ),
-
-
-                        const SizedBox(height: 16),
-                        // // Meals Section
-                        // if (kDebugMode) ...[
-                        //   _buildDebugDateSelector(context),
-                        //   const SizedBox(height: 16),
-                        // ],
-                        ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: Meals.values.length,
-                          itemBuilder: (context, index) {
-                            final mealCategory = Meals.values[index];
-                            final contents = mealContents[mealCategory] ?? [];
-
-                            // Skip meals with no content
-                            if (contents.isEmpty) {
-                              return const SizedBox.shrink();
-                            }
-
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                ListTile(
-                                  title: Text(
-                                    mealCategory.displayLabel,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.deepOrange,
-                                    ),
-                                  ),
-                                  subtitle: Padding(
-                                    padding: const EdgeInsets.only(top: 8.0),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: MealFormatter.formatMealContentWithOptions(
-                                        contents.map((content) => {'content': content}).toList()
-                                      ),
-                                    ),
-                                  ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        MealUploadPage.formatTimeOfDay24(
-                                            mealTimes[mealCategory] ??
-                                                defaultMealTime),
-                                        textAlign: TextAlign.left,
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.camera_alt),
-                                        color: Colors.blue,
-                                        onPressed: () async {
-                                          await _uploadMealImage(mealCategory);
-                                        },
-                                      ),
-                                      Checkbox(
-                                        value: checkedStates[mealCategory],
-                                        onChanged: (bool? newValue) async {
-                                          setState(() {
-                                            checkedStates[mealCategory] =
-                                                newValue ?? false;
-                                          });
-
-                                          // Update the meal state in Firestore
-                                          await  Provider.of<MealManager>(context, listen: false).updateMealState(widget.userId, now, mealCategory,newValue ?? false);
-                                          
-                                          // Cancel reminder if meal is checked off
-                                          if (newValue == true) {
-                                            await _mealReminderService.cancelMealReminder(mealCategory);
-                                          }
-                                        },
-                                        activeColor: Colors.deepOrange,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Divider(),
-                              ],
-                            );
-                          },
-                        ),
+                        // Font size adjustment controls (for testing)
+                        if (IS_TESTING) _buildFontSizeControls(),
+                        
+                        // Combined Daily Tracking Card (Water + Steps)
+                        _buildDailyTrackingCard(),
+                        
+                        const SizedBox(height: 12),
+                        
+                        // Meals Section with collapsible tiles
+                        _buildCollapsibleMealsList(defaultMealTime),
                       ],
                     ),
                   ),
@@ -627,6 +394,425 @@ class _MealUploadPageState extends State<MealUploadPage> {
             const LoadingOverlay(message: 'Görsel yükleniyor...'),
         ],
       ),
+    );
+  }
+
+  /// Font size adjustment controls for testing on phone
+  Widget _buildFontSizeControls() {
+    return Column(
+      children: [
+        // Toggle button to show/hide controls
+        InkWell(
+          onTap: () => setState(() => _showFontSizeControls = !_showFontSizeControls),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _showFontSizeControls ? Colors.purple.shade50 : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _showFontSizeControls ? Colors.purple.shade300 : Colors.grey.shade300,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.text_fields,
+                  size: 16,
+                  color: _showFontSizeControls ? Colors.purple.shade600 : Colors.grey.shade600,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Font Ayarları',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: _showFontSizeControls ? Colors.purple.shade700 : Colors.grey.shade700,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  _showFontSizeControls ? Icons.expand_less : Icons.expand_more,
+                  size: 16,
+                  color: _showFontSizeControls ? Colors.purple.shade600 : Colors.grey.shade600,
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        // Controls panel
+        AnimatedCrossFade(
+          duration: const Duration(milliseconds: 200),
+          crossFadeState: _showFontSizeControls 
+              ? CrossFadeState.showFirst 
+              : CrossFadeState.showSecond,
+          firstChild: Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.purple.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.purple.shade200),
+            ),
+            child: Column(
+              children: [
+                // Title font size
+                Row(
+                  children: [
+                    const SizedBox(width: 80, child: Text('Başlık:', style: TextStyle(fontSize: 12))),
+                    Expanded(
+                      child: Slider(
+                        value: _titleFontSize,
+                        min: 10,
+                        max: 22,
+                        divisions: 12,
+                        onChanged: (v) => setState(() => _titleFontSize = v),
+                        activeColor: Colors.purple,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 40,
+                      child: Text(
+                        '${_titleFontSize.toInt()}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                // Content font size
+                Row(
+                  children: [
+                    const SizedBox(width: 80, child: Text('İçerik:', style: TextStyle(fontSize: 12))),
+                    Expanded(
+                      child: Slider(
+                        value: _contentFontSize,
+                        min: 10,
+                        max: 20,
+                        divisions: 10,
+                        onChanged: (v) => setState(() => _contentFontSize = v),
+                        activeColor: Colors.purple,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 40,
+                      child: Text(
+                        '${_contentFontSize.toInt()}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                // Reset button
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _titleFontSize = 14.0;
+                    _contentFontSize = 13.0;
+                  }),
+                  icon: const Icon(Icons.refresh, size: 14),
+                  label: const Text('Sıfırla', style: TextStyle(fontSize: 11)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.purple.shade700,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          secondChild: const SizedBox(height: 8),
+        ),
+      ],
+    );
+  }
+
+  /// Compact combined card for water intake and steps
+  Widget _buildDailyTrackingCard() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Water row
+            Row(
+              children: [
+                Icon(Icons.water_drop, color: Colors.blue.shade600, size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'Su',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 4,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                      activeTrackColor: Colors.blue.shade400,
+                      inactiveTrackColor: Colors.blue.shade100,
+                      thumbColor: Colors.blue.shade600,
+                    ),
+                    child: Slider(
+                      value: _waterIntakeLiters,
+                      min: 0,
+                      max: 5,
+                      divisions: 20,
+                      onChanged: (value) => setState(() => _waterIntakeLiters = value),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 48,
+                  child: Text(
+                    '${_waterIntakeLiters.toStringAsFixed(1)}L',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade700,
+                    ),
+                    textAlign: TextAlign.end,
+                  ),
+                ),
+              ],
+            ),
+            
+            const Divider(height: 12, thickness: 0.5),
+            
+            // Steps row
+            Row(
+              children: [
+                Icon(Icons.directions_walk, color: Colors.green.shade600, size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'Adım',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 36,
+                    child: TextField(
+                      controller: _stepsController,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText: '0',
+                        hintStyle: TextStyle(color: Colors.grey.shade400),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.green.shade400, width: 1.5),
+                        ),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Save button
+                SizedBox(
+                  height: 32,
+                  child: FilledButton.icon(
+                    onPressed: _isSavingDailyData ? null : _saveDailyData,
+                    icon: _isSavingDailyData
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.save_outlined, size: 16),
+                    label: const Text('Kaydet', style: TextStyle(fontSize: 12)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.deepOrange,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      visualDensity: VisualDensity.compact,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Build collapsible meals list
+  Widget _buildCollapsibleMealsList(TimeOfDay defaultMealTime) {
+    // Filter meals with content
+    final mealsWithContent = Meals.values.where((meal) {
+      final contents = mealContents[meal] ?? [];
+      return contents.isNotEmpty;
+    }).toList();
+
+    if (mealsWithContent.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              Icon(Icons.restaurant_menu, size: 48, color: Colors.grey.shade400),
+              const SizedBox(height: 12),
+              Text(
+                'Henüz öğün planı oluşturulmamış',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: mealsWithContent.map((mealCategory) {
+        final contents = mealContents[mealCategory] ?? [];
+        final isExpanded = _expandedMeals[mealCategory] ?? false;
+        final isChecked = checkedStates[mealCategory] ?? false;
+        final mealTime = mealTimes[mealCategory] ?? defaultMealTime;
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 6),
+          elevation: 1,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              key: PageStorageKey(mealCategory.name),
+              initiallyExpanded: isExpanded,
+              onExpansionChanged: (expanded) {
+                setState(() {
+                  _expandedMeals[mealCategory] = expanded;
+                });
+              },
+              tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+              childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: isChecked ? Colors.green.shade50 : Colors.deepOrange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  isChecked ? Icons.check_circle : Icons.restaurant,
+                  size: 18,
+                  color: isChecked ? Colors.green.shade600 : Colors.deepOrange.shade600,
+                ),
+              ),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      mealCategory.displayLabel,
+                      style: TextStyle(
+                        fontSize: _titleFontSize,
+                        fontWeight: FontWeight.w600,
+                        color: isChecked ? Colors.green.shade700 : Colors.deepOrange.shade700,
+                      ),
+                    ),
+                  ),
+                  // Time badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      MealUploadPage.formatTimeOfDay24(mealTime),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Camera button
+                  InkWell(
+                    onTap: () => _uploadMealImage(mealCategory),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.camera_alt_outlined,
+                        size: 18,
+                        color: Colors.blue.shade600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  // Checkbox
+                  SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: Checkbox(
+                      value: isChecked,
+                      onChanged: (bool? newValue) async {
+                        setState(() {
+                          checkedStates[mealCategory] = newValue ?? false;
+                        });
+                        await Provider.of<MealManager>(context, listen: false)
+                            .updateMealState(widget.userId, now, mealCategory, newValue ?? false);
+                        if (newValue == true) {
+                          await _mealReminderService.cancelMealReminder(mealCategory);
+                        }
+                      },
+                      activeColor: Colors.green.shade600,
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+              ),
+              subtitle: !isExpanded
+                  ? Text(
+                      '${contents.length} içerik',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade500,
+                      ),
+                    )
+                  : null,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: MealFormatter.formatMealContentWithOptions(
+                    contents.map((content) => {'content': content}).toList(),
+                    fontSize: _contentFontSize,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 

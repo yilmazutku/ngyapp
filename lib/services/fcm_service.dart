@@ -46,7 +46,22 @@ class FcmService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // ===== Notification Configuration Flags =====
-  // These flags control whether notifications should be processed when user is logged out.
+  
+  // --- In-App Notification Flags ---
+  // These control whether in-app banners are shown when user is INSIDE the app.
+  // Push notifications (when app is in background/terminated) are not affected.
+  
+  /// Whether to show in-app notification banners for chat messages.
+  /// Set to false to disable the in-app banner while keeping push notifications.
+  static const bool showInAppChatNotifications = true;
+  
+  /// Whether to show in-app notification banners for announcements/news.
+  /// Set to false to disable the in-app banner while keeping push notifications.
+  /// (Disabled by default since push notifications already alert the user)
+  static const bool showInAppAnnouncementNotifications = false;
+  
+  // --- Logged-Out Notification Flags ---
+  // These control whether notifications should be processed when user is logged out.
   // Set to false to prevent notifications from showing when user is not authenticated.
   
   /// Whether to allow chat notifications when user is logged out.
@@ -219,6 +234,20 @@ class FcmService {
     // Check if we should suppress this notification (user is already viewing this chat)
     if (_shouldSuppressNotification(message.data)) {
       _logger.info('Suppressing notification - user is already in this chat');
+      return;
+    }
+
+    // Check in-app notification flags based on notification type
+    final type = (message.data['type'] ?? '').toString();
+    final isChatNotification = type == 'chat' || type == 'chat_admin';
+    final isAnnouncementNotification = type == 'news';
+    
+    if (isChatNotification && !showInAppChatNotifications) {
+      _logger.info('Skipping in-app chat notification - disabled by flag');
+      return;
+    }
+    if (isAnnouncementNotification && !showInAppAnnouncementNotifications) {
+      _logger.info('Skipping in-app announcement notification - disabled by flag');
       return;
     }
 
