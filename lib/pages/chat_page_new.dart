@@ -1,8 +1,11 @@
 // lib/pages/chat_page_new.dart
+import 'dart:io' show Platform;
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'package:ngy_app/providers/chat_manager_new.dart';
@@ -99,6 +102,91 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
+  /// Check and request photo library permission.
+  /// Returns true if permission is granted, false otherwise.
+  /// Shows a dialog to open Settings if permission is permanently denied.
+  Future<bool> _checkPhotoPermission() async {
+    Permission permission;
+    if (Platform.isIOS) {
+      permission = Permission.photos;
+    } else {
+      permission = Permission.photos;
+    }
+
+    var status = await permission.status;
+    logger.info('Photo permission status: {}', [status.toString()]);
+
+    if (status.isGranted || status.isLimited) {
+      return true;
+    }
+
+    if (status.isDenied) {
+      status = await permission.request();
+      if (status.isGranted || status.isLimited) {
+        return true;
+      }
+    }
+
+    if (status.isPermanentlyDenied || status.isDenied) {
+      if (!mounted) return false;
+      
+      final shouldOpenSettings = await DialogUtils.openConfirm(
+        context,
+        title: 'Fotoğraf İzni Gerekli',
+        message: 'Fotoğraf göndermek için galeri erişim izni gereklidir.\n\n'
+            'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
+        confirmText: 'Ayarlara Git',
+        cancelText: 'İptal',
+      );
+
+      if (shouldOpenSettings) {
+        await openAppSettings();
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+  /// Check and request camera permission.
+  /// Returns true if permission is granted, false otherwise.
+  /// Shows a dialog to open Settings if permission is permanently denied.
+  Future<bool> _checkCameraPermission() async {
+    var status = await Permission.camera.status;
+    logger.info('Camera permission status: {}', [status.toString()]);
+
+    if (status.isGranted) {
+      return true;
+    }
+
+    if (status.isDenied) {
+      status = await Permission.camera.request();
+      if (status.isGranted) {
+        return true;
+      }
+    }
+
+    if (status.isPermanentlyDenied || status.isDenied) {
+      if (!mounted) return false;
+      
+      final shouldOpenSettings = await DialogUtils.openConfirm(
+        context,
+        title: 'Kamera İzni Gerekli',
+        message: 'Fotoğraf çekebilmek için kamera erişim izni gereklidir.\n\n'
+            'Lütfen Ayarlar\'a giderek kamera erişimine izin verin.',
+        confirmText: 'Ayarlara Git',
+        cancelText: 'İptal',
+      );
+
+      if (shouldOpenSettings) {
+        await openAppSettings();
+      }
+      return false;
+    }
+
+    return false;
+  }
+
   /// Pick an image from the gallery and send it to the chat.
   /// 
   /// Flow:
@@ -107,6 +195,13 @@ class _ChatPageState extends State<ChatPage> {
   /// 3. Sends image via ChatManager
   /// 4. Handles errors with user-friendly dialogs
   Future<void> _pickAndSendImage() async {
+    // Check permission first
+    final hasPermission = await _checkPhotoPermission();
+    if (!hasPermission) {
+      logger.info('Photo permission denied, aborting gallery pick');
+      return;
+    }
+
     final chat = context.read<ChatManager>();
     logger.info('Gallery image picker opened. chatId={}', [_chatId]);
 
@@ -169,6 +264,13 @@ class _ChatPageState extends State<ChatPage> {
   /// 3. Sends image via ChatManager
   /// 4. Handles errors with user-friendly dialogs
   Future<void> _captureAndSendImage() async {
+    // Check camera permission first
+    final hasPermission = await _checkCameraPermission();
+    if (!hasPermission) {
+      logger.info('Camera permission denied, aborting capture');
+      return;
+    }
+
     final chat = context.read<ChatManager>();
     logger.info('Camera capture opened. chatId={}', [_chatId]);
 
@@ -262,6 +364,15 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
     logger.debug('Image source selected: {}', [src.name]);
+
+    // Step 2.5: Check permission based on selected source
+    final hasPermission = src == ImageSource.camera 
+        ? await _checkCameraPermission() 
+        : await _checkPhotoPermission();
+    if (!hasPermission) {
+      logger.info('Permission denied for {}, aborting meal upload', [src.name]);
+      return;
+    }
 
     // Step 3: Pick/capture image
     final XFile? image = await _picker.pickImage(source: src);

@@ -1,8 +1,12 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/logger.dart';
 import '../models/meal_model.dart';
@@ -21,6 +25,9 @@ final Logger logger = Logger.forClass(MealUploadPage);
 
 /// Set to false to hide font size adjustment controls
 const bool IS_TESTING = true;
+
+/// SharedPreferences key for storing expanded meal states
+const String _expandedMealsKey = 'meal_upload_expanded_meals';
 
 class MealUploadPage extends StatefulWidget {
   final String userId;
@@ -83,8 +90,48 @@ class _MealUploadPageState extends State<MealUploadPage> {
     _notificationService.initialize();
     _mealReminderService.initialize();
     
+    // Load persisted expanded meal states
+    _loadExpandedMeals();
+    
     // Schedule meal reminders when page loads (if user has notifications enabled)
     _scheduleMealRemindersIfEnabled();
+  }
+
+  /// Load persisted expanded meal states from SharedPreferences
+  Future<void> _loadExpandedMeals() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final expandedList = prefs.getStringList(_expandedMealsKey) ?? [];
+      
+      if (mounted) {
+        setState(() {
+          for (final mealName in expandedList) {
+            final meal = Meals.fromName(mealName);
+            if (meal != null) {
+              _expandedMeals[meal] = true;
+            }
+          }
+        });
+      }
+      logger.debug('Loaded expanded meals: {}', [expandedList]);
+    } catch (e) {
+      logger.err('Error loading expanded meals: {}', [e.toString()]);
+    }
+  }
+
+  /// Save expanded meal states to SharedPreferences
+  Future<void> _saveExpandedMeals() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final expandedList = _expandedMeals.entries
+          .where((entry) => entry.value)
+          .map((entry) => entry.key.name)
+          .toList();
+      await prefs.setStringList(_expandedMealsKey, expandedList);
+      logger.debug('Saved expanded meals: {}', [expandedList]);
+    } catch (e) {
+      logger.err('Error saving expanded meals: {}', [e.toString()]);
+    }
   }
 
   /// Schedule meal reminders if the user has notifications enabled
@@ -194,13 +241,146 @@ class _MealUploadPageState extends State<MealUploadPage> {
     }
   }
 
+  /// Check and request photo library permission.
+  /// Returns true if permission is granted, false otherwise.
+  /// Shows a dialog to open Settings if permission is permanently denied.
+  Future<bool> _checkPhotoPermission() async {
+    // On iOS 14+, use photos permission; on Android, use storage or photos
+    Permission permission;
+    if (Platform.isIOS) {
+      permission = Permission.photos;
+    } else {
+      // Android 13+ uses photos, older versions use storage
+      permission = Permission.photos;
+    }
+
+    var status = await permission.status;
+    logger.info('Photo permission status: {}', [status.toString()]);
+
+    if (status.isGranted || status.isLimited) {
+      return true;
+    }
+
+    if (status.isDenied) {
+      // First time or can still request
+      status = await permission.request();
+      if (status.isGranted || status.isLimited) {
+        return true;
+      }
+    }
+
+    // Permission is permanently denied - show dialog to open Settings
+    if (status.isPermanentlyDenied || status.isDenied) {
+      if (!mounted) return false;
+      
+      final shouldOpenSettings = await DialogUtils.openConfirm(
+        context,
+        title: 'Fotoğraf İzni Gerekli',
+        message: 'Öğün fotoğrafı yükleyebilmek için fotoğraf galerisine erişim izni gereklidir.\n\n'
+            'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
+        confirmText: 'Ayarlara Git',
+        cancelText: 'İptal',
+      );
+
+      if (shouldOpenSettings) {
+        await openAppSettings();
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+  /// Check and request camera permission.
+  /// Returns true if permission is granted, false otherwise.
+  /// Shows a dialog to open Settings if permission is permanently denied.
+  Future<bool> _checkCameraPermission() async {
+    var status = await Permission.camera.status;
+    logger.info('Camera permission status: {}', [status.toString()]);
+
+    if (status.isGranted) {
+      return true;
+    }
+
+    if (status.isDenied) {
+      status = await Permission.camera.request();
+      if (status.isGranted) {
+        return true;
+      }
+    }
+
+    if (status.isPermanentlyDenied || status.isDenied) {
+      if (!mounted) return false;
+      
+      final shouldOpenSettings = await DialogUtils.openConfirm(
+        context,
+        title: 'Kamera İzni Gerekli',
+        message: 'Fotoğraf çekebilmek için kamera erişim izni gereklidir.\n\n'
+            'Lütfen Ayarlar\'a giderek kamera erişimine izin verin.',
+        confirmText: 'Ayarlara Git',
+        cancelText: 'İptal',
+      );
+
+      if (shouldOpenSettings) {
+        await openAppSettings();
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+  /// Show dialog to choose image source (gallery or camera)
+  Future<ImageSource?> _chooseSource() async {
+    logger.debug('Opening image source selection dialog');
+    
+    return showDialog<ImageSource>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Kaynak'),
+        content: const Text('Görsel kaynağını seçin.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              logger.debug('Image source selected: gallery');
+              Navigator.pop(context, ImageSource.gallery);
+            },
+            child: const Text('Galeri'),
+          ),
+          TextButton(
+            onPressed: () {
+              logger.debug('Image source selected: camera');
+              Navigator.pop(context, ImageSource.camera);
+            },
+            child: const Text('Kamera'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _uploadMealImage(Meals mealCategory) async {
+    // 1) Choose image source (gallery or camera)
+    final ImageSource? source = await _chooseSource();
+    if (source == null) {
+      logger.debug('Meal upload cancelled: No source selected');
+      return;
+    }
+    logger.debug('Image source selected: {}', [source.name]);
+
+    // 2) Check permission based on selected source
+    final hasPermission = source == ImageSource.camera
+        ? await _checkCameraPermission()
+        : await _checkPhotoPermission();
+    if (!hasPermission) {
+      logger.info('Permission denied for {}, aborting upload', [source.name]);
+      return;
+    }
+
     final ImagePicker picker = ImagePicker();
 
-    // 1) Pick image from gallery
-    final XFile? image = await picker.pickImage(
-      source: ImageSource.gallery,
-    );
+    // 3) Pick/capture image
+    final XFile? image = await picker.pickImage(source: source);
 
     if (image == null) {
       // User cancelled image picking
@@ -707,6 +887,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
                 setState(() {
                   _expandedMeals[mealCategory] = expanded;
                 });
+                _saveExpandedMeals();
               },
               tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
               childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -791,15 +972,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
                   ),
                 ],
               ),
-              subtitle: !isExpanded
-                  ? Text(
-                      '${contents.length} içerik',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey.shade500,
-                      ),
-                    )
-                  : null,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
