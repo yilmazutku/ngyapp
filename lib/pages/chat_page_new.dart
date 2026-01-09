@@ -114,37 +114,41 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     var status = await permission.status;
-    logger.info('Photo permission status: {}', [status.toString()]);
+    logger.info('Photo permission initial status: {}', [status.toString()]);
 
+    // Already granted or limited access - proceed
     if (status.isGranted || status.isLimited) {
       return true;
     }
 
-    if (status.isDenied) {
+    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
+    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
+    // Always try to request first if not permanently denied
+    if (!status.isPermanentlyDenied && !status.isRestricted) {
+      logger.info('Requesting photo permission...');
       status = await permission.request();
+      logger.info('Photo permission after request: {}', [status.toString()]);
+      
       if (status.isGranted || status.isLimited) {
         return true;
       }
     }
 
-    if (status.isPermanentlyDenied || status.isDenied) {
-      if (!mounted) return false;
-      
-      final shouldOpenSettings = await DialogUtils.openConfirm(
-        context,
-        title: 'Fotoğraf İzni Gerekli',
-        message: 'Fotoğraf göndermek için galeri erişim izni gereklidir.\n\n'
-            'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
-        confirmText: 'Ayarlara Git',
-        cancelText: 'İptal',
-      );
+    // Permission denied or permanently denied - show dialog to open Settings
+    if (!mounted) return false;
+    
+    final shouldOpenSettings = await DialogUtils.openConfirm(
+      context,
+      title: 'Fotoğraf İzni Gerekli',
+      message: 'Fotoğraf göndermek için galeri erişim izni gereklidir.\n\n'
+          'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
+      confirmText: 'Ayarlara Git',
+      cancelText: 'İptal',
+    );
 
-      if (shouldOpenSettings) {
-        await openAppSettings();
-      }
-      return false;
+    if (shouldOpenSettings) {
+      await openAppSettings();
     }
-
     return false;
   }
 
@@ -153,37 +157,41 @@ class _ChatPageState extends State<ChatPage> {
   /// Shows a dialog to open Settings if permission is permanently denied.
   Future<bool> _checkCameraPermission() async {
     var status = await Permission.camera.status;
-    logger.info('Camera permission status: {}', [status.toString()]);
+    logger.info('Camera permission initial status: {}', [status.toString()]);
 
+    // Already granted - proceed
     if (status.isGranted) {
       return true;
     }
 
-    if (status.isDenied) {
+    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
+    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
+    // Always try to request first if not permanently denied or restricted
+    if (!status.isPermanentlyDenied && !status.isRestricted) {
+      logger.info('Requesting camera permission...');
       status = await Permission.camera.request();
+      logger.info('Camera permission after request: {}', [status.toString()]);
+      
       if (status.isGranted) {
         return true;
       }
     }
 
-    if (status.isPermanentlyDenied || status.isDenied) {
-      if (!mounted) return false;
-      
-      final shouldOpenSettings = await DialogUtils.openConfirm(
-        context,
-        title: 'Kamera İzni Gerekli',
-        message: 'Fotoğraf çekebilmek için kamera erişim izni gereklidir.\n\n'
-            'Lütfen Ayarlar\'a giderek kamera erişimine izin verin.',
-        confirmText: 'Ayarlara Git',
-        cancelText: 'İptal',
-      );
+    // Permission denied or permanently denied - show dialog to open Settings
+    if (!mounted) return false;
+    
+    final shouldOpenSettings = await DialogUtils.openConfirm(
+      context,
+      title: 'Kamera İzni Gerekli',
+      message: 'Fotoğraf çekebilmek için kamera erişim izni gereklidir.\n\n'
+          'Lütfen Ayarlar\'a giderek kamera erişimine izin verin.',
+      confirmText: 'Ayarlara Git',
+      cancelText: 'İptal',
+    );
 
-      if (shouldOpenSettings) {
-        await openAppSettings();
-      }
-      return false;
+    if (shouldOpenSettings) {
+      await openAppSettings();
     }
-
     return false;
   }
 
