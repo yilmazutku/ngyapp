@@ -9,7 +9,6 @@ import '../models/filter_params.dart';
 import '../providers/meal_state_and_upload_manager.dart';
 import '../providers/daily_data_provider.dart';
 
-import '../utils/dialog_utils.dart';
 import '../widgets/chat_image_preview.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
@@ -1346,57 +1345,10 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
               onPressed: () => Navigator.pop(context),
               child: const Text('Kapat'),
             ),
-            TextButton(
-              onPressed: () => _confirmDeleteMeal(context, meal),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Sil'),
-            ),
           ],
         );
       },
     );
   }
 
-  void _confirmDeleteMeal(BuildContext context, MealModel meal) {
-    DialogUtils.openConfirm(
-      context,
-      title: 'Görsel Silme',
-      message: 'Bu görseli silmek istediğinizden emin misiniz?',
-    ).then((confirmed) {
-      if (confirmed) {
-        _deleteMeal(meal);
-      }
-    });
-  }
-
-  Future<void> _deleteMeal(MealModel meal) async {
-    try {
-      final provider = Provider.of<MealManager>(context, listen: false);
-
-      await provider.fetchMeals(
-        null,
-        userId: widget.userId,
-        showAllImages: true,
-      );
-
-      if (!mounted) return;
-      setState(() {
-        fetchData();
-      });
-
-      if (!mounted) return;
-      DialogUtils.openInfo(
-        context,
-        title: 'Başarılı',
-        message: 'Görsel başarıyla silindi.',
-      );
-    } catch (e) {
-      if (!mounted) return;
-      DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Görsel silinirken bir hata oluştu: $e',
-      );
-    }
-  }
 }

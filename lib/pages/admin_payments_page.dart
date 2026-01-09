@@ -1,16 +1,23 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../dialogs/edit_payment_dialog.dart';
-import '../dialogs/add_payment_dialog.dart';
 import '../models/logger.dart';
 import '../models/payment_model.dart';
+import '../models/subs_model.dart';
 import '../models/user_model.dart';
 import '../providers/payment_provider.dart';
+import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/loading_overlay.dart';
 
 final Logger logger = Logger.forClass(AdminPaymentsPage);
 final DateFormat kDateFormat = DateFormat('d MMMM yyyy', 'tr_TR');
@@ -333,12 +340,14 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
   void _showEditPaymentDialog(PaymentModel payment) {
     logger.info(
-        'Opening edit payment dialog for payment ${payment.paymentId} (User: ${_getUserName(payment.userId)})');
+        'Opening admin edit payment dialog for payment ${payment.paymentId} (User: ${_getUserName(payment.userId)})');
     showDialog(
       context: context,
       builder: (context) {
-        return EditPaymentDialog(
+        return _AdminEditPaymentDialog(
           payment: payment,
+          users: _users,
+          userById: _userById,
           onPaymentUpdated: () {
             logger.info('Payment ${payment.paymentId} updated successfully');
             _loadData(); // refresh whole page/caches
@@ -349,32 +358,16 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
   }
 
   void _showAddPaymentDialog(BuildContext context) {
-    logger.info('Opening add payment dialog - Step 1: User selection');
+    logger.info('Opening admin add payment dialog');
 
     showDialog(
       context: context,
-      builder: (dialogContext) {
-        return _UserSelectionDialog(
+      builder: (context) {
+        return _AdminAddPaymentDialog(
           users: _users,
-          onUserSelected: (user) {
-            logger.info('User selected for payment: ${user.name} (${user.userId})');
-            Navigator.pop(dialogContext); // close user picker
-            showDialog(
-              context: context,
-              builder: (context) {
-                return AddPaymentDialog(
-                  userId: user.userId,
-                  onPaymentAdded: () {
-                    logger.info('Payment added successfully for user ${user.name}');
-                    _loadData();
-                  },
-                );
-              },
-            );
-          },
-          onCancel: () {
-            logger.info('User selection canceled');
-            Navigator.pop(dialogContext);
+          onPaymentAdded: () {
+            logger.info('Payment added successfully');
+            _loadData();
           },
         );
       },
@@ -936,25 +929,44 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
   }
 }
 
-/// Stateful dialog for user selection with working search functionality
-class _UserSelectionDialog extends StatefulWidget {
+/// Admin Add Payment Dialog with user and subscription selection
+/// Matches the logic flow of AddPaymentDialog but with user selection
+class _AdminAddPaymentDialog extends StatefulWidget {
   final List<UserModel> users;
-  final Function(UserModel) onUserSelected;
-  final VoidCallback onCancel;
+  final Function onPaymentAdded;
 
-  const _UserSelectionDialog({
+  const _AdminAddPaymentDialog({
     required this.users,
-    required this.onUserSelected,
-    required this.onCancel,
+    required this.onPaymentAdded,
   });
 
   @override
-  State<_UserSelectionDialog> createState() => _UserSelectionDialogState();
+  State<_AdminAddPaymentDialog> createState() => _AdminAddPaymentDialogState();
 }
 
-class _UserSelectionDialogState extends State<_UserSelectionDialog> {
-  final TextEditingController _searchController = TextEditingController();
+class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
+    with LoadingStateMixin {
+  final Logger _logger = Logger.forClass(_AdminAddPaymentDialog);
+  final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _userSearchController = TextEditingController();
+  final DateFormat _df = DateFormat('d MMMM yyyy', 'tr_TR');
+  final ImagePicker _picker = ImagePicker();
+
+  // User selection
+  UserModel? _selectedUser;
   List<UserModel> _filteredUsers = [];
+  bool _showUserDropdown = false;
+
+  // Subscription selection
+  List<SubscriptionModel> _subscriptions = [];
+  SubscriptionModel? _selectedSubscription;
+  bool _isLoadingSubscriptions = false;
+
+  // Payment details
+  DateTime? _selectedPaymentDate = DateTime.now();
+  DateTime? _selectedDueDate;
+  PaymentStatus _paymentStatus = PaymentStatus.completed;
+  File? _dekontImage;
 
   @override
   void initState() {
@@ -964,7 +976,8 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _amountController.dispose();
+    _userSearchController.dispose();
     super.dispose();
   }
 
@@ -976,7 +989,7 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
         final searchQuery = query.toLowerCase();
         _filteredUsers = widget.users.where((user) {
           final name = user.name.toLowerCase();
-          final surname = (user.surname ?? '').toLowerCase();
+          final surname = user.surname.toLowerCase();
           final fullName = '$name $surname'.trim();
           final email = user.email.toLowerCase();
           return name.contains(searchQuery) ||
@@ -988,54 +1001,1284 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
     });
   }
 
+  Future<void> _onUserSelected(UserModel user) async {
+    setState(() {
+      _selectedUser = user;
+      _userSearchController.text = '${user.name} ${user.surname}'.trim();
+      _showUserDropdown = false;
+      _isLoadingSubscriptions = true;
+      _selectedSubscription = null;
+      _subscriptions = [];
+    });
+
+    try {
+      final subProvider = Provider.of<SubProvider>(context, listen: false);
+      final subs = await subProvider.fetchSubscriptions(
+        userId: user.userId,
+        showAllSubscriptions: false, // Only active subscriptions
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _subscriptions = subs;
+        _isLoadingSubscriptions = false;
+        // Default to first active subscription if available
+        if (subs.isNotEmpty) {
+          _selectedSubscription = subs.first;
+        }
+      });
+    } catch (e) {
+      _logger.err('Error fetching subscriptions: {}', [e]);
+      if (!mounted) return;
+      setState(() => _isLoadingSubscriptions = false);
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Abonelikler yüklenirken bir hata oluştu: $e',
+        );
+      }
+    }
+  }
+
+  Future<void> _pickDekontImage() async {
+    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    setState(() {
+      if (pickedFile != null) {
+        _dekontImage = File(pickedFile.path);
+        _logger.info('Dekont image selected: ${pickedFile.path}');
+      } else {
+        _logger.err('No dekont image selected.');
+      }
+    });
+  }
+
+  Future<void> _addPayment() async {
+    // Validation - matches AddPaymentDialog
+    if (_selectedUser == null) {
+      _logger.err('_addPayment: User is required.');
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Lütfen bir kullanıcı seçiniz.',
+        );
+      }
+      return;
+    }
+
+    if (_amountController.text.isEmpty) {
+      _logger.err('_addPayment: Amount is required.');
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Lütfen miktarı giriniz.',
+        );
+      }
+      return;
+    }
+
+    if (_paymentStatus == PaymentStatus.completed && _selectedPaymentDate == null) {
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Lütfen ödeme tarihini seçiniz.',
+        );
+      }
+      return;
+    }
+
+    if (_paymentStatus == PaymentStatus.planned && _selectedDueDate == null) {
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Lütfen planlanan tarihi seçiniz.',
+        );
+      }
+      return;
+    }
+
+    // Show confirmation dialog - matches AddPaymentDialog style
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Ödeme Ekle'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Aşağıdaki ödemeyi eklemek istediğinizden emin misiniz?'),
+              const SizedBox(height: 16),
+              Text('Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}'),
+              Text('Miktar: ${_amountController.text} TL'),
+              Text('Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}'),
+              Text('Durum: ${_paymentStatus.label}'),
+              if (_selectedDueDate != null)
+                Text(
+                  'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              if (_selectedPaymentDate != null)
+                Text(
+                  'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              if (_dekontImage != null) const Text('Dekont: Yüklendi'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('İptal'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Evet'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldSave != true) return;
+
+    startLoading();
+
+    try {
+      final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
+      final paymentAmount = double.parse(_amountController.text);
+
+      await paymentProvider.addPayment(
+        userId: _selectedUser!.userId,
+        subscription: _selectedSubscription,
+        amount: paymentAmount,
+        paymentDate: _selectedPaymentDate,
+        status: _paymentStatus,
+        dekontImage: _dekontImage,
+        dueDate: _selectedDueDate,
+      );
+
+      // Update subscription's amountPaid if a subscription is selected and payment is completed
+      if (_selectedSubscription != null && _paymentStatus == PaymentStatus.completed) {
+        final subscriptionId = _selectedSubscription!.subscriptionId;
+        final newAmountPaid = _selectedSubscription!.amountPaid + paymentAmount;
+
+        final subProvider = Provider.of<SubProvider>(context, listen: false);
+        await subProvider.updateAmountPaid(
+          userId: _selectedUser!.userId,
+          subscriptionId: subscriptionId,
+          amountPaid: newAmountPaid,
+        );
+
+        _selectedSubscription!.amountPaid = newAmountPaid;
+        _logger.info('Updated subscription $subscriptionId amountPaid to $newAmountPaid');
+      }
+
+      widget.onPaymentAdded();
+      if (mounted) {
+        Navigator.of(context).pop();
+        await DialogUtils.openInfo(
+          context,
+          title: 'Başarılı',
+          message: 'Ödeme başarıyla eklendi.\n\n'
+              'Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}\n'
+              'Miktar: ${_amountController.text} TL\n'
+              'Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}\n'
+              'Durum: ${_paymentStatus.label}\n'
+              '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
+              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
+        );
+      }
+    } catch (e) {
+      _logger.err('Error adding payment: {}', [e]);
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Ödeme eklenirken bir hata oluştu: $e',
+        );
+      }
+    } finally {
+      stopLoading();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Kullanıcı Seçin'),
-      content: SizedBox(
-        width: double.maxFinite,
-        height: 400,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: TextField(
-                controller: _searchController,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Kullanıcı ara...',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-                ),
-                onChanged: _filterUsers,
-              ),
-            ),
-            Expanded(
-              child: _filteredUsers.isEmpty
-                  ? const Center(child: Text('Kullanıcı bulunamadı'))
-                  : ListView.builder(
-                      itemCount: _filteredUsers.length,
-                      itemBuilder: (context, index) {
-                        final user = _filteredUsers[index];
-                        return ListTile(
-                          leading: CircleAvatar(
-                            child: Text(user.name.isNotEmpty ? user.name[0].toUpperCase() : '?'),
-                          ),
-                          title: Text('${user.name} ${user.surname ?? ''}'.trim()),
-                          subtitle: Text(user.email),
-                          onTap: () => widget.onUserSelected(user),
+    return Stack(
+      children: [
+        AlertDialog(
+          title: const Text('Ödeme Ekle'),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 450,
+              child: ListBody(
+                children: [
+                  // User Selection
+                  TextField(
+                    controller: _userSearchController,
+                    decoration: InputDecoration(
+                      labelText: 'Kullanıcı',
+                      hintText: 'Kullanıcı ara...',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.person_search),
+                      suffixIcon: _selectedUser != null
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                setState(() {
+                                  _selectedUser = null;
+                                  _userSearchController.clear();
+                                  _subscriptions = [];
+                                  _selectedSubscription = null;
+                                  _filteredUsers = widget.users;
+                                });
+                              },
+                            )
+                          : null,
+                    ),
+                    onTap: () => setState(() => _showUserDropdown = true),
+                    onChanged: (value) {
+                      _filterUsers(value);
+                      setState(() => _showUserDropdown = true);
+                    },
+                  ),
+                  if (_showUserDropdown && _selectedUser == null)
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      margin: const EdgeInsets.only(top: 4),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: _filteredUsers.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text('Kullanıcı bulunamadı'),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: _filteredUsers.length,
+                              itemBuilder: (context, index) {
+                                final user = _filteredUsers[index];
+                                return ListTile(
+                                  dense: true,
+                                  leading: CircleAvatar(
+                                    radius: 16,
+                                    child: Text(user.name.isNotEmpty ? user.name[0].toUpperCase() : '?'),
+                                  ),
+                                  title: Text('${user.name} ${user.surname}'.trim()),
+                                  subtitle: Text(user.email, style: const TextStyle(fontSize: 12)),
+                                  onTap: () => _onUserSelected(user),
+                                );
+                              },
+                            ),
+                    ),
+                  const SizedBox(height: 16),
+
+                  // Subscription Dropdown
+                  if (_selectedUser == null)
+                    const Text('Önce kullanıcı seçiniz', style: TextStyle(color: Colors.grey))
+                  else if (_isLoadingSubscriptions)
+                    const Center(child: CircularProgressIndicator())
+                  else
+                    DropdownButtonFormField<SubscriptionModel?>(
+                      value: _selectedSubscription,
+                      items: [
+                        const DropdownMenuItem<SubscriptionModel?>(
+                          value: null,
+                          child: Text('Paketsiz ödeme'),
+                        ),
+                        ..._subscriptions.map((sub) {
+                          String amountInfo = '';
+                          if (sub.amountPaid < sub.totalAmount) {
+                            final remaining = sub.totalAmount - sub.amountPaid;
+                            amountInfo = ' (Kalan ödeme: ${remaining.toStringAsFixed(2)} TL)';
+                          }
+                          return DropdownMenuItem<SubscriptionModel?>(
+                            value: sub,
+                            child: Text('${sub.packageName}$amountInfo'),
+                          );
+                        }),
+                      ],
+                      onChanged: (newValue) => setState(() => _selectedSubscription = newValue),
+                      decoration: const InputDecoration(
+                        labelText: 'Bağlı Paket',
+                        hintText: 'Paket seçin (opsiyonel)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+
+                  // Amount Field
+                  TextFormField(
+                    controller: _amountController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Miktar (TL)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Payment status dropdown
+                  DropdownButtonFormField<PaymentStatus>(
+                    value: _paymentStatus,
+                    items: PaymentStatus.values.map((PaymentStatus status) {
+                      return DropdownMenuItem<PaymentStatus>(
+                        value: status,
+                        child: Text(status.label),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) {
+                      setState(() {
+                        _paymentStatus = newValue!;
+                        if (_paymentStatus == PaymentStatus.completed) {
+                          _selectedPaymentDate = DateTime.now();
+                          _selectedDueDate = null;
+                        } else {
+                          _selectedPaymentDate = null;
+                        }
+                      });
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Ödeme Durumu',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Due Date Picker (for planned)
+                  if (_paymentStatus == PaymentStatus.planned) ...[
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        _selectedDueDate == null
+                            ? 'Planlanan Tarih Seç'
+                            : 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
+                        style: _selectedDueDate != null
+                            ? const TextStyle(fontWeight: FontWeight.bold)
+                            : null,
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: () async {
+                        DateTime? pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedDueDate ?? DateTime.now(),
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime(2030),
                         );
+                        if (pickedDate != null) {
+                          setState(() => _selectedDueDate = pickedDate);
+                        }
                       },
                     ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Payment Date Picker (for completed)
+                  if (_paymentStatus == PaymentStatus.completed) ...[
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        _selectedPaymentDate == null
+                            ? 'Ödeme Tarihi Seç'
+                            : 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}${DateUtils.isSameDay(_selectedPaymentDate!, DateTime.now()) ? ' (Bugün)' : ''}',
+                        style: _selectedPaymentDate != null
+                            ? const TextStyle(fontWeight: FontWeight.bold)
+                            : null,
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: () async {
+                        DateTime? pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedPaymentDate ?? DateTime.now(),
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime.now(),
+                        );
+                        setState(() => _selectedPaymentDate = pickedDate);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () => _pickDekontImage(),
+                      child: const Text('Dekont Yükle (Opsiyonel)'),
+                    ),
+                    const SizedBox(height: 16),
+                    _dekontImage != null
+                        ? Image.file(_dekontImage!, height: 100)
+                        : const Text('Dekont Seçilmedi'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.of(context).pop(),
+              child: const Text('İptal'),
+            ),
+            ElevatedButton(
+              onPressed: isLoading ? null : () => _addPayment(),
+              child: const Text('Ödeme Ekle'),
             ),
           ],
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: widget.onCancel,
-          child: const Text('İptal'),
+        if (isLoading) const LoadingOverlay(message: 'Ödeme ekleniyor...'),
+      ],
+    );
+  }
+}
+
+/// Admin Edit Payment Dialog with user change capability
+/// Matches the logic flow of EditPaymentDialog but with user selection
+class _AdminEditPaymentDialog extends StatefulWidget {
+  final PaymentModel payment;
+  final List<UserModel> users;
+  final Map<String, UserModel> userById;
+  final Function onPaymentUpdated;
+
+  const _AdminEditPaymentDialog({
+    required this.payment,
+    required this.users,
+    required this.userById,
+    required this.onPaymentUpdated,
+  });
+
+  @override
+  State<_AdminEditPaymentDialog> createState() => _AdminEditPaymentDialogState();
+}
+
+class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
+    with LoadingStateMixin {
+  final Logger _logger = Logger.forClass(_AdminEditPaymentDialog);
+  final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _userSearchController = TextEditingController();
+  final DateFormat _df = DateFormat('d MMMM yyyy', 'tr_TR');
+  final ImagePicker _picker = ImagePicker();
+
+  // User selection
+  late UserModel? _selectedUser;
+  late String _originalUserId;
+  List<UserModel> _filteredUsers = [];
+  bool _showUserDropdown = false;
+
+  // Subscription selection
+  List<SubscriptionModel> _availableSubscriptions = [];
+  String? _selectedSubscriptionId;
+  bool _loadingSubscriptions = true;
+
+  // Payment details
+  DateTime? _selectedPaymentDate;
+  DateTime? _selectedDueDate;
+  late PaymentStatus _paymentStatus;
+  File? _dekontImage;
+
+  @override
+  void initState() {
+    super.initState();
+    _originalUserId = widget.payment.userId;
+    _selectedUser = widget.userById[widget.payment.userId];
+    _userSearchController.text = _selectedUser != null
+        ? '${_selectedUser!.name} ${_selectedUser!.surname}'.trim()
+        : 'Bilinmeyen Kullanıcı';
+    _filteredUsers = widget.users;
+
+    _amountController.text = widget.payment.amount.toString();
+    _selectedPaymentDate = widget.payment.paymentDate ?? DateTime.now();
+    _selectedDueDate = widget.payment.dueDate;
+    _paymentStatus = widget.payment.status;
+    _selectedSubscriptionId = widget.payment.subscriptionId;
+
+    _loadSubscriptions();
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _userSearchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadSubscriptions() async {
+    if (_selectedUser == null) {
+      setState(() => _loadingSubscriptions = false);
+      return;
+    }
+
+    try {
+      final subProvider = Provider.of<SubProvider>(context, listen: false);
+      final subscriptions = await subProvider.fetchSubscriptions(
+        userId: _selectedUser!.userId,
+        showAllSubscriptions: true,
+      );
+      if (mounted) {
+        setState(() {
+          _availableSubscriptions = subscriptions;
+
+          // Check if selected subscription still exists, if not reset to null (Paketsiz)
+          if (_selectedSubscriptionId != null) {
+            final exists = subscriptions.any((s) => s.subscriptionId == _selectedSubscriptionId);
+            if (!exists) {
+              _logger.warn('Selected subscription $_selectedSubscriptionId no longer exists, resetting to Paketsiz');
+              _selectedSubscriptionId = null;
+            }
+          }
+
+          _loadingSubscriptions = false;
+        });
+      }
+    } catch (e) {
+      _logger.err('Error loading subscriptions: {}', [e]);
+      if (mounted) {
+        setState(() => _loadingSubscriptions = false);
+      }
+    }
+  }
+
+  void _filterUsers(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredUsers = widget.users;
+      } else {
+        final searchQuery = query.toLowerCase();
+        _filteredUsers = widget.users.where((user) {
+          final name = user.name.toLowerCase();
+          final surname = user.surname.toLowerCase();
+          final fullName = '$name $surname'.trim();
+          final email = user.email.toLowerCase();
+          return name.contains(searchQuery) ||
+              surname.contains(searchQuery) ||
+              fullName.contains(searchQuery) ||
+              email.contains(searchQuery);
+        }).toList();
+      }
+    });
+  }
+
+  Future<void> _onUserSelected(UserModel user) async {
+    final bool userChanged = _selectedUser?.userId != user.userId;
+
+    setState(() {
+      _selectedUser = user;
+      _userSearchController.text = '${user.name} ${user.surname}'.trim();
+      _showUserDropdown = false;
+
+      if (userChanged) {
+        _loadingSubscriptions = true;
+        _selectedSubscriptionId = null; // Reset subscription when user changes
+        _availableSubscriptions = [];
+      }
+    });
+
+    if (userChanged) {
+      await _loadSubscriptions();
+    }
+  }
+
+  Future<void> _pickDekontImage() async {
+    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    setState(() {
+      if (pickedFile != null) {
+        _dekontImage = File(pickedFile.path);
+        _logger.info('Dekont image selected: ${pickedFile.path}');
+      } else {
+        _logger.err('No dekont image selected.');
+      }
+    });
+  }
+
+  /// TR/EN-friendly numeric parser - matches EditPaymentDialog
+  double? _parseAmountOrNull(String text) {
+    String s = text.trim().replaceAll(' ', '');
+    if (s.isEmpty) return null;
+
+    if (s.contains('.') && s.contains(',')) {
+      s = s.replaceAll('.', '');
+      s = s.replaceAll(',', '.');
+    } else if (s.contains(',')) {
+      s = s.replaceAll(',', '.');
+    }
+    if (!RegExp(r'^\d+(\.\d+)?$').hasMatch(s)) return null;
+
+    try {
+      final v = double.parse(s);
+      if (v.isNaN || v.isInfinite) return null;
+      return v;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _updatePayment() async {
+    // Validation - matches EditPaymentDialog
+    if (_selectedUser == null) {
+      _logger.warn('User is required on _updatePayment.');
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Lütfen bir kullanıcı seçiniz.',
+        );
+      }
+      return;
+    }
+
+    final rawAmount = _amountController.text;
+    if (rawAmount.trim().isEmpty) {
+      _logger.warn('Amount is required on _updatePayment.');
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Lütfen miktarı giriniz.',
+        );
+      }
+      return;
+    }
+
+    final parsedAmount = _parseAmountOrNull(rawAmount);
+    if (parsedAmount == null) {
+      _logger.warn('Invalid amount input: "{}"', [rawAmount]);
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Miktar geçersiz. Lütfen sayısal bir değer giriniz.\nÖrnek: 1200,50',
+        );
+      }
+      return;
+    }
+
+    // Status-specific date requirements
+    if (_paymentStatus == PaymentStatus.completed) {
+      if (_selectedPaymentDate == null) {
+        if (mounted) {
+          await DialogUtils.openError(
+            context,
+            title: 'Hata',
+            message: 'Lütfen ödeme tarihini seçiniz.',
+          );
+        }
+        return;
+      }
+    } else if (_paymentStatus == PaymentStatus.planned) {
+      if (_selectedDueDate == null) {
+        if (mounted) {
+          await DialogUtils.openError(
+            context,
+            title: 'Hata',
+            message: 'Lütfen planlanan tarihi seçiniz.',
+          );
+        }
+        return;
+      }
+    }
+
+    // Original values
+    final oldPayment = widget.payment;
+    final oldAmount = oldPayment.amount;
+    final oldStatus = oldPayment.status;
+    final oldSubsId = oldPayment.subscriptionId;
+    final userChanged = _selectedUser!.userId != _originalUserId;
+
+    final newAmount = parsedAmount;
+
+    // Get subscription names for display
+    String? oldSubName;
+    String? newSubName;
+    if (oldSubsId != null) {
+      try {
+        final oldSub = _availableSubscriptions.firstWhere((s) => s.subscriptionId == oldSubsId);
+        oldSubName = oldSub.packageName;
+      } catch (e) {
+        oldSubName = 'Silinmiş Paket';
+      }
+    }
+    if (_selectedSubscriptionId != null) {
+      try {
+        final newSub = _availableSubscriptions.firstWhere((s) => s.subscriptionId == _selectedSubscriptionId);
+        newSubName = newSub.packageName;
+      } catch (e) {
+        newSubName = 'Bilinmeyen Paket';
+      }
+    }
+
+    // Confirm - matches EditPaymentDialog style
+    final shouldUpdate = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Ödeme Güncelle'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Aşağıdaki değişiklikleri yapmak istediğinizden emin misiniz?'),
+                const SizedBox(height: 16),
+                Text('Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}'),
+                Text('Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL'),
+                Text('Durum: ${_paymentStatus.label}'),
+                if (_selectedSubscriptionId != null)
+                  Text('Bağlı Paket: $newSubName')
+                else
+                  const Text('Bağlı Paket: Yok'),
+                if (_selectedSubscriptionId != oldSubsId)
+                  Text(
+                    'Paket Değişti: ${oldSubName ?? "Yok"} → ${newSubName ?? "Yok"}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
+                  ),
+                if (userChanged)
+                  Text(
+                    'Kullanıcı Değişti: ${widget.userById[_originalUserId]?.name ?? "Bilinmeyen"} → ${_selectedUser!.name}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
+                  ),
+                if (_selectedDueDate != null)
+                  Text(
+                    'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                if (_selectedPaymentDate != null)
+                  Text(
+                    'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                if (_dekontImage != null) const Text('Dekont: Yüklendi'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('İptal'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Evet'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldUpdate != true) {
+      _logger.info('Payment update cancelled by user for payment ${oldPayment.paymentId}');
+      return;
+    }
+
+    startLoading();
+
+    try {
+      // Upload dekont if selected
+      String? dekontUrl = widget.payment.dekontUrl;
+      if (_dekontImage != null) {
+        _logger.info('Uploading new dekont image for payment ${oldPayment.paymentId}');
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('payments')
+            .child('${widget.payment.paymentId}_${DateTime.now().millisecondsSinceEpoch}');
+        await storageRef.putFile(_dekontImage!);
+        dekontUrl = await storageRef.getDownloadURL();
+        _logger.info('New dekont image uploaded successfully, URL: $dekontUrl');
+      }
+
+      final amountDifference = newAmount - oldAmount;
+      final String? oldSubscriptionId = widget.payment.subscriptionId;
+      final String? newSubscriptionId = _selectedSubscriptionId;
+      final bool subscriptionChanged = oldSubscriptionId != newSubscriptionId;
+      final statusChanged = oldStatus != _paymentStatus;
+
+      _logger.info('Payment update initiated for payment ${oldPayment.paymentId}:');
+      _logger.info('- User changed: $userChanged');
+      _logger.info('- Amount: $oldAmount -> $newAmount');
+      _logger.info('- Status: ${oldStatus.label} -> ${_paymentStatus.label}');
+      _logger.info('- Subscription changed: $subscriptionChanged');
+
+      final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
+
+      if (userChanged) {
+        // User changed: delete from old user, add to new user
+        _logger.info('User changed from $_originalUserId to ${_selectedUser!.userId}');
+
+        // Remove from old subscription if payment was completed
+        if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
+          _logger.info('Removing amount from old subscription $oldSubscriptionId');
+          try {
+            final oldSubDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(_originalUserId)
+                .collection('subscriptions')
+                .doc(oldSubscriptionId)
+                .get();
+
+            if (oldSubDoc.exists) {
+              final oldSubData = oldSubDoc.data() as Map<String, dynamic>;
+              double currentAmountPaid = (oldSubData['amountPaid'] ?? 0).toDouble();
+              double newAmountPaid = (currentAmountPaid - oldAmount).clamp(0, double.infinity);
+
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(_originalUserId)
+                  .collection('subscriptions')
+                  .doc(oldSubscriptionId)
+                  .update({'amountPaid': newAmountPaid});
+
+              _logger.info('Updated old subscription $oldSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid');
+            }
+          } catch (e) {
+            _logger.err('Error updating old subscription $oldSubscriptionId: {}', [e]);
+          }
+        }
+
+        // Delete payment from old user
+        await paymentProvider.deletePayment(oldPayment.paymentId, _originalUserId);
+        _logger.info('Deleted payment from old user $_originalUserId');
+
+        // Add payment to new user
+        await paymentProvider.addPayment(
+          userId: _selectedUser!.userId,
+          subscription: newSubscriptionId != null
+              ? _availableSubscriptions.where((s) => s.subscriptionId == newSubscriptionId).firstOrNull
+              : null,
+          amount: newAmount,
+          paymentDate: _selectedPaymentDate,
+          status: _paymentStatus,
+          dekontImage: _dekontImage,
+          dueDate: _selectedDueDate,
+        );
+        _logger.info('Added payment to new user ${_selectedUser!.userId}');
+
+        // Add to new subscription if payment is completed
+        if (newSubscriptionId != null && _paymentStatus == PaymentStatus.completed) {
+          _logger.info('Adding amount to new subscription $newSubscriptionId');
+          try {
+            final newSubDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(_selectedUser!.userId)
+                .collection('subscriptions')
+                .doc(newSubscriptionId)
+                .get();
+
+            if (newSubDoc.exists) {
+              final newSubData = newSubDoc.data() as Map<String, dynamic>;
+              double currentAmountPaid = (newSubData['amountPaid'] ?? 0).toDouble();
+              double adjustedAmountPaid = currentAmountPaid + newAmount;
+
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(_selectedUser!.userId)
+                  .collection('subscriptions')
+                  .doc(newSubscriptionId)
+                  .update({'amountPaid': adjustedAmountPaid});
+
+              _logger.info('Updated new subscription $newSubscriptionId amountPaid from $currentAmountPaid to $adjustedAmountPaid');
+            }
+          } catch (e) {
+            _logger.err('Error updating new subscription $newSubscriptionId: {}', [e]);
+          }
+        }
+      } else {
+        // User didn't change - update payment in place
+        final updatedPayment = PaymentModel(
+          paymentId: widget.payment.paymentId,
+          userId: _selectedUser!.userId,
+          subscriptionId: _selectedSubscriptionId,
+          amount: newAmount,
+          status: _paymentStatus,
+          paymentDate: _selectedPaymentDate,
+          dueDate: _selectedDueDate,
+          dekontUrl: dekontUrl,
+          createDate: widget.payment.createDate,
+          createUser: widget.payment.createUser,
+          updateDate: DateTime.now(),
+          updateUser: 'admin',
+          notes: widget.payment.notes,
+          notificationTimes: widget.payment.notificationTimes,
+        );
+
+        _logger.info('Updating payment in database...');
+        await paymentProvider.updatePayment(updatedPayment);
+        _logger.info('Payment ${updatedPayment.paymentId} updated successfully in database');
+
+        // Handle subscription amount adjustments - matches EditPaymentDialog logic
+        if (subscriptionChanged || statusChanged || (oldStatus == PaymentStatus.completed && amountDifference != 0)) {
+          _logger.info('Processing subscription adjustments...');
+
+          if (subscriptionChanged) {
+            // Subscription changed: remove from old, add to new
+
+            // Step 1: Remove amount from old subscription if it was completed
+            if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
+              _logger.info('Removing amount from old subscription $oldSubscriptionId');
+              try {
+                final oldSubDoc = await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(_selectedUser!.userId)
+                    .collection('subscriptions')
+                    .doc(oldSubscriptionId)
+                    .get();
+
+                if (oldSubDoc.exists) {
+                  final oldSubData = oldSubDoc.data() as Map<String, dynamic>;
+                  double currentAmountPaid = (oldSubData['amountPaid'] ?? 0).toDouble();
+                  double newAmountPaid = (currentAmountPaid - oldAmount).clamp(0, double.infinity);
+
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(_selectedUser!.userId)
+                      .collection('subscriptions')
+                      .doc(oldSubscriptionId)
+                      .update({'amountPaid': newAmountPaid});
+
+                  _logger.info('Updated old subscription $oldSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (removed $oldAmount)');
+                }
+              } catch (e) {
+                _logger.err('Error updating old subscription $oldSubscriptionId: {}', [e]);
+              }
+            }
+
+            // Step 2: Add amount to new subscription if it is completed
+            if (newSubscriptionId != null && _paymentStatus == PaymentStatus.completed) {
+              _logger.info('Adding amount to new subscription $newSubscriptionId');
+              try {
+                final newSubDoc = await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(_selectedUser!.userId)
+                    .collection('subscriptions')
+                    .doc(newSubscriptionId)
+                    .get();
+
+                if (newSubDoc.exists) {
+                  final newSubData = newSubDoc.data() as Map<String, dynamic>;
+                  double currentAmountPaid = (newSubData['amountPaid'] ?? 0).toDouble();
+                  double adjustedAmountPaid = currentAmountPaid + newAmount;
+
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(_selectedUser!.userId)
+                      .collection('subscriptions')
+                      .doc(newSubscriptionId)
+                      .update({'amountPaid': adjustedAmountPaid});
+
+                  _logger.info('Updated new subscription $newSubscriptionId amountPaid from $currentAmountPaid to $adjustedAmountPaid (added $newAmount)');
+                }
+              } catch (e) {
+                _logger.err('Error updating new subscription $newSubscriptionId: {}', [e]);
+              }
+            }
+          } else if (newSubscriptionId != null) {
+            // Same subscription, but amount or status changed
+            _logger.info('Same subscription - adjusting amount for subscription $newSubscriptionId');
+            try {
+              final subDoc = await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(_selectedUser!.userId)
+                  .collection('subscriptions')
+                  .doc(newSubscriptionId)
+                  .get();
+
+              if (subDoc.exists) {
+                final subData = subDoc.data() as Map<String, dynamic>;
+                double currentAmountPaid = (subData['amountPaid'] ?? 0).toDouble();
+
+                double adjustmentAmount = 0;
+                if (statusChanged) {
+                  if (_paymentStatus == PaymentStatus.completed && oldStatus != PaymentStatus.completed) {
+                    adjustmentAmount = newAmount;
+                    _logger.info('Status changed to completed - adding full amount $newAmount');
+                  } else if (_paymentStatus != PaymentStatus.completed && oldStatus == PaymentStatus.completed) {
+                    adjustmentAmount = -oldAmount;
+                    _logger.info('Status changed from completed - subtracting old amount $oldAmount');
+                  }
+                } else if (_paymentStatus == PaymentStatus.completed && amountDifference != 0) {
+                  adjustmentAmount = amountDifference;
+                  _logger.info('Amount changed for completed payment - adjusting by $amountDifference');
+                }
+
+                if (adjustmentAmount != 0) {
+                  final newAmountPaid = (currentAmountPaid + adjustmentAmount).clamp(0, double.infinity);
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(_selectedUser!.userId)
+                      .collection('subscriptions')
+                      .doc(newSubscriptionId)
+                      .update({'amountPaid': newAmountPaid});
+
+                  _logger.info('Adjusted subscription $newSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (adjustment: $adjustmentAmount)');
+                }
+              }
+            } catch (e) {
+              _logger.err('Error adjusting subscription $newSubscriptionId: {}', [e]);
+            }
+          }
+        }
+      }
+
+      _logger.info('Payment update completed successfully');
+
+      widget.onPaymentUpdated();
+      if (mounted) {
+        Navigator.of(context).pop();
+        await DialogUtils.openInfo(
+          context,
+          title: 'Başarılı',
+          message: 'Ödeme başarıyla güncellendi.\n\n'
+              'Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}\n'
+              'Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL\n'
+              'Durum: ${_paymentStatus.label}\n'
+              '${newSubName != null ? 'Bağlı Paket: $newSubName\n' : 'Bağlı Paket: Yok\n'}'
+              '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
+              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
+        );
+      }
+    } catch (e) {
+      _logger.err('Error updating payment ${widget.payment.paymentId}: {}', [e]);
+
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Ödeme güncellenirken bir hata oluştu: $e',
+        );
+      }
+    } finally {
+      stopLoading();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        AlertDialog(
+          title: const Text('Ödemeyi Düzenle'),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 450,
+              child: ListBody(
+                children: [
+                  // User Selection
+                  TextField(
+                    controller: _userSearchController,
+                    decoration: InputDecoration(
+                      labelText: 'Kullanıcı',
+                      hintText: 'Kullanıcı ara...',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.person_search),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.arrow_drop_down),
+                        onPressed: () => setState(() => _showUserDropdown = !_showUserDropdown),
+                      ),
+                    ),
+                    onTap: () => setState(() => _showUserDropdown = true),
+                    onChanged: (value) {
+                      _filterUsers(value);
+                      setState(() => _showUserDropdown = true);
+                    },
+                  ),
+                  if (_showUserDropdown)
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      margin: const EdgeInsets.only(top: 4),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: _filteredUsers.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text('Kullanıcı bulunamadı'),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: _filteredUsers.length,
+                              itemBuilder: (context, index) {
+                                final user = _filteredUsers[index];
+                                final isSelected = _selectedUser?.userId == user.userId;
+                                return ListTile(
+                                  dense: true,
+                                  selected: isSelected,
+                                  leading: CircleAvatar(
+                                    radius: 16,
+                                    backgroundColor: isSelected ? Theme.of(context).primaryColor : null,
+                                    child: Text(
+                                      user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
+                                      style: TextStyle(color: isSelected ? Colors.white : null),
+                                    ),
+                                  ),
+                                  title: Text('${user.name} ${user.surname}'.trim()),
+                                  subtitle: Text(user.email, style: const TextStyle(fontSize: 12)),
+                                  onTap: () => _onUserSelected(user),
+                                );
+                              },
+                            ),
+                    ),
+                  if (_selectedUser?.userId != _originalUserId && _selectedUser != null)
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.warning, color: Colors.orange.shade700, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Kullanıcı değiştirilecek! Ödeme yeni kullanıcıya aktarılacak.',
+                              style: TextStyle(color: Colors.orange.shade900, fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+
+                  // Amount Field (with numeric guard)
+                  TextField(
+                    controller: _amountController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: false),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(labelText: 'Miktar (TL)'),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Subscription Selection Dropdown
+                  if (_loadingSubscriptions)
+                    const Center(child: CircularProgressIndicator())
+                  else
+                    DropdownButtonFormField<String?>(
+                      value: _selectedSubscriptionId,
+                      decoration: const InputDecoration(
+                        labelText: 'Bağlı Paket',
+                        hintText: 'Paket seçin (opsiyonel)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Paketsiz ödeme'),
+                        ),
+                        ..._availableSubscriptions.map((sub) {
+                          return DropdownMenuItem<String?>(
+                            value: sub.subscriptionId,
+                            child: Text(
+                              '${sub.packageName} (${_df.format(sub.startDate)})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }),
+                      ],
+                      onChanged: (newValue) => setState(() => _selectedSubscriptionId = newValue),
+                    ),
+                  const SizedBox(height: 16),
+
+                  // Payment Status Dropdown (no clearing on toggle)
+                  DropdownButtonFormField<PaymentStatus>(
+                    value: _paymentStatus,
+                    items: PaymentStatus.values.map((PaymentStatus status) {
+                      return DropdownMenuItem<PaymentStatus>(
+                        value: status,
+                        child: Text(status.label),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) {
+                      setState(() {
+                        _paymentStatus = newValue!;
+                        // DO NOT clear the other date anymore.
+                        // We keep both in memory so the picker reopens with the last chosen date.
+                      });
+                    },
+                    decoration: const InputDecoration(labelText: 'Ödeme Durumu'),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // "Planlanan tarihi seç" ONLY when Planned
+                  if (_paymentStatus == PaymentStatus.planned) ...[
+                    ListTile(
+                      title: Text(
+                        _selectedDueDate == null
+                            ? 'Planlanan tarihi seç'
+                            : 'Planlanan tarih: ${_df.format(_selectedDueDate!)}',
+                        style: _selectedDueDate != null ? const TextStyle(fontWeight: FontWeight.bold) : null,
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: () async {
+                        final now = DateTime.now();
+                        final pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedDueDate ?? now,
+                          firstDate: now.subtract(const Duration(days: 365)),
+                          lastDate: now.add(const Duration(days: 365)),
+                        );
+                        setState(() {
+                          _selectedDueDate = pickedDate;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // "Ödeme tarihi seç" ONLY when Completed
+                  if (_paymentStatus == PaymentStatus.completed) ...[
+                    ListTile(
+                      title: Text(
+                        _selectedPaymentDate == null
+                            ? 'Ödeme tarihi seç'
+                            : 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}${DateUtils.isSameDay(_selectedPaymentDate!, DateTime.now()) ? ' (Bugün)' : ''}',
+                        style: _selectedPaymentDate != null ? const TextStyle(fontWeight: FontWeight.bold) : null,
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: () async {
+                        final pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedPaymentDate ?? DateTime.now(),
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime.now(),
+                        );
+                        setState(() {
+                          _selectedPaymentDate = pickedDate;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Dekont only when completed
+                    ElevatedButton(
+                      onPressed: () => _pickDekontImage(),
+                      child: const Text('Dekont Görseli Yükle (Opsiyonel)'),
+                    ),
+                    const SizedBox(height: 16),
+                    _dekontImage != null
+                        ? Image.file(_dekontImage!, height: 100)
+                        : widget.payment.dekontUrl != null
+                            ? Image.network(widget.payment.dekontUrl!, height: 100)
+                            : const Text('Dekont Görseli Seçilmedi'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.of(context).pop(),
+              child: const Text('İptal'),
+            ),
+            ElevatedButton(
+              onPressed: isLoading ? null : () => _updatePayment(),
+              child: const Text('Ödemeyi Güncelle'),
+            ),
+          ],
         ),
+        if (isLoading) const LoadingOverlay(message: 'Ödeme güncelleniyor...'),
       ],
     );
   }
