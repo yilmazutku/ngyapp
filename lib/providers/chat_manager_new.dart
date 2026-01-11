@@ -102,6 +102,9 @@ class ChatManager extends ChangeNotifier {
   /// Check if a given UID belongs to an admin user
   static bool isAdminUid(String uid) => adminIds.contains(uid);
 
+  /// Get admin IDs set (for external access)
+  static Set<String> get adminUids => adminIds;
+
   ChatManager({
     required this.db,
     required this.auth,
@@ -183,28 +186,93 @@ class ChatManager extends ChangeNotifier {
   /// - Creates the chat document if it doesn't exist
   /// - Adds both admin UIDs and the user as participants
   /// - Updates last message info for the admin chat list
+  /// - Increments unread count for admins when user sends a message
   /// - Uses merge: true to avoid overwriting existing fields
   Future<void> _ensureChatDoc(
       String chatId, {
         String? lastMessage,
         String? lastImageUrl,
         Timestamp? lastAt,
+        bool incrementUnreadForAdmins = false,
       }) async {
     final participants = <String>{chatId, ...adminIds}.toList();
     logger.debug(
-      'Ensuring chat doc. chatId={} participants={} lastMsg="{}" lastImageUrl={}', 
-      [chatId, participants, lastMessage ?? 'none', lastImageUrl ?? 'none']
+      'Ensuring chat doc. chatId={} participants={} lastMsg="{}" lastImageUrl={} incrementUnread={}', 
+      [chatId, participants, lastMessage ?? 'none', lastImageUrl ?? 'none', incrementUnreadForAdmins]
     );
     
-    await _chatDoc(chatId).set({
+    final updateData = <String, dynamic>{
       'participants': participants,
       if (lastMessage != null) 'lastMessage': lastMessage,
       if (lastImageUrl != null) 'lastImageUrl': lastImageUrl,
       if (lastAt != null) 'lastMessageAt': lastAt,
       'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    };
+    
+    // Increment unread count for all admins when a non-admin sends a message
+    if (incrementUnreadForAdmins) {
+      for (final adminUid in adminIds) {
+        updateData['adminUnreadCount.$adminUid'] = FieldValue.increment(1);
+      }
+      logger.debug('Incrementing unread count for admins');
+    }
+    
+    await _chatDoc(chatId).set(updateData, SetOptions(merge: true));
     
     logger.debug('Chat doc ensured. chatId={}', [chatId]);
+  }
+
+  /// Mark a chat as read for the current admin user.
+  /// Resets the unread count to 0 and updates lastReadAt timestamp.
+  /// 
+  /// Call this when admin opens a chat.
+  Future<void> markChatAsRead(String chatId) async {
+    final currentUid = auth.currentUser?.uid;
+    if (currentUid == null || !isAdminUid(currentUid)) {
+      logger.debug('markChatAsRead skipped: not logged in or not admin');
+      return;
+    }
+    
+    logger.info('Marking chat as read. chatId={} adminUid={}', [chatId, currentUid]);
+    
+    await _chatDoc(chatId).set({
+      'adminUnreadCount.$currentUid': 0,
+      'adminLastReadAt.$currentUid': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    
+    logger.debug('Chat marked as read. chatId={}', [chatId]);
+  }
+
+  /// Stream of total unread chat count for the current admin.
+  /// Returns the number of chats that have unread messages.
+  Stream<int> totalUnreadChatsStream() {
+    final currentUid = auth.currentUser?.uid;
+    if (currentUid == null || !isAdminUid(currentUid)) {
+      return Stream.value(0);
+    }
+    
+    return db
+        .collection('chats')
+        .where('participants', arrayContains: currentUid)
+        .snapshots()
+        .map((snapshot) {
+          int count = 0;
+          for (final doc in snapshot.docs) {
+            final data = doc.data();
+            final unreadMap = data['adminUnreadCount'] as Map<String, dynamic>?;
+            final unread = (unreadMap?[currentUid] ?? 0) as int;
+            if (unread > 0) count++;
+          }
+          logger.debug('Total unread chats count: {}', [count]);
+          return count;
+        });
+  }
+
+  /// Get unread count for a specific chat and admin from chat data.
+  /// Helper method used by UI widgets.
+  static int getUnreadCountFromChatData(Map<String, dynamic> chatData, String adminUid) {
+    final unreadMap = chatData['adminUnreadCount'] as Map<String, dynamic>?;
+    return (unreadMap?[adminUid] ?? 0) as int;
   }
 
   /// Send a text message to a specific chat.
@@ -234,8 +302,16 @@ class ChatManager extends ChangeNotifier {
     try {
       logger.info('Sending text message. chatId={} senderId={} length={}', [chatId, userId, text.length]);
       
+      // Increment unread count for admins if a non-admin user sends the message
+      final isUserMessage = !isAdminUid(userId);
+      
       // Update chat document with latest message info
-      await _ensureChatDoc(chatId, lastMessage: text, lastAt: Timestamp.now());
+      await _ensureChatDoc(
+        chatId, 
+        lastMessage: text, 
+        lastAt: Timestamp.now(),
+        incrementUnreadForAdmins: isUserMessage,
+      );
       
       // Add message to subcollection
       final ref = await _chatDoc(chatId).collection('messages').add({
@@ -340,11 +416,15 @@ class ChatManager extends ChangeNotifier {
       logger.debug('Upload complete. downloadUrl={}', [url]);
 
       // Step 5: Update chat document with image metadata
+      // Increment unread count for admins if a non-admin user sends the message
+      final isUserMessage = !isAdminUid(userId);
+      
       await _ensureChatDoc(
         chatId, 
         lastMessage: 'Fotoğraf', 
         lastImageUrl: url, 
-        lastAt: Timestamp.now()
+        lastAt: Timestamp.now(),
+        incrementUnreadForAdmins: isUserMessage,
       );
 
       // Step 6: Add message to subcollection

@@ -348,4 +348,61 @@ class NotificationService {
     await _notifications.cancelAll();
     _logger.info('All notifications cancelled');
   }
+
+  /// Clear the app badge (set badge count to 0)
+  /// Call this when app resumes to foreground to clear badge after user dismisses notifications
+  Future<void> clearBadge() async {
+    if (!_isSupported) return;
+    
+    try {
+      // iOS: Clear badge by setting badge number to 0
+      if (Platform.isIOS) {
+        final iosImplementation = _notifications
+            .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+        // Use the setBadge method available on iOS plugin
+        // Note: This requires iOS 16+ for direct badge setting, but the notification
+        // channel approach works on older versions too
+        await iosImplementation?.requestPermissions(badge: true);
+        
+        // The most reliable way to clear badge on iOS is to show and immediately
+        // cancel a notification with badgeNumber: 0, but simpler is to use
+        // the underlying UNUserNotificationCenter API which flutter_local_notifications
+        // exposes. For now, we use a workaround: set badge via notification details.
+        // Actually, flutter_local_notifications doesn't have a direct setBadge method,
+        // so we need to use a different approach.
+        
+        // Alternative: Use native iOS API through platform channel, but for simplicity
+        // we can show a silent notification with badge: 0 then cancel it
+        const iosDetails = DarwinNotificationDetails(
+          presentAlert: false,
+          presentBadge: true,
+          presentSound: false,
+          badgeNumber: 0,
+        );
+        
+        const details = NotificationDetails(iOS: iosDetails);
+        
+        // Show notification with badge 0 (won't display anything, just clears badge)
+        await _notifications.show(
+          -1, // Use a reserved ID for badge clearing
+          '', // Empty title
+          '', // Empty body
+          details,
+        );
+        
+        // Immediately cancel to ensure no notification is shown
+        await _notifications.cancel(-1);
+        
+        _logger.info('iOS badge cleared');
+      }
+      
+      // Android: Badge is automatically managed by the system based on active notifications
+      // No action needed - badge clears when notifications are dismissed
+      if (Platform.isAndroid) {
+        _logger.info('Android badge is auto-managed by system');
+      }
+    } catch (e) {
+      _logger.err('Error clearing badge: $e');
+    }
+  }
 }

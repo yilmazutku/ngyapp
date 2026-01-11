@@ -557,13 +557,51 @@ class _MealUploadPageState extends State<MealUploadPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 ListTile(
-                                  title: Text(
-                                    mealCategory.displayLabel,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.deepOrange,
-                                    ),
+                                  title: Row(
+                                    children: [
+                                      Text(
+                                        mealCategory.displayLabel,
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.deepOrange,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        icon: const Icon(Icons.camera_alt),
+                                        color: Colors.blue,
+                                        visualDensity: VisualDensity.compact,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        onPressed: () async {
+                                          await _uploadMealImage(mealCategory);
+                                        },
+                                      ),
+                                      SizedBox(
+                                        width: 32,
+                                        height: 32,
+                                        child: Checkbox(
+                                          value: checkedStates[mealCategory],
+                                          onChanged: (bool? newValue) async {
+                                            setState(() {
+                                              checkedStates[mealCategory] =
+                                                  newValue ?? false;
+                                            });
+
+                                            // Update the meal state in Firestore
+                                            await Provider.of<MealManager>(context, listen: false).updateMealState(widget.userId, now, mealCategory, newValue ?? false);
+                                            
+                                            // Cancel reminder if meal is checked off
+                                            if (newValue == true) {
+                                              await _mealReminderService.cancelMealReminder(mealCategory);
+                                            }
+                                          },
+                                          activeColor: Colors.deepOrange,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                   subtitle: Padding(
                                     padding: const EdgeInsets.only(top: 8.0),
@@ -574,41 +612,14 @@ class _MealUploadPageState extends State<MealUploadPage> {
                                       ),
                                     ),
                                   ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        MealUploadPage.formatTimeOfDay24(
-                                            mealTimes[mealCategory] ??
-                                                defaultMealTime),
-                                        textAlign: TextAlign.left,
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.camera_alt),
-                                        color: Colors.blue,
-                                        onPressed: () async {
-                                          await _uploadMealImage(mealCategory);
-                                        },
-                                      ),
-                                      Checkbox(
-                                        value: checkedStates[mealCategory],
-                                        onChanged: (bool? newValue) async {
-                                          setState(() {
-                                            checkedStates[mealCategory] =
-                                                newValue ?? false;
-                                          });
-
-                                          // Update the meal state in Firestore
-                                          await  Provider.of<MealManager>(context, listen: false).updateMealState(widget.userId, now, mealCategory,newValue ?? false);
-                                          
-                                          // Cancel reminder if meal is checked off
-                                          if (newValue == true) {
-                                            await _mealReminderService.cancelMealReminder(mealCategory);
-                                          }
-                                        },
-                                        activeColor: Colors.deepOrange,
-                                      ),
-                                    ],
+                                  trailing: Text(
+                                    MealUploadPage.formatTimeOfDay24(
+                                        mealTimes[mealCategory] ??
+                                            defaultMealTime),
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey,
+                                    ),
                                   ),
                                 ),
                                 const Divider(),

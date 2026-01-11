@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import 'package:ngy_app/pages/chat_page_new.dart';
 import 'package:ngy_app/models/logger.dart';
+import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
 
@@ -169,12 +170,16 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
               // Check if the last message included an image
               final hasImage = lastImageUrl != null && lastImageUrl.isNotEmpty;
 
+              // Get unread count for this admin
+              final unreadCount = ChatManager.getUnreadCountFromChatData(data, adminUid);
+
               return _ChatListItem(
                 chatId: chatId,
                 lastMsg: lastMsg,
                 lastImageUrl: lastImageUrl,
                 timeStr: timeStr,
                 hasImage: hasImage,
+                unreadCount: unreadCount,
                 logger: logger,
               );
             },
@@ -188,13 +193,14 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
 /// Widget representing a single chat item in the admin chat list.
 /// 
 /// Fetches user details to display name instead of UID.
-/// Shows last message, image preview, and timestamp.
+/// Shows last message, image preview, timestamp, and unread badge.
 class _ChatListItem extends StatelessWidget {
   final String chatId;
   final String lastMsg;
   final String? lastImageUrl;
   final String timeStr;
   final bool hasImage;
+  final int unreadCount;
   final Logger logger;
 
   const _ChatListItem({
@@ -203,6 +209,7 @@ class _ChatListItem extends StatelessWidget {
     required this.lastImageUrl,
     required this.timeStr,
     required this.hasImage,
+    required this.unreadCount,
     required this.logger,
   });
 
@@ -235,7 +242,9 @@ class _ChatListItem extends StatelessWidget {
                 displayName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w500,
+                ),
               ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -262,9 +271,44 @@ class _ChatListItem extends StatelessWidget {
                     ),
                 ],
               ),
-              trailing: Text(timeStr),
-              onTap: () {
+              trailing: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    timeStr,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: unreadCount > 0 ? Colors.green.shade700 : Colors.grey,
+                      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  if (unreadCount > 0) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        unreadCount > 99 ? '99+' : unreadCount.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              onTap: () async {
                 logger.info('Opening chat for user. chatId={} userName="{}"', [chatId, displayName]);
+                // Mark chat as read when admin opens it
+                final chatManager = Provider.of<ChatManager>(context, listen: false);
+                await chatManager.markChatAsRead(chatId);
+                if (!context.mounted) return;
                 Navigator.push(
                   context,
                   MaterialPageRoute(

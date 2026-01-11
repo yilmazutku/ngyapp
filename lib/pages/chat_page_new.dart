@@ -44,7 +44,7 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final Logger logger = Logger.forClass(_ChatPageState);
   final ImagePicker _picker = ImagePicker();
   static const _months = [
@@ -71,6 +71,9 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     
+    // Register for app lifecycle changes to handle background/foreground transitions
+    WidgetsBinding.instance.addObserver(this);
+    
     _currentUid = FirebaseAuth.instance.currentUser!.uid;
     
     // Resolve chat ID once and cache it
@@ -85,6 +88,11 @@ class _ChatPageState extends State<ChatPage> {
     // Set active chat ID to suppress notifications for this chat
     FcmService().setActiveChatId(_chatId);
     
+    // Mark chat as read for admin users
+    if (_isAdminUser) {
+      _markChatAsReadForAdmin();
+    }
+    
     logger.info(
       'ChatPage initialized. currentUid={} isAdmin={} chatId={} canUploadMeals={}',
       [_currentUid, _isAdminUser, _chatId, _canUploadMeals]
@@ -93,10 +101,44 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
     // Clear active chat ID to resume receiving notifications
     FcmService().clearActiveChatId();
     logger.info('ChatPage disposed. currentUid={}', [_currentUid]);
     super.dispose();
+  }
+
+  /// Mark chat as read for admin user (resets unread count)
+  Future<void> _markChatAsReadForAdmin() async {
+    try {
+      final chatManager = context.read<ChatManager>();
+      await chatManager.markChatAsRead(_chatId);
+      logger.debug('Chat marked as read for admin. chatId={}', [_chatId]);
+    } catch (e) {
+      logger.warn('Failed to mark chat as read: {}', [e]);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    // When app goes to background, clear active chat ID so notifications can come through
+    // When app returns to foreground, re-set active chat ID to suppress in-app banners
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      // App is going to background - allow notifications
+      FcmService().clearActiveChatId();
+      logger.info('App backgrounded, cleared active chat ID to allow notifications');
+    } else if (state == AppLifecycleState.resumed) {
+      // App is back in foreground - suppress notifications for this chat again
+      FcmService().setActiveChatId(_chatId);
+      // Re-mark as read when returning to foreground
+      if (_isAdminUser) {
+        _markChatAsReadForAdmin();
+      }
+      logger.info('App resumed, re-set active chat ID to suppress in-app notifications');
+    }
   }
 
   /// Pick an image from the gallery and send it to the chat.
@@ -723,7 +765,7 @@ class _MessageBubble extends StatelessWidget {
 }
 
 /// Extracted input row widget - uses Selector for targeted rebuilds
-class _ChatInputRow extends StatelessWidget {
+class _ChatInputRow extends StatefulWidget {
   final String chatId;
   final bool canUploadMeals;
   final VoidCallback onPickImage;
@@ -741,7 +783,58 @@ class _ChatInputRow extends StatelessWidget {
   });
 
   @override
+  State<_ChatInputRow> createState() => _ChatInputRowState();
+}
+
+class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderStateMixin {
+  bool _isMenuOpen = false;
+  late final AnimationController _animationController;
+  late final Animation<double> _rotationAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _rotationAnimation = Tween<double>(begin: 0, end: 0.125).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _toggleMenu() {
+    setState(() {
+      _isMenuOpen = !_isMenuOpen;
+      if (_isMenuOpen) {
+        _animationController.forward();
+      } else {
+        _animationController.reverse();
+      }
+    });
+  }
+
+  void _closeMenuAndRun(VoidCallback action) {
+    if (_isMenuOpen) {
+      setState(() {
+        _isMenuOpen = false;
+        _animationController.reverse();
+      });
+    }
+    action();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
@@ -751,70 +844,168 @@ class _ChatInputRow extends StatelessWidget {
           builder: (context, state, _) {
             final isDisabled = state.sending || state.uploading;
             
-            return Row(
+            return Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // Gallery image button
-                IconButton(
-                  icon: const Icon(Icons.photo),
-                  onPressed: isDisabled ? null : onPickImage,
-                  tooltip: 'Galeriden görsel',
+                // Expandable attachment menu
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeInOut,
+                  child: _isMenuOpen
+                      ? Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              _AttachmentOption(
+                                icon: Icons.photo_library_rounded,
+                                label: 'Galeri',
+                                color: Colors.purple,
+                                onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onPickImage),
+                              ),
+                              _AttachmentOption(
+                                icon: Icons.camera_alt_rounded,
+                                label: 'Kamera',
+                                color: Colors.blue,
+                                onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onCaptureImage),
+                              ),
+                              if (widget.canUploadMeals)
+                                _AttachmentOption(
+                                  icon: Icons.restaurant_rounded,
+                                  label: 'Öğün Yükle',
+                                  color: Colors.orange,
+                                  onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onMealUpload),
+                                ),
+                            ],
+                          ),
+                        )
+                      : const SizedBox.shrink(),
                 ),
-
-                IconButton(
-                  icon: const Icon(Icons.camera_alt),
-                  onPressed: isDisabled ? null : onCaptureImage,
-                  tooltip: 'Kameradan çek',
-                ),
-
-                // Meal upload button
-                if (canUploadMeals)
-                  TextButton.icon(
-                    onPressed: isDisabled ? null : onMealUpload,
-                    icon: const Icon(Icons.restaurant),
-                    label: const Text('Öğün Yükle'),
-                  ),
                 
-                const SizedBox(width: 8),
-                
-                // Text input field
-                Expanded(
-                  child: TextField(
-                    controller: context.read<ChatManager>().messageController,
-                    minLines: 1,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      hintText: 'Mesaj yazın…',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                // Input row
+                Row(
+                  children: [
+                    // Plus button to toggle menu
+                    RotationTransition(
+                      turns: _rotationAnimation,
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.add_circle_rounded,
+                          color: _isMenuOpen ? colorScheme.primary : null,
+                          size: 28,
+                        ),
+                        onPressed: isDisabled ? null : _toggleMenu,
+                        tooltip: 'Ekler',
+                      ),
                     ),
-                  ),
-                ),
-                
-                const SizedBox(width: 8),
-                
-                // Send button
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: state.sending
-                      ? null
-                      : () async {
-                    final chat = context.read<ChatManager>();
-                    logger.info('Send text button tapped. chatId={}', [chatId]);
                     
-                    try {
-                      await chat.sendTextTo(chatId);
-                    } catch (e, st) {
-                      logger.err('Send text button handler failed. error={}', [e]);
-                      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-                      
-                      if (!context.mounted) return;
-                      DialogUtils.openError(context, title: 'Mesaj Gönderim Hatası', message: 'Mesaj gönderilemedi.');
-                    }
-                  },
+                    const SizedBox(width: 4),
+                    
+                    // Text input field
+                    Expanded(
+                      child: TextField(
+                        controller: context.read<ChatManager>().messageController,
+                        minLines: 1,
+                        maxLines: 4,
+                        decoration: InputDecoration(
+                          hintText: 'Mesaj yazın…',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    
+                    const SizedBox(width: 4),
+                    
+                    // Send button
+                    IconButton(
+                      icon: Icon(
+                        Icons.send_rounded,
+                        color: colorScheme.primary,
+                      ),
+                      onPressed: state.sending
+                          ? null
+                          : () async {
+                        final chat = context.read<ChatManager>();
+                        widget.logger.info('Send text button tapped. chatId={}', [widget.chatId]);
+                        
+                        try {
+                          await chat.sendTextTo(widget.chatId);
+                        } catch (e, st) {
+                          widget.logger.err('Send text button handler failed. error={}', [e]);
+                          if (kDebugMode) widget.logger.debug('Stack trace:\n{}', [st]);
+                          
+                          if (!context.mounted) return;
+                          DialogUtils.openError(context, title: 'Mesaj Gönderim Hatası', message: 'Mesaj gönderilemedi.');
+                        }
+                      },
+                    ),
+                  ],
                 ),
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// Individual attachment option button for the expandable menu
+class _AttachmentOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _AttachmentOption({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDisabled = onTap == null;
+    
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Opacity(
+        opacity: isDisabled ? 0.5 : 1.0,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

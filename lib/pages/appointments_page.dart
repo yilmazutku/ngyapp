@@ -73,6 +73,56 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       final subProvider =
           Provider.of<SubProvider>(context, listen: false);
 
+      // Check if user already has an appointment this week
+      final existingAppointments = await appointmentManager.fetchAppointments(
+        null,
+        showAllAppointments: true,
+        userId: widget.userId,
+      );
+      
+      // Calculate the week (Monday to Saturday) of the SELECTED appointment date
+      // This ensures we check the week the user is trying to book into, not today's week
+      final selectedWeekStart = _selectedDate.subtract(Duration(days: _selectedDate.weekday - 1));
+      final weekStartDate = DateTime(selectedWeekStart.year, selectedWeekStart.month, selectedWeekStart.day); // Monday 00:00
+      final weekEndDate = weekStartDate.add(const Duration(days: 6)); // Sunday 00:00 (end of Saturday)
+      
+      logger.debug('Checking for existing appointments in week: {} to {}', 
+        [weekStartDate, weekEndDate]);
+      
+      // Statuses that count as "having an appointment" (exclude only canceled)
+      const validStatuses = {
+        AppointmentStatus.scheduled,
+        AppointmentStatus.completed,
+        AppointmentStatus.burned,
+        AppointmentStatus.postponed,
+      };
+      
+      // Check if there's an existing valid appointment this week (Mon-Sat)
+      final hasAppointmentThisWeek = existingAppointments.any((appointment) {
+        final appointmentDate = appointment.appointmentDateTime;
+        final isValidStatus = validStatuses.contains(appointment.status);
+        final isWithinWeek = !appointmentDate.isBefore(weekStartDate) && // >= Monday 00:00
+                             appointmentDate.isBefore(weekEndDate);       // < Sunday 00:00 (i.e., up to Saturday 23:59)
+        
+        if (isValidStatus && isWithinWeek) {
+          logger.debug('Found existing appointment this week: {} status={} date={}', 
+            [appointment.appointmentId, appointment.status, appointmentDate]);
+        }
+        
+        return isValidStatus && isWithinWeek;
+      });
+      
+      if (!mounted) return;
+      
+      if (hasAppointmentThisWeek) {
+        await DialogUtils.openError(
+          context,
+          title: 'Randevu Oluşturulamadı',
+          message: 'Bu hafta için zaten bir randevunuz bulunmaktadır. Haftada yalnızca bir randevu alabilirsiniz.',
+        );
+        return;
+      }
+
       // Fetch the latest active subscription
       final subscriptions = await subProvider.fetchSubscriptions(
         userId: widget.userId,

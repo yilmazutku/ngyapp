@@ -58,6 +58,7 @@ import 'providers/test_provider.dart';
 import 'providers/user_provider.dart';
 import 'services/fcm_service.dart';
 import 'services/meal_reminder_service.dart';
+import 'services/notification_service.dart';
 import 'tabs/admin_images_page.dart';
 import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
@@ -300,7 +301,11 @@ class _AppLifecycleManagerState extends State<AppLifecycleManager>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
-    if (state == AppLifecycleState.detached) {
+    if (state == AppLifecycleState.resumed) {
+      // App resumed to foreground - clear the app badge
+      // This handles the case when user clears notifications from notification center
+      NotificationService().clearBadge();
+    } else if (state == AppLifecycleState.detached) {
       // App is about to be terminated, clean up resources
       logger.info('Application is detaching, cleaning up resources');
       Logger.dispose();
@@ -698,6 +703,10 @@ class _HomePageState extends State<HomePage> {
             'icon': Icons.chat,
             'label': 'Chat',
             'onTap': () => _navigateToChat(context, userId, isAdmin),
+            // Only admins get the badge stream
+            'badgeStream': isAdmin 
+                ? context.read<ChatManager>().totalUnreadChatsStream()
+                : null,
           },
           {
             'icon': Icons.food_bank,
@@ -845,6 +854,8 @@ class _HomePageState extends State<HomePage> {
                           itemCount: gridItems.length,
                           itemBuilder: (context, index) {
                             final item = gridItems[index];
+                            final badgeStream = item['badgeStream'] as Stream<int>?;
+                            
                             return Card(
                               elevation: 4,
                               shape: RoundedRectangleBorder(
@@ -856,11 +867,33 @@ class _HomePageState extends State<HomePage> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(
-                                      item['icon'],
-                                      size: 48,
-                                      color: themeProviderInstance.primaryColor,
-                                    ),
+                                    // Icon with optional badge
+                                    if (badgeStream != null)
+                                      StreamBuilder<int>(
+                                        stream: badgeStream,
+                                        builder: (context, snapshot) {
+                                          final count = snapshot.data ?? 0;
+                                          return Badge(
+                                            isLabelVisible: count > 0,
+                                            label: Text(
+                                              count > 99 ? '99+' : count.toString(),
+                                              style: const TextStyle(fontSize: 10),
+                                            ),
+                                            backgroundColor: Colors.red,
+                                            child: Icon(
+                                              item['icon'],
+                                              size: 48,
+                                              color: themeProviderInstance.primaryColor,
+                                            ),
+                                          );
+                                        },
+                                      )
+                                    else
+                                      Icon(
+                                        item['icon'],
+                                        size: 48,
+                                        color: themeProviderInstance.primaryColor,
+                                      ),
                                     const SizedBox(height: 8),
                                     Text(
                                       item['label'],
