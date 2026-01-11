@@ -304,7 +304,8 @@ class _AppLifecycleManagerState extends State<AppLifecycleManager>
     if (state == AppLifecycleState.resumed) {
       // App resumed to foreground - clear the app badge
       // This handles the case when user clears notifications from notification center
-      NotificationService().clearBadge();
+      logger.info('Application resumed, clearing notification badge');
+      FcmService().clearBadge();
     } else if (state == AppLifecycleState.detached) {
       // App is about to be terminated, clean up resources
       logger.info('Application is detaching, cleaning up resources');
@@ -816,6 +817,8 @@ class _HomePageState extends State<HomePage> {
                   );
 
                   if (shouldLogout == true) {
+                    // Remove FCM token before signing out to stop notifications
+                    await FcmService().removeFcmToken();
                     await FirebaseAuth.instance.signOut();
                     if (context.mounted) {
                       Navigator.pushReplacement(

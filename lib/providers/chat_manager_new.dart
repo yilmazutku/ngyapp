@@ -306,9 +306,11 @@ class ChatManager extends ChangeNotifier {
       final isUserMessage = !isAdminUid(userId);
       
       // Update chat document with latest message info
+      // Clear lastImageUrl since this is a text-only message
       await _ensureChatDoc(
         chatId, 
         lastMessage: text, 
+        lastImageUrl: '', 
         lastAt: Timestamp.now(),
         incrementUnreadForAdmins: isUserMessage,
       );

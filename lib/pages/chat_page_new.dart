@@ -1,8 +1,11 @@
 // lib/pages/chat_page_new.dart
+import 'dart:io' show Platform;
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'package:ngy_app/providers/chat_manager_new.dart';
@@ -141,6 +144,99 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  /// Check and request photo library permission.
+  /// Returns true if permission is granted, false otherwise.
+  /// Shows a dialog to open Settings if permission is permanently denied.
+  Future<bool> _checkPhotoPermission() async {
+    Permission permission;
+    if (Platform.isIOS) {
+      permission = Permission.photos;
+    } else {
+      permission = Permission.photos;
+    }
+
+    var status = await permission.status;
+    logger.info('Photo permission initial status: {}', [status.toString()]);
+
+    // Already granted or limited access - proceed
+    if (status.isGranted || status.isLimited) {
+      return true;
+    }
+
+    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
+    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
+    // Always try to request first if not permanently denied
+    if (!status.isPermanentlyDenied && !status.isRestricted) {
+      logger.info('Requesting photo permission...');
+      status = await permission.request();
+      logger.info('Photo permission after request: {}', [status.toString()]);
+      
+      if (status.isGranted || status.isLimited) {
+        return true;
+      }
+    }
+
+    // Permission denied or permanently denied - show dialog to open Settings
+    if (!mounted) return false;
+    
+    final shouldOpenSettings = await DialogUtils.openConfirm(
+      context,
+      title: 'Fotoğraf İzni Gerekli',
+      message: 'Fotoğraf göndermek için galeri erişim izni gereklidir.\n\n'
+          'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
+      confirmText: 'Ayarlara Git',
+      cancelText: 'İptal',
+    );
+
+    if (shouldOpenSettings) {
+      await openAppSettings();
+    }
+    return false;
+  }
+
+  /// Check and request camera permission.
+  /// Returns true if permission is granted, false otherwise.
+  /// Shows a dialog to open Settings if permission is permanently denied.
+  Future<bool> _checkCameraPermission() async {
+    var status = await Permission.camera.status;
+    logger.info('Camera permission initial status: {}', [status.toString()]);
+
+    // Already granted - proceed
+    if (status.isGranted) {
+      return true;
+    }
+
+    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
+    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
+    // Always try to request first if not permanently denied or restricted
+    if (!status.isPermanentlyDenied && !status.isRestricted) {
+      logger.info('Requesting camera permission...');
+      status = await Permission.camera.request();
+      logger.info('Camera permission after request: {}', [status.toString()]);
+      
+      if (status.isGranted) {
+        return true;
+      }
+    }
+
+    // Permission denied or permanently denied - show dialog to open Settings
+    if (!mounted) return false;
+    
+    final shouldOpenSettings = await DialogUtils.openConfirm(
+      context,
+      title: 'Kamera İzni Gerekli',
+      message: 'Fotoğraf çekebilmek için kamera erişim izni gereklidir.\n\n'
+          'Lütfen Ayarlar\'a giderek kamera erişimine izin verin.',
+      confirmText: 'Ayarlara Git',
+      cancelText: 'İptal',
+    );
+
+    if (shouldOpenSettings) {
+      await openAppSettings();
+    }
+    return false;
+  }
+
   /// Pick an image from the gallery and send it to the chat.
   /// 
   /// Flow:
@@ -149,6 +245,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 3. Sends image via ChatManager
   /// 4. Handles errors with user-friendly dialogs
   Future<void> _pickAndSendImage() async {
+    // Check permission first
+    final hasPermission = await _checkPhotoPermission();
+    if (!hasPermission) {
+      logger.info('Photo permission denied, aborting gallery pick');
+      return;
+    }
+
     final chat = context.read<ChatManager>();
     logger.info('Gallery image picker opened. chatId={}', [_chatId]);
 
@@ -211,6 +314,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 3. Sends image via ChatManager
   /// 4. Handles errors with user-friendly dialogs
   Future<void> _captureAndSendImage() async {
+    // Check camera permission first
+    final hasPermission = await _checkCameraPermission();
+    if (!hasPermission) {
+      logger.info('Camera permission denied, aborting capture');
+      return;
+    }
+
     final chat = context.read<ChatManager>();
     logger.info('Camera capture opened. chatId={}', [_chatId]);
 
@@ -304,6 +414,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     logger.debug('Image source selected: {}', [src.name]);
+
+    // Step 2.5: Check permission based on selected source
+    final hasPermission = src == ImageSource.camera 
+        ? await _checkCameraPermission() 
+        : await _checkPhotoPermission();
+    if (!hasPermission) {
+      logger.info('Permission denied for {}, aborting meal upload', [src.name]);
+      return;
+    }
 
     // Step 3: Pick/capture image
     final XFile? image = await _picker.pickImage(source: src);
@@ -454,14 +573,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(PushNotificationReference.chatAdminToUserTitle),
-        // Show chat user name in subtitle if admin is viewing another user's chat
-        bottom: widget.overrideChatId != null && _isAdminUser
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(24),
-                child: _buildUserNameSubtitle(_chatId),
-              )
-            : null,
+        // If admin is viewing a user's chat, show user's name as title
+        // Otherwise show the default chat title
+        title: widget.overrideChatId != null && _isAdminUser
+            ? _buildUserNameTitle(_chatId)
+            : Text(PushNotificationReference.chatAdminToUserTitle),
       ),
       body: Column(
         children: [
@@ -535,50 +651,36 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Build a subtitle widget displaying the user's full name.
+  /// Build a title widget displaying the user's full name.
   /// 
   /// Fetches user details from Firestore and displays name + surname.
-  /// Shows a loading indicator while fetching, and falls back to UID on error.
-  Widget _buildUserNameSubtitle(String userId) {
+  /// Shows loading text while fetching, and falls back to "Sohbet" on error.
+  Widget _buildUserNameTitle(String userId) {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     
     return FutureBuilder(
       future: userProvider.fetchUserDetails(userId: userId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.only(bottom: 4),
-            child: SizedBox(
-              height: 12,
-              width: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white70,
-              ),
-            ),
-          );
+          return const Text('Yükleniyor...');
         }
         
-        String displayName = userId; // Fallback to UID
+        String displayName = 'Sohbet'; // Fallback
         
         if (snapshot.hasData && snapshot.data != null) {
           final user = snapshot.data!;
           final firstName = user.name.trim();
-          final lastName = user.surname.trim() ?? '';
+          final lastName = user.surname.trim();
           displayName = lastName.isNotEmpty ? '$firstName $lastName' : firstName;
-          logger.debug('User name loaded for chatId={}: {}', [userId, displayName]);
+          logger.debug('User name loaded for chat title: {}', [displayName]);
         } else if (snapshot.hasError) {
-          logger.warn('Failed to load user name for chatId={}: {}', [userId, snapshot.error]);
+          logger.warn('Failed to load user name for chat title: {}', [snapshot.error]);
         }
         
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(
-            'Kullanıcı: $displayName',
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+        return Text(
+          displayName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         );
       },
     );

@@ -8,6 +8,7 @@ import 'package:ngy_app/pages/chat_page_new.dart';
 import 'package:ngy_app/models/logger.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
+import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
 
 /// Admin chat list page displaying all chats where the admin is a participant.
@@ -17,6 +18,7 @@ import 'package:ngy_app/widgets/chat_image_preview.dart';
 /// - Displays last message text and/or image preview
 /// - Tapping a chat opens the full conversation
 /// - Real-time updates via Firestore streams
+/// - Admins can initiate new chats with any customer user
 /// 
 /// Architecture:
 /// - Uses server-side sorting (requires Firestore composite index)
@@ -55,6 +57,36 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     super.dispose();
   }
 
+  /// Opens a dialog for selecting a user to start a new chat.
+  /// 
+  /// Shows a searchable list of all customer users. When a user is selected,
+  /// navigates to ChatPage with the selected user's ID.
+  Future<void> _showNewChatDialog() async {
+    logger.info('Opening new chat user selection dialog');
+    
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+    
+    final selectedUserId = await showDialog<String>(
+      context: context,
+      builder: (context) => _UserSelectionDialog(
+        userProvider: userProvider,
+        logger: logger,
+      ),
+    );
+    
+    if (selectedUserId != null && mounted) {
+      logger.info('User selected for new chat. userId={}', [selectedUserId]);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatPage(overrideChatId: selectedUserId),
+        ),
+      );
+    } else {
+      logger.debug('New chat dialog cancelled or no user selected');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final adminUid = FirebaseAuth.instance.currentUser!.uid;
@@ -83,6 +115,12 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
             },
           )
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showNewChatDialog,
+        icon: const Icon(Icons.add_comment),
+        label: const Text('Yeni Sohbet'),
+        tooltip: 'Yeni sohbet başlat',
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: q.snapshots(includeMetadataChanges: true),
@@ -167,7 +205,8 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
                   ? ''
                   : '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}';
               
-              // Check if the last message included an image
+              // Show image preview if lastImageUrl exists and is not empty
+              // (lastImageUrl is cleared when a text-only message is sent)
               final hasImage = lastImageUrl != null && lastImageUrl.isNotEmpty;
 
               // Get unread count for this admin
@@ -394,6 +433,238 @@ class _ErrorView extends StatelessWidget {
           style: const TextStyle(color: Colors.red),
         ),
       ),
+    );
+  }
+}
+
+/// Dialog for selecting a user to start a new chat.
+/// 
+/// Features:
+/// - Fetches all customer users on initialization
+/// - Searchable by name, surname, or email
+/// - Displays user name and email in the list
+/// - Returns the selected user's ID or null if cancelled
+class _UserSelectionDialog extends StatefulWidget {
+  final UserProvider userProvider;
+  final Logger logger;
+
+  const _UserSelectionDialog({
+    required this.userProvider,
+    required this.logger,
+  });
+
+  @override
+  State<_UserSelectionDialog> createState() => _UserSelectionDialogState();
+}
+
+class _UserSelectionDialogState extends State<_UserSelectionDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  
+  List<UserModel> _allUsers = [];
+  List<UserModel> _filteredUsers = [];
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Load all customer users from Firestore.
+  Future<void> _loadUsers() async {
+    widget.logger.debug('Loading users for new chat dialog');
+    
+    try {
+      final users = await widget.userProvider.fetchAllCustomers();
+      
+      // Sort users by name for easier browsing
+      users.sort((a, b) {
+        final nameA = '${a.name} ${a.surname}'.toLowerCase();
+        final nameB = '${b.name} ${b.surname}'.toLowerCase();
+        return nameA.compareTo(nameB);
+      });
+      
+      if (!mounted) return;
+      
+      setState(() {
+        _allUsers = users;
+        _filteredUsers = users;
+        _isLoading = false;
+      });
+      
+      widget.logger.info('Loaded {} users for new chat selection', [users.length]);
+    } catch (e) {
+      widget.logger.err('Error loading users for new chat dialog: {}', [e]);
+      
+      if (!mounted) return;
+      
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// Filter users based on search query.
+  /// 
+  /// Matches against name, surname, and email (case-insensitive).
+  void _filterUsers(String query) {
+    final normalizedQuery = query.toLowerCase().trim();
+    
+    if (normalizedQuery.isEmpty) {
+      setState(() {
+        _filteredUsers = _allUsers;
+      });
+      return;
+    }
+    
+    setState(() {
+      _filteredUsers = _allUsers.where((user) {
+        final fullName = '${user.name} ${user.surname}'.toLowerCase();
+        final email = user.email.toLowerCase();
+        return fullName.contains(normalizedQuery) || email.contains(normalizedQuery);
+      }).toList();
+    });
+    
+    widget.logger.debug('Search filter applied. query="{}" results={}', [query, _filteredUsers.length]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Kullanıcı Seçin'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: MediaQuery.of(context).size.height * 0.6,
+        child: Column(
+          children: [
+            // Search field
+            TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'İsim veya e-posta ile ara...',
+                prefixIcon: const Icon(Icons.search),
+                border: const OutlineInputBorder(),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          _filterUsers('');
+                        },
+                      )
+                    : null,
+              ),
+              onChanged: _filterUsers,
+            ),
+            const SizedBox(height: 12),
+            
+            // User list
+            Expanded(
+              child: _buildUserList(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('İptal'),
+        ),
+      ],
+    );
+  }
+
+  /// Build the user list based on current loading/error/data state.
+  Widget _buildUserList() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              'Kullanıcılar yüklenemedi',
+              style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+    
+    if (_filteredUsers.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.person_search, size: 48, color: Colors.grey),
+            const SizedBox(height: 16),
+            Text(
+              _searchController.text.isNotEmpty
+                  ? 'Aramayla eşleşen kullanıcı bulunamadı'
+                  : 'Henüz kayıtlı kullanıcı yok',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+    
+    return ListView.separated(
+      itemCount: _filteredUsers.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final user = _filteredUsers[index];
+        final fullName = '${user.name} ${user.surname}'.trim();
+        final displayName = fullName.isNotEmpty ? fullName : 'İsimsiz Kullanıcı';
+        
+        return ListTile(
+          leading: CircleAvatar(
+            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+            child: Text(
+              displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          title: Text(
+            displayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            user.email,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
+          ),
+          onTap: () {
+            widget.logger.debug('User selected in dialog. userId={} name="{}"', [user.userId, displayName]);
+            Navigator.of(context).pop(user.userId);
+          },
+        );
+      },
     );
   }
 }

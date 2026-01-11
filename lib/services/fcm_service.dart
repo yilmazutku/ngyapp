@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_app_badger/flutter_app_badger.dart';
 
 import '../constants/app_constants.dart';
 import '../models/logger.dart';
@@ -43,6 +44,33 @@ class FcmService {
   
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // ===== Notification Configuration Flags =====
+  
+  // --- In-App Notification Flags ---
+  // These control whether in-app banners are shown when user is INSIDE the app.
+  // Push notifications (when app is in background/terminated) are not affected.
+  
+  /// Whether to show in-app notification banners for chat messages.
+  /// Set to false to disable the in-app banner while keeping push notifications.
+  static const bool showInAppChatNotifications = true;
+  
+  /// Whether to show in-app notification banners for announcements/news.
+  /// Set to false to disable the in-app banner while keeping push notifications.
+  /// (Disabled by default since push notifications already alert the user)
+  static const bool showInAppAnnouncementNotifications = false;
+  
+  // --- Logged-Out Notification Flags ---
+  // These control whether notifications should be processed when user is logged out.
+  // Set to false to prevent notifications from showing when user is not authenticated.
+  
+  /// Whether to allow chat notifications when user is logged out.
+  /// When false, chat notifications are ignored if no user is authenticated.
+  static const bool allowChatNotificationsWhenLoggedOut = false;
+  
+  /// Whether to allow announcement/news notifications when user is logged out.
+  /// When false, announcement notifications are ignored if no user is authenticated.
+  static const bool allowAnnouncementNotificationsWhenLoggedOut = false;
 
   /// Check if FCM is supported on this platform
   /// FCM is NOT supported on Windows and Linux
@@ -90,6 +118,9 @@ class FcmService {
 
     // Save token for current user (if logged in)
     await saveFcmToken();
+    
+    // Clear any existing badge count when app starts
+    await clearBadge();
 
     // Handle app launch from terminated state
     final initialMessage = await _messaging.getInitialMessage();
@@ -108,6 +139,32 @@ class FcmService {
 
     _logger.info('FCM service initialized');
     return true;
+  }
+  
+  /// Clear the app icon badge count.
+  /// 
+  /// This should be called when:
+  /// - App starts/initializes
+  /// - App is resumed from background
+  /// - User opens the relevant notification content
+  /// 
+  /// Works on iOS and Android (supported launchers).
+  Future<void> clearBadge() async {
+    if (!isSupported) return;
+    
+    try {
+      // Check if badge is supported on this device
+      final isSupported = await FlutterAppBadger.isAppBadgeSupported();
+      if (!isSupported) {
+        _logger.debug('App badge is not supported on this device');
+        return;
+      }
+      
+      await FlutterAppBadger.removeBadge();
+      _logger.info('App badge cleared');
+    } catch (e) {
+      _logger.err('Error clearing app badge: $e');
+    }
   }
 
   /// Request notification permissions
@@ -142,6 +199,29 @@ class FcmService {
   void _onForegroundMessage(RemoteMessage message) {
     _logger.info('Foreground message received: ${message.notification?.title}');
 
+    // Check if user is logged in
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      // User is logged out - check if we should show this notification type
+      final type = (message.data['type'] ?? '').toString();
+      final isChatNotification = type == 'chat' || type == 'chat_admin';
+      final isAnnouncementNotification = type == 'news';
+      
+      if (isChatNotification && !allowChatNotificationsWhenLoggedOut) {
+        _logger.info('Ignoring chat notification - user is logged out');
+        return;
+      }
+      if (isAnnouncementNotification && !allowAnnouncementNotificationsWhenLoggedOut) {
+        _logger.info('Ignoring announcement notification - user is logged out');
+        return;
+      }
+      // For other notification types when logged out, still skip
+      if (!isChatNotification && !isAnnouncementNotification) {
+        _logger.info('Ignoring notification - user is logged out');
+        return;
+      }
+    }
+
     final context = _navigatorKey?.currentContext;
     if (context == null) {
       _logger.warn('No context available for showing in-app notification');
@@ -154,6 +234,20 @@ class FcmService {
     // Check if we should suppress this notification (user is already viewing this chat)
     if (_shouldSuppressNotification(message.data)) {
       _logger.info('Suppressing notification - user is already in this chat');
+      return;
+    }
+
+    // Check in-app notification flags based on notification type
+    final type = (message.data['type'] ?? '').toString();
+    final isChatNotification = type == 'chat' || type == 'chat_admin';
+    final isAnnouncementNotification = type == 'news';
+    
+    if (isChatNotification && !showInAppChatNotifications) {
+      _logger.info('Skipping in-app chat notification - disabled by flag');
+      return;
+    }
+    if (isAnnouncementNotification && !showInAppAnnouncementNotifications) {
+      _logger.info('Skipping in-app announcement notification - disabled by flag');
       return;
     }
 
@@ -250,8 +344,31 @@ class FcmService {
   /// Handle notification tap (from background/terminated state)
   void _onNotificationTap(RemoteMessage message) {
     _logger.info('Notification tapped: ${message.messageId}');
+    
+    // Check if user is logged in before processing notification tap
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      final type = (message.data['type'] ?? '').toString();
+      final isChatNotification = type == 'chat' || type == 'chat_admin';
+      final isAnnouncementNotification = type == 'news';
+      
+      if (isChatNotification && !allowChatNotificationsWhenLoggedOut) {
+        _logger.info('Ignoring chat notification tap - user is logged out');
+        clearBadge();
+        return;
+      }
+      if (isAnnouncementNotification && !allowAnnouncementNotificationsWhenLoggedOut) {
+        _logger.info('Ignoring announcement notification tap - user is logged out');
+        clearBadge();
+        return;
+      }
+    }
+    
     _pendingMessage = message;
     _tryOpenPendingMessage();
+    
+    // Clear badge when user taps a notification
+    clearBadge();
   }
 
   /// Try to open pending message (navigate to appropriate page)

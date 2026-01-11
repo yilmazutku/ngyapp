@@ -26,33 +26,31 @@ class LoginProvider extends ChangeNotifier {
   /// 
   /// @return A boolean indicating whether the login was successful
   Future<bool> login(BuildContext context) async {
-    // windowsta cacheden login oluyor durumu vardı o yüzden burası var
-    // if (FirebaseAuth.instance.currentUser != null) {
-    //   if (kDebugMode) {
-    //     await FirebaseAuth.instance
-    //         .signOut(); // always start logged out on debug
-    //   }
-    // }
-    _setLoadingState(true);
     _errorMessage = '';
+    
+    // Validate inputs before attempting login
+    if (!_validateInputs()) {
+      notifyListeners();
+      return false;
+    }
+    
+    _setLoadingState(true);
     bool isLoginSuccessful = false;
+    
     try {
-    await FirebaseAuth.instance.signInWithEmailAndPassword(
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
-    isLoginSuccessful = true;
-
-
+      isLoginSuccessful = true;
     } on FirebaseAuthException catch (e) {
       _handleFirebaseAuthError(e);
-      // return false;
     } catch (e) {
       _errorMessage = 'Beklenmeyen bir hata oluştu.';
       logger.err('Unexpected error during sign-in: {}', [e.toString()]);
-      // return false;
     }
-    logger.info('isLoginSuccessful={}',[isLoginSuccessful]);
+    
+    logger.info('isLoginSuccessful={}', [isLoginSuccessful]);
     _setLoadingState(false);
     notifyListeners();
     return isLoginSuccessful;
@@ -92,14 +90,37 @@ class LoginProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Validates that email and password fields are not empty.
+  /// Validates that email and password fields are not empty and email format is valid.
   /// 
   /// @return A boolean indicating whether the inputs are valid
   bool _validateInputs() {
-    if (emailController.text.trim().isEmpty || passwordController.text.trim().isEmpty) {
-      _errorMessage = 'Lütfen alanları doldurunuz.';
+    final email = emailController.text.trim();
+    final password = passwordController.text.trim();
+    
+    // Check if both fields are empty
+    if (email.isEmpty && password.isEmpty) {
+      _errorMessage = 'Lütfen e-posta ve şifre alanlarını doldurunuz.';
       return false;
     }
+    
+    // Check if email is empty
+    if (email.isEmpty) {
+      _errorMessage = 'Lütfen e-posta adresinizi giriniz.';
+      return false;
+    }
+    
+    // Check if password is empty
+    if (password.isEmpty) {
+      _errorMessage = 'Lütfen şifrenizi giriniz.';
+      return false;
+    }
+    
+    // Basic email format validation
+    if (!email.contains('@') || !email.contains('.')) {
+      _errorMessage = 'Lütfen geçerli bir e-posta adresi giriniz.';
+      return false;
+    }
+    
     return true;
   }
 

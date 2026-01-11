@@ -45,31 +45,64 @@ class NewsDetailPage extends StatelessWidget {
                 ? 250
                 : 0,
             pinned: true,
+            // Ensure back button is visible against any background
+            foregroundColor: news.imageUrl != null && news.imageUrl!.isNotEmpty
+                ? Colors.white
+                : null,
             flexibleSpace: FlexibleSpaceBar(
               background: news.imageUrl != null && news.imageUrl!.isNotEmpty
-                  ? GestureDetector(
-                      onTap: () => _showFullScreenImage(context, news.imageUrl!),
-                      child: Image.network(
-                        news.imageUrl!,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return Container(
-                            color: Colors.grey[300],
-                            child: const Center(
-                              child: CircularProgressIndicator(),
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Background color for letterboxing
+                        Container(color: Colors.grey[200]),
+                        // Image - using contain to show the whole image
+                        GestureDetector(
+                          onTap: () => _showFullScreenImage(context, news.imageUrl!),
+                          child: Image.network(
+                            news.imageUrl!,
+                            fit: BoxFit.contain,
+                            width: double.infinity,
+                            height: double.infinity,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Container(
+                                color: Colors.grey[300],
+                                child: const Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                color: Colors.grey[300],
+                                child: const Center(
+                                  child: Icon(Icons.broken_image, size: 64),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        // Gradient overlay at top to ensure back button visibility
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: 100,
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black54,
+                                  Colors.transparent,
+                                ],
+                              ),
                             ),
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            color: Colors.grey[300],
-                            child: const Center(
-                              child: Icon(Icons.broken_image, size: 64),
-                            ),
-                          );
-                        },
-                      ),
+                          ),
+                        ),
+                      ],
                     )
                   : null,
             ),
