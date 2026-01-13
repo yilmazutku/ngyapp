@@ -1,14 +1,12 @@
-import 'dart:io' show exit;
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../main.dart';
 import '../models/kvkk_consent_model.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import 'login_page.dart';
 
 /// KVKK consent page shown after login for first-time users
 /// or when KVKK version has been updated.
@@ -235,14 +233,12 @@ Açık rızamı dilediğim zaman geri alabileceğimi (geri alma öncesindeki iş
 
     if (confirmed) {
       await FirebaseAuth.instance.signOut();
-      if (kIsWeb) {
-        // On web, redirect to login page
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, '/');
-        }
-      } else {
-        // On mobile/desktop, close the app
-        SystemNavigator.pop();
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
       }
     }
   }
@@ -250,28 +246,7 @@ Açık rızamı dilediğim zaman geri alabileceğimi (geri alma öncesindeki iş
   void _showTextDialog(String title, String content) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: MediaQuery.of(context).size.height * 0.6,
-          child: Scrollbar(
-            thumbVisibility: true,
-            child: SingleChildScrollView(
-              child: Text(
-                content,
-                style: const TextStyle(fontSize: 14, height: 1.5),
-              ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Kapat'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) => _TextViewDialog(title: title, content: content),
     );
   }
 
@@ -534,6 +509,58 @@ Açık rızamı dilediğim zaman geri alabileceğimi (geri alma öncesindeki iş
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Dialog widget for displaying KVKK text documents with proper scroll handling
+class _TextViewDialog extends StatefulWidget {
+  final String title;
+  final String content;
+
+  const _TextViewDialog({
+    required this.title,
+    required this.content,
+  });
+
+  @override
+  State<_TextViewDialog> createState() => _TextViewDialogState();
+}
+
+class _TextViewDialogState extends State<_TextViewDialog> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: MediaQuery.of(context).size.height * 0.6,
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            child: Text(
+              widget.content,
+              style: const TextStyle(fontSize: 14, height: 1.5),
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Kapat'),
+        ),
+      ],
     );
   }
 }
