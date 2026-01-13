@@ -5,6 +5,8 @@ import 'package:ngy_app/pages/reset_password_page.dart';
 
 import '../main.dart';
 import '../providers/login_manager.dart';
+import '../providers/user_provider.dart';
+import 'kvkk_consent_page.dart';
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
@@ -155,10 +157,7 @@ class LoginPage extends StatelessWidget {
                 // If AUTO_LOGIN is true and user is already logged in, navigate directly
                 if (AUTO_LOGIN && FirebaseAuth.instance.currentUser != null) {
                   if (context.mounted) {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (_) => const HomePage()),
-                    );
+                    await _navigateAfterLogin(context);
                   }
                   return;
                 }
@@ -167,10 +166,7 @@ class LoginPage extends StatelessWidget {
                 final ok = await loginProvider.login(context);
 
                 if (ok && context.mounted) {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const HomePage()),
-                  );
+                  await _navigateAfterLogin(context);
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -222,6 +218,31 @@ class LoginPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Navigates to the appropriate page after successful login.
+  /// Checks KVKK consent and redirects to consent page if needed.
+  Future<void> _navigateAfterLogin(BuildContext context) async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+    final hasConsent = await userProvider.hasValidKvkkConsent(userId: userId);
+
+    if (!context.mounted) return;
+
+    if (hasConsent) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomePage()),
+      );
+    } else {
+      // Redirect to KVKK consent page
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const KvkkConsentPage()),
+      );
+    }
   }
 }
 

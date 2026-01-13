@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../main.dart';
 import '../models/logger.dart';
 import '../models/user_model.dart';
+import '../models/kvkk_consent_model.dart';
 import '../pages/admin_create_user_page.dart';
 
 final Logger logger = Logger.forClass(UserProvider);
@@ -264,6 +265,97 @@ class UserProvider extends ChangeNotifier {
       return users;
     } catch (e) {
       logger.err('Error fetching customer users: {}', [e]);
+      rethrow;
+    }
+  }
+
+  // ============ KVKK Consent Methods ============
+
+  /// Fetches KVKK consent status for a user
+  /// 
+  /// @param userId The ID of the user to check consent for
+  /// 
+  /// @return KvkkConsentModel containing consent status, or null if not found
+  Future<KvkkConsentModel?> fetchKvkkConsent({required String userId}) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+
+      if (doc.exists) {
+        final data = doc.data();
+        if (data != null) {
+          return KvkkConsentModel.fromMap(data);
+        }
+      }
+      return null;
+    } catch (e) {
+      logger.err('Error fetching KVKK consent for userId={}: {}', [userId, e]);
+      rethrow;
+    }
+  }
+
+  /// Checks if a user has valid KVKK consent for the current version
+  /// 
+  /// @param userId The ID of the user to check
+  /// 
+  /// @return true if user has valid consent, false otherwise
+  Future<bool> hasValidKvkkConsent({required String userId}) async {
+    try {
+      final consent = await fetchKvkkConsent(userId: userId);
+      if (consent == null) {
+        logger.info('No KVKK consent found for userId={}', [userId]);
+        return false;
+      }
+      final hasValid = consent.hasValidConsent;
+      logger.info('KVKK consent check for userId={}: hasValid={}', [userId, hasValid]);
+      return hasValid;
+    } catch (e) {
+      logger.err('Error checking KVKK consent for userId={}: {}', [userId, e]);
+      return false;
+    }
+  }
+
+  /// Saves KVKK consent for a user
+  /// 
+  /// @param userId The ID of the user
+  /// @param kvkkAccepted Whether the user acknowledged the KVKK information notice
+  /// @param explicitConsentAccepted Whether the user gave explicit consent for special data
+  /// 
+  /// @return true if consent was saved successfully
+  Future<bool> saveKvkkConsent({
+    required String userId,
+    required bool kvkkAccepted,
+    required bool explicitConsentAccepted,
+  }) async {
+    try {
+      final now = DateTime.now();
+      final consentData = <String, dynamic>{
+        'kvkkVersion': kvkkCurrentVersion,
+      };
+
+      if (kvkkAccepted) {
+        consentData['kvkkAcceptedAt'] = Timestamp.fromDate(now);
+      }
+      if (explicitConsentAccepted) {
+        consentData['explicitConsentAcceptedAt'] = Timestamp.fromDate(now);
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .update(consentData);
+
+      logger.info(
+        'KVKK consent saved for userId={}: version={}, kvkkAccepted={}, explicitConsentAccepted={}',
+        [userId, kvkkCurrentVersion, kvkkAccepted, explicitConsentAccepted],
+      );
+      
+      notifyListeners();
+      return true;
+    } catch (e) {
+      logger.err('Error saving KVKK consent for userId={}: {}', [userId, e]);
       rethrow;
     }
   }
