@@ -253,7 +253,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     return Scaffold(
       appBar: const AppBarWithBack(
         title: 'Randevularım',
-        backgroundColor: Colors.deepPurple,
+        //backgroundColor: Colors.deepPurple,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -651,7 +651,7 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     return Scaffold(
       appBar: const AppBarWithBack(
         title: 'Geçmiş Randevularım',
-        backgroundColor: Colors.deepPurple,
+       // backgroundColor: Colors.deepPurple,
       ),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator()) 

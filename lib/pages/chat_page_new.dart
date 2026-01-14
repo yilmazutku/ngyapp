@@ -91,9 +91,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Set active chat ID to suppress notifications for this chat
     FcmService().setActiveChatId(_chatId);
     
-    // Mark chat as read for admin users
+    // Mark chat as read based on user type
     if (_isAdminUser) {
       _markChatAsReadForAdmin();
+    } else {
+      _markChatAsReadForUser();
     }
     
     logger.info(
@@ -119,7 +121,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       await chatManager.markChatAsRead(_chatId);
       logger.debug('Chat marked as read for admin. chatId={}', [_chatId]);
     } catch (e) {
-      logger.warn('Failed to mark chat as read: {}', [e]);
+      logger.warn('Failed to mark chat as read (admin): {}', [e]);
+    }
+  }
+
+  /// Mark chat as read for regular user (resets unread count)
+  Future<void> _markChatAsReadForUser() async {
+    try {
+      final chatManager = context.read<ChatManager>();
+      await chatManager.markChatAsReadForUser(_chatId);
+      logger.debug('Chat marked as read for user. chatId={}', [_chatId]);
+    } catch (e) {
+      logger.warn('Failed to mark chat as read (user): {}', [e]);
     }
   }
 
@@ -139,6 +152,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       // Re-mark as read when returning to foreground
       if (_isAdminUser) {
         _markChatAsReadForAdmin();
+      } else {
+        _markChatAsReadForUser();
       }
       logger.info('App resumed, re-set active chat ID to suppress in-app notifications');
     }

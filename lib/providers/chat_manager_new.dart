@@ -187,6 +187,8 @@ class ChatManager extends ChangeNotifier {
   /// - Adds both admin UIDs and the user as participants
   /// - Updates last message info for the admin chat list
   /// - Increments unread count for admins when user sends a message
+  /// - Increments unread count for user when admin sends a message
+  /// - Updates hasUnreadFor array for efficient unread count queries
   /// - Uses merge: true to avoid overwriting existing fields
   Future<void> _ensureChatDoc(
       String chatId, {
@@ -194,11 +196,12 @@ class ChatManager extends ChangeNotifier {
         String? lastImageUrl,
         Timestamp? lastAt,
         bool incrementUnreadForAdmins = false,
+        bool incrementUnreadForUser = false,
       }) async {
     final participants = <String>{chatId, ...adminIds}.toList();
     logger.debug(
-      'Ensuring chat doc. chatId={} participants={} lastMsg="{}" lastImageUrl={} incrementUnread={}', 
-      [chatId, participants, lastMessage ?? 'none', lastImageUrl ?? 'none', incrementUnreadForAdmins]
+      'Ensuring chat doc. chatId={} participants={} lastMsg="{}" lastImageUrl={} incrementUnreadAdmins={} incrementUnreadUser={}', 
+      [chatId, participants, lastMessage ?? 'none', lastImageUrl ?? 'none', incrementUnreadForAdmins, incrementUnreadForUser]
     );
     
     final updateData = <String, dynamic>{
@@ -214,7 +217,18 @@ class ChatManager extends ChangeNotifier {
       for (final adminUid in adminIds) {
         updateData['adminUnreadCount.$adminUid'] = FieldValue.increment(1);
       }
-      logger.debug('Incrementing unread count for admins');
+      // Add all admins to hasUnreadFor array for efficient count queries
+      // arrayUnion is idempotent - won't duplicate if already present
+      updateData['hasUnreadFor'] = FieldValue.arrayUnion(adminIds.toList());
+      logger.debug('Incrementing unread count for admins and updating hasUnreadFor');
+    }
+    
+    // Increment unread count for user when an admin sends a message
+    if (incrementUnreadForUser) {
+      updateData['userUnreadCount'] = FieldValue.increment(1);
+      // Add the user (chatId) to hasUnreadFor array for efficient count queries
+      updateData['hasUnreadFor'] = FieldValue.arrayUnion([chatId]);
+      logger.debug('Incrementing unread count for user and updating hasUnreadFor');
     }
     
     await _chatDoc(chatId).set(updateData, SetOptions(merge: true));
@@ -223,7 +237,8 @@ class ChatManager extends ChangeNotifier {
   }
 
   /// Mark a chat as read for the current admin user.
-  /// Resets the unread count to 0 and updates lastReadAt timestamp.
+  /// Resets the unread count to 0, updates lastReadAt timestamp,
+  /// and removes admin from hasUnreadFor array for efficient count queries.
   /// 
   /// Call this when admin opens a chat.
   Future<void> markChatAsRead(String chatId) async {
@@ -233,38 +248,121 @@ class ChatManager extends ChangeNotifier {
       return;
     }
     
-    logger.info('Marking chat as read. chatId={} adminUid={}', [chatId, currentUid]);
+    logger.info('Marking chat as read (admin). chatId={} adminUid={}', [chatId, currentUid]);
     
     await _chatDoc(chatId).set({
       'adminUnreadCount.$currentUid': 0,
       'adminLastReadAt.$currentUid': FieldValue.serverTimestamp(),
+      // Remove this admin from hasUnreadFor for efficient count queries
+      'hasUnreadFor': FieldValue.arrayRemove([currentUid]),
     }, SetOptions(merge: true));
     
-    logger.debug('Chat marked as read. chatId={}', [chatId]);
+    logger.debug('Chat marked as read (admin). chatId={}', [chatId]);
+  }
+
+  /// Mark a chat as read for the current regular user.
+  /// Resets the userUnreadCount to 0 and removes user from hasUnreadFor array.
+  /// 
+  /// Call this when a regular user opens their chat.
+  Future<void> markChatAsReadForUser(String chatId) async {
+    final currentUid = auth.currentUser?.uid;
+    if (currentUid == null) {
+      logger.debug('markChatAsReadForUser skipped: not logged in');
+      return;
+    }
+    
+    // Skip if current user is an admin (they use markChatAsRead instead)
+    if (isAdminUid(currentUid)) {
+      logger.debug('markChatAsReadForUser skipped: user is admin');
+      return;
+    }
+    
+    // Only mark as read if this is the user's own chat
+    if (currentUid != chatId) {
+      logger.debug('markChatAsReadForUser skipped: chatId does not match current user');
+      return;
+    }
+    
+    logger.info('Marking chat as read (user). chatId={} userId={}', [chatId, currentUid]);
+    
+    await _chatDoc(chatId).set({
+      'userUnreadCount': 0,
+      'userLastReadAt': FieldValue.serverTimestamp(),
+      // Remove this user from hasUnreadFor for efficient count queries
+      'hasUnreadFor': FieldValue.arrayRemove([currentUid]),
+    }, SetOptions(merge: true));
+    
+    logger.debug('Chat marked as read (user). chatId={}', [chatId]);
+  }
+
+  /// Stream of unread message count for the current regular user.
+  /// Returns the number of unread messages in their chat.
+  /// 
+  /// For regular users, they have only one chat (their own), so this
+  /// returns the count of unread messages in that chat.
+  Stream<int> userUnreadCountStream() {
+    final currentUid = auth.currentUser?.uid;
+    if (currentUid == null) {
+      logger.debug('userUnreadCountStream: returning 0 (not logged in)');
+      return Stream.value(0);
+    }
+    
+    // If user is admin, return 0 (admins use totalUnreadChatsStream instead)
+    if (isAdminUid(currentUid)) {
+      logger.debug('userUnreadCountStream: returning 0 (user is admin)');
+      return Stream.value(0);
+    }
+    
+    logger.info('userUnreadCountStream: starting stream for user {}', [currentUid]);
+    
+    // User's chat ID is their own UID
+    return _chatDoc(currentUid)
+        .snapshots()
+        .map((snapshot) {
+          if (!snapshot.exists) {
+            logger.debug('userUnreadCountStream: chat does not exist yet');
+            return 0;
+          }
+          final data = snapshot.data() ?? {};
+          final count = (data['userUnreadCount'] ?? 0) as int;
+          logger.debug('User unread count: {}', [count]);
+          return count;
+        })
+        .handleError((error, stackTrace) {
+          logger.err('userUnreadCountStream error: {}', [error]);
+          return 0;
+        });
   }
 
   /// Stream of total unread chat count for the current admin.
   /// Returns the number of chats that have unread messages.
+  /// 
+  /// OPTIMIZED: Uses 'hasUnreadFor' array field with arrayContains query.
+  /// This only fetches chats with unread messages (not ALL chats),
+  /// and Firestore's arrayContains is highly efficient with proper indexing.
   Stream<int> totalUnreadChatsStream() {
     final currentUid = auth.currentUser?.uid;
     if (currentUid == null || !isAdminUid(currentUid)) {
+      logger.debug('totalUnreadChatsStream: returning 0 (not admin or not logged in)');
       return Stream.value(0);
     }
     
+    logger.info('totalUnreadChatsStream: starting stream for admin {}', [currentUid]);
+    
+    // Efficient query: only get chats where this admin has unread messages
+    // Instead of fetching ALL chats and filtering client-side
     return db
         .collection('chats')
-        .where('participants', arrayContains: currentUid)
+        .where('hasUnreadFor', arrayContains: currentUid)
         .snapshots()
         .map((snapshot) {
-          int count = 0;
-          for (final doc in snapshot.docs) {
-            final data = doc.data();
-            final unreadMap = data['adminUnreadCount'] as Map<String, dynamic>?;
-            final unread = (unreadMap?[currentUid] ?? 0) as int;
-            if (unread > 0) count++;
-          }
-          logger.debug('Total unread chats count: {}', [count]);
+          final count = snapshot.docs.length;
+          logger.info('Total unread chats count: {} (efficient query)', [count]);
           return count;
+        })
+        .handleError((error, stackTrace) {
+          logger.err('totalUnreadChatsStream error: {}', [error]);
+          return 0;
         });
   }
 
@@ -302,8 +400,9 @@ class ChatManager extends ChangeNotifier {
     try {
       logger.info('Sending text message. chatId={} senderId={} length={}', [chatId, userId, text.length]);
       
-      // Increment unread count for admins if a non-admin user sends the message
+      // Determine who should get unread notification
       final isUserMessage = !isAdminUid(userId);
+      final isAdminMessage = isAdminUid(userId);
       
       // Update chat document with latest message info
       // Clear lastImageUrl since this is a text-only message
@@ -312,7 +411,8 @@ class ChatManager extends ChangeNotifier {
         lastMessage: text, 
         lastImageUrl: '', 
         lastAt: Timestamp.now(),
-        incrementUnreadForAdmins: isUserMessage,
+        incrementUnreadForAdmins: isUserMessage,  // User sends → notify admins
+        incrementUnreadForUser: isAdminMessage,   // Admin sends → notify user
       );
       
       // Add message to subcollection
@@ -418,15 +518,17 @@ class ChatManager extends ChangeNotifier {
       logger.debug('Upload complete. downloadUrl={}', [url]);
 
       // Step 5: Update chat document with image metadata
-      // Increment unread count for admins if a non-admin user sends the message
+      // Determine who should get unread notification
       final isUserMessage = !isAdminUid(userId);
+      final isAdminMessage = isAdminUid(userId);
       
       await _ensureChatDoc(
         chatId, 
         lastMessage: 'Fotoğraf', 
         lastImageUrl: url, 
         lastAt: Timestamp.now(),
-        incrementUnreadForAdmins: isUserMessage,
+        incrementUnreadForAdmins: isUserMessage,  // User sends → notify admins
+        incrementUnreadForUser: isAdminMessage,   // Admin sends → notify user
       );
 
       // Step 6: Add message to subcollection

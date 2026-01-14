@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final List<Widget>? actions;
-  final Color? backgroundColor;
+ // final Color? backgroundColor;
   final Color? foregroundColor;
   final PreferredSizeWidget? bottom;
   final String? backButtonTooltip;
@@ -16,7 +16,7 @@ class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
     super.key,
     required this.title,
     this.actions,
-    this.backgroundColor,
+   // this.backgroundColor,
     this.foregroundColor,
     this.bottom,
     this.backButtonTooltip = 'Geri',
@@ -63,7 +63,7 @@ class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
         onPressed: onBackPressed ?? () => Navigator.of(context).pop(),
       ),
       actions: resolvedActions,
-      backgroundColor: Color(0xFF6642E5), //backgroundColor
+      backgroundColor: Color(0xFF815598), //backgroundColor
       foregroundColor: Colors.white, //foregroundColor
       bottom: bottom,
       elevation: elevation,

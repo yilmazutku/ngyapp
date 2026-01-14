@@ -327,6 +327,50 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  /// Cached stream for unread chat count (only for admins)
+  /// This prevents the stream from being recreated on every rebuild
+  Stream<int>? _unreadChatsStream;
+  
+  /// Whether the stream has been initialized
+  bool _streamInitialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _initUnreadStream();
+  }
+  
+  /// Initialize the chat unread stream for the current user
+  /// Called in didChangeDependencies to ensure context is available
+  /// - For admins: shows count of chats with unread messages
+  /// - For regular users: shows count of unread messages in their chat
+  void _initUnreadStream() {
+    // Only initialize once
+    if (_streamInitialized) return;
+    
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) {
+      logger.debug('_initUnreadStream: no user logged in, skipping');
+      return;
+    }
+    
+    final isAdmin = FcmService.isAdmin(userId);
+    logger.info('_initUnreadStream: userId={} isAdmin={}', [userId, isAdmin]);
+    
+    final chatManager = context.read<ChatManager>();
+    
+    if (isAdmin) {
+      // Admin: count of chats with unread messages
+      _unreadChatsStream = chatManager.totalUnreadChatsStream();
+      logger.info('_initUnreadStream: admin unread chats stream initialized');
+    } else {
+      // Regular user: count of unread messages in their chat
+      _unreadChatsStream = chatManager.userUnreadCountStream();
+      logger.info('_initUnreadStream: user unread count stream initialized');
+    }
+    
+    _streamInitialized = true;
+  }
 
   // Fetch user role (optional, for admin features)
   Future<String> _getUserRole(String userId) async {
@@ -704,10 +748,8 @@ class _HomePageState extends State<HomePage> {
             'icon': Icons.chat,
             'label': 'Chat',
             'onTap': () => _navigateToChat(context, userId, isAdmin),
-            // Only admins get the badge stream
-            'badgeStream': isAdmin 
-                ? context.read<ChatManager>().totalUnreadChatsStream()
-                : null,
+            // Only admins get the badge stream (using cached stream)
+            'badgeStream': _unreadChatsStream,
           },
           {
             'icon': Icons.food_bank,
@@ -817,7 +859,10 @@ class _HomePageState extends State<HomePage> {
                   );
 
                   if (shouldLogout == true) {
-                    // Remove FCM token before signing out to stop notifications
+                    // Cancel all local notifications before signing out
+                    await NotificationService().cancelAllNotifications();
+                    await MealReminderService().cancelAllMealReminders();
+                    // Remove FCM token before signing out to stop push notifications
                     await FcmService().removeFcmToken();
                     await FirebaseAuth.instance.signOut();
                     if (context.mounted) {
@@ -875,12 +920,20 @@ class _HomePageState extends State<HomePage> {
                                       StreamBuilder<int>(
                                         stream: badgeStream,
                                         builder: (context, snapshot) {
+                                          // Handle stream errors gracefully
+                                          if (snapshot.hasError) {
+                                            logger.warn('Badge stream error: ${snapshot.error}');
+                                          }
+                                          
                                           final count = snapshot.data ?? 0;
                                           return Badge(
                                             isLabelVisible: count > 0,
                                             label: Text(
                                               count > 99 ? '99+' : count.toString(),
-                                              style: const TextStyle(fontSize: 10),
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
                                             ),
                                             backgroundColor: Colors.red,
                                             child: Icon(

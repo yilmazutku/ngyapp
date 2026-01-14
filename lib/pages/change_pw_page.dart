@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/logger.dart';
 import '../services/fcm_service.dart';
+import '../services/meal_reminder_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/app_bar_with_back.dart';
 
 final Logger log = Logger.forClass(ChangePasswordPage);
@@ -44,6 +46,9 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       await user.updatePassword(newPassword);
       log.info('Password updated successfully.');
 
+      // Cancel all local notifications before signing out
+      await NotificationService().cancelAllNotifications();
+      await MealReminderService().cancelAllMealReminders();
       // Remove FCM token and sign the user out
       await FcmService().removeFcmToken();
       await FirebaseAuth.instance.signOut();

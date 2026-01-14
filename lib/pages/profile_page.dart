@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:ngy_app/pages/reset_password_page.dart';
 import 'package:intl/intl.dart';
 import 'package:ngy_app/services/meal_reminder_service.dart';
+import 'package:ngy_app/services/notification_service.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 import '../widgets/app_bar_with_back.dart';
 
@@ -107,7 +108,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _logout() async {
-    // Remove FCM token before signing out to stop notifications on this device
+    // Cancel all local notifications before signing out
+    await NotificationService().cancelAllNotifications();
+    await MealReminderService().cancelAllMealReminders();
+    // Remove FCM token before signing out to stop push notifications on this device
     await FcmService().removeFcmToken();
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
@@ -135,7 +139,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return Scaffold(
       appBar: AppBarWithBack(
-        title: 'Profil',
+        title: 'Profilim',
         actions: [
           IconButton(
             icon: const Icon(Icons.save),

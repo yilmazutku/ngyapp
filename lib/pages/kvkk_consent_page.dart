@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import '../main.dart';
 import '../models/kvkk_consent_model.dart';
 import '../providers/user_provider.dart';
+import '../services/fcm_service.dart';
+import '../services/meal_reminder_service.dart';
+import '../services/notification_service.dart';
 import '../utils/dialog_utils.dart';
 import 'login_page.dart';
 
@@ -232,6 +235,11 @@ Açık rızamı dilediğim zaman geri alabileceğimi (geri alma öncesindeki iş
     );
 
     if (confirmed) {
+      // Cancel all local notifications before signing out
+      await NotificationService().cancelAllNotifications();
+      await MealReminderService().cancelAllMealReminders();
+      // Remove FCM token before signing out to stop push notifications
+      await FcmService().removeFcmToken();
       await FirebaseAuth.instance.signOut();
       if (mounted) {
         Navigator.pushAndRemoveUntil(
