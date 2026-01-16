@@ -112,6 +112,16 @@ class FcmService {
 
     // Request notification permissions
     await _requestPermissions();
+    
+    // IMPORTANT: Disable system push notification when app is in foreground.
+    // This prevents duplicate notifications (system + in-app banner).
+    // We show our own in-app banner via _onForegroundMessage instead.
+    await _messaging.setForegroundNotificationPresentationOptions(
+      alert: false,  // Don't show notification alert
+      badge: false,  // Don't update badge
+      sound: false,  // Don't play sound
+    );
+    _logger.info('Foreground notification presentation disabled (using in-app banner instead)');
 
     // Set up message handlers
     _setupMessageHandlers();

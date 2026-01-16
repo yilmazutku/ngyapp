@@ -24,7 +24,7 @@ import 'dart:async';
 final Logger logger = Logger.forClass(MealUploadPage);
 
 /// Set to false to hide font size adjustment controls
-const bool IS_TESTING = true;
+const bool IS_TESTING = false;
 
 /// SharedPreferences key for storing expanded meal states
 const String _expandedMealsKey = 'meal_upload_expanded_meals';

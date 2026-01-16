@@ -71,7 +71,7 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 late final PlatformConfig platformConfig;
 
 /// Global theme provider instance for early initialization
-late final ThemeProvider themeProvider;
+//late final ThemeProvider themeProvider;
 
 // === LOGGING FLAGS ===
 // DEBUG: Set to true to enable debug-level messages (log.debug calls)
@@ -114,9 +114,9 @@ void main() async {
   }
 
   // Initialize theme provider and load saved color preference
-  themeProvider = ThemeProvider();
-  await themeProvider.initialize();
-  logger.info('Theme provider initialized with color: ${themeProvider.primaryColorHex}');
+  // themeProvider = ThemeProvider();
+  // await themeProvider.initialize();
+  // logger.info('Theme provider initialized with color: ${themeProvider.primaryColorHex}');
 
   // Initialize platform-specific configuration (notifications, etc.)
   // This uses the Strategy Pattern to handle platform differences
@@ -177,7 +177,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: themeProvider),
+        // ChangeNotifierProvider.value(value: themeProvider),
         ChangeNotifierProvider(
           create: (_) => ChatManager(
             db: FirebaseFirestore.instance,

@@ -368,9 +368,21 @@ class ChatManager extends ChangeNotifier {
 
   /// Get unread count for a specific chat and admin from chat data.
   /// Helper method used by UI widgets.
+  /// 
+  /// Handles Firestore type variations safely:
+  /// - Map can be Map<String, dynamic> or Map<Object?, Object?>
+  /// - Values can be int or num (Firestore uses num for numbers)
   static int getUnreadCountFromChatData(Map<String, dynamic> chatData, String adminUid) {
-    final unreadMap = chatData['adminUnreadCount'] as Map<String, dynamic>?;
-    return (unreadMap?[adminUid] ?? 0) as int;
+    final unreadMapRaw = chatData['adminUnreadCount'];
+    if (unreadMapRaw == null || unreadMapRaw is! Map) {
+      return 0;
+    }
+    
+    final value = (unreadMapRaw as Map)[adminUid];
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
   }
 
   /// Send a text message to a specific chat.

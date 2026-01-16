@@ -206,7 +206,7 @@ class _TestsTabState extends State<TestsTab> {
       child: Row(
         children: [
           Expanded(
-            child: Text('Test Dosyaları', style: Theme.of(context).textTheme.titleMedium),
+            child: Text('Tahliller', style: Theme.of(context).textTheme.titleMedium),
           ),
           const SizedBox(width: 8),
           ElevatedButton.icon(
@@ -214,7 +214,7 @@ class _TestsTabState extends State<TestsTab> {
             icon: _busy
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.add),
-            label: const Text('Yeni Test Dosyası'),
+            label: const Text('Yeni Tahlil'),
           ),
         ],
       ),
