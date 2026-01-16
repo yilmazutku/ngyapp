@@ -72,6 +72,12 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   static const _kVerticalKey = PageStorageKey('admin_appts_vertical');
   static const _kHorizontalKey = PageStorageKey('admin_appts_horizontal');
 
+  // Mobile daily view: selected day for single-day display
+  late DateTime _selectedDay;
+
+  // Threshold for mobile view (single day) vs desktop view (weekly)
+  static const double _kMobileBreakpoint = 600.0;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +88,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final monday = now.subtract(Duration(days: difference));
     startDate = DateTime(monday.year, monday.month, monday.day);
     endDate = startDate!.add(const Duration(days: kDaysToShow - 1));
+
+    // Mobile: start with today
+    _selectedDay = DateTime(now.year, now.month, now.day);
 
     _verticalCtrl = ScrollController();
     _horizontalCtrl = ScrollController();
@@ -481,15 +490,17 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   }
 
   /// Build the time column on the left side
-  Widget _buildTimeColumn() {
+  /// [headerHeight] allows adjusting the top spacer to align with different header sizes
+  Widget _buildTimeColumn({double? headerHeight}) {
     final hours = List.generate(kEndHour - kStartHour + 1, (i) => kStartHour + i);
+    final effectiveHeaderHeight = headerHeight ?? kDayHeaderHeight;
     
     return SizedBox(
       width: kTimeColumnWidth,
       child: Column(
         children: [
           // Header spacer to align with day headers
-          SizedBox(height: kDayHeaderHeight),
+          SizedBox(height: effectiveHeaderHeight),
           // Time labels
           ...hours.map((hour) {
             return SizedBox(
@@ -607,11 +618,385 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   // Utility: normalize a DateTime to Y/M/D (00:00) to use as a map key
   DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
+  // ==================== Mobile Daily Navigation ====================
+  
+  /// Build mobile daily navigation bar with prev/next day buttons
+  Widget _buildMobileDayNavigation() {
+    final String dayTitle = _dayTitleFmt.format(_selectedDay);
+    final bool isToday = _dateOnly(_selectedDay) == _dateOnly(DateTime.now());
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+      child: Row(
+        children: [
+          // Previous day button
+          IconButton(
+            icon: const Icon(Icons.chevron_left, size: 28),
+            tooltip: 'Önceki Gün',
+            onPressed: () {
+              setState(() {
+                _selectedDay = _selectedDay.subtract(const Duration(days: 1));
+                // Update date range to include this day for fetching
+                _updateDateRangeForMobile();
+              });
+            },
+          ),
+          // Day title (centered, tappable to go to today)
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                // Tap to go to today
+                setState(() {
+                  _selectedDay = _dateOnly(DateTime.now());
+                  _updateDateRangeForMobile();
+                });
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    dayTitle,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  if (isToday)
+                    Container(
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'Bugün',
+                        style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          // Next day button
+          IconButton(
+            icon: const Icon(Icons.chevron_right, size: 28),
+            tooltip: 'Sonraki Gün',
+            onPressed: () {
+              setState(() {
+                _selectedDay = _selectedDay.add(const Duration(days: 1));
+                _updateDateRangeForMobile();
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Update date range to cover selected day (for fetching appointments)
+  void _updateDateRangeForMobile() {
+    // Set date range to just the selected day for efficient fetching
+    startDate = _selectedDay;
+    endDate = _selectedDay;
+    _fetchAllAppointments();
+  }
+
+  // ==================== Desktop Weekly Navigation ====================
+  
+  /// Build desktop weekly navigation bar with prev/next week buttons
+  Widget _buildDesktopWeekNavigation() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final double w = constraints.maxWidth;
+          final bool isNarrow = w < 480;
+          final bool isMedium = w >= 480 && w < 760;
+
+          void goPrev() {
+            if (startDate != null && endDate != null) {
+              setState(() {
+                startDate = startDate!.subtract(const Duration(days: 7));
+                endDate = endDate!.subtract(const Duration(days: 7));
+                _fetchAllAppointments();
+              });
+            }
+          }
+
+          void goNext() {
+            if (startDate != null && endDate != null) {
+              setState(() {
+                startDate = startDate!.add(const Duration(days: 7));
+                endDate = endDate!.add(const Duration(days: 7));
+                _fetchAllAppointments();
+              });
+            }
+          }
+
+          final prevIcon = const Icon(Icons.arrow_back_ios);
+          final nextIcon = const Icon(Icons.arrow_forward_ios);
+
+          final Widget prevBtn = isNarrow
+              ? IconButton(icon: prevIcon, tooltip: 'Önceki Hafta', onPressed: goPrev)
+              : ElevatedButton.icon(
+                  onPressed: goPrev,
+                  icon: prevIcon,
+                  label: Text(isMedium ? 'Önceki' : 'Önceki Hafta'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[100],
+                    foregroundColor: Colors.blue[900],
+                    visualDensity: VisualDensity.compact,
+                  ),
+                );
+
+          final Widget nextBtn = isNarrow
+              ? IconButton(icon: nextIcon, tooltip: 'Sonraki Hafta', onPressed: goNext)
+              : ElevatedButton.icon(
+                  onPressed: goNext,
+                  icon: nextIcon,
+                  label: Text(isMedium ? 'Sonraki' : 'Sonraki Hafta'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[100],
+                    foregroundColor: Colors.blue[900],
+                    visualDensity: VisualDensity.compact,
+                  ),
+                );
+
+          final Widget dateLabel = (startDate != null && endDate != null)
+              ? Text(
+                  '${_rangeFmt.format(startDate!)} - ${_rangeFmt.format(endDate!)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                )
+              : const SizedBox.shrink();
+
+          if (isNarrow) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [prevBtn, nextBtn],
+                ),
+                const SizedBox(height: 4),
+                Center(child: dateLabel),
+              ],
+            );
+          } else {
+            return Row(
+              children: [
+                prevBtn,
+                const SizedBox(width: isMedium ? 8 : 12),
+                Expanded(child: Center(child: dateLabel)),
+                const SizedBox(width: isMedium ? 8 : 12),
+                nextBtn,
+              ],
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  // ==================== Content Views ====================
+
+  // Mobile header height constant (compact, just the add button)
+  static const double _kMobileHeaderHeight = 36.0;
+
+  /// Build single day view for mobile (full-width, no redundant header)
+  Widget _buildSingleDayView(Map<DateTime, List<AppointmentModel>> byDay) {
+    final dayKey = _dateOnly(_selectedDay);
+    final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
+    
+    final totalHeight = _kMobileHeaderHeight + _timeGridHeight;
+
+    Widget gridContent = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildTimeColumn(headerHeight: _kMobileHeaderHeight),
+        // Full-width day content (no fixed width constraint)
+        Expanded(
+          child: _buildMobileDayContent(_selectedDay, dayAppointments),
+        ),
+      ],
+    );
+
+    return Scrollbar(
+      controller: _verticalCtrl,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        key: _kVerticalKey,
+        controller: _verticalCtrl,
+        child: SizedBox(
+          height: totalHeight,
+          child: gridContent,
+        ),
+      ),
+    );
+  }
+
+  /// Build mobile day content (full-width, simplified header with just add button)
+  Widget _buildMobileDayContent(DateTime day, List<AppointmentModel> dayAppointments) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Compact header with just the add button (date is in navigation bar)
+        Container(
+          height: _kMobileHeaderHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _showAddAppointmentDialog(context, day),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Randevu Ekle'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Time grid with appointments (full width)
+        SizedBox(
+          height: _timeGridHeight,
+          child: Stack(
+            children: [
+              // Hour grid lines
+              ...List.generate(kEndHour - kStartHour, (i) {
+                return Positioned(
+                  top: i * 60 * kPixelsPerMinute,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    height: 1,
+                    color: Colors.grey[300],
+                  ),
+                );
+              }),
+              // Appointments (full width cards)
+              ...dayAppointments.map((appt) {
+                if (appt.status == AppointmentStatus.canceled) {
+                  return const SizedBox.shrink();
+                }
+                
+                final effectiveTime = (appt.status == AppointmentStatus.postponed && appt.postponedDate != null)
+                    ? appt.postponedDate!
+                    : appt.appointmentDateTime;
+                
+                if (effectiveTime.hour < kStartHour || effectiveTime.hour >= kEndHour) {
+                  return const SizedBox.shrink();
+                }
+                
+                final top = _getTopPositionForTime(effectiveTime);
+                final height = _getHeightForDuration(appt.durationMinutes);
+                
+                return Positioned(
+                  top: top,
+                  left: 0,
+                  right: 0,
+                  height: height,
+                  child: _buildAppointmentCard(appt),
+                );
+              }),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Build weekly view for desktop
+  Widget _buildWeeklyView(Map<DateTime, List<AppointmentModel>> byDay, double screenWidth) {
+    final columnWidth = screenWidth / kDaysToShow;
+    final List<DateTime> weekDays = List.generate(kDaysToShow, (index) => startDate!.add(Duration(days: index)));
+    final totalHeight = kDayHeaderHeight + _timeGridHeight;
+
+    Widget dayColumnsRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: weekDays.map((day) {
+        final dayKey = _dateOnly(day);
+        final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
+        return _buildDayColumn(day, dayAppointments, columnWidth);
+      }).toList(),
+    );
+
+    Widget scrollableDayColumns = SingleChildScrollView(
+      key: _kHorizontalKey,
+      controller: _horizontalCtrl,
+      scrollDirection: Axis.horizontal,
+      child: dayColumnsRow,
+    );
+
+    Widget gridContent = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildTimeColumn(),
+        Expanded(child: scrollableDayColumns),
+      ],
+    );
+
+    return Scrollbar(
+      controller: _verticalCtrl,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        key: _kVerticalKey,
+        controller: _verticalCtrl,
+        child: SizedBox(
+          height: totalHeight,
+          child: gridContent,
+        ),
+      ),
+    );
+  }
+
+  /// Build fallback appointments list
+  Widget _buildAppointmentsList(List<AppointmentModel> appointments) {
+    return Scrollbar(
+      controller: _verticalCtrl,
+      child: ListView.builder(
+        key: const PageStorageKey('admin_appts_list_all'),
+        controller: _verticalCtrl,
+        addAutomaticKeepAlives: false,
+        itemCount: appointments.length,
+        itemBuilder: (context, index) {
+          final appointment = appointments[index];
+          final bool isPostponed = appointment.status == AppointmentStatus.postponed && appointment.postponedDate != null;
+          final DateTime effectiveDate = isPostponed ? appointment.postponedDate! : appointment.appointmentDateTime;
+          return ListTile(
+            title: Text('Tarih: ${_fullFmt.format(effectiveDate)}'),
+            subtitle: Text(
+              'Kullanıcı: ${appointment.user?.name ?? 'Bilinmiyor'}\n'
+                  'Tür: ${appointment.meetingType.label}\n'
+                  'Durum: ${appointment.status.label}\n'
+                  '${isPostponed ? 'Orijinal: ${_fullFmt.format(appointment.appointmentDateTime)}\nErtelenen: ${_fullFmt.format(appointment.postponedDate!)}\n' : ''}'
+                  'İptal Eden: ${appointment.canceledBy ?? 'Yok'}',
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _showEditAppointmentDialog(context, appointment),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.cancel, color: Colors.red),
+                  onPressed: () => _onDeleteClicked(appointment),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Calculate column width based on screen width
-    final screenWidth = MediaQuery.of(context).size.width;
-    final columnWidth = screenWidth / (kDaysToShow); // Each column takes 1/12 of screen width
 
     return Scaffold(
       appBar: AppBarWithBack(
@@ -662,15 +1047,12 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               _fetchAllAppointments();
             }),
           ),
-          if (startDate != null ||
-              endDate != null ||
-              selectedMeetingType != null ||
+          if (selectedMeetingType != null ||
               selectedStatuses.length != AppointmentStatus.values.length)
             IconButton(
               icon: const Icon(Icons.clear),
+              tooltip: 'Filtreleri Temizle',
               onPressed: () => setState(() {
-                startDate = null;
-                endDate = null;
                 selectedMeetingType = null;
                 selectedStatuses = Set.from(AppointmentStatus.values);
                 _fetchAllAppointments();
@@ -680,269 +1062,57 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           // backgroundColor:Color(0xFF673AB7),
           // foregroundColor: Colors.white,
       ),
-      body: Column(
-        children: [
-          // Week navigation and filter controls
-          Column(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final bool isMobile = constraints.maxWidth < _kMobileBreakpoint;
+          
+          return Column(
             children: [
-              // Week navigation buttons
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final double w = constraints.maxWidth;
-                    final bool isNarrow = w < 480;           // icon-only buttons + date below
-                    final bool isMedium = w >= 480 && w < 760; // short labels + centered date
+              // Navigation: Daily (mobile) or Weekly (desktop)
+              isMobile
+                  ? _buildMobileDayNavigation()
+                  : _buildDesktopWeekNavigation(),
 
-                    // Helpers to (de)crement the range
-                    void goPrev() {
-                      if (startDate != null && endDate != null) {
-                        setState(() {
-                          startDate = startDate!.subtract(const Duration(days: 7));
-                          endDate   = endDate!  .subtract(const Duration(days: 7));
-                          _fetchAllAppointments();
-                        });
-                      }
-                    }
-                    void goNext() {
-                      if (startDate != null && endDate != null) { // <-- use && (not &)
-                        setState(() {
-                          startDate = startDate!.add(const Duration(days: 7));
-                          endDate   = endDate!  .add(const Duration(days: 7));
-                          _fetchAllAppointments();
-                        });
-                      }
-                    }
-
-                    // Buttons, responsive variants
-                    final prevIcon = const Icon(Icons.arrow_back_ios);
-                    final nextIcon = const Icon(Icons.arrow_forward_ios);
-
-                    final Widget prevBtn = isNarrow
-                        ? IconButton(
-                      icon: prevIcon,
-                      tooltip: 'Önceki Hafta',
-                      onPressed: goPrev,
-                    )
-                        : ElevatedButton.icon(
-                      onPressed: goPrev,
-                      icon: prevIcon,
-                      label: Text(isMedium ? 'Önceki' : 'Önceki Hafta'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[100],
-                        foregroundColor: Colors.blue[900],
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    );
-
-                    final Widget nextBtn = isNarrow
-                        ? IconButton(
-                      icon: nextIcon,
-                      tooltip: 'Sonraki Hafta',
-                      onPressed: goNext,
-                    )
-                        : ElevatedButton.icon(
-                      onPressed: goNext,
-                      icon: nextIcon,
-                      label: Text(isMedium ? 'Sonraki' : 'Sonraki Hafta'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[100],
-                        foregroundColor: Colors.blue[900],
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    );
-
-                    final Widget dateLabel = (startDate != null && endDate != null)
-                        ? Text(
-                      '${_rangeFmt.format(startDate!)} - ${_rangeFmt.format(endDate!)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    )
-                        : const SizedBox.shrink();
-
-                    if (isNarrow) {
-                      // Icon-only buttons on first line, date centered below
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [prevBtn, nextBtn],
-                          ),
-                          const SizedBox(height: 4),
-                          Center(child: dateLabel),
-                        ],
-                      );
-                    } else if (isMedium) {
-                      // Short labels, centered date flexes in the middle
-                      return Row(
-                        children: [
-                          prevBtn,
-                          const SizedBox(width: 8),
-                          Expanded(child: Center(child: dateLabel)),
-                          const SizedBox(width: 8),
-                          nextBtn,
-                        ],
-                      );
+              // Appointments display (expanded to fill remaining space)
+              Expanded(
+                child: FutureBuilder<List<AppointmentModel>>(
+                  future: _appointmentsFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    } else if (snapshot.hasError) {
+                      logger.err('Randevular getirilirken hata: {}', [snapshot.error ?? '']);
+                      return Center(child: Text('Randevular getirilirken hata: ${snapshot.error}'));
                     } else {
-                      // Wide: original look but overflow-safe
-                      return Row(
-                        children: [
-                          prevBtn,
-                          const SizedBox(width: 12),
-                          Expanded(child: Center(child: dateLabel)),
-                          const SizedBox(width: 12),
-                          nextBtn,
-                        ],
-                      );
+                      final appointments = snapshot.data ?? [];
+
+                      // Fast path: group once by day to avoid scanning the whole list per day
+                      // Use effective date (postponedDate if exists for postponed appointments)
+                      final Map<DateTime, List<AppointmentModel>> byDay = {};
+                      for (final appt in appointments) {
+                        final key = _dateOnly(_getEffectiveDate(appt));
+                        (byDay[key] ??= <AppointmentModel>[]).add(appt);
+                      }
+
+                      // Mobile: single day view
+                      if (isMobile) {
+                        return _buildSingleDayView(byDay);
+                      }
+
+                      // Desktop: weekly view
+                      if (_isCorrectDateRange) {
+                        return _buildWeeklyView(byDay, constraints.maxWidth);
+                      } else {
+                        // Fallback: list all appointments (non 6-day range)
+                        return _buildAppointmentsList(appointments);
+                      }
                     }
                   },
                 ),
               ),
-
-
-              // Hide canceled appointments toggle (kept as in your code; enable if desired)
-              // Padding(
-              //   padding: const EdgeInsets.symmetric(horizontal: 12.0),
-              //   child: Row(
-              //     mainAxisAlignment: MainAxisAlignment.end,
-              //     children: const [
-              //       Text('İptal edilenleri gizle', style: TextStyle(fontSize: 12)),
-              //       // Switch(
-              //       //   value: hideCanceled,
-              //       //   activeColor: Colors.blue,
-              //       //   onChanged: (value) {
-              //       //     setState(() {
-              //       //       hideCanceled = value;
-              //       //       _fetchAllAppointments();
-              //       //     });
-              //       //   },
-              //       // ),
-              //     ],
-              //   ),
-              // ),
             ],
-          ),
-
-          // Appointments display (expanded to fill remaining space)
-          Expanded(
-            child: FutureBuilder<List<AppointmentModel>>(
-              future: _appointmentsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                } else if (snapshot.hasError) {
-                  logger.err('Randevular getirilirken hata: {}', [snapshot.error ?? '']);
-                  return Center(child: Text('Randevular getirilirken hata: ${snapshot.error}'));
-                } else {
-                  final appointments = snapshot.data ?? [];
-
-                  // Fast path: group once by day to avoid scanning the whole list per day
-                  // Use effective date (postponedDate if exists for postponed appointments)
-                  final Map<DateTime, List<AppointmentModel>> byDay = {};
-                  for (final appt in appointments) {
-                    final key = _dateOnly(_getEffectiveDate(appt));
-                    (byDay[key] ??= <AppointmentModel>[]).add(appt);
-                  }
-
-                  if (_isCorrectDateRange) {
-                    // Generate week days once
-                    final List<DateTime> weekDays =
-                        List.generate(kDaysToShow, (index) => startDate!.add(Duration(days: index)));
-
-                    // Calculate total height needed
-                    final totalHeight = kDayHeaderHeight + _timeGridHeight;
-
-                    // Build day columns row (without time column)
-                    Widget dayColumnsRow = Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: weekDays.map((day) {
-                        final dayKey = _dateOnly(day);
-                        final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
-                        return _buildDayColumn(day, dayAppointments, columnWidth);
-                      }).toList(),
-                    );
-
-                    // Wrap day columns in horizontal scroll
-                    Widget scrollableDayColumns = SingleChildScrollView(
-                      key: _kHorizontalKey,
-                      controller: _horizontalCtrl,
-                      scrollDirection: Axis.horizontal,
-                      child: dayColumnsRow,
-                    );
-
-                    // Build the complete layout: time column (fixed) + scrollable day columns
-                    Widget gridContent = Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Fixed time column on the left
-                        _buildTimeColumn(),
-                        // Scrollable day columns
-                        Expanded(child: scrollableDayColumns),
-                      ],
-                    );
-
-                    // Wrap everything in vertical scroll
-                    return Scrollbar(
-                      controller: _verticalCtrl,
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        key: _kVerticalKey,
-                        controller: _verticalCtrl,
-                        child: SizedBox(
-                          height: totalHeight,
-                          child: gridContent,
-                        ),
-                      ),
-                    );
-                  } else {
-                    // Fallback: list all appointments (non 6-day range)
-                    return Scrollbar(
-                      controller: _verticalCtrl,
-                      child: ListView.builder(
-                        key: const PageStorageKey('admin_appts_list_all'),
-                        controller: _verticalCtrl,
-                        addAutomaticKeepAlives: false,
-                        itemCount: appointments.length,
-                        itemBuilder: (context, index) {
-                          final appointment = appointments[index];
-                          final bool isPostponed = appointment.status == AppointmentStatus.postponed && appointment.postponedDate != null;
-                          final DateTime effectiveDate = isPostponed ? appointment.postponedDate! : appointment.appointmentDateTime;
-                          return ListTile(
-                            title: Text('Tarih: ${_fullFmt.format(effectiveDate)}'),
-                            subtitle: Text(
-                              'Kullanıcı: ${appointment.user?.name ?? 'Bilinmiyor'}\n'
-                                  'Tür: ${appointment.meetingType.label}\n'
-                                  'Durum: ${appointment.status.label}\n'
-                                  '${isPostponed ? 'Orijinal: ${_fullFmt.format(appointment.appointmentDateTime)}\nErtelenen: ${_fullFmt.format(appointment.postponedDate!)}\n' : ''}'
-                                  'İptal Eden: ${appointment.canceledBy ?? 'Yok'}',
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.edit),
-                                  onPressed: () => _showEditAppointmentDialog(context, appointment),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.cancel, color: Colors.red),
-                                  onPressed: () => _onDeleteClicked(appointment),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  }
-                }
-              },
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
