@@ -177,7 +177,11 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        // ChangeNotifierProvider.value(value: themeProvider),
+        ChangeNotifierProvider(create: (_) {
+          final provider = ThemeProvider();
+          provider.initialize(); // Load saved color preference
+          return provider;
+        }),
         ChangeNotifierProvider(
           create: (_) => ChatManager(
             db: FirebaseFirestore.instance,
