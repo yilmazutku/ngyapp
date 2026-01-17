@@ -787,9 +787,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             return Row(
               children: [
                 prevBtn,
-                const SizedBox(width: isMedium ? 8 : 12),
+                SizedBox(width: isMedium ? 8 : 12),
                 Expanded(child: Center(child: dateLabel)),
-                const SizedBox(width: isMedium ? 8 : 12),
+                SizedBox(width: isMedium ? 8 : 12),
                 nextBtn,
               ],
             );
