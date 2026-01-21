@@ -27,33 +27,28 @@ class LoginPage extends StatelessWidget {
             final isMediumScreen = screenSize.width > 600 && screenSize.width <= 900;
             final isSmallScreen = screenSize.width <= 600;
             
-            return Center(
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Consumer<LoginProvider>(
-                    builder: (context, loginProvider, child) {
-                      final errorMessage = loginProvider.errorMessage;
-                      final isLoading = loginProvider.isLoading;
+            return SingleChildScrollView(
+              child: Consumer<LoginProvider>(
+                builder: (context, loginProvider, child) {
+                  final errorMessage = loginProvider.errorMessage;
+                  final isLoading = loginProvider.isLoading;
 
-                      if (errorMessage.isNotEmpty) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          _showErrorDialog(context, errorMessage);
-                          loginProvider.clearError();
-                        });
-                      }
+                  if (errorMessage.isNotEmpty) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _showErrorDialog(context, errorMessage);
+                      loginProvider.clearError();
+                    });
+                  }
 
-                      return _buildLoginForm(
-                        context, 
-                        loginProvider, 
-                        isLoading, 
-                        isLargeScreen, 
-                        isMediumScreen, 
-                        isSmallScreen
-                      );
-                    },
-                  ),
-                ),
+                  return _buildLoginForm(
+                    context, 
+                    loginProvider, 
+                    isLoading, 
+                    isLargeScreen, 
+                    isMediumScreen, 
+                    isSmallScreen
+                  );
+                },
               ),
             );
           },
@@ -70,86 +65,91 @@ class LoginPage extends StatelessWidget {
     bool isMediumScreen,
     bool isSmallScreen
   ) {
-    // Calculate responsive width based on screen size
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
     
-    // Dynamic form width calculation based on screen category
-    double formWidth;
+    // Responsive logo size based on screen size
+    double logoSize;
     if (isLargeScreen) {
-      formWidth = screenWidth * 0.35; // 35% of large screens
+      logoSize = 200;
     } else if (isMediumScreen) {
-      formWidth = screenWidth * 0.5; // 50% of medium screens
+      logoSize = 180;
     } else {
-      formWidth = screenWidth * 0.85; // 85% of small screens
+      logoSize = 150;
     }
     
-    // Set min/max constraints to avoid extremes
-    formWidth = formWidth.clamp(300.0, 600.0);
+    // Responsive horizontal padding
+    double horizontalPadding;
+    if (isLargeScreen) {
+      horizontalPadding = 48;
+    } else if (isMediumScreen) {
+      horizontalPadding = 36;
+    } else {
+      horizontalPadding = 24;
+    }
     
     return Container(
-      width: formWidth,
-      padding: const EdgeInsets.all(20.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12.0),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.2),
-            spreadRadius: 5,
-            blurRadius: 7,
-            offset: const Offset(0, 3),
-          ),
-        ],
+      width: double.infinity,
+      constraints: BoxConstraints(
+        minHeight: screenHeight - MediaQuery.of(context).padding.top - kToolbarHeight,
       ),
+      color: Colors.white,
+      padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 24),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          // Company logo
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.asset(
-              'assets/ngy.png',
-              width: 120,
-              height: 120,
-              fit: BoxFit.contain,
+          // Company logo - bigger and centered
+          Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Image.asset(
+                'assets/ngy.png',
+                width: logoSize,
+                height: logoSize,
+                fit: BoxFit.contain,
+              ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 32),
           const Text(
             'Hesabınıza Giriş Yapın',
             style: TextStyle(
-              fontSize: 22,
+              fontSize: 26,
               fontWeight: FontWeight.bold,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 30),
+          const SizedBox(height: 40),
           TextField(
             controller: loginProvider.emailController,
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Emailinizi giriniz',
               labelText: 'Email',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.email),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              prefixIcon: const Icon(Icons.email),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           TextField(
             controller: loginProvider.passwordController,
             obscureText: true,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Şifrenizi giriniz',
               labelText: 'Şifre',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.lock),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              prefixIcon: const Icon(Icons.lock),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
           SizedBox(
-            height: 50,
+            height: 56,
             child: ElevatedButton(
               onPressed: isLoading
                   ? null
@@ -171,7 +171,7 @@ class LoginPage extends StatelessWidget {
               },
               style: ElevatedButton.styleFrom(
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
               child: isLoading
@@ -185,11 +185,11 @@ class LoginPage extends StatelessWidget {
                     )
                   : const Text(
                       'Giriş Yap',
-                      style: TextStyle(fontSize: 16),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                     ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           TextButton(
             onPressed: () {
               Navigator.push(
@@ -197,7 +197,10 @@ class LoginPage extends StatelessWidget {
                 MaterialPageRoute(builder: (context) => const ResetPasswordPage(email: '')),
               );
             },
-            child: const Text('Şifremi Unuttum'),
+            child: const Text(
+              'Şifremi Unuttum',
+              style: TextStyle(fontSize: 16),
+            ),
           ),
         ],
       ),

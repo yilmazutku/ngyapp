@@ -63,7 +63,7 @@ class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
         onPressed: onBackPressed ?? () => Navigator.of(context).pop(),
       ),
       actions: resolvedActions,
-      backgroundColor: Color(0xFF815598), //backgroundColor
+      backgroundColor: Color(0xFFA16AEC), //backgroundColor
       foregroundColor: Colors.white, //foregroundColor
       bottom: bottom,
       elevation: elevation,

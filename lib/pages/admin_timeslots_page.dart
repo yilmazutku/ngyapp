@@ -688,12 +688,12 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
   Future<void> _showDeleteConfirmationDialog(String time) async {
     return showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Zaman Dilimi Sil'),
           content: Text('$time zaman dilimini silmek istediğinize emin misiniz?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('İptal')),
             ElevatedButton(
               onPressed: () async {
                 final latestData = await _fetchLatestTimeSlotData();
@@ -705,16 +705,21 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                   hasAppointment[key.toString()] = value as bool;
                 });
 
-
                 if (hasAppointment[time] == true) {
                   await _showErrorDialog(
                       'Hata', 'Bu zaman diliminde randevu bulunmakta. Önce randevuyu iptal etmeniz gerekiyor.');
                   return;
                 }
 
+                // Close the confirmation dialog first
+                Navigator.pop(dialogContext);
+
                 final updated = List<String>.from(storedTimes)..remove(time);
-                final success = await _saveTimeSlotsWithErrorHandling(updated);
-                if (success && mounted) Navigator.pop(context);
+                // Save silently (without success dialog) for delete operations
+                final success = await _saveTimeslotsSilently(updated);
+                if (success && mounted) {
+                  await _fetchDayData(_selectedDate);
+                }
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
               child: const Text('Sil'),
@@ -723,6 +728,30 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         );
       },
     );
+  }
+
+  /// Save time slots silently (without showing success dialog) - used for delete operations
+  Future<bool> _saveTimeslotsSilently(List<String> timeSlots) async {
+    try {
+      final timeslotManager =
+          Provider.of<TimeslotManager>(context, listen: false);
+
+      // unique + sorted
+      final unique = {...timeSlots}.toList();
+      _sortSlotsChronologically(unique);
+
+      await timeslotManager.updateTimeSlots(_selectedDate, unique);
+      return true;
+    } catch (e) {
+      logger.err('Error in saving timeslots. {}', [e]);
+      if (mounted) {
+        await _showErrorDialog(
+          'Hata',
+          'Zaman dilimleri kaydedilemedi. Lütfen destek talep ediniz.',
+        );
+      }
+      return false;
+    }
   }
 
   /// Show appointment details for a time slot
@@ -939,6 +968,285 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     );
   }
 
+  /// Show manual selection dialog - allows admin to pick individual time slots
+  Future<void> _showManualSelectionDialog() async {
+    TimeOfDay startTime = const TimeOfDay(hour: 9, minute: 30);
+    TimeOfDay endTime = const TimeOfDay(hour: 18, minute: 30);
+    const int intervalMinutes = 5; // 5-minute intervals for selection
+    
+    // Track selected slots - pre-populate with existing stored time slots
+    final Set<String> selectedSlots = {..._storedTimesForDay};
+
+    try {
+      return await showDialog(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (builderContext, setDialogState) {
+              // Generate all possible slots at 5-minute intervals
+              final allSlots = _generateSlotsWithInterval(
+                startTime,
+                endTime,
+                intervalMinutes,
+              );
+
+              return AlertDialog(
+                title: const Text('Elle Seç'),
+                content: SizedBox(
+                  width: MediaQuery.of(dialogContext).size.width * 0.8,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildTimeRangePicker(
+                          startTime: startTime,
+                          endTime: endTime,
+                          onStartTimeChanged: (t) => setDialogState(() {
+                            startTime = t;
+                            // Clear selections when time range changes
+                            selectedSlots.clear();
+                          }),
+                          onEndTimeChanged: (t) => setDialogState(() {
+                            endTime = t;
+                            // Clear selections when time range changes
+                            selectedSlots.clear();
+                          }),
+                        ),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Zaman Dilimleri (${selectedSlots.length} seçildi)',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextButton(
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      selectedSlots.addAll(allSlots);
+                                    });
+                                  },
+                                  child: const Text('Tümünü Seç'),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      selectedSlots.clear();
+                                    });
+                                  },
+                                  child: const Text('Temizle'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Seçmek için tıklayın, tekrar tıklayarak seçimi kaldırın.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildSelectableTimeSlotGrid(
+                          allSlots,
+                          selectedSlots,
+                          (slot) {
+                            setDialogState(() {
+                              if (selectedSlots.contains(slot)) {
+                                selectedSlots.remove(slot);
+                              } else {
+                                selectedSlots.add(slot);
+                              }
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('İptal'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      if (selectedSlots.isEmpty) {
+                        if (!mounted) return;
+                        await DialogUtils.openError(
+                          builderContext,
+                          title: 'Hata',
+                          message: 'Lütfen en az bir zaman dilimi seçin.',
+                        );
+                        return;
+                      }
+
+                      Navigator.of(dialogContext).pop(); // close dialog first
+                      if (!mounted) return;
+
+                      await _applyManualSelection(selectedSlots.toList());
+                    },
+                    child: const Text('Tamam'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } catch (e) {
+      logger.err('Error in manual selection dialog: {}', [e]);
+    }
+  }
+
+  /// Generate time slots with a given interval between start and end time
+  List<String> _generateSlotsWithInterval(
+    TimeOfDay startTime,
+    TimeOfDay endTime,
+    int intervalMinutes,
+  ) {
+    final slots = <String>[];
+    int currentMinutes = startTime.hour * 60 + startTime.minute;
+    final endMinutes = endTime.hour * 60 + endTime.minute;
+
+    while (currentMinutes <= endMinutes) {
+      final hour = currentMinutes ~/ 60;
+      final minute = currentMinutes % 60;
+      if (hour < 24) {
+        slots.add(_formatTimeSlot(TimeOfDay(hour: hour, minute: minute)));
+      }
+      currentMinutes += intervalMinutes;
+    }
+    return slots;
+  }
+
+  /// Build selectable time slot grid for manual selection
+  Widget _buildSelectableTimeSlotGrid(
+    List<String> allSlots,
+    Set<String> selectedSlots,
+    void Function(String slot) onSlotTap,
+  ) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 350),
+      child: SingleChildScrollView(
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: allSlots.map((slot) {
+            final isSelected = selectedSlots.contains(slot);
+            final hasAppt = _hasAppointment[slot] ?? false;
+
+            return GestureDetector(
+              onTap: () => onSlotTap(slot),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: hasAppt
+                      ? Colors.red[100]
+                      : isSelected
+                          ? Colors.green[400]
+                          : Colors.grey[200],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: hasAppt
+                        ? Colors.red[400]!
+                        : isSelected
+                            ? Colors.green[700]!
+                            : Colors.grey[400]!,
+                    width: isSelected ? 2 : 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (hasAppt)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Icon(
+                          Icons.event,
+                          size: 14,
+                          color: Colors.red[700],
+                        ),
+                      ),
+                    Text(
+                      slot,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: hasAppt
+                            ? Colors.red[900]
+                            : isSelected
+                                ? Colors.white
+                                : Colors.grey[800],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  /// Apply the manual selection - save selected slots as available time slots
+  Future<void> _applyManualSelection(List<String> selectedSlots) async {
+    try {
+      // Sort slots chronologically
+      _sortSlotsChronologically(selectedSlots);
+
+      // Fetch latest data to check for appointments
+      final latestData = await _fetchLatestTimeSlotData();
+      final bookedTimeSlots = latestData['bookedTimeSlots'] as List<String>;
+
+      // Check if any booked slots are NOT in the selected slots
+      final bookedButNotSelected = bookedTimeSlots
+          .where((slot) => !selectedSlots.contains(slot))
+          .toList();
+
+      if (bookedButNotSelected.isNotEmpty) {
+        if (!mounted) return;
+        final proceed = await DialogUtils.openConfirm(
+          context,
+          title: 'Uyarı',
+          message:
+              'Aşağıdaki zaman dilimlerinde randevu bulunmakta ancak seçiminizde yer almıyor:\n${bookedButNotSelected.join(", ")}\n\nBu dilimler otomatik olarak eklenecek. Devam etmek istiyor musunuz?',
+        );
+        if (!proceed) return;
+      }
+
+      // Add booked slots that weren't selected (to preserve appointments)
+      final finalSlots = [...selectedSlots];
+      for (final booked in bookedButNotSelected) {
+        if (!finalSlots.contains(booked)) {
+          finalSlots.add(booked);
+        }
+      }
+      _sortSlotsChronologically(finalSlots);
+
+      // Save the time slots
+      final success = await _saveTimeSlotsWithErrorHandling(finalSlots);
+      if (success && mounted) {
+        await _fetchDayData(_selectedDate);
+      }
+    } catch (e) {
+      logger.err('Error in applying manual selection: {}', [e]);
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Zaman dilimleri kaydedilemedi: ${e.toString()}',
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1091,22 +1399,22 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         ),
       ),
       ElevatedButton.icon(
-        onPressed: _showTimeRangeConfigDialog,
-        icon: const Icon(Icons.watch_later),
-        label: const Text('Özel Zaman Dilimi'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.purple[100],
-          foregroundColor: Colors.purple[900],
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        ),
-      ),
-      ElevatedButton.icon(
         onPressed: _showTimeSlotDialog,
         icon: const Icon(Icons.add),
         label: const Text('Elle Ekle'),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.amber[100],
           foregroundColor: Colors.amber[900],
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+      ),
+      ElevatedButton.icon(
+        onPressed: _showManualSelectionDialog,
+        icon: const Icon(Icons.touch_app),
+        label: const Text('Elle Seç'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.teal[100],
+          foregroundColor: Colors.teal[900],
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         ),
       ),

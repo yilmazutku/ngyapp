@@ -64,8 +64,6 @@ import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
 import 'pages/notification_test_page.dart';
-import 'providers/theme_provider.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 
 /// Global platform configuration instance
 late final PlatformConfig platformConfig;
@@ -177,11 +175,6 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) {
-          final provider = ThemeProvider();
-          provider.initialize(); // Load saved color preference
-          return provider;
-        }),
         ChangeNotifierProvider(
           create: (_) => ChatManager(
             db: FirebaseFirestore.instance,
@@ -207,70 +200,46 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => NewsProvider()),
       ],
       child: AppLifecycleManager(
-        child: Consumer<ThemeProvider>(
-          builder: (context, themeProviderInstance, child) {
-            final primaryColor = themeProviderInstance.primaryColor;
-            return MaterialApp(
-              navigatorKey: navKey, // <-- IMPORTANT for notification tap navigation
-              debugShowCheckedModeBanner: false,
-              theme: ThemeData(
-                primarySwatch: themeProviderInstance.primarySwatch,
-                primaryColor: primaryColor,
-                scaffoldBackgroundColor: Colors.grey[100],
-                appBarTheme: AppBarTheme(
-                  backgroundColor: primaryColor,
-                  titleTextStyle: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  iconTheme: const IconThemeData(color: Colors.white),
-                  elevation: 2,
-                ),
-                textTheme: const TextTheme(
-                  bodyMedium: TextStyle(color: Colors.black87),
-                ),
-                cardColor: Colors.white,
-                iconTheme: IconThemeData(color: primaryColor),
-                elevatedButtonTheme: ElevatedButtonThemeData(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
+        child: MaterialApp(
+          navigatorKey: navKey, // <-- IMPORTANT for notification tap navigation
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            primarySwatch: Colors.purple,
+            primaryColor: const Color(0xFFA16AEC),
+            scaffoldBackgroundColor: Colors.grey[100],
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Color(0xFFA16AEC),
+              titleTextStyle: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
               ),
-              supportedLocales: const [
-                Locale('tr', 'TR'),
-                Locale('en', 'US'),
-              ],
-              locale: const Locale('tr', 'TR'),
-              localizationsDelegates: const [
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-                  home: const LoginPage(),
-              // home: StreamBuilder<User?>(
-              //   stream: FirebaseAuth.instance.authStateChanges(),
-              //   builder: (context, snapshot) {
-              //     logger.info(
-              //       'authStateChanges: connectionState=${snapshot.connectionState}, '
-              //           'hasData=${snapshot.hasData}, user=${snapshot.data?.uid}',
-              //     );
-              //
-              //     if (snapshot.connectionState == ConnectionState.waiting) {
-              //       return const Center(child: CircularProgressIndicator());
-              //     }
-              //     if (snapshot.hasData) {
-              //       logger.info('User is logged in, showing HomePage');
-              //       return const HomePage();
-              //     }
-              //     logger.info('No user logged in, showing LoginPage');
-              //     return const LoginPage();
-              //   },
-              // ),
-            );
-          },
+              iconTheme: IconThemeData(color: Colors.white),
+              elevation: 2,
+            ),
+            textTheme: const TextTheme(
+              bodyMedium: TextStyle(color: Colors.black87),
+            ),
+            cardColor: Colors.white,
+            iconTheme: const IconThemeData(color: Color(0xFFA16AEC)),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFA16AEC),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+          supportedLocales: const [
+            Locale('tr', 'TR'),
+            Locale('en', 'US'),
+          ],
+          locale: const Locale('tr', 'TR'),
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          home: const LoginPage(),
         ),
       ),
     );
@@ -534,199 +503,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Opens the full color picker dialog
-  void _openColorPicker(BuildContext context, ThemeProvider themeProviderInstance) {
-    Color pickerColor = themeProviderInstance.primaryColor;
-    
-    showDialog(
-      context: context,
-      barrierColor: Colors.transparent, // No shadow, see widgets behind
-      builder: (dialogContext) => Align(
-        alignment: Alignment.bottomCenter,
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            margin: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 20,
-                  offset: const Offset(0, -4),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
-                  child: Row(
-                    children: [
-                      Icon(Icons.palette, color: themeProviderInstance.primaryColor),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'Tema Rengi Seç',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                ),
-                // Color picker
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: ColorPicker(
-                    pickerColor: pickerColor,
-                    onColorChanged: (color) {
-                      pickerColor = color;
-                      // Apply color instantly as user picks
-                      themeProviderInstance.setColor(color);
-                    },
-                    enableAlpha: false,
-                    hexInputBar: true,
-                    labelTypes: const [ColorLabelType.hex, ColorLabelType.rgb],
-                    pickerAreaHeightPercent: 0.7,
-                    displayThumbColor: true,
-                    paletteType: PaletteType.hsvWithHue,
-                    pickerAreaBorderRadius: const BorderRadius.all(Radius.circular(12)),
-                  ),
-                ),
-                // Actions
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {
-                            themeProviderInstance.resetToDefault();
-                          },
-                          child: const Text('Başa Dön'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                          child: const Text('Tamam'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Builds the color palette section for theme customization
-  Widget _buildColorPaletteSection(BuildContext context, ThemeProvider themeProviderInstance) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _openColorPicker(context, themeProviderInstance),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                // Color preview circle
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: themeProviderInstance.primaryColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: themeProviderInstance.primaryColor.withOpacity(0.4),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.colorize,
-                    color: Colors.white,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                // Title and hex code
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Tema Rengi',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: themeProviderInstance.primaryColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          themeProviderInstance.primaryColorHex,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            fontFamily: 'monospace',
-                            color: themeProviderInstance.primaryColor,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Arrow icon
-                Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.grey.shade400,
-                  size: 18,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final userId = FirebaseAuth.instance.currentUser?.uid;
@@ -882,95 +658,82 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-          body: Consumer<ThemeProvider>(
-            builder: (context, themeProviderInstance, child) {
-              return LayoutBuilder(
-                builder: (context, constraints) {
-                  // Responsive grid layout based on screen width
-                  final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              // Responsive grid layout based on screen width
+              final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
 
-                  return Column(
-                    children: [
-                      // Color Palette Section
-                      _buildColorPaletteSection(context, themeProviderInstance),
-                      // Grid of navigation items
-                      Expanded(
-                        child: GridView.builder(
-                          padding: const EdgeInsets.all(16),
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: crossAxisCount,
-                            childAspectRatio: 1.5,
-                            crossAxisSpacing: 16,
-                            mainAxisSpacing: 16,
-                          ),
-                          itemCount: gridItems.length,
-                          itemBuilder: (context, index) {
-                            final item = gridItems[index];
-                            final badgeStream = item['badgeStream'] as Stream<int>?;
-                            
-                            return Card(
-                              elevation: 4,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: item['onTap'],
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    // Icon with optional badge
-                                    if (badgeStream != null)
-                                      StreamBuilder<int>(
-                                        stream: badgeStream,
-                                        builder: (context, snapshot) {
-                                          // Handle stream errors gracefully
-                                          if (snapshot.hasError) {
-                                            logger.warn('Badge stream error: ${snapshot.error}');
-                                          }
-                                          
-                                          final count = snapshot.data ?? 0;
-                                          return Badge(
-                                            isLabelVisible: count > 0,
-                                            label: Text(
-                                              count > 99 ? '99+' : count.toString(),
-                                              style: const TextStyle(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            backgroundColor: Colors.red,
-                                            child: Icon(
-                                              item['icon'],
-                                              size: 48,
-                                              color: themeProviderInstance.primaryColor,
-                                            ),
-                                          );
-                                        },
-                                      )
-                                    else
-                                      Icon(
-                                        item['icon'],
-                                        size: 48,
-                                        color: themeProviderInstance.primaryColor,
-                                      ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      item['label'],
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      textAlign: TextAlign.center,
+              return GridView.builder(
+                padding: const EdgeInsets.all(16),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  childAspectRatio: 1.5,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                ),
+                itemCount: gridItems.length,
+                itemBuilder: (context, index) {
+                  final item = gridItems[index];
+                  final badgeStream = item['badgeStream'] as Stream<int>?;
+                  
+                  return Card(
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: item['onTap'],
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Icon with optional badge
+                          if (badgeStream != null)
+                            StreamBuilder<int>(
+                              stream: badgeStream,
+                              builder: (context, snapshot) {
+                                // Handle stream errors gracefully
+                                if (snapshot.hasError) {
+                                  logger.warn('Badge stream error: ${snapshot.error}');
+                                }
+                                
+                                final count = snapshot.data ?? 0;
+                                return Badge(
+                                  isLabelVisible: count > 0,
+                                  label: Text(
+                                    count > 99 ? '99+' : count.toString(),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                                  ),
+                                  backgroundColor: Colors.red,
+                                  child: Icon(
+                                    item['icon'],
+                                    size: 48,
+                                    color: const Color(0xFFA16AEC),
+                                  ),
+                                );
+                              },
+                            )
+                          else
+                            Icon(
+                              item['icon'],
+                              size: 48,
+                              color: const Color(0xFFA16AEC),
+                            ),
+                          const SizedBox(height: 8),
+                          Text(
+                            item['label'],
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   );
                 },
               );
