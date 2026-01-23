@@ -1247,6 +1247,225 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     }
   }
 
+  /// Show dialog to copy time slots from another day
+  Future<void> _showCopyFromAnotherDayDialog() async {
+    DateTime? sourceDate;
+    
+    // Loop until user confirms or cancels
+    while (true) {
+      if (!mounted) return;
+      
+      // Step 1: Pick a source date
+      sourceDate = await showDatePicker(
+        context: context,
+        initialDate: sourceDate ?? _selectedDate.subtract(const Duration(days: 1)),
+        firstDate: DateTime.now().subtract(const Duration(days: 365)),
+        lastDate: DateTime.now().add(const Duration(days: 365)),
+        helpText: 'Kopyalanacak günü seçin',
+        confirmText: 'Seç',
+        cancelText: 'İptal',
+        locale: const Locale('tr', 'TR'),
+      );
+
+      // User cancelled date picker
+      if (sourceDate == null || !mounted) return;
+
+      // Don't allow copying from the same day
+      if (_sameYMD(sourceDate, _selectedDate)) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Aynı günden kopyalama yapamazsınız. Lütfen farklı bir gün seçin.',
+        );
+        continue;
+      }
+
+      // Step 2: Fetch time slots from the source date
+      try {
+        final timeslotManager =
+            Provider.of<TimeslotManager>(context, listen: false);
+        final sourceData = await timeslotManager.fetchTimeslotDataForDate(sourceDate);
+
+        final sourceStoredTimes = (sourceData['storedTimes'] as List)
+            .map((e) => e.toString())
+            .toList();
+        final sourceHasAppointment = sourceData['hasAppointment'] as Map;
+
+        // Filter out slots that have appointments - only get admin-chosen available slots
+        final availableSlots = sourceStoredTimes.where((slot) {
+          return sourceHasAppointment[slot] != true;
+        }).toList();
+
+        if (availableSlots.isEmpty) {
+          if (!mounted) return;
+          final tryAgain = await DialogUtils.openConfirm(
+            context,
+            title: 'Bilgi',
+            message:
+                '${_dayTitleFmt.format(sourceDate)} tarihinde kopyalanacak müsait zaman dilimi bulunamadı.\n\nBaşka bir gün seçmek ister misiniz?',
+            confirmText: 'Evet',
+            cancelText: 'Hayır',
+          );
+          if (tryAgain) continue;
+          return;
+        }
+
+        _sortSlotsChronologically(availableSlots);
+
+        // Step 3: Show confirmation dialog with the slots
+        if (!mounted) return;
+        final confirmed = await _showCopyConfirmationDialog(
+          sourceDate,
+          availableSlots,
+        );
+
+        if (confirmed == true) {
+          // User confirmed - proceed with copy
+          await _applyCopyFromAnotherDay(availableSlots);
+          return;
+        } else if (confirmed == false) {
+          // User clicked "Başka Gün Seç" - continue loop
+          continue;
+        } else {
+          // User cancelled (null) - exit
+          return;
+        }
+      } catch (e) {
+        logger.err('Error fetching source date data: {}', [e]);
+        if (!mounted) return;
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Kaynak tarih verileri alınırken hata oluştu: ${e.toString()}',
+        );
+        return;
+      }
+    }
+  }
+
+  /// Show confirmation dialog for copying time slots
+  /// Returns: true = confirmed, false = choose another day, null = cancelled
+  Future<bool?> _showCopyConfirmationDialog(
+    DateTime sourceDate,
+    List<String> slots,
+  ) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Zaman Dilimlerini Kopyala'),
+          content: SizedBox(
+            width: MediaQuery.of(dialogContext).size.width * 0.7,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  RichText(
+                    text: TextSpan(
+                      style: DefaultTextStyle.of(dialogContext).style,
+                      children: [
+                        TextSpan(
+                          text: _dayTitleFmt.format(sourceDate),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const TextSpan(text: ' tarihinden '),
+                        TextSpan(
+                          text: '${slots.length} zaman dilimi',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const TextSpan(text: ' kopyalanacak:'),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 200),
+                    child: SingleChildScrollView(
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: slots.map((slot) {
+                          return Chip(
+                            label: Text(slot, style: const TextStyle(fontSize: 12)),
+                            backgroundColor: Colors.green[100],
+                            padding: EdgeInsets.zero,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Hedef tarih: ${_dayTitleFmt.format(_selectedDate)}',
+                    style: const TextStyle(
+                      fontStyle: FontStyle.italic,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(null),
+              child: const Text('İptal'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Başka Gün Seç'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Kopyala'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Apply the copy from another day - merge with existing slots
+  Future<void> _applyCopyFromAnotherDay(List<String> slotsToAdd) async {
+    try {
+      // Fetch latest data for current date
+      final latestData = await _fetchLatestTimeSlotData();
+      final currentStoredTimes = (latestData['storedTimes'] as List<dynamic>)
+          .map((e) => e.toString())
+          .toList();
+      final bookedTimeSlots = latestData['bookedTimeSlots'] as List<String>;
+
+      // Merge: add new slots that don't already exist
+      final mergedSlots = {...currentStoredTimes, ...slotsToAdd}.toList();
+
+      // Make sure booked slots are preserved
+      for (final booked in bookedTimeSlots) {
+        if (!mergedSlots.contains(booked)) {
+          mergedSlots.add(booked);
+        }
+      }
+
+      _sortSlotsChronologically(mergedSlots);
+
+      // Save
+      final success = await _saveTimeSlotsWithErrorHandling(mergedSlots);
+      if (success && mounted) {
+        await _fetchDayData(_selectedDate);
+      }
+    } catch (e) {
+      logger.err('Error applying copy from another day: {}', [e]);
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Zaman dilimleri kopyalanırken hata oluştu: ${e.toString()}',
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1415,6 +1634,16 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.teal[100],
           foregroundColor: Colors.teal[900],
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+      ),
+      ElevatedButton.icon(
+        onPressed: _showCopyFromAnotherDayDialog,
+        icon: const Icon(Icons.content_copy),
+        label: const Text('Başka Günden Kopyala'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.indigo[100],
+          foregroundColor: Colors.indigo[900],
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         ),
       ),
