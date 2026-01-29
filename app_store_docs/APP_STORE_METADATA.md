@@ -2,15 +2,15 @@
 
 ## App Name (30 characters max)
 ```
-NGY Diyetisyen
+NGY
 ```
-Character count: 14
+Character count: 3
 
 ## Subtitle (30 characters max)
 ```
-Kişisel Beslenme Takibi
+Beslenme Danışmanlığı
 ```
-Character count: 23
+Character count: 21
 
 ---
 
@@ -18,7 +18,9 @@ Character count: 23
 
 ### Turkish Version
 ```
-NGY Diyetisyen, Diyetisyen Nilay Göktepe Yılmaz'ın danışanları için özel olarak tasarlanmış kişisel beslenme takip uygulamasıdır.
+NGY Beslenme Danışmanlığı - Nilay Göktepe Yılmaz Beslenme Danışmanlığı
+
+NGY, Diyetisyen Nilay Göktepe Yılmaz'ın danışanları için özel olarak tasarlanmış kişisel beslenme takip uygulamasıdır.
 
 ÖZELLİKLER
 
@@ -69,13 +71,15 @@ GÜVENLİK
 
 Bu uygulama yalnızca Diyetisyen Nilay Göktepe Yılmaz'ın kayıtlı danışanları tarafından kullanılabilir. Kayıt olmak için lütfen diyetisyeninizle iletişime geçin.
 ```
-Character count: ~1650
+Character count: ~1750
 
 ---
 
 ### English Version (if needed)
 ```
-NGY Dietitian is a personal nutrition tracking app designed exclusively for clients of Dietitian Nilay Göktepe Yılmaz.
+NGY Nutrition Counseling - Nilay Göktepe Yılmaz Nutrition Counseling
+
+NGY is a personal nutrition tracking app designed exclusively for clients of Dietitian Nilay Göktepe Yılmaz.
 
 FEATURES
 
@@ -148,9 +152,9 @@ diyetisyen,beslenme,diyet,sağlıklı yaşam,kilo takibi,randevu,öğün takibi
 Updated with each version, shown above the description.
 
 ```
-Diyetisyen Nilay Göktepe Yılmaz'ın danışanları için: Randevu alın, diyet planınızı takip edin, öğünlerinizi paylaşın ve ilerlemenizi görün!
+NGY - Nilay Göktepe Yılmaz Beslenme Danışmanlığı. Randevu alın, diyet planınızı takip edin, öğünlerinizi paylaşın!
 ```
-Character count: 139
+Character count: 113
 
 ---
 
@@ -159,7 +163,7 @@ Update this with each version release.
 
 ### Version 1.0.0
 ```
-NGY Diyetisyen uygulamasının ilk sürümü!
+NGY uygulamasının ilk sürümü!
 
 • Randevu alma ve takip
 • Kişisel diyet planları
@@ -190,9 +194,9 @@ Based on app content:
 
 ## Copyright Text
 ```
-© 2024 Nilay Göktepe Yılmaz. All rights reserved.
+© 2026 Nilay Göktepe Yılmaz. Tüm hakları saklıdır.
 ```
 or
 ```
-© 2024 NGY Diyetisyen. Tüm hakları saklıdır.
+© 2026 NGY Beslenme Danışmanlığı. Tüm hakları saklıdır.
 ```

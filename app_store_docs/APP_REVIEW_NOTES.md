@@ -60,7 +60,7 @@ NGY Dietitian is a private client management app designed exclusively for regist
 
 **Payments (Ödemeler)**
 - View payment history
-- Upload receipt (dekont)
+
 
 **Profile (Profil)**
 - View user information
@@ -110,10 +110,9 @@ NGY Dietitian is a private client management app designed exclusively for regist
 | Simulated Gambling | None |
 | Horror/Fear Themes | None |
 | Mature/Suggestive Themes | None |
-| Medical/Treatment Information | Infrequent/Mild |
+| Medical/Treatment Information | No |
 | Unrestricted Web Access | No |
 
-**Note:** The app provides dietary guidance and nutrition tracking, which falls under mild medical/treatment information. It does NOT provide medical diagnosis or treatment.
 
 ---
 
@@ -136,10 +135,10 @@ If you have any questions during the review process:
 
 | Field | Value |
 |-------|-------|
-| First Name | [YOUR_FIRST_NAME] |
-| Last Name | [YOUR_LAST_NAME] |
-| Phone | [YOUR_PHONE_NUMBER] |
-| Email | [YOUR_EMAIL_ADDRESS] |
+| First Name | utku |
+| Last Name | yılmaz |
+| Phone | +90 534 077 5179 |
+| Email | utkuyy97@gmail.com |
 
 ---
 
