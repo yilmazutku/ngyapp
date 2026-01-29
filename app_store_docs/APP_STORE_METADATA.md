@@ -194,9 +194,5 @@ Based on app content:
 
 ## Copyright Text
 ```
-© 2026 Nilay Göktepe Yılmaz. Tüm hakları saklıdır.
-```
-or
-```
-© 2026 NGY Beslenme Danışmanlığı. Tüm hakları saklıdır.
+© 2026 Nilay Göktepe Sağlıklı Yaşam ve Beslenme Danışmanlığı. Tüm hakları saklıdır.
 ```
