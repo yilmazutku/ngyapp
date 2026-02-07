@@ -41,6 +41,7 @@ import 'pages/admin_create_user_page.dart';
 import 'pages/admin_payments_page.dart';
 import 'pages/admin_timeslots_page.dart';
 import 'pages/appointments_page.dart';
+import 'pages/kvkk_consent_page.dart';
 import 'pages/login_page.dart';
 import 'pages/meal_upload_page.dart';
 import 'pages/meas_page.dart';
@@ -239,10 +240,108 @@ class MyApp extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          home: const LoginPage(),
+          home: const AuthWrapper(),
         ),
       ),
     );
+  }
+}
+
+/// Wrapper widget that handles authentication state and navigates accordingly.
+/// - Shows a loading screen while checking auth state
+/// - If user is logged in, navigates to HomePage (after KVKK check)
+/// - If user is not logged in, shows LoginPage
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  /// Future for checking KVKK consent status
+  Future<bool>? _kvkkCheckFuture;
+  
+  /// Track the current user ID to reset KVKK check when user changes
+  String? _currentUserId;
+  
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Show loading while waiting for auth state
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        
+        // User is not logged in - show login page
+        if (!snapshot.hasData || snapshot.data == null) {
+          // Reset cached values when user logs out
+          _kvkkCheckFuture = null;
+          _currentUserId = null;
+          return const LoginPage();
+        }
+        
+        // User is logged in - check KVKK consent before showing HomePage
+        final userId = snapshot.data!.uid;
+        
+        // Reset KVKK check if user changed (e.g., logged out and logged in with different account)
+        if (_currentUserId != userId) {
+          _currentUserId = userId;
+          _kvkkCheckFuture = _checkKvkkConsent(userId);
+        }
+        
+        // Initialize KVKK check future if not already done
+        _kvkkCheckFuture ??= _checkKvkkConsent(userId);
+        
+        return FutureBuilder<bool>(
+          future: _kvkkCheckFuture,
+          builder: (context, kvkkSnapshot) {
+            // Show loading while checking KVKK consent
+            if (kvkkSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Oturum kontrol ediliyor...'),
+                    ],
+                  ),
+                ),
+              );
+            }
+            
+            // Check if KVKK consent exists
+            final hasConsent = kvkkSnapshot.data ?? false;
+            
+            if (hasConsent) {
+              return const HomePage();
+            } else {
+              // User needs to accept KVKK consent
+              return const KvkkConsentPage();
+            }
+          },
+        );
+      },
+    );
+  }
+  
+  /// Check if user has valid KVKK consent
+  Future<bool> _checkKvkkConsent(String userId) async {
+    try {
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      return await userProvider.hasValidKvkkConsent(userId: userId);
+    } catch (e) {
+      logger.err('Error checking KVKK consent: $e');
+      return false;
+    }
   }
 }
 

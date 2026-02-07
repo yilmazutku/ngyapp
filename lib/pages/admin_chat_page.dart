@@ -211,6 +211,12 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
 
               // Get unread count for this admin
               final unreadCount = ChatManager.getUnreadCountFromChatData(data, adminUid);
+              
+              // Debug log for unread count
+              logger.debug(
+                'Chat item: chatId={} adminUid={} unreadCount={} rawData={}',
+                [chatId, adminUid, unreadCount, data['adminUnreadCount']],
+              );
 
               return _ChatListItem(
                 chatId: chatId,

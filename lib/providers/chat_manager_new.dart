@@ -83,6 +83,7 @@ enum UploadKind {
 /// 
 /// Admin UIDs:
 /// - Nilay: 0MvvbZsjbmNPW4QYShRNSOOtkE43
+/// - Utku: 9CwKr0S4mDdZB4Wlc8BK4W8qsT42
 class ChatManager extends ChangeNotifier {
   final FirebaseFirestore db;
   final FirebaseAuth auth;
@@ -95,6 +96,7 @@ class ChatManager extends ChangeNotifier {
   /// Admin user IDs - these users have elevated permissions and are participants in all chats
   static const Set<String> adminIds = {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+    '9CwKr0S4mDdZB4Wlc8BK4W8qsT42', // Utku
   };
 
   /// Check if a given UID belongs to an admin user
