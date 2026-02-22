@@ -723,6 +723,36 @@ class _MealUploadPageState extends State<MealUploadPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Header row with title and history button
+            Row(
+              children: [
+                Text(
+                  'Günlük Takip',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+                const Spacer(),
+                // History button
+                TextButton.icon(
+                  onPressed: () => _showDailyDataHistory(),
+                  icon: Icon(Icons.history, size: 16, color: Colors.indigo.shade600),
+                  label: Text(
+                    'Geçmiş',
+                    style: TextStyle(fontSize: 12, color: Colors.indigo.shade600),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 8, thickness: 0.5),
             // Water row
             Row(
               children: [
@@ -841,6 +871,32 @@ class _MealUploadPageState extends State<MealUploadPage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Show history of daily data (water intake & steps) in a bottom sheet
+  Future<void> _showDailyDataHistory() async {
+    // Show bottom sheet with history
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (_, scrollController) {
+            return _DailyDataHistorySheet(
+              userId: widget.userId,
+              scrollController: scrollController,
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1070,5 +1126,396 @@ class _MealUploadPageState extends State<MealUploadPage> {
     _uploadTimeoutTimer?.cancel();
     _stepsController.dispose();
     super.dispose();
+  }
+}
+
+/// Stateful widget for daily data history bottom sheet
+class _DailyDataHistorySheet extends StatefulWidget {
+  final String userId;
+  final ScrollController scrollController;
+
+  const _DailyDataHistorySheet({
+    required this.userId,
+    required this.scrollController,
+  });
+
+  @override
+  State<_DailyDataHistorySheet> createState() => _DailyDataHistorySheetState();
+}
+
+class _DailyDataHistorySheetState extends State<_DailyDataHistorySheet> {
+  static const int _defaultDays = 7;
+  static const int _extendedDays = 30;
+  
+  late Future<Map<DateTime, DailyData>> _historyFuture;
+  int _selectedDays = _defaultDays;
+  final DateFormat _dateFormat = DateFormat('dd MMM', 'tr_TR');
+  final DateFormat _dayNameFormat = DateFormat('EEEE', 'tr_TR');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  void _loadHistory() {
+    final now = DateTime.now();
+    final startDate = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: _selectedDays - 1));
+    final endDate = DateTime(now.year, now.month, now.day);
+    
+    final dailyDataProvider = Provider.of<DailyDataProvider>(context, listen: false);
+    _historyFuture = dailyDataProvider.fetchDailyDataForDateRange(
+      widget.userId,
+      DateTimeRange(start: startDate, end: endDate),
+    );
+  }
+
+  void _changeDateRange(int days) {
+    setState(() {
+      _selectedDays = days;
+      _loadHistory();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Handle bar
+        Container(
+          margin: const EdgeInsets.only(top: 8),
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              Icon(Icons.history, color: Colors.indigo.shade600),
+              const SizedBox(width: 8),
+              const Text(
+                'Geçmiş Kayıtlar',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              // Date range selector
+              SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: _defaultDays, label: Text('7 Gün')),
+                  ButtonSegment(value: _extendedDays, label: Text('30 Gün')),
+                ],
+                selected: {_selectedDays},
+                onSelectionChanged: (selection) {
+                  if (selection.isNotEmpty) {
+                    _changeDateRange(selection.first);
+                  }
+                },
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: WidgetStateProperty.all(
+                    const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        // Content
+        Expanded(
+          child: FutureBuilder<Map<DateTime, DailyData>>(
+            future: _historyFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error_outline, size: 48, color: Colors.red.shade300),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Veriler yüklenirken bir hata oluştu',
+                          style: TextStyle(color: Colors.grey.shade600),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () => setState(() => _loadHistory()),
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('Tekrar Dene'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              
+              final data = snapshot.data ?? {};
+              if (data.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.inbox_outlined, size: 48, color: Colors.grey.shade400),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Henüz kayıt bulunmuyor',
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              
+              // Sort dates in descending order (most recent first)
+              final sortedDates = data.keys.toList()
+                ..sort((a, b) => b.compareTo(a));
+              
+              // Calculate averages
+              final validEntries = data.values.where(
+                (d) => d.waterIntake > 0 || d.steps > 0,
+              ).toList();
+              final avgWater = validEntries.isEmpty
+                  ? 0.0
+                  : validEntries.map((d) => d.waterIntake).reduce((a, b) => a + b) / validEntries.length;
+              final avgSteps = validEntries.isEmpty
+                  ? 0
+                  : (validEntries.map((d) => d.steps).reduce((a, b) => a + b) / validEntries.length).round();
+              
+              return Column(
+                children: [
+                  // Summary card
+                  if (validEntries.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.indigo.shade50, Colors.purple.shade50],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.indigo.shade100),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _buildSummaryItem(
+                              icon: Icons.water_drop,
+                              iconColor: Colors.blue.shade600,
+                              label: 'Ort. Su',
+                              value: '${avgWater.toStringAsFixed(1)}L',
+                            ),
+                          ),
+                          Container(
+                            width: 1,
+                            height: 40,
+                            color: Colors.indigo.shade200,
+                          ),
+                          Expanded(
+                            child: _buildSummaryItem(
+                              icon: Icons.directions_walk,
+                              iconColor: Colors.green.shade600,
+                              label: 'Ort. Adım',
+                              value: _formatSteps(avgSteps),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  // History list
+                  Expanded(
+                    child: Scrollbar(
+                      controller: widget.scrollController,
+                      child: ListView.separated(
+                        controller: widget.scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        itemCount: sortedDates.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 6),
+                        itemBuilder: (context, index) {
+                          final date = sortedDates[index];
+                          final dailyData = data[date]!;
+                          final isToday = _isToday(date);
+                          
+                          return _buildHistoryItem(date, dailyData, isToday);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryItem({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+  }) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: iconColor),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.indigo.shade700,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHistoryItem(DateTime date, DailyData data, bool isToday) {
+    final hasData = data.waterIntake > 0 || data.steps > 0;
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isToday ? Colors.amber.shade50 : Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isToday ? Colors.amber.shade300 : Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Date column
+          SizedBox(
+            width: 70,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isToday ? 'Bugün' : _dateFormat.format(date),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isToday ? Colors.amber.shade800 : Colors.grey.shade800,
+                  ),
+                ),
+                if (!isToday)
+                  Text(
+                    _dayNameFormat.format(date),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Water
+          Expanded(
+            child: Row(
+              children: [
+                Icon(
+                  Icons.water_drop,
+                  size: 16,
+                  color: hasData && data.waterIntake > 0 
+                      ? Colors.blue.shade500 
+                      : Colors.grey.shade400,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  data.waterIntake > 0 
+                      ? '${data.waterIntake.toStringAsFixed(1)}L' 
+                      : '-',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: data.waterIntake > 0 ? FontWeight.w600 : FontWeight.normal,
+                    color: data.waterIntake > 0 
+                        ? Colors.blue.shade700 
+                        : Colors.grey.shade400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Steps
+          Expanded(
+            child: Row(
+              children: [
+                Icon(
+                  Icons.directions_walk,
+                  size: 16,
+                  color: hasData && data.steps > 0 
+                      ? Colors.green.shade500 
+                      : Colors.grey.shade400,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  data.steps > 0 
+                      ? _formatSteps(data.steps) 
+                      : '-',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: data.steps > 0 ? FontWeight.w600 : FontWeight.normal,
+                    color: data.steps > 0 
+                        ? Colors.green.shade700 
+                        : Colors.grey.shade400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _isToday(DateTime date) {
+    final now = DateTime.now();
+    return date.year == now.year && date.month == now.month && date.day == now.day;
+  }
+
+  String _formatSteps(int steps) {
+    if (steps >= 1000) {
+      final k = steps / 1000;
+      return '${k.toStringAsFixed(k.truncateToDouble() == k ? 0 : 1)}k';
+    }
+    return steps.toString();
   }
 }
