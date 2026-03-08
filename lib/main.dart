@@ -616,7 +616,7 @@ class _HomePageState extends State<HomePage> {
           return const Center(child: CircularProgressIndicator());
         }
         final role = snapshot.data ?? 'user';
-        final isAdmin = FcmService.isAdmin(userId) && userId!='9CwKr0S4mDdZB4Wlc8BK4W8qsT42';
+        final isAdmin = FcmService.isAdmin(userId);
 
         // Build grid items based on user role
         final List<Map<String, dynamic>> gridItems = [];

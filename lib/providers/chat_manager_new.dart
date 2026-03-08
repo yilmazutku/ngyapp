@@ -78,12 +78,11 @@ enum UploadKind {
 /// Architecture:
 /// - One chat per user: chatId == userUid
 /// - Collection structure: chats/{userUid}/messages/*
-/// - Both admin UIDs are automatically added as participants in every chat
+/// - The admin UID is automatically added as a participant in every chat
 /// - Supports admin viewing any user's chat
 /// 
-/// Admin UIDs:
+/// Admin UID:
 /// - Nilay: 0MvvbZsjbmNPW4QYShRNSOOtkE43
-/// - Utku: 9CwKr0S4mDdZB4Wlc8BK4W8qsT42
 class ChatManager extends ChangeNotifier {
   final FirebaseFirestore db;
   final FirebaseAuth auth;
@@ -96,7 +95,6 @@ class ChatManager extends ChangeNotifier {
   /// Admin user IDs - these users have elevated permissions and are participants in all chats
   static const Set<String> adminIds = {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
-    '9CwKr0S4mDdZB4Wlc8BK4W8qsT42', // Utku
   };
 
   /// Check if a given UID belongs to an admin user
@@ -190,6 +188,9 @@ class ChatManager extends ChangeNotifier {
   /// - Increments unread count for user when admin sends a message
   /// - Updates hasUnreadFor array for efficient unread count queries
   /// - Uses merge: true to avoid overwriting existing fields
+  /// - Uses a separate update() call for dot-notation nested fields
+  ///   (adminUnreadCount.<uid>) because set()+merge does NOT reliably
+  ///   interpret dot-separated keys as nested field paths in the Flutter SDK.
   Future<void> _ensureChatDoc(
       String chatId, {
         String? lastMessage,
@@ -204,7 +205,8 @@ class ChatManager extends ChangeNotifier {
       [chatId, participants, lastMessage ?? 'none', lastImageUrl ?? 'none', incrementUnreadForAdmins, incrementUnreadForUser]
     );
     
-    final updateData = <String, dynamic>{
+    // Step 1: set() with merge for base fields (no dot-notation keys)
+    final baseData = <String, dynamic>{
       'participants': participants,
       if (lastMessage != null) 'lastMessage': lastMessage,
       if (lastImageUrl != null) 'lastImageUrl': lastImageUrl,
@@ -212,26 +214,30 @@ class ChatManager extends ChangeNotifier {
       'updatedAt': FieldValue.serverTimestamp(),
     };
     
-    // Increment unread count for all admins when a non-admin sends a message
-    if (incrementUnreadForAdmins) {
-      for (final adminUid in adminIds) {
-        updateData['adminUnreadCount.$adminUid'] = FieldValue.increment(1);
+    await _chatDoc(chatId).set(baseData, SetOptions(merge: true));
+    
+    // Step 2: update() for unread counters — update() properly resolves
+    // dot-notation keys (e.g. 'adminUnreadCount.<uid>') as nested field paths.
+    final needsUnreadUpdate = incrementUnreadForAdmins || incrementUnreadForUser;
+    if (needsUnreadUpdate) {
+      final unreadData = <String, dynamic>{};
+      
+      if (incrementUnreadForAdmins) {
+        for (final adminUid in adminIds) {
+          unreadData['adminUnreadCount.$adminUid'] = FieldValue.increment(1);
+        }
+        unreadData['hasUnreadFor'] = FieldValue.arrayUnion(adminIds.toList());
+        logger.debug('Incrementing unread count for admins and updating hasUnreadFor');
       }
-      // Add all admins to hasUnreadFor array for efficient count queries
-      // arrayUnion is idempotent - won't duplicate if already present
-      updateData['hasUnreadFor'] = FieldValue.arrayUnion(adminIds.toList());
-      logger.debug('Incrementing unread count for admins and updating hasUnreadFor');
+      
+      if (incrementUnreadForUser) {
+        unreadData['userUnreadCount'] = FieldValue.increment(1);
+        unreadData['hasUnreadFor'] = FieldValue.arrayUnion([chatId]);
+        logger.debug('Incrementing unread count for user and updating hasUnreadFor');
+      }
+      
+      await _chatDoc(chatId).update(unreadData);
     }
-    
-    // Increment unread count for user when an admin sends a message
-    if (incrementUnreadForUser) {
-      updateData['userUnreadCount'] = FieldValue.increment(1);
-      // Add the user (chatId) to hasUnreadFor array for efficient count queries
-      updateData['hasUnreadFor'] = FieldValue.arrayUnion([chatId]);
-      logger.debug('Incrementing unread count for user and updating hasUnreadFor');
-    }
-    
-    await _chatDoc(chatId).set(updateData, SetOptions(merge: true));
     
     logger.debug('Chat doc ensured. chatId={}', [chatId]);
   }
@@ -239,6 +245,9 @@ class ChatManager extends ChangeNotifier {
   /// Mark a chat as read for the current admin user.
   /// Resets the unread count to 0, updates lastReadAt timestamp,
   /// and removes admin from hasUnreadFor array for efficient count queries.
+  /// 
+  /// Uses update() because dot-notation keys (adminUnreadCount.<uid>) only
+  /// resolve as nested field paths with update(), not with set()+merge.
   /// 
   /// Call this when admin opens a chat.
   Future<void> markChatAsRead(String chatId) async {
@@ -250,12 +259,16 @@ class ChatManager extends ChangeNotifier {
     
     logger.info('Marking chat as read (admin). chatId={} adminUid={}', [chatId, currentUid]);
     
-    await _chatDoc(chatId).set({
-      'adminUnreadCount.$currentUid': 0,
-      'adminLastReadAt.$currentUid': FieldValue.serverTimestamp(),
-      // Remove this admin from hasUnreadFor for efficient count queries
-      'hasUnreadFor': FieldValue.arrayRemove([currentUid]),
-    }, SetOptions(merge: true));
+    try {
+      await _chatDoc(chatId).update({
+        'adminUnreadCount.$currentUid': 0,
+        'adminLastReadAt.$currentUid': FieldValue.serverTimestamp(),
+        'hasUnreadFor': FieldValue.arrayRemove([currentUid]),
+      });
+    } catch (e) {
+      // Document may not exist yet (e.g. admin opens a new chat before any messages)
+      logger.warn('markChatAsRead: update failed (doc may not exist). chatId={} error={}', [chatId, e]);
+    }
     
     logger.debug('Chat marked as read (admin). chatId={}', [chatId]);
   }

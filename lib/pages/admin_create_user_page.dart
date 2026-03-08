@@ -1,9 +1,43 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import '../firebase_options.dart';
 import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../widgets/app_bar_with_back.dart';
+
+class _CapitalizeWordsFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final text = newValue.text;
+    if (text.isEmpty) return newValue;
+
+    final buffer = StringBuffer();
+    bool capitalizeNext = true;
+    for (int i = 0; i < text.length; i++) {
+      if (text[i] == ' ') {
+        buffer.write(' ');
+        capitalizeNext = true;
+      } else if (capitalizeNext) {
+        buffer.write(text[i].toUpperCase());
+        capitalizeNext = false;
+      } else {
+        buffer.write(text[i].toLowerCase());
+      }
+    }
+
+    final formatted = buffer.toString();
+    return newValue.copyWith(
+      text: formatted,
+      selection: newValue.selection,
+    );
+  }
+}
 
 final Logger logger = Logger.forClass(CreateUserPage);
 
@@ -25,7 +59,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
 
   Future<void> createUser({
     required String name,
-    String? email,
+    required String email,
     String? password,
     required String surname,
     int? age,
@@ -37,10 +71,12 @@ class _CreateUserPageState extends State<CreateUserPage> {
       return;
     }
 
-    // Generate email and password if not provided
-    email ??=
-        '${name.toLowerCase()}_${DateTime.now().millisecondsSinceEpoch}@example.com';
-    password ??= CreateUserPage.tempPw; // Temporary default password
+    if (email.isEmpty) {
+      _showMessageDialog('Hata', 'Lütfen e-posta alanını doldurunuz.');
+      return;
+    }
+
+    password ??= CreateUserPage.tempPw;
 
     try {
       // Check if a user with the same email already exists
@@ -57,17 +93,36 @@ class _CreateUserPageState extends State<CreateUserPage> {
         return;
       }
 
-      // Create Firebase Authentication user
-      UserCredential userCredential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      // Use a secondary FirebaseApp so the admin session is not replaced
+      // by the newly created user's session.
+      FirebaseApp secondaryApp;
+      try {
+        secondaryApp = Firebase.app('tempUserCreation');
+      } catch (_) {
+        secondaryApp = await Firebase.initializeApp(
+          name: 'tempUserCreation',
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
 
-      final userId = userCredential.user?.uid;
+      String userId;
+      try {
+        final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+        final userCredential =
+            await secondaryAuth.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
 
-      if (userId == null) {
-        throw Exception('Firebase Authentication kullanıcı oluşturulamadı.');
+        final uid = userCredential.user?.uid;
+        if (uid == null) {
+          throw Exception('Firebase Authentication kullanıcı oluşturulamadı.');
+        }
+        userId = uid;
+
+        await secondaryAuth.signOut();
+      } finally {
+        await secondaryApp.delete();
       }
 
       // Create a UserModel instance
@@ -137,6 +192,8 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   labelText: 'İsim Giriniz',
                   border: OutlineInputBorder(),
                 ),
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: [_CapitalizeWordsFormatter()],
               ),
               const SizedBox(height: 10),
               TextField(
@@ -145,6 +202,8 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   labelText: 'Soyisim Giriniz (Opsiyonel)',
                   border: OutlineInputBorder(),
                 ),
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: [_CapitalizeWordsFormatter()],
               ),
               const SizedBox(height: 10),
               TextField(
@@ -175,7 +234,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
               TextField(
                 controller: _emailController,
                 decoration: const InputDecoration(
-                  labelText: 'E-posta Giriniz (Opsiyonel)',
+                  labelText: 'E-posta Giriniz',
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.emailAddress,
@@ -197,9 +256,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   final age = int.tryParse(_ageController.text.trim());
                   final reference = _referenceController.text.trim();
                   final notes = _notesController.text.trim();
-                  final email = _emailController.text.trim().isNotEmpty
-                      ? _emailController.text.trim()
-                      : null;
+                  final email = _emailController.text.trim();
                   final password = _passwordController.text.trim().isNotEmpty
                       ? _passwordController.text.trim()
                       : null;

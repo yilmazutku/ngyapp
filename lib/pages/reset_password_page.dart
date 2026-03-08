@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/logger.dart';
 import '../utils/dialog_utils.dart';
@@ -68,7 +69,9 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
   }
 
   Future<void> _resetPassword() async {
-    if (_emailController.text.isEmpty) {
+    final email = _emailController.text.trim();
+
+    if (email.isEmpty) {
       await DialogUtils.openError(
         context,
         title: 'Hata',
@@ -77,29 +80,64 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       return;
     }
 
+    setState(() {
+      _isLoading = true;
+    });
+
+    bool loadingOpen = false;
     try {
-      setState(() {
-        _isLoading = true;
-      });
+      if (mounted) {
+        DialogUtils.openLoading(context, message: 'Kontrol ediliyor...');
+        loadingOpen = true;
+      }
 
-      await FirebaseAuth.instance.sendPasswordResetEmail(
-        email: _emailController.text.trim(),
-      );
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
 
-      if (!mounted) return;
-      await DialogUtils.openInfo(
-        context,
-        title: 'Başarılı',
-        message: 'Şifre sıfırlama bağlantısı e-posta adresinize gönderildi.',
-      );
-      Navigator.of(context).pop();
+      if (querySnapshot.docs.isEmpty) {
+        if (mounted && loadingOpen) {
+          Navigator.of(context, rootNavigator: true).pop();
+          loadingOpen = false;
+        }
+        if (mounted) {
+          await DialogUtils.openError(
+            context,
+            title: 'Hata',
+            message: 'Bu e-posta adresine ait kayıtlı bir kullanıcı bulunamadı.',
+          );
+        }
+        return;
+      }
+
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (mounted) {
+        await DialogUtils.openInfo(
+          context,
+          title: 'Başarılı',
+          message: 'Şifre sıfırlama bağlantısı e-posta adresinize gönderildi.',
+        );
+        Navigator.of(context).pop();
+      }
     } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Şifre sıfırlama işlemi başarısız oldu: $e',
-      );
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Şifre sıfırlama işlemi başarısız oldu: $e',
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {

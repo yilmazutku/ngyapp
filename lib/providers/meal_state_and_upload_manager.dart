@@ -343,59 +343,41 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
   Future<void> _postToChat(String userId, Meals meal, String imageUrl, ChatManager? chatManager) async {
     try {
       // If we have a ChatManager instance, use it to post the image directly
-      if (chatManager != null) {
-        final chatId = userId; // In this app, chatId == userId
-        
-        // Use the direct Firestore approach
-        final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
-        
-        // Update chat document with image info
-        await chatDoc.set({
-          'participants': [chatId, ...ChatManager.adminIds],
-          'lastMessage': 'Öğün Fotoğrafı (${meal.label})',
-          'lastImageUrl': imageUrl,
-          'lastMessageAt': Timestamp.now(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-        
-        // Add message to chat
-        final refMsg = await chatDoc.collection('messages').add({
-          'chatId': chatId,
-          'senderId': userId,
-          'text': 'Öğün: ${meal.label}',
-          'imageUrl': imageUrl,
-          'createdAt': FieldValue.serverTimestamp(),
-          'clientCreatedAt': Timestamp.now(),
-          'storagePath': 'meals/$userId/${meal.name}', // Add a storage path for consistency
-        });
-        
-        logger.info('Meal image posted to chat using ChatManager. messageId={}', [refMsg.id]);
-      } else {
-        // If no ChatManager is provided, use Firestore directly
-        final chatId = userId; // In this app, chatId == userId
-        final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
-        
-        // Update chat document with image info
-        await chatDoc.set({
-          'participants': [chatId, ...ChatManager.adminIds],
-          'lastMessage': 'Öğün Fotoğrafı (${meal.label})',
-          'lastImageUrl': imageUrl,
-          'lastMessageAt': Timestamp.now(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-        
-        // Add message to chat
-        final refMsg = await chatDoc.collection('messages').add({
-          'chatId': chatId,
-          'senderId': userId,
-          'text': 'Öğün: ${meal.label}',
-          'imageUrl': imageUrl,
-          'createdAt': FieldValue.serverTimestamp(),
-          'clientCreatedAt': Timestamp.now(),
-        });
-        
-        logger.info('Meal image posted to chat directly. messageId={}', [refMsg.id]);
+      final chatId = userId; // In this app, chatId == userId
+      final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
+      
+      // Update chat document with image info
+      await chatDoc.set({
+        'participants': [chatId, ...ChatManager.adminIds],
+        'lastMessage': 'Öğün Fotoğrafı (${meal.label})',
+        'lastImageUrl': imageUrl,
+        'lastMessageAt': Timestamp.now(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      
+      // Increment admin unread counts via update() (dot-notation needs update())
+      final unreadData = <String, dynamic>{};
+      for (final adminUid in ChatManager.adminIds) {
+        unreadData['adminUnreadCount.$adminUid'] = FieldValue.increment(1);
       }
+      unreadData['hasUnreadFor'] = FieldValue.arrayUnion(ChatManager.adminIds.toList());
+      await chatDoc.update(unreadData);
+      
+      // Add message to chat
+      final msgData = <String, dynamic>{
+        'chatId': chatId,
+        'senderId': userId,
+        'text': 'Öğün: ${meal.label}',
+        'imageUrl': imageUrl,
+        'createdAt': FieldValue.serverTimestamp(),
+        'clientCreatedAt': Timestamp.now(),
+      };
+      if (chatManager != null) {
+        msgData['storagePath'] = 'meals/$userId/${meal.name}';
+      }
+      final refMsg = await chatDoc.collection('messages').add(msgData);
+      
+      logger.info('Meal image posted to chat. messageId={}', [refMsg.id]);
     } catch (e) {
       logger.err('Error posting to chat: {}', [e]);
     }
