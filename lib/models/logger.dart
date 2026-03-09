@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/foundation.dart';
 
 class Logger {
   final String name;
@@ -31,43 +30,9 @@ class Logger {
   /// Call early (e.g., before runApp): await Logger.initialize();
   static Future<void> initialize({bool debugEnabled = true, bool logToFileEnabled = true}) async {
     if (_initialized) return;
-    
-    // Store flags
     _debugEnabled = debugEnabled;
     _logToFileEnabled = logToFileEnabled;
-    
-    // If file logging is disabled, mark as initialized and skip file logging setup
-    if (!_logToFileEnabled) {
-      _initialized = true;
-      return;
-    }
-
-    final isDesktop =
-        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-    if (!isDesktop) {
-      _initialized = true; // console-only on mobile/web
-      return;
-    }
-
-    try {
-      final appDocDir = await getApplicationDocumentsDirectory();
-      final logsDir = Directory(p.join(appDocDir.path, 'IlkApp', 'logs'));
-      if (!await logsDir.exists()) {
-        await logsDir.create(recursive: true);
-      }
-      _logDirectory = logsDir.path;
-
-      // Prepare sink for "now" (sets date/index and opens the correct file).
-      await _prepareSinkForNow();
-
-      _initialized = true;
-      final logger = Logger('LogSystem');
-      logger.info('Logging system initialized. Log directory: $_logDirectory');
-    } catch (e, st) {
-      developer.log('Failed to initialize logging system: $e',
-          name: 'LogSystem', stackTrace: st);
-      _initialized = true; // allow console logging even if file logging failed
-    }
+    _initialized = true;
   }
 
   /// Close cleanly on app shutdown.
@@ -114,13 +79,8 @@ class Logger {
   }
 
   void _logToFile(String line, Object? error, StackTrace? stackTrace) {
-    // Skip file logging if disabled
     if (!_logToFileEnabled) return;
     if (_logDirectory == null) return;
-    if (kIsWeb ||
-        !(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-      return;
-    }
 
     _writeChain = _writeChain.then((_) async {
       try {

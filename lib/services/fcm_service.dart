@@ -3,7 +3,6 @@ import 'dart:io' show Platform;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_app_badger/flutter_app_badger.dart';
 
@@ -73,10 +72,8 @@ class FcmService {
   static const bool allowAnnouncementNotificationsWhenLoggedOut = false;
 
   /// Check if FCM is supported on this platform
-  /// FCM is NOT supported on Windows and Linux
   static bool get isSupported {
-    if (kIsWeb) return false; // Web has different FCM handling
-    return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+    return Platform.isAndroid || Platform.isIOS;
   }
 
   // Admin UIDs for routing notifications

@@ -1,6 +1,6 @@
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -72,22 +72,12 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
     );
 
     if (pickedFile != null) {
-      if (kIsWeb) {
-        final bytes = await pickedFile.readAsBytes();
-        if (!mounted) return;
-        setState(() {
-          _selectedImageBytes = bytes;
-          _selectedImageName = pickedFile.name;
-          _selectedImageFile = null;
-        });
-      } else {
-        if (!mounted) return;
-        setState(() {
-          _selectedImageFile = File(pickedFile.path);
-          _selectedImageBytes = null;
-          _selectedImageName = null;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _selectedImageFile = File(pickedFile.path);
+        _selectedImageBytes = null;
+        _selectedImageName = null;
+      });
     }
   }
 

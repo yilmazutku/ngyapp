@@ -32,7 +32,6 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  flutter_gen: any
   flutter_timezone: ^4.1.0
   firebase_core: any
   image_picker: any
@@ -45,7 +44,6 @@ dependencies:
   firebase_auth: any
   flutter_image_compress: ^2.1.0
   path: any
-  uuid: ^4.3.3
   docx_to_text: any
   shared_preferences: any
   table_calendar: ^3.0.8
@@ -58,16 +56,9 @@ dependencies:
   flutter_app_badger: ^1.5.0
 
 dev_dependencies:
-  #flutter_gen: any
   flutter_test:
     sdk: flutter
-  flutter_gen_runner: any
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
-  flutter_lints: ^2.0.3 # Using a fixed version instead of 'any'
+  flutter_lints: ^2.0.3
   flutter_launcher_icons: ^0.14.3
 
 # App icon configuration
@@ -89,7 +80,6 @@ flutter:
   assets:
     - assets/ngy.png
   uses-material-design: true
-  generate: true
 
   # To add assets to your application, add an assets section, like this:
   # assets:

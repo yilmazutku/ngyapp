@@ -2,53 +2,21 @@
 // ignore_for_file: type=lint
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+    show defaultTargetPlatform, TargetPlatform;
 
-/// Default [FirebaseOptions] for use with your Firebase apps.
-///
-/// Example:
-/// ```dart
-/// import 'firebase_options.dart';
-/// // ...
-/// await Firebase.initializeApp(
-///   options: DefaultFirebaseOptions.currentPlatform,
-/// );
-/// ```
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
-    if (kIsWeb) {
-      return web;
-    }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
         return ios;
-      case TargetPlatform.macOS:
-        return macos;
-      case TargetPlatform.windows:
-        return windows;
-      case TargetPlatform.linux:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform.',
         );
     }
   }
-
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyDgwN7hf_c2WYwvmlr_MdQ_18eQfauLRWQ',
-    appId: '1:49616297399:web:394561e0c2b9cfbf0e5c32',
-    messagingSenderId: '49616297399',
-    projectId: 'deneme2-bc96d',
-    authDomain: 'deneme2-bc96d.firebaseapp.com',
-    storageBucket: 'deneme2-bc96d.appspot.com',
-    measurementId: 'G-NCK304NX28',
-  );
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyDP59A_Bp2zz2Hp2Hf6EPrBGF3puoBKovc',
@@ -66,24 +34,4 @@ class DefaultFirebaseOptions {
     storageBucket: 'deneme2-bc96d.appspot.com',
     iosBundleId: 'com.utkuyilmaz.ngyApp',
   );
-
-  static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyADNFyAxaGJH0mHl-Mot3PYe5c462D_vLc',
-    appId: '1:49616297399:ios:b5209f425d87e9530e5c32',
-    messagingSenderId: '49616297399',
-    projectId: 'deneme2-bc96d',
-    storageBucket: 'deneme2-bc96d.appspot.com',
-    iosBundleId: 'com.utkuyilmaz.ngyApp',
-  );
-
-  static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyB-D-DkDYAX5C-illWOU2epOnJLXigWC6c',
-    appId: '1:49616297399:web:9e69a4f1cf91fd860e5c32',
-    messagingSenderId: '49616297399',
-    projectId: 'deneme2-bc96d',
-    authDomain: 'deneme2-bc96d.firebaseapp.com',
-    storageBucket: 'deneme2-bc96d.appspot.com',
-    measurementId: 'G-3G6KC6ED69',
-  );
-
 }

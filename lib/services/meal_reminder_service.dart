@@ -1,7 +1,6 @@
 import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
@@ -42,8 +41,7 @@ class MealReminderService {
 
   /// Check if local notifications are supported on this platform
   bool get isSupported {
-    if (kIsWeb) return false;
-    return Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isLinux;
+    return Platform.isAndroid || Platform.isIOS;
   }
 
   /// Initialize the service

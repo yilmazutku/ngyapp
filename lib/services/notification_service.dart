@@ -1,7 +1,6 @@
 import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
@@ -26,10 +25,7 @@ class NotificationService {
 
   /// Check if local notifications are supported on this platform
   bool get _isSupported {
-    if (kIsWeb) return false;
-    // flutter_local_notifications supports Android, iOS, macOS, Linux
-    // Windows is NOT supported
-    return Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isLinux;
+    return Platform.isAndroid || Platform.isIOS;
   }
 
   /// Public getter to check if notifications are supported on this platform
