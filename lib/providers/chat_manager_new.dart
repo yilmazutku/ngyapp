@@ -10,7 +10,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
-import 'package:image/image.dart' as img;
 
 import 'package:ngy_app/models/logger.dart';
 
@@ -632,77 +631,38 @@ class ChatManager extends ChangeNotifier {
       (w: 1024, h: 1024, q: 65),  // Third attempt: lower quality
     ];
 
-    // Use flutter_image_compress only on Android/iOS (hardware-accelerated)
-    final canUseFIC = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-    logger.debug('Compression method: {}', [canUseFIC ? 'FlutterImageCompress' : 'package:image']);
-
     File current = input;
 
     for (final a in attempts) {
       final outPath = _deriveOutPath(current.path);
 
-      if (canUseFIC) {
-        // Use flutter_image_compress for Android/iOS
-        logger.debug('[FIC] Compression attempt -> dimensions:{}x{} quality:{}%', [a.w, a.h, a.q]);
-        
-        final result = await fic.FlutterImageCompress.compressAndGetFile(
-          current.path,
-          outPath,
-          quality: a.q,
-          minWidth: a.w,
-          minHeight: a.h,
-          format: fic.CompressFormat.jpeg,
-          keepExif: false,
-        );
-        
-        if (result == null) {
-          logger.warn('[FIC] Compression returned null. outPath={}', [outPath]);
-          continue;
-        }
-        
-        final f = File(result.path);
-        final size = await _safeFileLength(f);
-        logger.debug('[FIC] Result size: {} bytes ({:.2f} MB)', [size, size / (1024 * 1024)]);
-        
-        if (size <= MAX_IMG_SIZE) {
-          logger.info('[FIC] Compression successful. finalSize={} bytes', [size]);
-          return f;
-        }
-        
-        current = f;
-        
-      } else {
-        // Fallback: pure Dart compression using package:image (Web/Desktop)
-        logger.debug('[IMG] Compression attempt -> box:{}x{} quality:{}%', [a.w, a.h, a.q]);
-        
-        final bytes = await current.readAsBytes();
-        final decoded = img.decodeImage(bytes);
-        
-        if (decoded == null) {
-          logger.warn('[IMG] Failed to decode image. path={}', [current.path]);
-          continue;
-        }
-
-        // Resize to fit within box while preserving aspect ratio
-        final resized = img.copyResize(
-          decoded,
-          width: decoded.width > decoded.height ? a.w : null,
-          height: decoded.height >= decoded.width ? a.h : null,
-          interpolation: img.Interpolation.average,
-        );
-
-        final jpg = img.encodeJpg(resized, quality: a.q);
-        final f = File(outPath)..writeAsBytesSync(jpg, flush: true);
-        final size = await _safeFileLength(f);
-        logger.debug('[IMG] Result size: {} bytes ({:.2f} MB)', [size, size / (1024 * 1024)]);
-        
-        if (size <= MAX_IMG_SIZE) {
-          logger.info('[IMG] Compression successful. finalSize={} bytes', [size]);
-          return f;
-        }
-        
-        current = f;
+      logger.debug('[FIC] Compression attempt -> dimensions:{}x{} quality:{}%', [a.w, a.h, a.q]);
+      
+      final result = await fic.FlutterImageCompress.compressAndGetFile(
+        current.path,
+        outPath,
+        quality: a.q,
+        minWidth: a.w,
+        minHeight: a.h,
+        format: fic.CompressFormat.jpeg,
+        keepExif: false,
+      );
+      
+      if (result == null) {
+        logger.warn('[FIC] Compression returned null. outPath={}', [outPath]);
+        continue;
       }
+      
+      final f = File(result.path);
+      final size = await _safeFileLength(f);
+      logger.debug('[FIC] Result size: {} bytes ({:.2f} MB)', [size, size / (1024 * 1024)]);
+      
+      if (size <= MAX_IMG_SIZE) {
+        logger.info('[FIC] Compression successful. finalSize={} bytes', [size]);
+        return f;
+      }
+      
+      current = f;
     }
 
     logger.warn('Compression did not reach target size after all attempts. Using last result or original.');
