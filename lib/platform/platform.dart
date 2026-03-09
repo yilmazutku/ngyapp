@@ -19,4 +19,6 @@ export 'platform_config.dart';
 export 'platform_config_android.dart';
 export 'platform_config_factory.dart';
 export 'platform_config_ios.dart';
+export 'platform_config_macos.dart';
+export 'platform_config_stub.dart';
 

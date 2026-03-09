@@ -23,9 +23,9 @@ class NotificationService {
 
   bool _isInitialized = false;
 
-  /// Check if local notifications are supported on this platform
+  /// Check if local notifications are supported on this platform (not on Windows)
   bool get _isSupported {
-    return Platform.isAndroid || Platform.isIOS;
+    return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
   }
 
   /// Public getter to check if notifications are supported on this platform

@@ -6,6 +6,8 @@ import '../models/logger.dart';
 import 'platform_config.dart';
 import 'platform_config_android.dart';
 import 'platform_config_ios.dart';
+import 'platform_config_macos.dart';
+import 'platform_config_stub.dart';
 
 class PlatformConfigFactory {
   static final Logger _logger = Logger.forClass(PlatformConfigFactory);
@@ -21,7 +23,18 @@ class PlatformConfigFactory {
       return IosPlatformConfig();
     }
 
-    throw UnsupportedError('Platform not supported: only Android and iOS are supported');
+    if (Platform.isMacOS) {
+      _logger.info('Creating macOS platform config');
+      return MacosPlatformConfig();
+    }
+
+    if (Platform.isWindows) {
+      _logger.info('Creating Windows platform config (no push notifications)');
+      return StubPlatformConfig(platformName: 'Windows');
+    }
+
+    _logger.warn('Unknown platform, using stub config');
+    return StubPlatformConfig(platformName: 'Unknown');
   }
 
   static Future<PlatformConfig> initializePlatform({

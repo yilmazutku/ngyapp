@@ -71,9 +71,9 @@ class FcmService {
   /// When false, announcement notifications are ignored if no user is authenticated.
   static const bool allowAnnouncementNotificationsWhenLoggedOut = false;
 
-  /// Check if FCM is supported on this platform
+  /// Check if FCM is supported on this platform (not on Windows)
   static bool get isSupported {
-    return Platform.isAndroid || Platform.isIOS;
+    return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
   }
 
   // Admin UIDs for routing notifications

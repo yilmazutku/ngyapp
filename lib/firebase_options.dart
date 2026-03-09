@@ -11,6 +11,10 @@ class DefaultFirebaseOptions {
         return android;
       case TargetPlatform.iOS:
         return ios;
+      case TargetPlatform.macOS:
+        return macos;
+      case TargetPlatform.windows:
+        return windows;
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform.',
@@ -33,5 +37,24 @@ class DefaultFirebaseOptions {
     projectId: 'deneme2-bc96d',
     storageBucket: 'deneme2-bc96d.appspot.com',
     iosBundleId: 'com.utkuyilmaz.ngyApp',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyADNFyAxaGJH0mHl-Mot3PYe5c462D_vLc',
+    appId: '1:49616297399:ios:b5209f425d87e9530e5c32',
+    messagingSenderId: '49616297399',
+    projectId: 'deneme2-bc96d',
+    storageBucket: 'deneme2-bc96d.appspot.com',
+    iosBundleId: 'com.utkuyilmaz.ngyApp',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyB-D-DkDYAX5C-illWOU2epOnJLXigWC6c',
+    appId: '1:49616297399:web:9e69a4f1cf91fd860e5c32',
+    messagingSenderId: '49616297399',
+    projectId: 'deneme2-bc96d',
+    authDomain: 'deneme2-bc96d.firebaseapp.com',
+    storageBucket: 'deneme2-bc96d.appspot.com',
+    measurementId: 'G-3G6KC6ED69',
   );
 }
