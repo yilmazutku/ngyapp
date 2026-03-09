@@ -45,7 +45,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
   @override
   void initState() {
     super.initState();
-    for (var meal in Meals.values) {
+    for (var meal in Meals.dietValues) {
       subtitles.add({
         'name': meal.label,
         'enumName': meal.name,
@@ -373,7 +373,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
     
     // Log all meal types we're looking for
     log.info('Searching for these meal types:');
-    for (var meal in Meals.values) {
+    for (var meal in Meals.dietValues) {
       log.info('- {} ({})', [meal.name, meal.label]);
     }
     
@@ -386,7 +386,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
       bool foundMealSection = false;
       
       // For non-Ara meals (direct matching)
-      for (var meal in Meals.values) {
+      for (var meal in Meals.dietValues) {
         if (meal != Meals.firstmid && meal != Meals.secondmid && meal != Meals.thirdmid) {
           // Case insensitive check
           if (line.toLowerCase().contains(meal.label.toLowerCase())) {

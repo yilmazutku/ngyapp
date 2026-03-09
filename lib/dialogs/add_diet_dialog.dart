@@ -56,10 +56,10 @@ class _AddDietDialogState extends State<AddDietDialog> {
   void initState() {
     super.initState();
     // Initialize subtitles with Meals enum
-    for (var meal in Meals.values) {
+    for (var meal in Meals.dietValues) {
       subtitles.add({
         'name': meal.label,
-        'time': meal.defaultTime, // from meal_model.dart
+        'time': meal.defaultTime,
         'content': [],
       });
     }
@@ -565,7 +565,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
         String enumKey = '';
         try {
           // Try to find the enum by matching label
-          for (var meal in Meals.values) {
+          for (var meal in Meals.dietValues) {
             if (meal.label == mealName) {
               enumKey = meal.name;
               break;

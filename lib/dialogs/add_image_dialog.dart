@@ -98,7 +98,7 @@ class _AddImageDialogState extends State<AddImageDialog> {
 
   @override
   Widget build(BuildContext context) {
-    const mealOptions = Meals.values;
+    final mealOptions = Meals.dietValues;
 
     return AlertDialog(
       title: const Text('Add Meal Image'),

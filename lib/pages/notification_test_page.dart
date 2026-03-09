@@ -438,7 +438,7 @@ class _NotificationTestPageState extends State<NotificationTestPage> {
             ),
             prefixIcon: const Icon(Icons.restaurant),
           ),
-          items: Meals.values.map((meal) {
+          items: Meals.dietValues.map((meal) {
             return DropdownMenuItem<Meals>(
               value: meal,
               child: Text('${meal.label} (${meal.defaultTime})'),

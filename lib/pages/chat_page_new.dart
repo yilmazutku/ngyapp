@@ -531,7 +531,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               for (final m in Meals.values)
                 ListTile(
                   title: Text(m.label),
-                  subtitle: Text(m.defaultTime),
+                  subtitle: m.defaultTime.isNotEmpty ? Text(m.defaultTime) : null,
                   onTap: () {
                     logger.debug('Meal selected in bottom sheet: {} ({})', [m.name, m.label]);
                     Navigator.of(ctx).pop(m);

@@ -54,12 +54,12 @@ class MealUploadPage extends StatefulWidget {
 
 class _MealUploadPageState extends State<MealUploadPage> {
   Map<Meals, bool> checkedStates = {
-    for (var meal in Meals.values) meal: false,
+    for (var meal in Meals.dietValues) meal: false,
   };
 
   Map<Meals, List<String>> mealContents = {};
   Map<Meals, TimeOfDay> mealTimes = {
-    for (var meal in Meals.values) meal: const TimeOfDay(hour: 0, minute: 0),
+    for (var meal in Meals.dietValues) meal: const TimeOfDay(hour: 0, minute: 0),
   };
   bool _isUploading = false;
   Timer? _uploadTimeoutTimer;
@@ -75,7 +75,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
   
   // Track which meals are expanded (all collapsed by default)
   final Map<Meals, bool> _expandedMeals = {
-    for (var meal in Meals.values) meal: false,
+    for (var meal in Meals.dietValues) meal: false,
   };
   
   // Font size adjustments for testing
@@ -903,7 +903,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
   /// Build collapsible meals list
   Widget _buildCollapsibleMealsList(TimeOfDay defaultMealTime) {
     // Filter meals with content
-    final mealsWithContent = Meals.values.where((meal) {
+    final mealsWithContent = Meals.dietValues.where((meal) {
       final contents = mealContents[meal] ?? [];
       return contents.isNotEmpty;
     }).toList();

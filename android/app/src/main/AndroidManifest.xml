@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
 
      <application
-         android:label="ngy_app"
+         android:label="Uzman Diyetisyen Nilay Göktepe Yılmaz"
          android:name="${applicationName}"
          android:icon="@mipmap/ic_launcher">
          <activity

@@ -81,12 +81,17 @@ enum Meals {
   lunch('Öğle', '12:30'),
   secondmid('Ara Öğün 2', '16:00'),
   dinner('Akşam', '19:00'),
-  thirdmid('Ara Öğün 3', '21:00');
+  thirdmid('Ara Öğün 3', '21:00'),
+  none('Hiçbiri', '');
 
   const Meals(this.label, this.defaultTime);
 
   final String label;
   final String defaultTime;
+
+  /// Actual meal types used for diets, tracking, and reminders (excludes [none]).
+  static List<Meals> get dietValues =>
+      values.where((m) => m != Meals.none).toList();
 
   /// Returns a simplified display label where all "Ara Öğün" types are shown as just "Ara"
   String get displayLabel {

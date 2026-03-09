@@ -126,6 +126,7 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
           tabs: _tabs,
           indicatorColor: Colors.white,
           labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
         ),
       ),
       body: TabBarView(

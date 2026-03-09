@@ -902,7 +902,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
     }
 
     // Define display order
-    const displayOrder = ['Sabah', 'Öğle', 'Akşam', 'Ara'];
+    const displayOrder = ['Sabah', 'Öğle', 'Akşam', 'Ara', 'Hiçbiri'];
     final sortedEntries = displayCounts.entries.toList()
       ..sort((a, b) {
         final aIndex = displayOrder.indexOf(a.key);
@@ -992,6 +992,8 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
         return Colors.indigo;
       case 'Ara':
         return Colors.purple;
+      case 'Hiçbiri':
+        return Colors.grey;
       default:
         return Colors.grey;
     }
@@ -1009,6 +1011,8 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       case Meals.secondmid:
       case Meals.thirdmid:
         return Colors.purple;
+      case Meals.none:
+        return Colors.grey;
     }
   }
 
@@ -1228,6 +1232,8 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       case Meals.secondmid:
       case Meals.thirdmid:
         return Icons.restaurant;
+      case Meals.none:
+        return Icons.image;
     }
   }
 

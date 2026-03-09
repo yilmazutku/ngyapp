@@ -28,7 +28,7 @@ void main() async {
     
     // Initialize subtitles structure similar to FileHandlerPage
     List<Map<String, dynamic>> subtitles = [];
-    for (var meal in Meals.values) {
+    for (var meal in Meals.dietValues) {
       subtitles.add({
         'name': meal.label,
         'time': meal.defaultTime,
@@ -82,7 +82,7 @@ void _extractSubtitles(String text, List<Map<String, dynamic>> subtitles) {
   
   // Log all meal types we're looking for
   log.info('Searching for these meal types:');
-  for (var meal in Meals.values) {
+  for (var meal in Meals.dietValues) {
     log.info('- {} ({})', [meal.name, meal.label]);
   }
   
@@ -93,7 +93,7 @@ void _extractSubtitles(String text, List<Map<String, dynamic>> subtitles) {
     bool foundMealSection = false;
     
     // For non-Ara meals (direct matching)
-    for (var meal in Meals.values) {
+    for (var meal in Meals.dietValues) {
       if (meal != Meals.firstmid && meal != Meals.secondmid && meal != Meals.thirdmid) {
         // Case insensitive check
         if (line.toLowerCase().contains(meal.label.toLowerCase())) {

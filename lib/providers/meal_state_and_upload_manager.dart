@@ -390,7 +390,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     final effectiveDate = date ?? DateTime.now();
     final currentDate = DateFormat('yyyy-MM-dd').format(effectiveDate);
     Map<Meals, bool> checkedStates = {
-      for (var meal in Meals.values) meal: false,
+      for (var meal in Meals.dietValues) meal: false,
     };
     
     try {

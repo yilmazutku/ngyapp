@@ -466,7 +466,7 @@ class _DietEditPageState extends State<DietEditPage> {
     
     // Get all meal enums not already in use
     final existingMealNames = _editableData.keys.toList();
-    final availableMeals = Meals.values.where((meal) => 
+    final availableMeals = Meals.dietValues.where((meal) => 
       !existingMealNames.contains(meal.name) || meal.name == mealName).toList();
     
     // Find the current meal enum
@@ -851,7 +851,7 @@ class _DietEditPageState extends State<DietEditPage> {
     
     // Get enum names that aren't already in the diet
     final existingMealNames = _editableData.keys.toList();
-    final availableMeals = Meals.values.where((meal) => 
+    final availableMeals = Meals.dietValues.where((meal) => 
       !existingMealNames.contains(meal.name)).toList();
     
     if (availableMeals.isEmpty) {

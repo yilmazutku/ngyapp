@@ -187,7 +187,7 @@ class MealReminderService {
 
     try {
       // Cancel all possible meal notifications
-      for (final meal in Meals.values) {
+      for (final meal in Meals.dietValues) {
         final notificationId = MEAL_NOTIFICATION_BASE_ID + meal.index;
         await _notifications.cancel(notificationId);
       }
@@ -257,7 +257,7 @@ class MealReminderService {
   /// Fetch today's meal states (checked/unchecked) for a user.
   Future<Map<Meals, bool>> _fetchTodayMealStates(String userId) async {
     Map<Meals, bool> states = {
-      for (final meal in Meals.values) meal: false,
+      for (final meal in Meals.dietValues) meal: false,
     };
 
     try {
