@@ -252,15 +252,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return false;
   }
 
-  /// Pick an image from the gallery and send it to the chat.
-  /// 
-  /// Flow:
-  /// 1. Opens gallery picker
-  /// 2. Shows loading dialog during upload
-  /// 3. Sends image via ChatManager
-  /// 4. Handles errors with user-friendly dialogs
-  Future<void> _pickAndSendImage() async {
-    // Check permission first
+  /// Pick an image from the gallery, then upload it.
+  ///
+  /// Currently only called from [_startMealUploadFlow], so [meal] is
+  /// always non-null in practice. Kept nullable for future flexibility
+  /// (e.g. re-adding a standalone gallery option to the attachment menu).
+  Future<void> _pickAndSendImage({Meals? meal}) async {
     final hasPermission = await _checkPhotoPermission();
     if (!hasPermission) {
       logger.info('Photo permission denied, aborting gallery pick');
@@ -270,66 +267,82 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final chat = context.read<ChatManager>();
     logger.info('Gallery image picker opened. chatId={}', [_chatId]);
 
-    // Step 1: Pick image from gallery
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image == null) {
       logger.debug('Gallery image pick cancelled by user');
       return;
     }
-    
+
     logger.debug('Gallery image selected. path={}', [image.path]);
-    
-    // Step 2: Show loading dialog (without await to avoid context issues)
+
     bool loadingOpen = false;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Görsel yükleniyor...');
+      DialogUtils.openLoading(
+        context,
+        message: meal != null ? 'Öğün fotoğrafı yükleniyor...' : 'Görsel yükleniyor...',
+      );
       loadingOpen = true;
       logger.debug('Loading dialog opened');
     }
-    
+
     try {
-      // Step 3: Send image
-      logger.debug('Starting image send operation...');
-      await chat.sendImageTo(_chatId, image);
-      logger.info('Gallery image sent successfully. chatId={}', [_chatId]);
-      
-      // Close loading dialog on success
+      if (meal != null) {
+        logger.info('Starting meal image upload (gallery). meal={} userId={}', [meal.name, _currentUid]);
+        final mealStateManager = Provider.of<MealManager>(context, listen: false);
+        final downloadUrl = await mealStateManager.uploadMealImg(
+          meal: meal,
+          image: image,
+          userId: _currentUid,
+          subscriptionId: _currentUid,
+          alsoPostToChat: true,
+          chatManager: chat,
+        );
+        if (downloadUrl == null) {
+          throw Exception('Öğün fotoğrafı yüklenemedi (downloadUrl is null)');
+        }
+        logger.info('Meal upload successful (gallery). meal={} userId={}', [meal.name, _currentUid]);
+      } else {
+        logger.debug('Starting image send operation...');
+        await chat.sendImageTo(_chatId, image);
+        logger.info('Gallery image sent successfully. chatId={}', [_chatId]);
+      }
+
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
         logger.debug('Loading dialog closed');
       }
-      
+
+      if (meal != null && mounted) {
+        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Öğün fotoğrafı yüklendi.');
+      }
     } catch (e, st) {
       logger.err('Gallery image send failed. chatId={} error={}', [_chatId, e]);
       if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-      
-      // Close loading dialog before showing error
+
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
         logger.debug('Loading dialog closed (error case)');
       }
-      
-      // Show error dialog
+
       if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Görsel gönderilemedi. Lütfen tekrar deneyin.',
+        message: meal != null
+            ? 'Öğün fotoğrafı yüklenemedi: ${e.toString()}'
+            : 'Görsel gönderilemedi. Lütfen tekrar deneyin.',
       );
     }
   }
 
-  /// Capture an image from the camera and send it to the chat.
-  /// 
-  /// Flow:
-  /// 1. Opens camera for capture
-  /// 2. Shows loading dialog during upload
-  /// 3. Sends image via ChatManager
-  /// 4. Handles errors with user-friendly dialogs
-  Future<void> _captureAndSendImage() async {
-    // Check camera permission first
+  /// Capture an image from the camera, then upload it.
+  ///
+  /// Currently only called from [_startMealUploadFlow], so [meal] is
+  /// always non-null in practice. Kept nullable for future flexibility
+  /// (e.g. re-adding a standalone camera option to the attachment menu).
+  Future<void> _captureAndSendImage({Meals? meal}) async {
     final hasPermission = await _checkCameraPermission();
     if (!hasPermission) {
       logger.info('Camera permission denied, aborting capture');
@@ -339,7 +352,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final chat = context.read<ChatManager>();
     logger.info('Camera capture opened. chatId={}', [_chatId]);
 
-    // Step 1: Capture image from camera
     final XFile? image = await _picker.pickImage(
       source: ImageSource.camera,
       preferredCameraDevice: CameraDevice.rear,
@@ -348,73 +360,87 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       logger.debug('Camera capture cancelled by user');
       return;
     }
-    
+
     logger.debug('Camera image captured. path={}', [image.path]);
-    
-    // Step 2: Show loading dialog (without await to avoid context issues)
+
     bool loadingOpen = false;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Görsel yükleniyor...');
+      DialogUtils.openLoading(
+        context,
+        message: meal != null ? 'Öğün fotoğrafı yükleniyor...' : 'Görsel yükleniyor...',
+      );
       loadingOpen = true;
       logger.debug('Loading dialog opened');
     }
-    
+
     try {
-      // Step 3: Send image
-      logger.debug('Starting image send operation...');
-      await chat.sendImageTo(_chatId, image);
-      logger.info('Camera image sent successfully. chatId={}', [_chatId]);
-      
-      // Close loading dialog on success
+      if (meal != null) {
+        logger.info('Starting meal image upload (camera). meal={} userId={}', [meal.name, _currentUid]);
+        final mealStateManager = Provider.of<MealManager>(context, listen: false);
+        final downloadUrl = await mealStateManager.uploadMealImg(
+          meal: meal,
+          image: image,
+          userId: _currentUid,
+          subscriptionId: _currentUid,
+          alsoPostToChat: true,
+          chatManager: chat,
+        );
+        if (downloadUrl == null) {
+          throw Exception('Öğün fotoğrafı yüklenemedi (downloadUrl is null)');
+        }
+        logger.info('Meal upload successful (camera). meal={} userId={}', [meal.name, _currentUid]);
+      } else {
+        logger.debug('Starting image send operation...');
+        await chat.sendImageTo(_chatId, image);
+        logger.info('Camera image sent successfully. chatId={}', [_chatId]);
+      }
+
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
         logger.debug('Loading dialog closed');
       }
-      
+
+      if (meal != null && mounted) {
+        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Öğün fotoğrafı yüklendi.');
+      }
     } catch (e, st) {
       logger.err('Camera image send failed. chatId={} error={}', [_chatId, e]);
       if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-      
-      // Close loading dialog before showing error
+
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
         logger.debug('Loading dialog closed (error case)');
       }
-      
-      // Show error dialog
+
       if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Kamera görüntüsü gönderilemedi. Lütfen tekrar deneyin.',
+        message: meal != null
+            ? 'Öğün fotoğrafı yüklenemedi: ${e.toString()}'
+            : 'Kamera görüntüsü gönderilemedi. Lütfen tekrar deneyin.',
       );
     }
   }
 
   /// Start the meal upload flow.
-  /// 
-  /// This is a multi-step process:
-  /// 1. User selects meal type (breakfast, lunch, dinner, snack)
+  ///
+  /// 1. User selects meal type
   /// 2. User selects image source (gallery or camera)
-  /// 3. User picks/captures image
-  /// 4. Image is uploaded to storage and posted to chat
+  /// 3. Delegates to [_pickAndSendImage] or [_captureAndSendImage]
   Future<void> _startMealUploadFlow() async {
-    final chat = context.read<ChatManager>();
-    
-    // Guard: Meal upload only allowed for your own chat
     if (!_canUploadMeals) {
       logger.warn(
         'Meal upload blocked. currentUid={} overrideChatId={} canUpload={}',
-        [_currentUid, widget.overrideChatId ?? 'null', _canUploadMeals]
+        [_currentUid, widget.overrideChatId ?? 'null', _canUploadMeals],
       );
       return;
     }
 
     logger.info('Meal upload flow started. currentUid={}', [_currentUid]);
-    
-    // Step 1: Choose meal type
+
     final Meals? meal = await _chooseMeal();
     if (meal == null) {
       logger.debug('Meal upload cancelled: No meal selected');
@@ -422,7 +448,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     logger.debug('Meal selected: {}', [meal.name]);
 
-    // Step 2: Choose image source
     final ImageSource? src = await _chooseSource();
     if (src == null) {
       logger.debug('Meal upload cancelled: No source selected');
@@ -430,85 +455,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     logger.debug('Image source selected: {}', [src.name]);
 
-    // Step 2.5: Check permission based on selected source
-    final hasPermission = src == ImageSource.camera 
-        ? await _checkCameraPermission() 
-        : await _checkPhotoPermission();
-    if (!hasPermission) {
-      logger.info('Permission denied for {}, aborting meal upload', [src.name]);
-      return;
-    }
-
-    // Step 3: Pick/capture image
-    final XFile? image = await _picker.pickImage(source: src);
-    if (image == null) {
-      logger.debug('Meal upload cancelled: No image selected');
-      return;
-    }
-    logger.debug('Meal image selected. path={}', [image.path]);
-
-    // Step 4: Upload with loading dialog
-    bool loadingOpen = false;
-    if (mounted) {
-      DialogUtils.openLoading(context, message: 'Öğün fotoğrafı yükleniyor...');
-      loadingOpen = true;
-      logger.debug('Loading dialog opened');
-    }
-
-    try {
-      logger.info('Starting meal image upload. meal={} userId={}', [meal.name, _currentUid]);
-      
-      // Use the MealStateManager for meal uploads
-      final mealStateManager = Provider.of<MealManager>(context, listen: false);
-      final downloadUrl = await mealStateManager.uploadMealImg(
-        meal: meal,
-        image: image,
-        userId: _currentUid,
-        subscriptionId: _currentUid, // Use appropriate subscription ID if available
-        alsoPostToChat: true, // Post to chat automatically
-        chatManager: chat, // Pass the ChatManager instance
-      );
-      
-      logger.debug('Meal upload completed. downloadUrl={}', [downloadUrl ?? 'null']);
-      
-      // Close loading dialog before showing success
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-        logger.debug('Loading dialog closed');
-      }
-      
-      if (downloadUrl != null) {
-        logger.info('Meal upload successful. meal={} userId={}', [meal.name, _currentUid]);
-        
-        if (!mounted) return;
-        await DialogUtils.openInfo(
-          context,
-          title: 'Başarılı',
-          message: 'Öğün fotoğrafı yüklendi.',
-        );
-      } else {
-        throw Exception('Öğün fotoğrafı yüklenemedi (downloadUrl is null)');
-      }
-      
-    } catch (e, st) {
-      logger.err('Meal upload failed. meal={} userId={} error={}', [meal.name ?? 'unknown', _currentUid, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-      
-      // Close loading dialog before showing error
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-        logger.debug('Loading dialog closed (error case)');
-      }
-      
-      // Show error dialog
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Öğün fotoğrafı yüklenemedi: ${e.toString()}',
-      );
+    if (src == ImageSource.gallery) {
+      await _pickAndSendImage(meal: meal);
+    } else {
+      await _captureAndSendImage(meal: meal);
     }
   }
 
@@ -656,8 +606,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _ChatInputRow(
             chatId: _chatId,
             canUploadMeals: _canUploadMeals,
-            onPickImage: _pickAndSendImage,
-            onCaptureImage: _captureAndSendImage,
             onMealUpload: _startMealUploadFlow,
             logger: logger,
           ),
@@ -885,16 +833,12 @@ class _MessageBubble extends StatelessWidget {
 class _ChatInputRow extends StatefulWidget {
   final String chatId;
   final bool canUploadMeals;
-  final VoidCallback onPickImage;
-  final VoidCallback onCaptureImage;
   final VoidCallback onMealUpload;
   final Logger logger;
 
   const _ChatInputRow({
     required this.chatId,
     required this.canUploadMeals,
-    required this.onPickImage,
-    required this.onCaptureImage,
     required this.onMealUpload,
     required this.logger,
   });
@@ -979,18 +923,6 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              _AttachmentOption(
-                                icon: Icons.photo_library_rounded,
-                                label: 'Galeri',
-                                color: Colors.purple,
-                                onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onPickImage),
-                              ),
-                              _AttachmentOption(
-                                icon: Icons.camera_alt_rounded,
-                                label: 'Kamera',
-                                color: Colors.blue,
-                                onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onCaptureImage),
-                              ),
                               if (widget.canUploadMeals)
                                 _AttachmentOption(
                                   icon: Icons.restaurant_rounded,

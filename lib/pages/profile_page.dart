@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:ngy_app/pages/reset_password_page.dart';
 import 'package:intl/intl.dart';
 import 'package:ngy_app/services/meal_reminder_service.dart';
-import 'package:ngy_app/services/notification_service.dart';
-import 'package:ngy_app/services/fcm_service.dart';
+import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -107,15 +106,71 @@ class _ProfilePageState extends State<ProfilePage> {
     _showInfoDialog('Bilgiler güncellendi!');
   }
 
-  Future<void> _logout() async {
-    // Cancel all local notifications before signing out
-    await NotificationService().cancelAllNotifications();
-    await MealReminderService().cancelAllMealReminders();
-    // Remove FCM token before signing out to stop push notifications on this device
-    await FcmService().removeFcmToken();
-    await FirebaseAuth.instance.signOut();
-    if (!context.mounted) return;
-    Navigator.of(context).popUntil((route) => route.isFirst);
+
+  Future<void> _requestAccountDeletion() async {
+    if (!mounted) return;
+
+    final firstConfirm = await DialogUtils.openConfirm(
+      context,
+      title: 'Hesap Silme Talebi',
+      message:
+          'Hesabınız ve ilişkili tüm verileriniz silinmek üzere işaretlenecektir. '
+          'Bu işlemden sonra hesabınıza giriş yapamayacaksınız. '
+          'Devam etmek istediğinize emin misiniz?',
+      confirmText: 'Evet, devam et',
+      cancelText: 'Vazgeç',
+    );
+
+    if (!firstConfirm || !mounted) return;
+
+    final secondConfirm = await DialogUtils.openConfirm(
+      context,
+      title: 'Son Onay',
+      message:
+          'Bu işlem geri alınamaz. Hesabınız kalıcı olarak silinmek üzere '
+          'işaretlenecek ve bir daha giriş yapamayacaksınız. '
+          'Gerçekten emin misiniz?',
+      confirmText: 'Evet, hesabımı sil',
+      cancelText: 'Vazgeç',
+    );
+
+    if (!secondConfirm || !mounted) return;
+
+    bool loadingOpen = false;
+    try {
+      if (mounted) {
+        DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
+        loadingOpen = true;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .set({'isUserRequestedRemoval': true}, SetOptions(merge: true));
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      await FirebaseAuth.instance.signOut();
+
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } catch (e) {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (mounted) {
+        DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'İşlem sırasında bir hata oluştu. Lütfen tekrar deneyiniz.',
+        );
+      }
+    }
   }
 
   void _showInfoDialog(String message) {
@@ -140,16 +195,6 @@ class _ProfilePageState extends State<ProfilePage> {
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Profilim',
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _saveUserData,
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _logout,
-          ),
-        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -295,21 +340,21 @@ class _ProfilePageState extends State<ProfilePage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      Align(
-                        alignment: Alignment.center,
-                        child: SizedBox(
-                          width: buttonWidth,
-                          child: ElevatedButton.icon(
-                            onPressed: _logout,
-                            icon: const Icon(Icons.logout),
-                            label: const Text('Çıkış Yap'),
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red),
-                          ),
-                        ),
-                      ),
                     ],
+                  ),
+                  const SizedBox(height: 48),
+                  const Divider(),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.center,
+                    child: TextButton.icon(
+                      onPressed: _requestAccountDeletion,
+                      icon: const Icon(Icons.delete_forever, color: Colors.red),
+                      label: const Text(
+                        'Hesabımı ve ilişkili tüm verileri sil',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ),
                   ),
                 ],
               ),
