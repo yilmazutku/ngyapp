@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/logger.dart';
@@ -38,10 +39,29 @@ class LoginProvider extends ChangeNotifier {
     bool isLoginSuccessful = false;
     
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
+
+      final uid = credential.user?.uid;
+      if (uid != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
+        final data = userDoc.data();
+        if (data != null && data['isUserRequestedRemoval'] == true) {
+          await FirebaseAuth.instance.signOut();
+          _errorMessage =
+              'E-posta adresi veya şifre yanlış, lütfen kontrol ediniz.';
+          logger.info('Login blocked: user {} requested account removal', [uid]);
+          _setLoadingState(false);
+          notifyListeners();
+          return false;
+        }
+      }
+
       isLoginSuccessful = true;
     } on FirebaseAuthException catch (e) {
       _handleFirebaseAuthError(e);
