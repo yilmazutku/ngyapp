@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 
 import '../dialogs/add_appointment_dialog.dart';
 import '../models/appointment_model.dart';
+import '../models/event_model.dart';
 import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../providers/appointment_manager.dart';
+import '../providers/event_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -64,6 +66,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   final List<String> sortOptions = ['Tarih Artan', 'Tarih Azalan', 'İsim A-Z', 'İsim Z-A'];
 
   late Future<List<AppointmentModel>> _appointmentsFuture;
+  List<EventModel> _events = [];
 
   // Scroll controllers + keys (avoid "no ScrollPosition" and preserve positions)
   late final ScrollController _verticalCtrl;
@@ -96,6 +99,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     _horizontalCtrl = ScrollController();
 
     _fetchAllAppointments();
+    _fetchEvents();
   }
 
   @override
@@ -108,6 +112,232 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// Initiates fetching of all appointments
   void _fetchAllAppointments() {
     _appointmentsFuture = _fetchAppointmentsWithUsers();
+  }
+
+  Future<void> _fetchEvents() async {
+    if (startDate == null || endDate == null) return;
+    try {
+      final eventProvider =
+          Provider.of<EventProvider>(context, listen: false);
+      final events = await eventProvider.fetchEventsForDateRange(
+          startDate!, endDate!.add(const Duration(days: 1)));
+      if (mounted) {
+        setState(() => _events = events);
+      }
+    } catch (e) {
+      logger.err('Error fetching events: {}', [e]);
+    }
+  }
+
+  void _showAddEventDialog(BuildContext context, DateTime selectedDate) {
+    final nameCtrl = TextEditingController();
+    final startHourCtrl = TextEditingController(text: '09');
+    final startMinCtrl = TextEditingController(text: '00');
+    final endHourCtrl = TextEditingController(text: '10');
+    final endMinCtrl = TextEditingController(text: '00');
+
+    TimeOfDay? _parseFields(
+        TextEditingController hCtrl, TextEditingController mCtrl) {
+      final h = int.tryParse(hCtrl.text);
+      final m = int.tryParse(mCtrl.text);
+      if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59) {
+        return null;
+      }
+      return TimeOfDay(hour: h, minute: m);
+    }
+
+    Widget buildTimeRow(String label, TextEditingController hCtrl,
+        TextEditingController mCtrl) {
+      return Row(
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(label,
+                style: const TextStyle(fontWeight: FontWeight.w500)),
+          ),
+          SizedBox(
+            width: 56,
+            child: TextField(
+              controller: hCtrl,
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
+              maxLength: 2,
+              decoration: const InputDecoration(
+                counterText: '',
+                hintText: 'SS',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: Text(':', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          ),
+          SizedBox(
+            width: 56,
+            child: TextField(
+              controller: mCtrl,
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
+              maxLength: 2,
+              decoration: const InputDecoration(
+                counterText: '',
+                hintText: 'DD',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Etkinlik Ekle'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Etkinlik Adı',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              buildTimeRow('Başlangıç', startHourCtrl, startMinCtrl),
+              const SizedBox(height: 12),
+              buildTimeRow('Bitiş', endHourCtrl, endMinCtrl),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('İptal')),
+            ElevatedButton(
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) {
+                  if (!mounted) return;
+                  await DialogUtils.openError(dialogContext,
+                      title: 'Hata',
+                      message: 'Lütfen etkinlik adı giriniz.');
+                  return;
+                }
+                final startTime =
+                    _parseFields(startHourCtrl, startMinCtrl);
+                final endTime = _parseFields(endHourCtrl, endMinCtrl);
+                if (startTime == null || endTime == null) {
+                  if (!mounted) return;
+                  await DialogUtils.openError(dialogContext,
+                      title: 'Hata',
+                      message: 'Geçersiz saat formatı. SS:DD olarak giriniz.');
+                  return;
+                }
+                final startDt = DateTime(
+                    selectedDate.year,
+                    selectedDate.month,
+                    selectedDate.day,
+                    startTime.hour,
+                    startTime.minute);
+                final endDt = DateTime(
+                    selectedDate.year,
+                    selectedDate.month,
+                    selectedDate.day,
+                    endTime.hour,
+                    endTime.minute);
+                if (!endDt.isAfter(startDt)) {
+                  if (!mounted) return;
+                  await DialogUtils.openError(dialogContext,
+                      title: 'Hata',
+                      message:
+                          'Bitiş saati başlangıçtan sonra olmalıdır.');
+                  return;
+                }
+                Navigator.pop(dialogContext);
+                try {
+                  final eventProvider =
+                      Provider.of<EventProvider>(context, listen: false);
+                  await eventProvider.addEvent(EventModel(
+                    eventId: '',
+                    name: name,
+                    startDateTime: startDt,
+                    endDateTime: endDt,
+                    createDate: DateTime.now(),
+                  ));
+                  if (mounted) {
+                    _fetchAllAppointments();
+                    await _fetchEvents();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    await DialogUtils.openError(context,
+                        title: 'Hata',
+                        message: 'Etkinlik oluşturulamadı: $e');
+                  }
+                }
+              },
+              child: const Text('Kaydet'),
+            ),
+          ],
+        );
+      },
+    ).then((_) {
+      nameCtrl.dispose();
+      startHourCtrl.dispose();
+      startMinCtrl.dispose();
+      endHourCtrl.dispose();
+      endMinCtrl.dispose();
+    });
+  }
+
+  Widget _buildEventCard(EventModel event) {
+    final String timeRange =
+        '${_timeFmt.format(event.startDateTime)}-${_timeFmt.format(event.endDateTime)}';
+    final String displayText = '$timeRange ${event.name}';
+
+    return GestureDetector(
+      onLongPress: () async {
+        final confirm = await DialogUtils.openConfirm(
+          context,
+          title: 'Etkinliği Sil',
+          message: '"${event.name}" etkinliğini silmek istiyor musunuz?',
+        );
+        if (confirm) {
+          final eventProvider =
+              Provider.of<EventProvider>(context, listen: false);
+          await eventProvider.deleteEvent(event.eventId);
+          if (mounted) {
+            _fetchAllAppointments();
+            await _fetchEvents();
+          }
+        }
+      },
+      child: Container(
+        width: double.infinity,
+        height: double.infinity,
+        margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Colors.deepPurple.shade50,
+          borderRadius: BorderRadius.circular(1),
+          border: Border.all(color: Colors.deepPurple.shade200, width: 1),
+        ),
+        child: Text(
+          displayText,
+          style: const TextStyle(
+              fontSize: 11, fontWeight: FontWeight.bold),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 3,
+        ),
+      ),
+    );
   }
 
   /// Generate test appointments for a given day
@@ -223,6 +453,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         startDate = DateTime(pickedRange.start.year, pickedRange.start.month, pickedRange.start.day);
         endDate = DateTime(pickedRange.end.year, pickedRange.end.month, pickedRange.end.day);
         _fetchAllAppointments();
+        _fetchEvents();
       });
     }
   }
@@ -549,16 +780,38 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const Spacer(),
-                SizedBox(
-                  height: 22,
-                  child: ElevatedButton.icon(
-                    onPressed: () => _showAddAppointmentDialog(context, day),
-                    icon: const Icon(Icons.add, size: 12),
-                    label: const Text('Ekle', style: TextStyle(fontSize: 12)),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 1),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 22,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _showAddAppointmentDialog(context, day),
+                          icon: const Icon(Icons.add, size: 12),
+                          label: const Text('Ekle', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 1),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: SizedBox(
+                        height: 22,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _showAddEventDialog(context, day),
+                          icon: const Icon(Icons.add, size: 12),
+                          label: const Text('Diğer', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 1),
+                            backgroundColor: Colors.deepPurple.shade50,
+                            foregroundColor: Colors.deepPurple,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -607,12 +860,37 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                     child: _buildAppointmentCard(appt),
                   );
                 }),
+                // Events
+                ..._eventsForDay(day).map((event) {
+                  if (event.startDateTime.hour < kStartHour ||
+                      event.startDateTime.hour >= kEndHour) {
+                    return const SizedBox.shrink();
+                  }
+                  final top = _getTopPositionForTime(event.startDateTime);
+                  final height =
+                      _getHeightForDuration(event.durationMinutes);
+                  return Positioned(
+                    top: top,
+                    left: 0,
+                    right: 0,
+                    height: height,
+                    child: _buildEventCard(event),
+                  );
+                }),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  List<EventModel> _eventsForDay(DateTime day) {
+    final dayStart = _dateOnly(day);
+    return _events.where((e) {
+      final eDay = _dateOnly(e.startDateTime);
+      return eDay == dayStart;
+    }).toList();
   }
 
   // Utility: normalize a DateTime to Y/M/D (00:00) to use as a map key
@@ -698,6 +976,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     startDate = _selectedDay;
     endDate = _selectedDay;
     _fetchAllAppointments();
+    _fetchEvents();
   }
 
   // ==================== Desktop Weekly Navigation ====================
@@ -718,6 +997,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                 startDate = startDate!.subtract(const Duration(days: 7));
                 endDate = endDate!.subtract(const Duration(days: 7));
                 _fetchAllAppointments();
+                _fetchEvents();
               });
             }
           }
@@ -728,6 +1008,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                 startDate = startDate!.add(const Duration(days: 7));
                 endDate = endDate!.add(const Duration(days: 7));
                 _fetchAllAppointments();
+                _fetchEvents();
               });
             }
           }
@@ -857,10 +1138,23 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _showAddEventDialog(context, day),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Diğer'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    backgroundColor: Colors.deepPurple.shade50,
+                    foregroundColor: Colors.deepPurple,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
-        // Time grid with appointments (full width)
+        // Time grid with appointments + events (full width)
         SizedBox(
           height: _timeGridHeight,
           child: Stack(
@@ -900,6 +1194,23 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                   right: 0,
                   height: height,
                   child: _buildAppointmentCard(appt),
+                );
+              }),
+              // Events
+              ..._eventsForDay(day).map((event) {
+                if (event.startDateTime.hour < kStartHour ||
+                    event.startDateTime.hour >= kEndHour) {
+                  return const SizedBox.shrink();
+                }
+                final top = _getTopPositionForTime(event.startDateTime);
+                final height =
+                    _getHeightForDuration(event.durationMinutes);
+                return Positioned(
+                  top: top,
+                  left: 0,
+                  right: 0,
+                  height: height,
+                  child: _buildEventCard(event),
                 );
               }),
             ],

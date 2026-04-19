@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/appointment_model.dart';
+import '../models/event_model.dart';
 import '../models/logger.dart';
+import '../models/user_model.dart';
+import 'event_provider.dart';
 
 class TimeslotManager extends ChangeNotifier {
   final Logger logger = Logger.forClass(TimeslotManager);
@@ -79,8 +82,27 @@ class TimeslotManager extends ChangeNotifier {
           .map((doc) => AppointmentModel.fromDocument(doc))
           .toList();
 
+      // Also fetch events for the day
+      final dayEvents =
+          await EventProvider.eventsCollection
+              .where('startDateTime', isGreaterThanOrEqualTo: startOfDay)
+              .where('startDateTime', isLessThan: endOfDay)
+              .get()
+              .then((snap) =>
+                  snap.docs.map((d) => EventModel.fromDocument(d)).toList());
+
       final availableSlots = adminTimeSlots.where((time) {
-        return isTimeSlotAvailable(date, time, dayAppointments);
+        if (!isTimeSlotAvailable(date, time, dayAppointments)) {
+          return false;
+        }
+        final slotDt = DateTime(
+            date.year, date.month, date.day, time.hour, time.minute);
+        for (final event in dayEvents) {
+          if (isSlotBlockedByEvent(slotDt, event)) {
+            return false;
+          }
+        }
+        return true;
       }).toList();
 
       logger.info(
@@ -114,13 +136,33 @@ class TimeslotManager extends ChangeNotifier {
       if (dateTimeWithHour.isBefore(DateTime.now())) return false;
 
       for (var appointment in dayAppointments) {
-        if (appointment.appointmentDateTime == dateTimeWithHour &&
-            appointment.status != AppointmentStatus.canceled) {
+        if (isSlotBlockedByAppointment(dateTimeWithHour, appointment)) {
           return false;
         }
       }
     }
     return true;
+  }
+
+  /// A slot is blocked if it falls within the appointment's duration [start, end).
+  bool isSlotBlockedByAppointment(
+      DateTime slotDateTime, AppointmentModel appointment) {
+    if (appointment.status == AppointmentStatus.canceled) return false;
+
+    final apptStart = appointment.appointmentDateTime;
+    final apptEnd =
+        apptStart.add(Duration(minutes: appointment.durationMinutes));
+
+    return !slotDateTime.isBefore(apptStart) && slotDateTime.isBefore(apptEnd);
+  }
+
+  /// A slot is blocked if it falls within the event's duration [start, end).
+  bool isSlotBlockedByEvent(DateTime slotDateTime, EventModel event) {
+    final eventStart = event.startDateTime;
+    final eventEnd = event.endDateTime;
+
+    return !slotDateTime.isBefore(eventStart) &&
+        slotDateTime.isBefore(eventEnd);
   }
 
   // ---------------------- TIMESLOT CRUD ----------------------
@@ -275,8 +317,9 @@ class TimeslotManager extends ChangeNotifier {
 
       final List<dynamic> rawSlots =
       docSnapshot.exists ? (docSnapshot.data()?['slots'] ?? []) : [];
-      final List<String> storedTimes =
+      final List<String> adminSlots =
       rawSlots.map((e) => e.toString()).toList();
+      final List<String> storedTimes = List<String>.from(adminSlots);
 
       final startOfDay = DateTime(date.year, date.month, date.day);
       final endOfDay = startOfDay.add(const Duration(days: 1));
@@ -288,22 +331,81 @@ class TimeslotManager extends ChangeNotifier {
       final bookedTimeSlots = <String>[];
       final appointmentsBySlot = <String, List<AppointmentModel>>{};
 
-      for (var appointment in appointments) {
-        if (appointment.status != AppointmentStatus.canceled) {
-          final hour =
-          appointment.appointmentDateTime.hour.toString().padLeft(2, '0');
-          final minute =
-          appointment.appointmentDateTime.minute.toString().padLeft(2, '0');
-          final timeSlot = '$hour:$minute';
+      final activeAppointments = appointments
+          .where((a) => a.status != AppointmentStatus.canceled)
+          .toList();
 
-          hasAppointment[timeSlot] = true;
-          bookedTimeSlots.add(timeSlot);
+      // Batch-fetch user data for all active appointments
+      final uniqueUserIds =
+          activeAppointments.map((a) => a.userId).toSet();
+      final usersCollection = FirebaseFirestore.instance.collection('users');
+      final userCache = <String, UserModel>{};
+      for (final uid in uniqueUserIds) {
+        try {
+          final doc = await usersCollection.doc(uid).get();
+          if (doc.exists) {
+            userCache[uid] = UserModel.fromDocument(doc);
+          }
+        } catch (_) {}
+      }
+      for (final appt in activeAppointments) {
+        appt.user = userCache[appt.userId];
+      }
 
-          appointmentsBySlot.putIfAbsent(timeSlot, () => []);
-          appointmentsBySlot[timeSlot]!.add(appointment);
+      // Ensure each appointment's own start-time slot exists in storedTimes
+      for (var appointment in activeAppointments) {
+        final hour =
+            appointment.appointmentDateTime.hour.toString().padLeft(2, '0');
+        final minute =
+            appointment.appointmentDateTime.minute.toString().padLeft(2, '0');
+        final timeSlot = '$hour:$minute';
+        if (!storedTimes.contains(timeSlot)) {
+          storedTimes.add(timeSlot);
+        }
+      }
 
-          if (!storedTimes.contains(timeSlot)) {
-            storedTimes.add(timeSlot);
+      // Fetch events for the day
+      final dayEvents = await EventProvider.eventsCollection
+          .where('startDateTime', isGreaterThanOrEqualTo: startOfDay)
+          .where('startDateTime', isLessThan: endOfDay)
+          .get()
+          .then((snap) =>
+              snap.docs.map((d) => EventModel.fromDocument(d)).toList());
+
+      final eventsBySlot = <String, List<EventModel>>{};
+
+      // Check every stored slot against every active appointment and event
+      for (final slotStr in storedTimes) {
+        final parts = slotStr.split(':');
+        final slotDateTime = startOfDay.add(
+          Duration(hours: int.parse(parts[0]), minutes: int.parse(parts[1])),
+        );
+
+        for (final appointment in activeAppointments) {
+          if (isSlotBlockedByAppointment(slotDateTime, appointment)) {
+            hasAppointment[slotStr] = true;
+            if (!bookedTimeSlots.contains(slotStr)) {
+              bookedTimeSlots.add(slotStr);
+            }
+            appointmentsBySlot.putIfAbsent(slotStr, () => []);
+            if (!appointmentsBySlot[slotStr]!
+                .any((a) => a.appointmentId == appointment.appointmentId)) {
+              appointmentsBySlot[slotStr]!.add(appointment);
+            }
+          }
+        }
+
+        for (final event in dayEvents) {
+          if (isSlotBlockedByEvent(slotDateTime, event)) {
+            hasAppointment[slotStr] = true;
+            if (!bookedTimeSlots.contains(slotStr)) {
+              bookedTimeSlots.add(slotStr);
+            }
+            eventsBySlot.putIfAbsent(slotStr, () => []);
+            if (!eventsBySlot[slotStr]!
+                .any((e) => e.eventId == event.eventId)) {
+              eventsBySlot[slotStr]!.add(event);
+            }
           }
         }
       }
@@ -324,9 +426,12 @@ class TimeslotManager extends ChangeNotifier {
 
       return {
         'storedTimes': storedTimes,
+        'adminSlots': adminSlots,
         'hasAppointment': hasAppointment,
         'bookedTimeSlots': bookedTimeSlots,
         'appointmentsBySlot': appointmentsBySlot,
+        'eventsBySlot': eventsBySlot,
+        'events': dayEvents,
       };
     } catch (e) {
       logger.err('Error fetching timeslot data for date {}: {}', [date, e]);

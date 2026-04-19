@@ -3,15 +3,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'logger.dart';
 
 class MealModel {
+  static const int maxImages = 3;
+
   final String mealId;
   final Meals mealType;
-  final String imageUrl;
+  final List<String> imageUrls;
   final String? subscriptionId;
   final String? description;
   final DateTime timestamp;
   final int? calories;
   final String? notes;
-  bool isChecked; // Now mutable to allow state changes
+  bool isChecked;
   final DateTime createDate;
   final String? createUser;
   DateTime? updateDate;
@@ -20,7 +22,7 @@ class MealModel {
   MealModel({
     required this.mealId,
     required this.mealType,
-    required this.imageUrl,
+    required this.imageUrls,
     this.subscriptionId,
     this.description,
     required this.timestamp,
@@ -33,12 +35,29 @@ class MealModel {
     this.updateUser,
   }) : createDate = createDate ?? DateTime.now();
 
+  /// First image URL for convenience, or empty string if none.
+  String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
+
+  bool get canAddMoreImages => imageUrls.length < maxImages;
+
   factory MealModel.fromDocument(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    // Backward compat: read new list field first, fall back to legacy string
+    List<String> urls;
+    if (data['imageUrls'] is List) {
+      urls = List<String>.from(data['imageUrls']);
+    } else if (data['imageUrl'] is String &&
+        (data['imageUrl'] as String).isNotEmpty) {
+      urls = [data['imageUrl'] as String];
+    } else {
+      urls = [];
+    }
+
     return MealModel(
       mealId: doc.id,
       mealType: Meals.values.firstWhere((e) => e.name == data['mealType']),
-      imageUrl: data['imageUrl'],
+      imageUrls: urls,
       subscriptionId: data['subscriptionId'],
       description: data['description'],
       timestamp: (data['timestamp'] as Timestamp).toDate(),
@@ -55,6 +74,8 @@ class MealModel {
   Map<String, dynamic> toMap() {
     return {
       'mealType': mealType.name,
+      'imageUrls': imageUrls,
+      // Keep legacy field for any readers that still use it
       'imageUrl': imageUrl,
       'subscriptionId': subscriptionId,
       'description': description,

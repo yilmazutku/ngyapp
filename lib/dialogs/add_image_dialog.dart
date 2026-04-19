@@ -231,48 +231,32 @@ class _AddImageDialogState extends State<AddImageDialog> {
     });
 
     try {
-      // 2) Get MealManager from Provider
-      //
-      // MealManager.uploadMealImg will:
-      //  - find today's meal doc:
-      //      users/{userId}/meals/{yyyy-MM-dd}/mealEntries/{meal.name}
-      //  - load old meal doc (if exists)
-      //  - delete old image from Storage (if there was one)
-      //  - upload the new image file to Storage
-      //  - write/merge MealModel in Firestore (for that meal & date)
-      //  - update daily "meals" map (mark this meal as checked)
-      //  - optionally post to chat (we pass alsoPostToChat: false here)
       final mealManager = Provider.of<MealManager>(context, listen: false);
 
       final downloadUrl = await mealManager.uploadMealImg(
         userId: widget.userId,
-        meal: _selectedMeal!,                          // which meal (BREAKFAST, LUNCH, etc.)
-        image: _selectedImage!,                        // picked image
+        meal: _selectedMeal!,
+        image: _selectedImage!,
         subscriptionId: _selectedSubscription!.subscriptionId,
-        alsoPostToChat: false,                         // or true if you want it in chat too
-        // chatManager: someChatManager,               // if you want to use chat posting
+        alsoPostToChat: false,
       );
 
-      // 3) uploadMealImg returns the download URL on success, or null on failure
       if (downloadUrl != null) {
-        // Tell parent to refresh its data (list/grid/etc.)
         widget.onImageAdded();
 
         if (!mounted) return;
 
-        // Show success dialog
         await DialogUtils.openInfo(
           context,
           title: 'Başarılı',
           message: 'Resim başarıyla yüklendi.',
         );
 
-        // Close the dialog
         Navigator.of(context).pop();
       } else {
-        // uploadMealImg already logged the error; we just show a generic message
         setState(() {
-          _errorMessage = 'Error uploading image.';
+          _errorMessage =
+              'Yükleme başarısız. Bu öğün için en fazla ${MealModel.maxImages} görsel ekleyebilirsiniz.';
         });
       }
     } catch (e) {

@@ -186,9 +186,8 @@ static const MEAL_RANGE_DAYS=7;
     return meals;
   }
 
-/// Uploads a meal photo to Firebase Storage and updates the meal document
-/// *without* wiping possible future-user-entered fields (description, calories, notes).
-/// önceden tamamını silip yapıyodu şuan sadece modify ediyo merge ile
+/// Uploads a meal photo to Firebase Storage and appends it to the meal document.
+/// A meal type can have up to [MealModel.maxImages] images.
 Future<String?> uploadMealImg({
   required String userId,
   required Meals meal,
@@ -201,11 +200,6 @@ Future<String?> uploadMealImg({
   try {
     logger.info('Uploading meal photo. meal={}', [meal.name]);
 
-    // 1) Prepare references for "today" and this specific meal
-    //
-    // Firestore path (per user, per day, per meal):
-    //   users/{userId}/meals/{yyyy-MM-dd}/mealEntries/{meal.name}
-    //
     final referenceDate = overrideDate ?? DateTime.now();
     final currentDate = DateFormat('yyyy-MM-dd').format(referenceDate);
     final mealDocRef = FirebaseFirestore.instance
@@ -218,29 +212,20 @@ Future<String?> uploadMealImg({
 
     MealModel? previousMealModel;
 
-    // 2) Try to read the existing document:
-    //    - If it exists, we:
-    //        * parse it into MealModel
-    //        * delete ONLY the old image from Storage
-    //    - We do NOT delete the Firestore document itself.
     try {
       final mealDoc = await mealDocRef.get();
-
       if (mealDoc.exists) {
         previousMealModel = MealModel.fromDocument(mealDoc);
 
-        // If there was an old image, delete it from Storage to avoid leaks.
-        if (previousMealModel.imageUrl.isNotEmpty) {
-          await deleteFile(previousMealModel.imageUrl);
-          logger.info('Previous meal image deleted for meal: {}', [meal.name]);
+        if (!previousMealModel.canAddMoreImages) {
+          logger.warn('Max images reached for meal: {}', [meal.name]);
+          return null;
         }
       }
     } catch (e) {
-      logger.err('Error handling previous meal image/doc: {}', [e]);
-      // We still continue; worst case we just overwrite with new data.
+      logger.err('Error reading previous meal doc: {}', [e]);
     }
 
-    // 3) Upload the new image file to Firebase Storage.
     final result = await _uploadImg(
       image,
       meal: meal,
@@ -253,24 +238,14 @@ Future<String?> uploadMealImg({
       return null;
     }
 
-    // 4) Build the new MealModel, but KEEP user-entered fields from previous doc:
-    //
-    //    - Always update:
-    //        * imageUrl          -> new image URL
-    //        * timestamp         -> now
-    //        * subscriptionId    -> from parameter
-    //        * isChecked         -> true  (this meal is now "done" for today)
-    //
-    //    - Preserve from previousMealModel (if it existed):
-    //        * description
-    //        * calories
-    //        * notes
-    //
-    //    This way, changing the photo does NOT wipe those fields.
+    // Append the new URL to existing list
+    final existingUrls = previousMealModel?.imageUrls ?? [];
+    final updatedUrls = [...existingUrls, result.downloadUrl!];
+
     final mergedMealModel = MealModel(
       mealId: previousMealModel?.mealId ?? mealDocRef.id,
       mealType: meal,
-      imageUrl: result.downloadUrl!,
+      imageUrls: updatedUrls,
       subscriptionId: subscriptionId,
       timestamp: referenceDate,
       description: previousMealModel?.description,
@@ -279,40 +254,77 @@ Future<String?> uploadMealImg({
       isChecked: true,
     );
 
-    // 5) Write merged data back to Firestore.
-    //    .set() here will:
-    //      - create the doc if it didn't exist
-    //      - overwrite it with the merged fields if it did
     await mealDocRef.set(mergedMealModel.toMap());
+    await updateMealState(userId, referenceDate, meal, true);
 
-    // 6) Update the "meals" map on the day document:
-    //
-    // users/{userId}/meals/{currentDate}
-    //
-    // Example document after multiple meals:
-    // {
-    //   "meals": {
-    //     "BREAKFAST": true,
-    //     "LUNCH": true,
-    //     "DINNER": false
-    //   }
-    // }
-    //
-    // merge: true means we only touch this one meal key.
-    await updateMealState(userId, referenceDate, meal,true /*isChecked*/);
-
-    // 7) Optionally post the new image to chat
     if (alsoPostToChat) {
       await _postToChat(userId, meal, result.downloadUrl!, chatManager);
     }
 
-    // 8) Notify listeners so UI can refresh
     notifyListeners();
 
     logger.info('Meal upload finished. downloadUrl={}', [result.downloadUrl]);
     return result.downloadUrl;
   } catch (e, st) {
-    logger.err('Error uploading meal: {}, Stack:', [e,st]);
+    logger.err('Error uploading meal: {}, Stack:', [e, st]);
+    rethrow;
+  }
+}
+
+/// Deletes a single image from a meal entry.
+/// If no images remain, the meal is marked as unchecked.
+Future<void> deleteMealImage({
+  required String userId,
+  required Meals meal,
+  required String imageUrlToDelete,
+  DateTime? overrideDate,
+}) async {
+  try {
+    final referenceDate = overrideDate ?? DateTime.now();
+    final currentDate = DateFormat('yyyy-MM-dd').format(referenceDate);
+    final mealDocRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('meals')
+        .doc(currentDate)
+        .collection('mealEntries')
+        .doc(meal.name);
+
+    final mealDoc = await mealDocRef.get();
+    if (!mealDoc.exists) return;
+
+    final mealModel = MealModel.fromDocument(mealDoc);
+    final updatedUrls = List<String>.from(mealModel.imageUrls)
+      ..remove(imageUrlToDelete);
+
+    // Delete the file from Storage
+    await deleteFile(imageUrlToDelete);
+
+    if (updatedUrls.isEmpty) {
+      // No images left — remove the document and uncheck
+      await mealDocRef.delete();
+      await updateMealState(userId, referenceDate, meal, false);
+    } else {
+      await mealDocRef.set(
+        MealModel(
+          mealId: mealModel.mealId,
+          mealType: meal,
+          imageUrls: updatedUrls,
+          subscriptionId: mealModel.subscriptionId,
+          timestamp: mealModel.timestamp,
+          description: mealModel.description,
+          calories: mealModel.calories,
+          notes: mealModel.notes,
+          isChecked: true,
+        ).toMap(),
+      );
+    }
+
+    notifyListeners();
+    logger.info('Deleted image from meal {}. Remaining: {}',
+        [meal.name, updatedUrls.length]);
+  } catch (e) {
+    logger.err('Error deleting meal image: {}', [e]);
     rethrow;
   }
 }

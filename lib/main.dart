@@ -49,6 +49,7 @@ import 'pages/profile_page.dart';
 import 'pages/user_payments_page.dart';
 import 'providers/appointment_manager.dart';
 import 'providers/daily_data_provider.dart';
+import 'providers/event_provider.dart';
 import 'providers/diet_provider.dart';
 import 'providers/login_manager.dart';
 import 'providers/meal_state_and_upload_manager.dart';
@@ -65,6 +66,7 @@ import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
 import 'pages/notification_test_page.dart';
+import 'pages/testing_page.dart';
 
 /// Global platform configuration instance
 late final PlatformConfig platformConfig;
@@ -190,6 +192,7 @@ class MyApp extends StatelessWidget {
           create: (ctx) => AppointmentManager(subProvider: ctx.read<SubProvider>()),
         ),
         ChangeNotifierProvider(create: (_) => TimeslotManager()),
+        ChangeNotifierProvider(create: (_) => EventProvider()),
         ChangeNotifierProvider(create: (_) => LoginProvider()),
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(
@@ -602,6 +605,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _navigateToTesting(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const TestingPage(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final userId = FirebaseAuth.instance.currentUser?.uid;
@@ -699,6 +711,11 @@ class _HomePageState extends State<HomePage> {
               'icon': Icons.notifications_active,
               'label': 'Bildirim Testi',
               'onTap': () => _navigateToNotificationTest(context),
+            },
+            {
+              'icon': Icons.science,
+              'label': 'Testing',
+              'onTap': () => _navigateToTesting(context),
             },
           ]);
         }

@@ -129,14 +129,23 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         showAllSubscriptions: true,
       );
       
-      // Find the latest created subscription with status == 'active'
-      // Subscriptions are already ordered by startDate descending
-      final activeSubscription = subscriptions.firstWhere(
-        (sub) => sub.status == SubActiveStatus.active,
-        orElse: () => throw Exception('Aktif paketiniz bulunmamaktadır. Lütfen önce bir paket satın alın.'),
-      );
+      final activeSubscription = subscriptions
+          .cast<SubscriptionModel?>()
+          .firstWhere(
+            (sub) => sub!.status == SubActiveStatus.active,
+            orElse: () => null,
+          );
 
       if (!mounted) return;
+
+      if (activeSubscription == null) {
+        await DialogUtils.openError(
+          context,
+          title: 'Randevu Oluşturulamadı',
+          message: 'Tanımlı bir paketiniz bulunamadı. Randevu alabilmeniz için lütfen ofis ile iletişime geçiniz.',
+        );
+        return;
+      }
 
       DateTime appointmentDateTime = DateTime(
         _selectedDate.year,

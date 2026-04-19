@@ -18,6 +18,7 @@ import '../utils/meal_formatter.dart';
 import '../services/notification_service.dart';
 import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/chat_image_preview.dart';
 import '../widgets/loading_overlay.dart';
 import 'dart:async';
 
@@ -61,6 +62,10 @@ class _MealUploadPageState extends State<MealUploadPage> {
   Map<Meals, TimeOfDay> mealTimes = {
     for (var meal in Meals.dietValues) meal: const TimeOfDay(hour: 0, minute: 0),
   };
+
+  /// Today's uploaded images per meal type.
+  Map<Meals, List<String>> _mealImages = {};
+
   bool _isUploading = false;
   Timer? _uploadTimeoutTimer;
 
@@ -226,6 +231,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
         checkedStates = fetchedStates;
       });
 
+      // Fetch today's uploaded images
+      await _refreshMealImages();
+
       // Fetch daily data using provider
       final dailyDataProvider =
           Provider.of<DailyDataProvider>(context, listen: false);
@@ -238,6 +246,35 @@ class _MealUploadPageState extends State<MealUploadPage> {
             });
         } catch (e) {
       logger.err('Error fetching meal states or contents: {}', [e.toString()]);
+    }
+  }
+
+  /// Fetches today's meal images from MealManager and updates [_mealImages].
+  Future<void> _refreshMealImages() async {
+    try {
+      final mealManager = Provider.of<MealManager>(context, listen: false);
+      final effectiveDate = kDebugMode ? _debugSelectedDate ?? now : now;
+      final dateKey = DateFormat('yyyy-MM-dd').format(effectiveDate);
+      final meals = await mealManager.fetchMeals(
+        null,
+        userId: widget.userId,
+        showAllImages: true,
+        date: dateKey,
+      );
+
+      final map = <Meals, List<String>>{};
+      for (final m in meals) {
+        if (m.imageUrls.isNotEmpty) {
+          map[m.mealType] = m.imageUrls;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _mealImages = map;
+      });
+    } catch (e) {
+      logger.err('Error refreshing meal images: {}', [e]);
     }
   }
 
@@ -405,17 +442,31 @@ class _MealUploadPageState extends State<MealUploadPage> {
     });
 
     try {
-      // 2) Get MealManager from Provider
-      //
-      // MealManager.uploadMealImg will:
-      //   - find today's meal doc:
-      //       users/{userId}/meals/{yyyy-MM-dd}/mealEntries/{meal.name}
-      //   - load previous meal doc (if exists)
-      //   - delete ONLY the old image from Storage
-      //   - upload the new image to Storage
-      //   - write/merge MealModel in Firestore
-      //   - update the "meals" map on the day doc (mark this meal as checked)
       final mealManager = Provider.of<MealManager>(context, listen: false);
+
+      // Pre-check: see if the meal already has max images
+      final existingMeals = await mealManager.fetchMeals(
+        null,
+        userId: widget.userId,
+        showAllImages: true,
+        date: DateFormat('yyyy-MM-dd')
+            .format(kDebugMode ? _debugSelectedDate ?? now : now),
+      );
+      final existingMeal = existingMeals
+          .where((m) => m.mealType == mealCategory)
+          .toList();
+      if (existingMeal.isNotEmpty && !existingMeal.first.canAddMoreImages) {
+        if (!mounted) return;
+        _uploadTimeoutTimer?.cancel();
+        setState(() => _isUploading = false);
+        await DialogUtils.openError(
+          context,
+          title: 'Limit',
+          message:
+              'Bu öğün için en fazla ${MealModel.maxImages} görsel yükleyebilirsiniz.',
+        );
+        return;
+      }
 
       final downloadUrl = await mealManager.uploadMealImg(
         userId: widget.userId,
@@ -423,8 +474,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
         image: image,
         subscriptionId: widget.subscriptionId,
         overrideDate: kDebugMode ? _debugSelectedDate : null,
-        alsoPostToChat: false, // set true if you want it in chat too
-        // chatManager: someChatManager, // if you wire ChatManager here
+        alsoPostToChat: false,
       );
 
       if (!mounted) return;
@@ -434,27 +484,22 @@ class _MealUploadPageState extends State<MealUploadPage> {
         _isUploading = false;
       });
 
-      // 3) Check result from uploadMealImg
       if (downloadUrl != null) {
-        // Locally mark this meal as checked in the UI.
-        // Firestore state is already updated inside MealManager.
         setState(() {
           checkedStates[mealCategory] = true;
         });
 
-        // Cancel the reminder notification for this meal since it's been uploaded
         await _mealReminderService.cancelMealReminder(mealCategory);
-
-        // Inform parent screen
+        await _refreshMealImages();
         widget.onImageUploaded();
 
+        if (!mounted) return;
         await DialogUtils.openInfo(
           context,
           title: 'Başarılı',
           message: 'Öğün görseli başarıyla yüklendi.',
         );
       } else {
-        // uploadMealImg returned null → upload failed
         await DialogUtils.openError(
           context,
           title: 'Hata',
@@ -565,7 +610,11 @@ class _MealUploadPageState extends State<MealUploadPage> {
                         // Combined Daily Tracking Card (Water + Steps)
                         _buildDailyTrackingCard(),
                         
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 8),
+
+                        _buildViewUploadsButton(),
+
+                        const SizedBox(height: 8),
                         
                         // Meals Section with collapsible tiles
                         _buildCollapsibleMealsList(defaultMealTime),
@@ -1047,6 +1096,279 @@ class _MealUploadPageState extends State<MealUploadPage> {
           ),
         );
       }).toList(),
+    );
+  }
+
+  Widget _buildViewUploadsButton() {
+    final totalImages =
+        _mealImages.values.fold<int>(0, (sum, list) => sum + list.length);
+    if (totalImages == 0) return const SizedBox.shrink();
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _showUploadsSheet,
+        icon: const Icon(Icons.photo_library_outlined, size: 18),
+        label: Text('Yüklediklerimi Gör / Sil'),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          side: BorderSide(color: Colors.blue.shade300),
+          foregroundColor: Colors.blue.shade700,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showUploadsSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            final mealsWithImages = Meals.dietValues
+                .where((m) => (_mealImages[m] ?? []).isNotEmpty)
+                .toList();
+
+            return DraggableScrollableSheet(
+              initialChildSize: 0.55,
+              minChildSize: 0.3,
+              maxChildSize: 0.85,
+              expand: false,
+              builder: (_, scrollController) {
+                return Column(
+                  children: [
+                    // Handle
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.photo_library,
+                              color: Colors.blue.shade600),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Yüklediklerim',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    if (mealsWithImages.isEmpty)
+                      const Expanded(
+                        child: Center(
+                          child: Text('Henüz yüklenmiş görsel yok.'),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: ListView.builder(
+                          controller: scrollController,
+                          padding: const EdgeInsets.all(12),
+                          itemCount: mealsWithImages.length,
+                          itemBuilder: (_, index) {
+                            final meal = mealsWithImages[index];
+                            final images = _mealImages[meal]!;
+
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              elevation: 1,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${meal.label}  (${images.length}/${MealModel.maxImages})',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.grey.shade800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SizedBox(
+                                      height: 90,
+                                      child: ListView.separated(
+                                        key: PageStorageKey(
+                                            'sheet_imgs_${meal.name}'),
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: images.length,
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(width: 8),
+                                        itemBuilder: (_, imgIdx) {
+                                          final url = images[imgIdx];
+                                          return Stack(
+                                            children: [
+                                              GestureDetector(
+                                                onTap: () =>
+                                                    _showFullImage(url),
+                                                child: ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          8),
+                                                  child: ChatImagePreview(
+                                                    imageUrl: url,
+                                                    width: 90,
+                                                    height: 90,
+                                                    borderRadius: 8,
+                                                    fit: BoxFit.cover,
+                                                  ),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                top: 3,
+                                                right: 3,
+                                                child: GestureDetector(
+                                                  onTap: () async {
+                                                    final confirmed =
+                                                        await DialogUtils
+                                                            .openConfirm(
+                                                      ctx,
+                                                      title: 'Görseli Sil',
+                                                      message:
+                                                          'Bu görseli silmek istediğinize emin misiniz?',
+                                                      confirmText: 'Sil',
+                                                      cancelText: 'İptal',
+                                                    );
+                                                    if (!confirmed) return;
+                                                    if (!mounted) return;
+
+                                                    try {
+                                                      final mealManager =
+                                                          Provider.of<MealManager>(
+                                                              context,
+                                                              listen:
+                                                                  false);
+                                                      await mealManager
+                                                          .deleteMealImage(
+                                                        userId:
+                                                            widget.userId,
+                                                        meal: meal,
+                                                        imageUrlToDelete:
+                                                            url,
+                                                        overrideDate: kDebugMode
+                                                            ? _debugSelectedDate
+                                                            : null,
+                                                      );
+                                                      await _refreshMealImages();
+                                                      if (!mounted) return;
+
+                                                      final imgs =
+                                                          _mealImages[
+                                                                  meal] ??
+                                                              [];
+                                                      if (imgs.isEmpty) {
+                                                        setState(() {
+                                                          checkedStates[
+                                                              meal] = false;
+                                                        });
+                                                      }
+                                                      setSheetState(() {});
+                                                    } catch (e) {
+                                                      logger.err(
+                                                          'Error deleting meal image: {}',
+                                                          [e]);
+                                                      if (mounted) {
+                                                        await DialogUtils
+                                                            .openError(
+                                                          ctx,
+                                                          title: 'Hata',
+                                                          message:
+                                                              'Görsel silinirken bir hata oluştu.',
+                                                        );
+                                                      }
+                                                    }
+                                                  },
+                                                  child: Container(
+                                                    decoration:
+                                                        const BoxDecoration(
+                                                      color: Colors.black54,
+                                                      shape:
+                                                          BoxShape.circle,
+                                                    ),
+                                                    padding:
+                                                        const EdgeInsets
+                                                            .all(4),
+                                                    child: const Icon(
+                                                        Icons.delete,
+                                                        size: 15,
+                                                        color:
+                                                            Colors.white),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Shows a full-screen preview of a meal image.
+  void _showFullImage(String url) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                minScale: 1.0,
+                maxScale: 4.0,
+                child: Image.network(url, fit: BoxFit.contain),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

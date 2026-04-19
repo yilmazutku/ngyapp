@@ -1110,7 +1110,8 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
     final Color typeColor = _getMealTypeColor(meal.mealType);
     final String timeStr = DateFormat('HH:mm').format(meal.timestamp);
     final String heroTag =
-        '${meal.imageUrl ?? ''}_${meal.timestamp.millisecondsSinceEpoch}';
+        '${meal.imageUrl}_${meal.timestamp.millisecondsSinceEpoch}';
+    final int imageCount = meal.imageUrls.length;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1135,36 +1136,67 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
               mainAxisSize: MainAxisSize.max,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Thumbnail - flexible to fill available space
                 Expanded(
                   child: Padding(
                     padding: EdgeInsets.all(kMealCardPadding),
-                    child: Hero(
-                      tag: heroTag,
-                      child: ChatImagePreview(
-                        imageUrl: meal.imageUrl,
-                        borderRadius: 8,
-                        cacheWidth: cache,
-                        cacheHeight: cache,
-                        fit: BoxFit.cover,
-                        onTap: () => _showMealDetails(
-                          context,
-                          meal,
-                          dialogImageHeight,
-                          heroTag,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Hero(
+                          tag: heroTag,
+                          child: ChatImagePreview(
+                            imageUrl: meal.imageUrl,
+                            borderRadius: 8,
+                            cacheWidth: cache,
+                            cacheHeight: cache,
+                            fit: BoxFit.cover,
+                            onTap: () => _showMealDetails(
+                              context,
+                              meal,
+                              dialogImageHeight,
+                              heroTag,
+                            ),
+                          ),
                         ),
-                      ),
+                        if (imageCount > 1)
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.photo_library,
+                                      size: 12, color: Colors.white),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '$imageCount',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
 
-                // Compact info section with meal type and time
                 Padding(
                   padding: EdgeInsets.all(kMealCardPadding),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Meal type with icon
                       Flexible(
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1190,7 +1222,6 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                         ),
                       ),
 
-                      // Time in 24h format
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -1281,15 +1312,16 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       ) {
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         const double kDialogMaxWidth = 520;
-        final screen = MediaQuery.of(context).size;
+        final screen = MediaQuery.of(dialogContext).size;
         final double approxBodyWidth =
-        (screen.width - 64).clamp(280.0, kDialogMaxWidth);
+            (screen.width - 64).clamp(280.0, kDialogMaxWidth);
+        final images = meal.imageUrls;
 
         return AlertDialog(
           insetPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
           title: Text(
             '${meal.mealType.label} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}',
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -1301,24 +1333,49 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Hero(
-                    tag: heroTag,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: SizedBox(
-                        width: approxBodyWidth,
-                        height: dialogImageHeight,
-                        child: InteractiveViewer(
-                          minScale: 1.0,
-                          maxScale: 4.0,
-                          child: ChatImagePreview(
-                            imageUrl: meal.imageUrl,
-                            fit: BoxFit.contain,
+                  if (images.length == 1)
+                    Hero(
+                      tag: heroTag,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: SizedBox(
+                          width: approxBodyWidth,
+                          height: dialogImageHeight,
+                          child: InteractiveViewer(
+                            minScale: 1.0,
+                            maxScale: 4.0,
+                            child: ChatImagePreview(
+                              imageUrl: images.first,
+                              fit: BoxFit.contain,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
+                    )
+                  else
+                    ...images.asMap().entries.map((entry) {
+                      final idx = entry.key;
+                      final url = entry.value;
+                      return Padding(
+                        padding: EdgeInsets.only(
+                            bottom: idx < images.length - 1 ? 8.0 : 0),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: SizedBox(
+                            width: approxBodyWidth,
+                            height: dialogImageHeight,
+                            child: InteractiveViewer(
+                              minScale: 1.0,
+                              maxScale: 4.0,
+                              child: ChatImagePreview(
+                                imageUrl: url,
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
                   const SizedBox(height: 16),
 
                   if (meal.description != null &&
@@ -1326,29 +1383,19 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                     const Text(
                       'Açıklama:',
                       style:
-                      TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                     ),
                     const SizedBox(height: 4),
                     Text(meal.description!),
                     const SizedBox(height: 16),
                   ],
-
-                  // const Text(
-                  //   'Yüklenme Zamanı:',
-                  //   style:
-                  //   TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  // ),
-                  // const SizedBox(height: 4),
-                  // Text(
-                  //   DateFormat('dd-MM-yyyy, HH:mm').format(meal.timestamp),
-                  // ),
                 ],
               ),
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Kapat'),
             ),
           ],

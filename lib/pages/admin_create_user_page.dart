@@ -199,11 +199,29 @@ class _CreateUserPageState extends State<CreateUserPage> {
               TextField(
                 controller: _surnameController,
                 decoration: const InputDecoration(
-                  labelText: 'Soyisim Giriniz (Opsiyonel)',
+                  labelText: 'Soyisim Giriniz',
                   border: OutlineInputBorder(),
                 ),
                 textCapitalization: TextCapitalization.words,
                 inputFormatters: [_CapitalizeWordsFormatter()],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _passwordController,
+                decoration: const InputDecoration(
+                  labelText: 'Şifre Giriniz',
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: 'E-posta Giriniz',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 10),
               TextField(
@@ -229,24 +247,6 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   labelText: 'Notlar (Opsiyonel)',
                   border: OutlineInputBorder(),
                 ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'E-posta Giriniz',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Şifre Giriniz (Opsiyonel)',
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: true,
               ),
               const SizedBox(height: 10),
               ElevatedButton(

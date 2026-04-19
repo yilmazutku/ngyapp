@@ -6,6 +6,7 @@ import 'package:table_calendar/table_calendar.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../models/logger.dart';
 import '../models/appointment_model.dart';
+import '../models/event_model.dart';
 import '../providers/timeslot_manager.dart';
 import '../utils/dialog_utils.dart';
 import '../models/time_range_config.dart';
@@ -25,17 +26,18 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
   bool _isLoading = false;
   bool _showCalendar = true;
 
+  /// Configurable day start/end used by interval generation and manual selection.
+  TimeOfDay _dayStartTime = const TimeOfDay(hour: 9, minute: 30);
+  TimeOfDay _dayEndTime = const TimeOfDay(hour: 18, minute: 30);
+
   /// What’s stored in Firebase for the selected day.
   List<String> _storedTimesForDay = [];
 
   /// Which times have appointments on them.
   final Map<String, bool> _hasAppointment = {};
   Map<String, List<AppointmentModel>> _appointmentsBySlot = {};
+  Map<String, List<EventModel>> _eventsBySlot = {};
 
-
-  /// Time range constants
-  static const TimeOfDay _startTime = TimeOfDay(hour: 9, minute: 30);
-  static const TimeOfDay _endTime = TimeOfDay(hour: 18, minute: 00);
 
   /// Hoisted formatters
   static final DateFormat _dayTitleFmt = DateFormat('dd MMMM yyyy', 'tr_TR');
@@ -134,6 +136,13 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         List<AppointmentModel>.from(value as List);
       });
 
+      final rawEventsBySlot = data['eventsBySlot'] as Map?;
+      final eventsBySlot = <String, List<EventModel>>{};
+      (rawEventsBySlot ?? {}).forEach((key, value) {
+        eventsBySlot[key.toString()] =
+            List<EventModel>.from(value as List);
+      });
+
       if (!mounted) return;
       setState(() {
         _storedTimesForDay = storedTimes;
@@ -141,6 +150,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
           ..clear()
           ..addAll(hasAppt);
         _appointmentsBySlot = appointmentsBySlot;
+        _eventsBySlot = eventsBySlot;
         _isLoading = false;
       });
     } catch (e) {
@@ -230,8 +240,8 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
 
   /// Show dialog to configure time ranges
   Future<void> _showTimeRangeConfigDialog() async {
-    TimeOfDay startTime = const TimeOfDay(hour: 9, minute: 30);
-    TimeOfDay endTime = const TimeOfDay(hour: 18, minute: 30);
+    TimeOfDay startTime = _dayStartTime;
+    TimeOfDay endTime = _dayEndTime;
     final intervalController = TextEditingController(text: '30');
 
     try {
@@ -366,21 +376,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
 
 
 
-  /// Check if a time slot is within valid range
-  bool _isTimeInRange(TimeOfDay time) {
-    final startMinutes = _startTime.hour * 60 + _startTime.minute;
-    final endMinutes = _endTime.hour * 60 + _endTime.minute;
-    final timeMinutes = time.hour * 60 + time.minute;
-    return timeMinutes >= startMinutes && timeMinutes <= endMinutes;
-  }
-
-  /// Check if a time slot conflicts with existing slots
-  bool _hasTimeConflict(String timeStr) {
-    final time = _parseTimeSlot(timeStr);
-    if (time == null) return true;
-    if (!_isTimeInRange(time)) return true;
-    return _storedTimesForDay.contains(timeStr) || _hasAppointment[timeStr] == true;
-  }
 
   /// Fetch most recent time slot data from the database without UI update
   Future<Map<String, dynamic>> _fetchLatestTimeSlotData() async {
@@ -440,7 +435,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
 
     result['invalidSlots'] = timeSlots.where((slot) {
       final t = _parseTimeSlot(slot);
-      return t == null || !_isTimeInRange(t);
+      return t == null;
     }).toList();
 
     if (checkExisting) {
@@ -565,9 +560,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                 }
 
                 final bookedSlots = newTimeSlots.where((s) {
-                  final t = _parseTimeSlot(s);
-                  if (t == null) return true;
-                  if (!_isTimeInRange(t)) return true;
                   return hasAppointment[s] == true;
                 }).toList();
 
@@ -646,7 +638,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
 
                 if (validation['invalidSlots']!.isNotEmpty) {
                   await _showErrorDialog('Hata',
-                      'Girdiğiniz zaman geçersiz saat formatında veya izin verilen saat aralığında değil.');
+                      'Girdiğiniz zaman geçersiz saat formatında.');
                   return;
                 }
                 if (validation['existingSlots']!.isNotEmpty) {
@@ -799,7 +791,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
       physics: const NeverScrollableScrollPhysics(), // vertical scroll handled by parent
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 4,
-        childAspectRatio: 2.5,
+        childAspectRatio: 1.8,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
       ),
@@ -809,12 +801,56 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
   }
 
   /// Build individual time slot item
+  String _formatEndTime(AppointmentModel appt) {
+    final end = appt.appointmentDateTime
+        .add(Duration(minutes: appt.durationMinutes));
+    return '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatStartTime(AppointmentModel appt) {
+    final dt = appt.appointmentDateTime;
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
   Widget _buildTimeSlotItem(String timeStr) {
     final hasAppt = _hasAppointment[timeStr] ?? false;
+    final slotAppointments = _appointmentsBySlot[timeStr] ?? [];
+    final slotEvents = _eventsBySlot[timeStr] ?? [];
+    final isMobile = MediaQuery.of(context).size.shortestSide < 600;
+    final baseFontSize = isMobile ? 14.0 : 16.0;
+
+    final bool hasEvent = slotEvents.isNotEmpty;
+    final Color cardColor = hasEvent
+        ? Colors.deepPurple.shade50
+        : hasAppt
+            ? Colors.red[50]!
+            : Colors.green[50]!;
+
+    // Determine what label/details to show
+    String? detailName;
+    String? detailTimeRange;
+    Color detailColor = Colors.red;
+
+    if (hasEvent) {
+      final e = slotEvents.first;
+      detailName = e.name;
+      final endStr =
+          '${e.endDateTime.hour.toString().padLeft(2, '0')}:${e.endDateTime.minute.toString().padLeft(2, '0')}';
+      final startStr =
+          '${e.startDateTime.hour.toString().padLeft(2, '0')}:${e.startDateTime.minute.toString().padLeft(2, '0')}';
+      detailTimeRange = '$startStr-$endStr';
+      detailColor = Colors.deepPurple;
+    } else if (slotAppointments.isNotEmpty) {
+      final a = slotAppointments.first;
+      detailName =
+          '${a.user?.name ?? ''} ${a.user?.surname ?? ''}'.trim();
+      detailTimeRange =
+          '${_formatStartTime(a)}-${_formatEndTime(a)}';
+    }
 
     return Card(
       elevation: 2,
-      color: hasAppt ? Colors.red[50] : Colors.green[50],
+      color: cardColor,
       child: Stack(
         children: [
           Padding(
@@ -822,11 +858,36 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(timeStr, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                Text(timeStr,
+                    style: TextStyle(
+                        fontSize: baseFontSize,
+                        fontWeight: FontWeight.bold)),
                 if (hasAppt) ...[
                   const SizedBox(height: 2),
-                  const Icon(Icons.event, size: 16, color: Colors.red),
-                  const Text('Dolu', style: TextStyle(fontSize: 10, color: Colors.red)),
+                  Text('Dolu',
+                      style: TextStyle(
+                          fontSize: baseFontSize - 4,
+                          color: detailColor,
+                          fontWeight: FontWeight.w600)),
+                  if (!isMobile && detailName != null && detailName.isNotEmpty) ...[
+                    const SizedBox(height: 1),
+                    Text(
+                      detailName,
+                      style: TextStyle(
+                          fontSize: baseFontSize - 4,
+                          color: detailColor,
+                          fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    if (detailTimeRange != null)
+                      Text(
+                        detailTimeRange,
+                        style: TextStyle(
+                            fontSize: baseFontSize - 5,
+                            color: detailColor.withValues(alpha: 0.7)),
+                      ),
+                  ],
                 ],
               ],
             ),
@@ -834,7 +895,9 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
           Positioned.fill(
             child: Material(
               color: Colors.transparent,
-              child: InkWell(onTap: () => hasAppt ? _showAppointmentDetails(timeStr) : null),
+              child: InkWell(
+                  onTap: () =>
+                      hasAppt ? _showAppointmentDetails(timeStr) : null),
             ),
           ),
           if (!hasAppt)
@@ -861,12 +924,107 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     );
   }
 
+  /// Show dialog that lets the admin configure the day start/end time.
+  Future<void> _showDayTimeRangeDialog() async {
+    TimeOfDay tempStart = _dayStartTime;
+    TimeOfDay tempEnd = _dayEndTime;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (builderContext, setDialogState) {
+            final startMinutes = tempStart.hour * 60 + tempStart.minute;
+            final endMinutes = tempEnd.hour * 60 + tempEnd.minute;
+            final isValid = endMinutes > startMinutes;
+
+            return AlertDialog(
+              title: const Text('Gün Saat Aralığı'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Aralıklı oluşturma ve elle seçme işlemlerinde kullanılacak günün başlangıç ve bitiş saatini belirleyin.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTimeRangePicker(
+                    startTime: tempStart,
+                    endTime: tempEnd,
+                    onStartTimeChanged: (t) =>
+                        setDialogState(() => tempStart = t),
+                    onEndTimeChanged: (t) =>
+                        setDialogState(() => tempEnd = t),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isValid ? Colors.green[50] : Colors.red[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isValid ? Colors.green : Colors.red,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isValid ? Icons.check_circle : Icons.error,
+                          color: isValid ? Colors.green : Colors.red,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            isValid
+                                ? '${_formatTimeSlot(tempStart)} – ${_formatTimeSlot(tempEnd)}'
+                                : 'Bitiş saati başlangıçtan sonra olmalıdır.',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: isValid
+                                  ? Colors.green[800]
+                                  : Colors.red[800],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('İptal'),
+                ),
+                ElevatedButton(
+                  onPressed: isValid
+                      ? () => Navigator.of(dialogContext).pop(true)
+                      : null,
+                  child: const Text('Kaydet'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _dayStartTime = tempStart;
+        _dayEndTime = tempEnd;
+      });
+    }
+  }
+
   /// Show dialog to select time range for interval generation
   Future<void> _showIntervalTimeRangeDialog(int intervalMinutes) async {
-    const startTime = TimeOfDay(hour: 9, minute: 30);
-    const endTime = TimeOfDay(hour: 18, minute: 30);
-    final timeRangeConfig =
-    TimeRangeConfig(startTime: startTime, endTime: endTime, intervalMinutes: intervalMinutes);
+    final timeRangeConfig = TimeRangeConfig(
+      startTime: _dayStartTime,
+      endTime: _dayEndTime,
+      intervalMinutes: intervalMinutes,
+    );
 
     final newTimeSlots = _generateTimeSlots(timeRangeConfig);
 
@@ -970,8 +1128,8 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
 
   /// Show manual selection dialog - allows admin to pick individual time slots
   Future<void> _showManualSelectionDialog() async {
-    TimeOfDay startTime = const TimeOfDay(hour: 9, minute: 30);
-    TimeOfDay endTime = const TimeOfDay(hour: 18, minute: 30);
+    TimeOfDay startTime = _dayStartTime;
+    TimeOfDay endTime = _dayEndTime;
     const int intervalMinutes = 5; // 5-minute intervals for selection
     
     // Track selected slots - pre-populate with existing stored time slots
@@ -1286,23 +1444,17 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
             Provider.of<TimeslotManager>(context, listen: false);
         final sourceData = await timeslotManager.fetchTimeslotDataForDate(sourceDate);
 
-        final sourceStoredTimes = (sourceData['storedTimes'] as List)
+        final sourceAdminSlots = (sourceData['adminSlots'] as List)
             .map((e) => e.toString())
             .toList();
-        final sourceHasAppointment = sourceData['hasAppointment'] as Map;
 
-        // Filter out slots that have appointments - only get admin-chosen available slots
-        final availableSlots = sourceStoredTimes.where((slot) {
-          return sourceHasAppointment[slot] != true;
-        }).toList();
-
-        if (availableSlots.isEmpty) {
+        if (sourceAdminSlots.isEmpty) {
           if (!mounted) return;
           final tryAgain = await DialogUtils.openConfirm(
             context,
             title: 'Bilgi',
             message:
-                '${_dayTitleFmt.format(sourceDate)} tarihinde kopyalanacak müsait zaman dilimi bulunamadı.\n\nBaşka bir gün seçmek ister misiniz?',
+                '${_dayTitleFmt.format(sourceDate)} tarihinde kopyalanacak zaman dilimi bulunamadı.\n\nBaşka bir gün seçmek ister misiniz?',
             confirmText: 'Evet',
             cancelText: 'Hayır',
           );
@@ -1310,18 +1462,17 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
           return;
         }
 
-        _sortSlotsChronologically(availableSlots);
+        _sortSlotsChronologically(sourceAdminSlots);
 
         // Step 3: Show confirmation dialog with the slots
         if (!mounted) return;
         final confirmed = await _showCopyConfirmationDialog(
           sourceDate,
-          availableSlots,
+          sourceAdminSlots,
         );
 
         if (confirmed == true) {
-          // User confirmed - proceed with copy
-          await _applyCopyFromAnotherDay(availableSlots);
+          await _applyCopyFromAnotherDay(sourceAdminSlots);
           return;
         } else if (confirmed == false) {
           // User clicked "Başka Gün Seç" - continue loop
@@ -1585,7 +1736,21 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
 
   /// List of action buttons to be used in both layouts
   List<Widget> _buildActionButtonsList() {
+    final rangeLabel =
+        '${_formatTimeSlot(_dayStartTime)}–${_formatTimeSlot(_dayEndTime)}';
+
     return [
+      ElevatedButton.icon(
+        onPressed: _showDayTimeRangeDialog,
+        icon: const Icon(Icons.schedule),
+        label: Text('Saat Aralığı ($rangeLabel)'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.deepPurple[50],
+          foregroundColor: Colors.deepPurple[900],
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+      ),
+      Container(height: 36, width: 1, color: Colors.grey[300]),
       ElevatedButton.icon(
         onPressed: _showDeleteAllConfirmationDialog,
         icon: const Icon(Icons.delete_forever),

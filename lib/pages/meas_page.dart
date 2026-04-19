@@ -462,21 +462,33 @@ class _MeasurementPageState extends State<MeasurementPage> {
             primary: false,
             child: SizedBox(
               width: contentWidth,
-              child: Scrollbar(
-                controller: _verticalCtrl,
-                thumbVisibility: true,
-                notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
-                child: ListView.separated(
-                  controller: _verticalCtrl,
-                  primary: false,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: _measurements.length + 1, // +1 for header
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    if (index == 0) return _buildHeaderRow();
-                    return _buildDataRow(_measurements[index - 1]);
-                  },
-                ),
+              child: Column(
+                children: [
+                  // Sticky header - always visible
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: _buildHeaderRow(),
+                  ),
+                  const Divider(height: 1),
+                  // Scrollable data rows
+                  Expanded(
+                    child: Scrollbar(
+                      controller: _verticalCtrl,
+                      thumbVisibility: true,
+                      notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
+                      child: ListView.separated(
+                        controller: _verticalCtrl,
+                        primary: false,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: _measurements.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          return _buildDataRow(_measurements[index]);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
