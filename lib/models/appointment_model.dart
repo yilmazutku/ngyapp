@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ngy_app/models/user_model.dart';
 
+import 'appointment_color_palette.dart';
+
 class AppointmentModel {
   final String appointmentId;
   final String userId;
@@ -340,24 +342,13 @@ enum AppointmentType {
     return durationMinutes;
   }
 
-  /// Returns the background color for this appointment type
-  /// For haftalik: color depends on meeting type (online=orange, f2f=blue)
-  /// For pb and og: color is fixed (pink and yellow)
+  /// Returns the background color for this appointment type. The mapping is
+  /// admin-configurable through `admininput/appointmentColors`; values fall
+  /// back to the built-in defaults (the original hard-coded colors) when no
+  /// override has been set by the admin.
   Color getBgColor(MeetingType meetingType) {
-    switch (this) {
-      case AppointmentType.pb:
-       // return Colors.pink.shade50;
-      case AppointmentType.og:
-        return Colors.tealAccent;
-      case AppointmentType.haftalik:
-        if (meetingType == null) return Colors.grey.shade50;
-        return meetingType == MeetingType.online 
-            ? Colors.blue.shade400
-            : Colors.pink.shade200;
-      case AppointmentType.diger:
-      case AppointmentType.kgtakip:
-        return Colors.red;
-    }
+    final slot = AppointmentColorSlot.forAppointment(this, meetingType);
+    return AppointmentColorsRegistry.colorFor(slot);
   }
 
   /// Returns the border color for this appointment type

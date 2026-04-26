@@ -71,9 +71,23 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         return;
       }
       
+      // Hide users with incomplete profile data (empty name, surname, or email).
+      // These are typically corrupt or partially-created records that should not
+      // appear in the admin user management list.
+      final validUsers = users.where((u) {
+        return u.name.trim().isNotEmpty &&
+            u.surname.trim().isNotEmpty &&
+            u.email.trim().isNotEmpty;
+      }).toList();
+
+      logger.info(
+        'Filtered users for display. total={} valid={} skipped={}',
+        [users.length, validUsers.length, users.length - validUsers.length],
+      );
+
       setState(() {
-        _allUsers = users;
-        _filteredUsers = users;
+        _allUsers = validUsers;
+        _filteredUsers = validUsers;
         _isLoading = false;
       });
       

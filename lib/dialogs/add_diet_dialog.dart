@@ -6,14 +6,16 @@ import 'package:provider/provider.dart';
 // Replace with your actual imports
 import '../models/logger.dart';
 import '../models/meal_model.dart'; // For Meals enum
+import '../models/special_line_model.dart'; // SpecialLinesRegistry / detect
 import '../models/subs_model.dart'; // Add subscription model import
 import '../file_handlers//file_handler.dart'; // For handleFile
 // For deleteFile
 import '../providers/sub_provider.dart';
 // Add user provider import
 import '../providers/diet_provider.dart'; // Add diet provider import
+import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
-import '../utils/meal_formatter.dart'; // Import for VEYA_MARKER and VEYA_OPTION_SEPARATOR_REGEX
+import '../utils/meal_formatter.dart';
 
 /// We'll create a logger for this dialog
 final Logger log = Logger.forClass(AddDietDialog);
@@ -334,7 +336,18 @@ class _AddDietDialogState extends State<AddDietDialog> {
   /// Replicates _pickAndSaveFile from FileHandlerPage, minus the user dropdown
   Future<void> _pickAndSaveFile() async {
     // No need to validate subscription as it's already pre-selected and shown to the user
-    
+
+    // Pull the latest admin-configured special lines so the docx parser knows
+    // about every marker (built-in + admin) before it starts splitting lines.
+    try {
+      await Provider.of<SpecialLinesProvider>(context, listen: false)
+          .fetchSpecialLines();
+    } catch (e) {
+      log.warn(
+          'Could not load admin special lines, falling back to built-ins only: {}',
+          [e]);
+    }
+
     // Clear any old parse data
     for (var subtitle in subtitles) {
       subtitle['content'].clear();
@@ -510,15 +523,18 @@ class _AddDietDialogState extends State<AddDietDialog> {
         // If we have an active subtitle, treat this line as content
         log.info('Adding content to subtitle {}: {}',
             [currentSubtitle['name'], line]);
-        
-        // Check if this line starts with "Veya" followed by whitespace (tab)
-        // Use the same RegExp pattern from meal_formatter.dart
-        if (line.trim().startsWith(VEYA_MARKER)|| VEYA_OPTION_SEPARATOR_REGEX.hasMatch(line)) {
-          // Add the exact line to preserve the "Veya" marker and spacing
-          currentSubtitle['content'].add({'content': VEYA_MARKER});
-          currentSubtitle['content'].add({'content': line.trim().replaceRange(0, VEYA_MARKER.length, '')});
+
+        // Detect any configured special-line marker (Veya, Haftada X, plus
+        // every admin-defined entry). Marker is stored as its own row so the
+        // formatter can render it as a section divider; trailing content (if
+        // any) is stored as the next regular row.
+        final match = SpecialLinesRegistry.detect(line);
+        if (match != null) {
+          currentSubtitle['content'].add({'content': match.markerLabel});
+          if (match.contentAfter.isNotEmpty) {
+            currentSubtitle['content'].add({'content': match.contentAfter});
+          }
         } else {
-          // Regular content line
           currentSubtitle['content'].add({'content': line});
         }
       }

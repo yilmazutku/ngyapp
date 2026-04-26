@@ -45,7 +45,13 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   DateTime _selectedDate = DateTime.now();
   DateTime? _postponedDate;
   List<UserModel> _users = [];
-  
+
+  // User search (admin scenario only)
+  final TextEditingController _userSearchController = TextEditingController();
+  List<UserModel> _filteredUsers = [];
+  bool _showUserDropdown = false;
+  String? _userFieldError;
+
   // Subscription related variables
   List<SubscriptionModel> _subscriptions = [];
   SubscriptionModel? _selectedSubscription;
@@ -82,7 +88,52 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   void dispose() {
     _notesController.dispose();
     _durationController.dispose();
+    _userSearchController.dispose();
     super.dispose();
+  }
+
+  /// Filters [_users] using the entered query (matches name, surname, full
+  /// name, or email — same rules used in the admin payment dialog).
+  void _filterUsers(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredUsers = _users;
+      } else {
+        final searchQuery = query.toLowerCase();
+        _filteredUsers = _users.where((user) {
+          final name = user.name.toLowerCase();
+          final surname = user.surname.toLowerCase();
+          final fullName = '$name $surname'.trim();
+          final email = user.email.toLowerCase();
+          return name.contains(searchQuery) ||
+              surname.contains(searchQuery) ||
+              fullName.contains(searchQuery) ||
+              email.contains(searchQuery);
+        }).toList();
+      }
+    });
+  }
+
+  void _onUserSelectedFromSearch(UserModel user) {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _selectedUser = user;
+      _userSearchController.text = '${user.name} ${user.surname}'.trim();
+      _showUserDropdown = false;
+      _userFieldError = null;
+    });
+    _fetchSubscriptions(user.userId);
+  }
+
+  void _clearSelectedUser() {
+    setState(() {
+      _selectedUser = null;
+      _userSearchController.clear();
+      _filteredUsers = _users;
+      _subscriptions = [];
+      _selectedSubscription = null;
+      _showUserDropdown = false;
+    });
   }
 
   Future<void> _loadUserDetails() async {
@@ -177,6 +228,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
 
       setState(() {
         _users = users;
+        _filteredUsers = users;
       });
     } catch (e) {
       logger.err('Error loading users: {}', [e]);
@@ -218,7 +270,16 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
 
   Future<void> _saveAppointment() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
+    // Manual user validation (admin scenario only) — kept out of the Form
+    // validator because the user picker is a TextField + custom result list
+    // rather than a FormField, to avoid the input decoration relayout crashes
+    // we hit when toggling readOnly / FormField rebuilds while focused.
+    if (widget.userId == null && _selectedUser == null) {
+      setState(() => _userFieldError = 'Lütfen bir kullanıcı seçin');
+      return;
+    }
+
     // Additional validation for required subscription
     if (_selectedSubscription == null) {
       await DialogUtils.openError(
@@ -369,41 +430,80 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
           content: Form(
             key: _formKey,
             child: SingleChildScrollView(
-          child: Column(
+              // AlertDialog computes the intrinsic width of its content; the
+              // ListView.builder used in the user search dropdown can't be
+              // intrinsically measured, so we pin a fixed width here so the
+              // dialog never traverses into it for sizing.
+              child: SizedBox(
+                width: 450,
+                child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (widget.userId == null) ...[
-                DropdownButtonFormField<UserModel>(
-                  value: _selectedUser,
-                  decoration: const InputDecoration(
+                TextField(
+                  controller: _userSearchController,
+                  decoration: InputDecoration(
                     labelText: 'Kullanıcı',
-                    border: OutlineInputBorder(),
+                    hintText: 'Kullanıcı ara...',
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.person_search),
+                    suffixIcon: _selectedUser != null
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: _clearSelectedUser,
+                          )
+                        : null,
+                    errorText: _userFieldError,
                   ),
-                  items: _users.map((user) {
-                    return DropdownMenuItem<UserModel>(
-                      value: user,
-                      child: Text(user.name),
-                    );
-                  }).toList(),
+                  onTap: () => setState(() => _showUserDropdown = true),
                   onChanged: (value) {
+                    if (_selectedUser != null) {
+                      setState(() => _selectedUser = null);
+                    }
+                    _filterUsers(value);
                     setState(() {
-                      _selectedUser = value;
-                      // When user changes, fetch their subscriptions
-                      if (value != null) {
-                        _fetchSubscriptions(value.userId);
-                      } else {
-                        _subscriptions = [];
-                        _selectedSubscription = null;
-                      }
+                      _showUserDropdown = true;
+                      _userFieldError = null;
                     });
                   },
-                  validator: (value) {
-                    if (value == null) {
-                      return 'Lütfen bir kullanıcı seçin';
-                    }
-                    return null;
-                  },
                 ),
+                if (_showUserDropdown && _selectedUser == null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Container(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: _filteredUsers.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text('Kullanıcı bulunamadı'),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: _filteredUsers.length,
+                              itemBuilder: (context, index) {
+                                final user = _filteredUsers[index];
+                                return ListTile(
+                                  dense: true,
+                                  leading: CircleAvatar(
+                                    radius: 16,
+                                    child: Text(user.name.isNotEmpty
+                                        ? user.name[0].toUpperCase()
+                                        : '?'),
+                                  ),
+                                  title: Text(
+                                      '${user.name} ${user.surname}'.trim()),
+                                  subtitle: Text(user.email,
+                                      style: const TextStyle(fontSize: 12)),
+                                  onTap: () => _onUserSelectedFromSearch(user),
+                                );
+                              },
+                            ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
               ],
               
@@ -610,9 +710,10 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                 maxLines: 3,
               ),
             ],
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
           actions: [
             TextButton(
               onPressed: isLoading ? null : () => Navigator.of(context).pop(),

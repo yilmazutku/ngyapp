@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
 import '../models/filter_params.dart';
+import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
@@ -134,6 +135,19 @@ class _AppointmentsTabState
     _tempStatus = _selectedStatus;
     _tempType = _selectedType;
     _tempSortOption = _sortOption;
+
+    // Make sure admin-configured background colors are loaded before we
+    // render appointment cards (no-op after the first call per session).
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        await Provider.of<AppointmentColorsProvider>(context, listen: false)
+            .fetchColors();
+        if (mounted) setState(() {});
+      } catch (_) {
+        // Failures fall back to built-in default colors; nothing to do.
+      }
+    });
   }
 
   @override

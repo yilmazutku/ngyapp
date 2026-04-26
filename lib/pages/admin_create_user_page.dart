@@ -71,6 +71,11 @@ class _CreateUserPageState extends State<CreateUserPage> {
       return;
     }
 
+    if (surname.isEmpty) {
+      _showMessageDialog('Hata', 'Lütfen soyisim alanını doldurunuz.');
+      return;
+    }
+
     if (email.isEmpty) {
       _showMessageDialog('Hata', 'Lütfen e-posta alanını doldurunuz.');
       return;

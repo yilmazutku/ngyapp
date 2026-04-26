@@ -7,9 +7,11 @@ import '../models/appointment_model.dart';
 import '../models/event_model.dart';
 import '../models/logger.dart';
 import '../models/user_model.dart';
+import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/event_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
+import '../dialogs/edit_event_dialog.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
@@ -303,6 +305,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final String displayText = '$timeRange ${event.name}';
 
     return GestureDetector(
+      onTap: () => _showEditEventDialog(context, event),
       onLongPress: () async {
         final confirm = await DialogUtils.openConfirm(
           context,
@@ -419,7 +422,16 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     try {
       final appointmentManager = Provider.of<AppointmentManager>(context, listen: false);
-      
+
+      // Make sure admin-configured background colors are loaded before we
+      // render appointment cards (no-op after the first call per session).
+      try {
+        await Provider.of<AppointmentColorsProvider>(context, listen: false)
+            .fetchColors();
+      } catch (e) {
+        logger.err('Failed to load appointment colors: {}', [e]);
+      }
+
       // Apply filters on Firebase side for better performance
       final fetchedAppointments = await appointmentManager.fetchAppointmentsWithUsers(
         startDate: startDate,
@@ -634,6 +646,25 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           appointment: appointment,
           onAppointmentUpdated: () {
             setState(() => _fetchAllAppointments());
+          },
+        );
+      },
+    );
+  }
+
+  /// Show dialog to edit an event
+  void _showEditEventDialog(BuildContext context, EventModel event) {
+    logger.info('opening edit event dialog for eventId:{}', [event.eventId]);
+    showDialog(
+      context: context,
+      builder: (_) {
+        return EditEventDialog(
+          event: event,
+          onEventUpdated: () {
+            if (mounted) {
+              _fetchAllAppointments();
+              _fetchEvents();
+            }
           },
         );
       },

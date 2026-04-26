@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/diet_model.dart';
 import '../models/logger.dart';
+import '../models/meal_model.dart';
+import '../models/special_line_model.dart';
 import '../providers/diet_provider.dart';
+import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
 import '../widgets/app_bar_with_back.dart';
-import '../models/meal_model.dart';
-
-// Import the constants from meal_formatter.dart
 
 class DietEditPage extends StatefulWidget {
   final String userId;
@@ -45,10 +45,27 @@ class _DietEditPageState extends State<DietEditPage> {
     _scrollController = ScrollController();
     // Initialize diet name
     _dietName = widget.dietDoc.displayName;
-    
+
     // If it's a new diet, mark it as having changes
     if (widget.isNewDiet) {
       _hasChanges = true;
+    }
+
+    // Load admin-configured special lines so any marker (built-in + admin)
+    // is rendered with section-divider styling and parsed correctly when the
+    // admin types content manually.
+    _loadSpecialLines();
+  }
+
+  Future<void> _loadSpecialLines() async {
+    try {
+      await Provider.of<SpecialLinesProvider>(context, listen: false)
+          .fetchSpecialLines();
+      if (mounted) setState(() {});
+    } catch (e) {
+      logger.warn(
+          'Could not load admin special lines, falling back to built-ins only: {}',
+          [e.toString()]);
     }
   }
 
@@ -625,75 +642,20 @@ class _DietEditPageState extends State<DietEditPage> {
 
                   if (newContent != currentContent) {
                     setState(() {
-                      final contentList = _editableData[mealName]['content'] as List;
-                      
-                      // Check if this is a multiline edit
+                      final contentList =
+                          _editableData[mealName]['content'] as List;
+
                       if (newContent.contains('\n')) {
-                        // Remove the current item
                         contentList.removeAt(index);
-                        
-                        // Parse the content for multiple lines and check for "veya" separators
-                        final lines = newContent.split('\n');
-                        bool firstLine = true;
-                        int insertIndex = index;
-                        
-                        for (String line in lines) {
-                          final trimmedLine = line.trim();
-                          if (trimmedLine.isEmpty) continue;
-                          
-                                                // Check for any of our special markers at the start of the line
-                      bool isSpecialMarker = false;
-                      
-                      // Check for Veya marker
-                      if (!firstLine && trimmedLine.toLowerCase().startsWith(VEYA_MARKER.toLowerCase())) {
-                        // Add a standalone "Veya" marker first
-                        contentList.insert(insertIndex, {'content': VEYA_MARKER});
-                        insertIndex++;
-                        
-                        // Then add the content after "veya" if there is any
-                        final contentAfterVeya = trimmedLine.substring(VEYA_MARKER.length).trim();
-                        if (contentAfterVeya.isNotEmpty) {
-                          contentList.insert(insertIndex, {'content': contentAfterVeya});
-                          insertIndex++;
-                        }
-                        isSpecialMarker = true;
-                      } 
-                      // Check for Haftada X marker
-                      else if (!firstLine && trimmedLine.toLowerCase().startsWith(HAFTADA_MARKER_PREFIX.toLowerCase())) {
-                        // Try to extract the number X from "Haftada X"
-                        final match = RegExp(r'^Haftada\s+(\d+)').firstMatch(trimmedLine);
-                        if (match != null && match.groupCount >= 1) {
-                          final number = match.group(1);
-                          final markerText = '$HAFTADA_MARKER_PREFIX $number';
-                          
-                          // Add the "Haftada X" marker
-                          contentList.insert(insertIndex, {'content': markerText});
-                          insertIndex++;
-                          
-                          // Then add any content after "Haftada X" if there is any
-                          final contentAfterMarker = trimmedLine.substring(match.end).trim();
-                          if (contentAfterMarker.isNotEmpty) {
-                            contentList.insert(insertIndex, {'content': contentAfterMarker});
-                            insertIndex++;
-                          }
-                          isSpecialMarker = true;
-                        }
-                      }
-                      
-                      // If not a special marker, treat as regular content
-                      if (!isSpecialMarker) {
-                            // Regular content line
-                            contentList.insert(insertIndex, {'content': trimmedLine});
-                            insertIndex++;
-                          }
-                          
-                          firstLine = false;
+                        final inserted = _expandLinesIntoEntries(newContent);
+                        for (int i = 0; i < inserted.length; i++) {
+                          contentList.insert(index + i, inserted[i]);
                         }
                       } else {
                         // Simple single-line edit
                         contentList[index] = {'content': newContent};
                       }
-                      
+
                       _hasChanges = true;
                     });
                   }
@@ -778,60 +740,9 @@ class _DietEditPageState extends State<DietEditPage> {
 
                   Navigator.pop(context);
                   setState(() {
-                    final contentList = _editableData[mealName]['content'] as List;
-                    
-                    // Parse the content for multiple lines and check for "veya" separators
-                    final lines = content.split('\n');
-                    bool firstLine = true;
-                    
-                    for (String line in lines) {
-                      final trimmedLine = line.trim();
-                      if (trimmedLine.isEmpty) continue;
-                      
-                      // Check for any of our special markers at the start of the line
-                      bool isSpecialMarker = false;
-                      
-                      // Check for Veya marker
-                      if (!firstLine && trimmedLine.toLowerCase().startsWith(VEYA_MARKER.toLowerCase())) {
-                        // Add a standalone "Veya" marker first
-                        contentList.add({'content': VEYA_MARKER});
-                        
-                        // Then add the content after "veya" if there is any
-                        final contentAfterVeya = trimmedLine.substring(VEYA_MARKER.length).trim();
-                        if (contentAfterVeya.isNotEmpty) {
-                          contentList.add({'content': contentAfterVeya});
-                        }
-                        isSpecialMarker = true;
-                      } 
-                      // Check for Haftada X marker
-                      else if (!firstLine && trimmedLine.toLowerCase().startsWith(HAFTADA_MARKER_PREFIX.toLowerCase())) {
-                        // Try to extract the number X from "Haftada X"
-                        final match = RegExp(r'^Haftada\s+(\d+)').firstMatch(trimmedLine);
-                        if (match != null && match.groupCount >= 1) {
-                          final number = match.group(1);
-                          final markerText = '$HAFTADA_MARKER_PREFIX $number';
-                          
-                          // Add the "Haftada X" marker
-                          contentList.add({'content': markerText});
-                          
-                          // Then add any content after "Haftada X" if there is any
-                          final contentAfterMarker = trimmedLine.substring(match.end).trim();
-                          if (contentAfterMarker.isNotEmpty) {
-                            contentList.add({'content': contentAfterMarker});
-                          }
-                          isSpecialMarker = true;
-                        }
-                      }
-                      
-                      // If not a special marker, treat as regular content
-                      if (!isSpecialMarker) {
-                        // Regular content line
-                        contentList.add({'content': trimmedLine});
-                      }
-                      
-                      firstLine = false;
-                    }
-                    
+                    final contentList =
+                        _editableData[mealName]['content'] as List;
+                    contentList.addAll(_expandLinesIntoEntries(content));
                     _hasChanges = true;
                   });
                 },
@@ -1146,6 +1057,43 @@ class _DietEditPageState extends State<DietEditPage> {
     );
   }
 
+  /// Splits a multi-line text blob into a list of `{'content': ...}` map
+  /// entries, expanding any line that begins with a configured special marker
+  /// (Veya, Haftada X, plus admin-defined entries) into the standalone-marker
+  /// row + trailing content row pair the formatter expects.
+  ///
+  /// The first non-empty line is always treated as regular content even when
+  /// it would otherwise look like a marker, mirroring the previous behavior of
+  /// the dialogs (so a user typing "Veya foo" as the first line keeps that as
+  /// a single line, while subsequent lines split correctly).
+  List<Map<String, dynamic>> _expandLinesIntoEntries(String text) {
+    final List<Map<String, dynamic>> out = [];
+    final lines = text.split('\n');
+    bool firstLine = true;
+
+    for (final raw in lines) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+
+      if (!firstLine) {
+        final match = SpecialLinesRegistry.detect(line);
+        if (match != null) {
+          out.add({'content': match.markerLabel});
+          if (match.contentAfter.isNotEmpty) {
+            out.add({'content': match.contentAfter});
+          }
+          firstLine = false;
+          continue;
+        }
+      }
+
+      out.add({'content': line});
+      firstLine = false;
+    }
+
+    return out;
+  }
+
   // Helper method to get display name for meal keys
   String getMealDisplayName(String mealKey) {
     // Try to find matching enum by name
@@ -1158,275 +1106,169 @@ class _DietEditPageState extends State<DietEditPage> {
     }
   }
 
-  List<Widget> _buildEditableContentItems(String mealName, List<dynamic> contentList) {
-    List<Widget> widgets = [];
-    
-    // Find all "Veya" markers to identify option groups
-    List<int> veyaIndices = [];
+  List<Widget> _buildEditableContentItems(
+      String mealName, List<dynamic> contentList) {
+    final List<Widget> widgets = [];
+
     for (int i = 0; i < contentList.length; i++) {
       final item = contentList[i];
-      final content = (item is Map) ? (item['content'] ?? '') : item.toString();
-      
-      if (content.trim() == VEYA_MARKER || isVeyaOptionSeparator(content)) {
-        veyaIndices.add(i);
+      final content =
+          (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+
+      if (isSpecialMarkerSeparator(content)) {
+        // Marker + inline content: render the marker pill first, then the
+        // trailing content underneath as a regular editable row. Mirrors the
+        // original branch that handled "Veya foo" / "Haftada 2 foo".
+        final cfg = SpecialLinesRegistry.matching(content);
+        widgets.add(_buildMarkerRow(
+          mealName: mealName,
+          index: i,
+          markerLabel: cfg?.extractMarkerLabel(content) ?? content.trim(),
+          config: cfg,
+        ));
+
+        final after = extractContentAfterMarker(content);
+        if (after.isNotEmpty) {
+          widgets.add(
+              _buildContentRow(mealName: mealName, index: i, content: after));
+        }
+      } else if (isExactStandaloneMarker(content)) {
+        // Strict standalone marker — original used `SPECIAL_MARKERS.contains`
+        // here, i.e. trimmed content equals a configured prefix exactly.
+        final cfg = SpecialLinesRegistry.matching(content);
+        widgets.add(_buildMarkerRow(
+          mealName: mealName,
+          index: i,
+          markerLabel: cfg?.extractMarkerLabel(content) ?? content.trim(),
+          config: cfg,
+        ));
+      } else {
+        widgets.add(
+            _buildContentRow(mealName: mealName, index: i, content: content));
       }
     }
-    
-    // Process each content item individually
-    for (int i = 0; i < contentList.length; i++) {
-      final item = contentList[i];
-      final content = (item is Map) ? (item['content'] ?? '') : item.toString();
-      
-      // Check if this is a special marker separator line
-      if (isSpecialMarkerSeparator(content)) {
-        // Handle marker separator line - extract the content after marker
-        final contentAfterMarker = extractContentAfterMarker(content);
-        
-        // Determine marker type and styling
-        bool isVeya = content.trim().startsWith(VEYA_MARKER);
-        bool isHaftada = content.trim().startsWith(HAFTADA_MARKER_PREFIX);
-        
-        // Set styling based on marker type
-        Color markerColor = isVeya ? Colors.orange : Colors.blue;
-        IconData markerIcon = isVeya ? Icons.sync_alt : Icons.calendar_today;
-        
-        // Extract the marker text to display
-        String markerText = VEYA_MARKER; // Default
-        if (isHaftada) {
-          final match = HAFTADA_OPTION_SEPARATOR_REGEX.firstMatch(content);
-          if (match != null) {
-            markerText = match.group(0)!.trim();
-          } else {
-            markerText = HAFTADA_MARKER_PREFIX;
-          }
-        }
-        
-        // Add marker separator indicator
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Marker indicator
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: markerColor.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    markerIcon,
-                    color: markerColor,
-                    size: 16,
-                  ),
-                ),
-                const SizedBox(width: 12),
 
-                // Marker text
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: markerColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      markerText,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: markerColor,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                ),
+    return widgets;
+  }
 
-                // Delete marker button
-                IconButton(
-                  icon: const Icon(Icons.remove_circle,
-                      color: Colors.red, size: 20),
-                  onPressed: () => _deleteContentItem(mealName, i),
-                  tooltip: 'Satırı Sil',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.all(8),
-                ),
-              ],
+  /// Pill-styled marker row used for both standalone markers and the leading
+  /// part of a "marker + content" row.
+  Widget _buildMarkerRow({
+    required String mealName,
+    required int index,
+    required String markerLabel,
+    required SpecialLineConfig? config,
+  }) {
+    final color = _markerColorFor(config);
+    final icon = _markerIconFor(config);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
             ),
+            child: Icon(icon, color: color, size: 16),
           ),
-        );
-        
-        // If there's content after marker, add it as a separate item
-        if (contentAfterMarker.isNotEmpty) {
-          widgets.add(
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Item indicator
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      '${i + 1}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-
-                  // Content text with edit option
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => _editContentItem(mealName, i, contentAfterMarker),
-                      child: Text(
-                        contentAfterMarker,
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  ),
-
-                  // Delete item button - this deletes the entire line
-                  IconButton(
-                    icon: const Icon(Icons.remove_circle,
-                        color: Colors.red, size: 20),
-                    onPressed: () => _deleteContentItem(mealName, i),
-                    tooltip: 'Öğeyi Sil',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.all(8),
-                  ),
-                ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                markerLabel,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                  fontSize: 16,
+                ),
               ),
             ),
-          );
-        }
-      } 
-      // Check if this is a standalone marker
-      else if (SPECIAL_MARKERS.contains(content.trim())) {
-        // Determine marker type and styling
-        bool isVeya = content.trim() == VEYA_MARKER;
-        bool isHaftada = content.trim() == HAFTADA_MARKER_PREFIX;
-        
-        // Set styling based on marker type
-        Color markerColor = isVeya ? Colors.orange : Colors.blue;
-        IconData markerIcon = isVeya ? Icons.sync_alt : Icons.calendar_today;
-        
-        // Handle standalone marker line
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Marker indicator
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: markerColor.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    markerIcon,
-                    color: markerColor,
-                    size: 16,
-                  ),
-                ),
-                const SizedBox(width: 12),
+          ),
+          IconButton(
+            icon:
+                const Icon(Icons.remove_circle, color: Colors.red, size: 20),
+            onPressed: () => _deleteContentItem(mealName, index),
+            tooltip: 'Satırı Sil',
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(8),
+          ),
+        ],
+      ),
+    );
+  }
 
-                // Marker text
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: markerColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      content.trim(),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: markerColor,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Delete marker button
-                IconButton(
-                  icon: const Icon(Icons.remove_circle,
-                      color: Colors.red, size: 20),
-                  onPressed: () => _deleteContentItem(mealName, i),
-                  tooltip: 'Satırı Sil',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.all(8),
-                ),
-              ],
+  /// Standard editable row for a regular meal-content line (or for the
+  /// trailing content part of a "marker + content" row).
+  Widget _buildContentRow({
+    required String mealName,
+    required int index,
+    required String content,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '${index + 1}',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.blue,
+                fontSize: 12,
+              ),
             ),
           ),
-        );
-      }
-      // Normal content items (not containing Veya)
-      else {
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Item indicator
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    '${i + 1}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-
-                // Content text with edit option
-                Expanded(
-                  child: InkWell(
-                    onTap: () => _editContentItem(mealName, i, content),
-                    child: Text(
-                      content,
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                  ),
-                ),
-
-                // Delete item button
-                IconButton(
-                  icon: const Icon(Icons.remove_circle,
-                      color: Colors.red, size: 20),
-                  onPressed: () => _deleteContentItem(mealName, i),
-                  tooltip: 'Öğeyi Sil',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.all(8),
-                ),
-              ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: () => _editContentItem(mealName, index, content),
+              child: Text(content, style: const TextStyle(fontSize: 16)),
             ),
           ),
-        );
-      }
-    }
-    
-    return widgets;
+          IconButton(
+            icon:
+                const Icon(Icons.remove_circle, color: Colors.red, size: 20),
+            onPressed: () => _deleteContentItem(mealName, index),
+            tooltip: 'Öğeyi Sil',
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(8),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Color used for the marker pill. Built-in markers keep their original
+  /// colors (Veya = orange, Haftada = blue); admin-defined markers fall back
+  /// to teal so they're visibly distinct from regular rows.
+  Color _markerColorFor(SpecialLineConfig? cfg) {
+    if (cfg == null) return Colors.grey;
+    if (cfg == SpecialLinesRegistry.veya) return Colors.orange;
+    if (cfg == SpecialLinesRegistry.haftada) return Colors.blue;
+    return Colors.teal;
+  }
+
+  IconData _markerIconFor(SpecialLineConfig? cfg) {
+    if (cfg == null) return Icons.label_outline;
+    if (cfg == SpecialLinesRegistry.veya) return Icons.sync_alt;
+    if (cfg == SpecialLinesRegistry.haftada) return Icons.calendar_today;
+    return Icons.bookmark_outline;
   }
 
   // Add "Veya" content item - use the constant from meal_formatter.dart

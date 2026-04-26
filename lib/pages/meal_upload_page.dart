@@ -13,6 +13,7 @@ import '../models/meal_model.dart';
 import '../providers/daily_data_provider.dart';
 import '../providers/diet_provider.dart';
 import '../providers/meal_state_and_upload_manager.dart';
+import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
 import '../services/notification_service.dart';
@@ -150,6 +151,17 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   Future<void> _fetchMealStatesAndContents() async {
     try {
+      // Pull the admin-configured special lines first so the meal formatter
+      // recognizes every marker (built-in + admin) when rendering the plan.
+      try {
+        await Provider.of<SpecialLinesProvider>(context, listen: false)
+            .fetchSpecialLines();
+      } catch (e) {
+        logger.warn(
+            'Could not load admin special lines, falling back to built-ins only: {}',
+            [e.toString()]);
+      }
+
       // Fetch meal contents (subtitles) using DietProvider
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
       final subtitles = await dietProvider.fetchLatestDietSubtitles(widget.userId);

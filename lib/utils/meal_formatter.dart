@@ -1,190 +1,175 @@
 import 'package:flutter/material.dart';
 
-// Constants for special markers handling
-const String VEYA_MARKER = "Veya";
-const String HAFTADA_MARKER_PREFIX = "Haftada"; // New marker for weekly frequency
+import '../models/special_line_model.dart';
+
+// ---------------------------------------------------------------------------
+// Legacy constants (kept for backward compatibility with files that already
+// import them — e.g. add_diet_dialog.dart and the old file_handler_page.dart).
+// New code should rely on [SpecialLinesRegistry] / [SpecialLineConfig] instead.
+// ---------------------------------------------------------------------------
+const String VEYA_MARKER = 'Veya';
+const String HAFTADA_MARKER_PREFIX = 'Haftada';
 const List<String> SPECIAL_MARKERS = [VEYA_MARKER, HAFTADA_MARKER_PREFIX];
 
-// Regular expressions for marker separators
-final RegExp VEYA_OPTION_SEPARATOR_REGEX = RegExp(r'^Veya\s+'); // Matches "Veya" followed by whitespace
-final RegExp HAFTADA_OPTION_SEPARATOR_REGEX = RegExp(r'^Haftada\s+\d+\s*'); // Matches "Haftada X" where X is a number
+final RegExp VEYA_OPTION_SEPARATOR_REGEX = RegExp(r'^Veya\s+');
+final RegExp HAFTADA_OPTION_SEPARATOR_REGEX = RegExp(r'^Haftada\s+\d+\s*');
 
-// Helper to check if a content string is any special marker separator
+/// Returns true when [content] is a "marker + inline content" line for any
+/// configured special line (built-in or admin-defined).
+///
+/// Mirrors the original `isSpecialMarkerSeparator`: any of the per-config
+/// separator regexes (`^Veya\s+`, `^Haftada\s+\d+\s*`, …) hits.
 bool isSpecialMarkerSeparator(String content) {
-  return VEYA_OPTION_SEPARATOR_REGEX.hasMatch(content) || 
-         HAFTADA_OPTION_SEPARATOR_REGEX.hasMatch(content);
+  for (final cfg in SpecialLinesRegistry.all) {
+    if (cfg.isSeparator(content)) return true;
+  }
+  return false;
 }
 
-// Helper to check if a content string is a standalone marker
+/// Lax standalone check (matches the original `isStandaloneMarker`):
+/// trimmed content equals the prefix exactly OR begins with `"$prefix "`.
+/// Used by callers that need to recognize an option-starting marker line.
 bool isStandaloneMarker(String content) {
-  final trimmedContent = content.trim();
-  return SPECIAL_MARKERS.contains(trimmedContent) || 
-         SPECIAL_MARKERS.any((marker) => trimmedContent.startsWith('$marker '));
+  for (final cfg in SpecialLinesRegistry.all) {
+    if (cfg.isStandalone(content)) return true;
+  }
+  return false;
 }
 
-// Helper to check if a content string is a Veya option separator (kept for backward compatibility)
-bool isVeyaOptionSeparator(String content) {
-  return VEYA_OPTION_SEPARATOR_REGEX.hasMatch(content);
+/// Strict standalone check that mirrors the original
+/// `SPECIAL_MARKERS.contains(content.trim())`: trimmed content equals one of
+/// the configured prefixes exactly.
+///
+/// The renderers use this — rather than the lax [isStandaloneMarker] — to
+/// decide whether to drop the row entirely instead of stripping a marker.
+bool isExactStandaloneMarker(String content) {
+  for (final cfg in SpecialLinesRegistry.all) {
+    if (cfg.isExactMarker(content)) return true;
+  }
+  return false;
 }
 
-// Helper to extract content after a marker in a separator
+/// Backward-compatible alias for [isSpecialMarkerSeparator] that only checks
+/// the "Veya" prefix; preserved for callers that explicitly need that.
+bool isVeyaOptionSeparator(String content) =>
+    SpecialLinesRegistry.veya.isSeparator(content);
+
+/// Strips the matched marker portion off a separator line and returns the
+/// trailing content. Returns [content] unchanged when no marker matches.
+/// No trim — mirrors the original `extractContentAfterMarker` exactly.
 String extractContentAfterMarker(String content) {
-  if (VEYA_OPTION_SEPARATOR_REGEX.hasMatch(content)) {
-    return content.replaceFirst(VEYA_OPTION_SEPARATOR_REGEX, '');
-  } else if (HAFTADA_OPTION_SEPARATOR_REGEX.hasMatch(content)) {
-    return content.replaceFirst(HAFTADA_OPTION_SEPARATOR_REGEX, '');
+  for (final cfg in SpecialLinesRegistry.all) {
+    if (cfg.isSeparator(content)) {
+      return content.replaceFirst(cfg.separatorRegex, '');
+    }
   }
   return content;
 }
 
-// Helper to extract content after Veya in a separator (kept for backward compatibility)
-String extractContentAfterVeya(String content) {
-  return extractContentAfterMarker(content);
+String extractContentAfterVeya(String content) =>
+    extractContentAfterMarker(content);
+
+/// Returns the [SpecialLineConfig] whose marker matches [content], or null.
+SpecialLineConfig? _matchingConfig(String content) =>
+    SpecialLinesRegistry.matching(content);
+
+/// Best-effort label to display in the section divider for the option that
+/// starts at a marker line. Falls back to "Veya" so the existing visual
+/// behavior is preserved when no marker matches.
+String _dividerLabelFor(String markerContent) {
+  final cfg = _matchingConfig(markerContent);
+  if (cfg != null) return cfg.extractMarkerLabel(markerContent);
+  return VEYA_MARKER;
 }
 
-/// Utility class for formatting meal content for display
+/// Utility class for formatting meal content for display.
+///
+/// Each call inspects the current [SpecialLinesRegistry] so admin-configured
+/// markers render with the same styling as the built-in "Veya" / "Haftada X"
+/// separators.
 class MealFormatter {
-  /// Formats a list of meal content items to display options with "Veya" separators
-  /// 
-  /// Each option starts with content item that has "Veya" prefix
-  /// Returns a list of widgets with Text widgets for content and Dividers with "Veya" text
-  /// [fontSize] - optional font size for content text (default: 16)
-  static List<Widget> formatMealContentWithOptions(List<dynamic> contentList, {double fontSize = 16}) {
-    List<Widget> formattedContent = [];
-    List<int> optionStartIndices = [];
-    
-    // First, identify all option boundaries
-    for (int i = 0; i < contentList.length; i++) {
-      final item = contentList[i];
-      final content = (item is Map) ? (item['content'] ?? '') : item.toString();
-      
-      // The first item is always the start of the first option
-      if (i == 0) {
-        optionStartIndices.add(i);
-      }
-      // Any standalone marker or marker followed by content is the start of a new option
-      else if (isStandaloneMarker(content.toString()) || isSpecialMarkerSeparator(content.toString())) {
-        optionStartIndices.add(i);
-      }
-    }
-    
-    // Now create UI for each option with separators
-    for (int optionIndex = 0; optionIndex < optionStartIndices.length; optionIndex++) {
-      // Add divider before all options except the first
+  /// Formats a list of meal content items into widgets, inserting a styled
+  /// divider before each new option introduced by a special marker line.
+  static List<Widget> formatMealContentWithOptions(
+    List<dynamic> contentList, {
+    double fontSize = 16,
+  }) {
+    final List<Widget> formatted = [];
+    final List<int> optionStartIndices = _collectOptionStarts(contentList);
+
+    for (int optionIndex = 0;
+        optionIndex < optionStartIndices.length;
+        optionIndex++) {
       if (optionIndex > 0) {
-        // Get the marker text for the divider
         final markerItem = contentList[optionStartIndices[optionIndex]];
-        final markerContent = (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
-        String dividerText = VEYA_MARKER; // Default
-        
-        // Determine which marker to display in the divider
-        if (markerContent.trim().startsWith(HAFTADA_MARKER_PREFIX)) {
-          // For Haftada X, show the full "Haftada X" text
-          final match = HAFTADA_OPTION_SEPARATOR_REGEX.firstMatch(markerContent);
-          if (match != null) {
-            dividerText = match.group(0)!.trim();
-          } else {
-            dividerText = HAFTADA_MARKER_PREFIX;
-          }
-        }
-        
-        formattedContent.add(const SizedBox(height: 8));
-        formattedContent.add(
-          Row(
-            children: [
-              const Expanded(child: Divider()),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                child: Text(
-                  dividerText,
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontStyle: FontStyle.italic,
-                  ),
+        final markerContent =
+            (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
+        final dividerText = _dividerLabelFor(markerContent.toString());
+
+        formatted.add(const SizedBox(height: 8));
+        formatted.add(Row(
+          children: [
+            const Expanded(child: Divider()),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Text(
+                dividerText,
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontStyle: FontStyle.italic,
                 ),
               ),
-              const Expanded(child: Divider()),
-            ],
-          ),
-        );
-        formattedContent.add(const SizedBox(height: 8));
+            ),
+            const Expanded(child: Divider()),
+          ],
+        ));
+        formatted.add(const SizedBox(height: 8));
       }
-      
-      // Determine the range of indices for this option
-      int startIdx = optionStartIndices[optionIndex];
-      int endIdx = (optionIndex < optionStartIndices.length - 1) 
-                 ? optionStartIndices[optionIndex + 1] 
-                 : contentList.length;
-      
-      // Add all items in this option
+
+      final int startIdx = optionStartIndices[optionIndex];
+      final int endIdx = (optionIndex < optionStartIndices.length - 1)
+          ? optionStartIndices[optionIndex + 1]
+          : contentList.length;
+
       for (int i = startIdx; i < endIdx; i++) {
         final item = contentList[i];
-        String displayContent = (item is Map) ? (item['content'] ?? '') : item.toString();
-        
-        // Skip standalone marker items
-        if (SPECIAL_MARKERS.contains(displayContent.trim())) {
-          continue; // Skip standalone marker lines
+        String displayContent =
+            (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+
+        // Strict skip — original was `SPECIAL_MARKERS.contains(t.trim())`.
+        if (isExactStandaloneMarker(displayContent)) {
+          continue;
         } else if (isSpecialMarkerSeparator(displayContent)) {
-          // Extract content after any marker
           displayContent = extractContentAfterMarker(displayContent);
         }
-        
-        formattedContent.add(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4.0),
-            child: Text(
-              displayContent,
-              style: TextStyle(fontSize: fontSize),
-            ),
+
+        formatted.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0),
+          child: Text(
+            displayContent,
+            style: TextStyle(fontSize: fontSize),
           ),
-        );
+        ));
       }
     }
-    
-    return formattedContent;
+
+    return formatted;
   }
 
-  /// Returns a RichText widget that formats meal content with options
-  /// Used when we need to display the content as a single widget
+  /// Returns a [RichText] widget that formats meal content with options.
   static Widget formatMealContentAsRichText(List<dynamic> contentList) {
-    List<TextSpan> spans = [];
-    List<int> optionStartIndices = [];
-    
-    // First, identify all option boundaries
-    for (int i = 0; i < contentList.length; i++) {
-      final item = contentList[i];
-      final content = (item is Map) ? (item['content'] ?? '') : item.toString();
-      
-      // The first item is always the start of the first option
-      if (i == 0) {
-        optionStartIndices.add(i);
-      }
-      // Any standalone marker or marker followed by content is the start of a new option
-      else if (isStandaloneMarker(content.toString()) || isSpecialMarkerSeparator(content.toString())) {
-        optionStartIndices.add(i);
-      }
-    }
-    
-    // Now create spans for each option with separators
-    for (int optionIndex = 0; optionIndex < optionStartIndices.length; optionIndex++) {
-      // Add divider before all options except the first
+    final List<TextSpan> spans = [];
+    final List<int> optionStartIndices = _collectOptionStarts(contentList);
+
+    for (int optionIndex = 0;
+        optionIndex < optionStartIndices.length;
+        optionIndex++) {
       if (optionIndex > 0) {
-        // Get the marker text for the divider
         final markerItem = contentList[optionStartIndices[optionIndex]];
-        final markerContent = (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
-        String dividerText = VEYA_MARKER; // Default
-        
-        // Determine which marker to display in the divider
-        if (markerContent.trim().startsWith(HAFTADA_MARKER_PREFIX)) {
-          // For Haftada X, show the full "Haftada X" text
-          final match = HAFTADA_OPTION_SEPARATOR_REGEX.firstMatch(markerContent);
-          if (match != null) {
-            dividerText = match.group(0)!.trim();
-          } else {
-            dividerText = HAFTADA_MARKER_PREFIX;
-          }
-        }
-        
+        final markerContent =
+            (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
+        final dividerText = _dividerLabelFor(markerContent.toString());
+
         spans.add(const TextSpan(text: '\n'));
         spans.add(TextSpan(
           text: '$dividerText\n',
@@ -196,33 +181,30 @@ class MealFormatter {
         ));
         spans.add(const TextSpan(text: '\n'));
       }
-      
-      // Determine the range of indices for this option
-      int startIdx = optionStartIndices[optionIndex];
-      int endIdx = (optionIndex < optionStartIndices.length - 1) 
-                 ? optionStartIndices[optionIndex + 1] 
-                 : contentList.length;
-      
-      // Add all items in this option
+
+      final int startIdx = optionStartIndices[optionIndex];
+      final int endIdx = (optionIndex < optionStartIndices.length - 1)
+          ? optionStartIndices[optionIndex + 1]
+          : contentList.length;
+
       for (int i = startIdx; i < endIdx; i++) {
         final item = contentList[i];
-        String displayContent = (item is Map) ? (item['content'] ?? '') : item.toString();
-        
-        // Skip standalone marker items
-        if (SPECIAL_MARKERS.contains(displayContent.trim())) {
-          continue; // Skip standalone marker lines
+        String displayContent =
+            (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+
+        if (isExactStandaloneMarker(displayContent)) {
+          continue;
         } else if (isSpecialMarkerSeparator(displayContent)) {
-          // Extract content after any marker
           displayContent = extractContentAfterMarker(displayContent);
         }
-        
+
         spans.add(TextSpan(
           text: '$displayContent\n',
           style: const TextStyle(height: 1.5),
         ));
       }
     }
-    
+
     return RichText(
       text: TextSpan(
         style: const TextStyle(color: Colors.black, fontSize: 16),
@@ -231,74 +213,65 @@ class MealFormatter {
     );
   }
 
-  /// Convert meal content to a formatted string for plain text display
+  /// Plain text version of the formatted content.
   static String formatMealContentAsString(List<dynamic> contentList) {
-    StringBuffer buffer = StringBuffer();
-    List<int> optionStartIndices = [];
-    
-    // First, identify all option boundaries
-    for (int i = 0; i < contentList.length; i++) {
-      final item = contentList[i];
-      final content = (item is Map) ? (item['content'] ?? '') : item.toString();
-      
-      // The first item is always the start of the first option
-      if (i == 0) {
-        optionStartIndices.add(i);
-      }
-      // Any standalone marker or marker followed by content is the start of a new option
-      else if (isStandaloneMarker(content.toString()) || isSpecialMarkerSeparator(content.toString())) {
-        optionStartIndices.add(i);
-      }
-    }
-    
-    // Now create text for each option with separators
-    for (int optionIndex = 0; optionIndex < optionStartIndices.length; optionIndex++) {
-      // Add divider before all options except the first
+    final buffer = StringBuffer();
+    final optionStartIndices = _collectOptionStarts(contentList);
+
+    for (int optionIndex = 0;
+        optionIndex < optionStartIndices.length;
+        optionIndex++) {
       if (optionIndex > 0) {
-        // Get the marker text for the divider
         final markerItem = contentList[optionStartIndices[optionIndex]];
-        final markerContent = (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
-        String dividerText = VEYA_MARKER; // Default
-        
-        // Determine which marker to display in the divider
-        if (markerContent.trim().startsWith(HAFTADA_MARKER_PREFIX)) {
-          // For Haftada X, show the full "Haftada X" text
-          final match = HAFTADA_OPTION_SEPARATOR_REGEX.firstMatch(markerContent);
-          if (match != null) {
-            dividerText = match.group(0)!.trim();
-          } else {
-            dividerText = HAFTADA_MARKER_PREFIX;
-          }
-        }
-        
+        final markerContent =
+            (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
+        final dividerText = _dividerLabelFor(markerContent.toString());
+
         buffer.writeln();
         buffer.writeln(dividerText);
         buffer.writeln();
       }
-      
-      // Determine the range of indices for this option
-      int startIdx = optionStartIndices[optionIndex];
-      int endIdx = (optionIndex < optionStartIndices.length - 1) 
-                 ? optionStartIndices[optionIndex + 1] 
-                 : contentList.length;
-      
-      // Add all items in this option
+
+      final int startIdx = optionStartIndices[optionIndex];
+      final int endIdx = (optionIndex < optionStartIndices.length - 1)
+          ? optionStartIndices[optionIndex + 1]
+          : contentList.length;
+
       for (int i = startIdx; i < endIdx; i++) {
         final item = contentList[i];
-        String displayContent = (item is Map) ? (item['content'] ?? '') : item.toString();
-        
-        // Skip standalone marker items
-        if (SPECIAL_MARKERS.contains(displayContent.trim())) {
-          continue; // Skip standalone marker lines
+        String displayContent =
+            (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+
+        if (isExactStandaloneMarker(displayContent)) {
+          continue;
         } else if (isSpecialMarkerSeparator(displayContent)) {
-          // Extract content after any marker
           displayContent = extractContentAfterMarker(displayContent);
         }
-        
+
         buffer.writeln(displayContent);
       }
     }
-    
+
     return buffer.toString();
   }
-} 
+
+  /// Identifies the indices in [contentList] that begin a new option block.
+  /// The first item is always treated as an option start; subsequent option
+  /// starts are any line recognized as a special marker (standalone or
+  /// separator).
+  static List<int> _collectOptionStarts(List<dynamic> contentList) {
+    final List<int> starts = [];
+    for (int i = 0; i < contentList.length; i++) {
+      final item = contentList[i];
+      final content =
+          (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+
+      if (i == 0) {
+        starts.add(i);
+      } else if (isStandaloneMarker(content) || isSpecialMarkerSeparator(content)) {
+        starts.add(i);
+      }
+    }
+    return starts;
+  }
+}

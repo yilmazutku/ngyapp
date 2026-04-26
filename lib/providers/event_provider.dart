@@ -50,6 +50,22 @@ class EventProvider extends ChangeNotifier {
     }
   }
 
+  Future<EventModel> updateEvent(EventModel event) async {
+    try {
+      await eventsCollection.doc(event.eventId).update({
+        'name': event.name,
+        'startDateTime': Timestamp.fromDate(event.startDateTime),
+        'endDateTime': Timestamp.fromDate(event.endDateTime),
+      });
+      logger.info('Event updated: {}', [event]);
+      notifyListeners();
+      return event;
+    } catch (e) {
+      logger.err('Error updating event: {}', [e]);
+      rethrow;
+    }
+  }
+
   Future<void> deleteEvent(String eventId) async {
     try {
       await eventsCollection.doc(eventId).delete();
