@@ -37,6 +37,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   DateTime? _startDate=DateTime.now();
   bool _isLoading = false;
   bool _isPaymentReceived = false;
+  PaymentType _paymentType = PaymentType.nakit;
   SubsMeetingType _selectedMeetingType = SubsMeetingType.faceToFace;
 
   @override
@@ -192,6 +193,25 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   onChanged: (val) => setState(() => _isPaymentReceived = val ?? false),
                   controlAffinity: ListTileControlAffinity.leading,
                 ),
+
+                // Payment type for the created payment (only when payment received)
+                if (_isPaymentReceived) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<PaymentType>(
+                    value: _paymentType,
+                    items: PaymentType.selectableValues.map((PaymentType type) {
+                      return DropdownMenuItem<PaymentType>(
+                        value: type,
+                        child: Text(type.label),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) => setState(() => _paymentType = newValue!),
+                    decoration: const InputDecoration(
+                      labelText: 'Ödeme Türü',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -319,6 +339,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
             amount: paymentAmount,
             paymentDate: _startDate, // Use subscription start date as payment date
             status: PaymentStatus.completed,
+            paymentType: _paymentType,
             notes: 'Abonelik ödemesi: ${_packageNameController.text}',
           );
           

@@ -140,34 +140,25 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
       return 'Geçersiz şablon. Örn: "Veya", "Haftada X", "Günde X defa".';
     }
 
-    final newTemplate = parsed.toTemplate().toLowerCase();
-    final newPrefix = parsed.prefix.toLowerCase();
+    final newKey = parsed.identityKey;
 
+    // Only EXACT template duplicates are rejected. Markers that merely share a
+    // leading word (e.g. "Haftada X" and "Haftada X Gün") are allowed — the
+    // parser resolves overlaps by preferring the most specific (longest) match.
     final builtIns = [
       SpecialLinesRegistry.veya,
       SpecialLinesRegistry.haftada,
     ];
     for (final cfg in builtIns) {
-      if (cfg.toTemplate().toLowerCase() == newTemplate) {
+      if (cfg.identityKey == newKey) {
         return 'Bu şablon sistem tarafından zaten kullanılıyor.';
-      }
-      if (newPrefix.isNotEmpty &&
-          cfg.prefix.toLowerCase() == newPrefix) {
-        return '"${cfg.prefix}" kelimesi sistem şablonu olarak zaten kullanılıyor.';
       }
     }
 
     for (int i = 0; i < _customLines.length; i++) {
       if (editingIndex != null && i == editingIndex) continue;
-      final existing = _customLines[i];
-      if (existing.toTemplate().toLowerCase() == newTemplate) {
+      if (_customLines[i].identityKey == newKey) {
         return 'Aynı şablon zaten mevcut.';
-      }
-      // Two markers with the same non-empty prefix would shadow each other
-      // during parsing (their separator regexes overlap), so disallow it.
-      if (newPrefix.isNotEmpty &&
-          existing.prefix.toLowerCase() == newPrefix) {
-        return 'Aynı kelime ile başka bir özel satır zaten mevcut.';
       }
     }
     return null;
@@ -246,14 +237,16 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
                       child: const Text(
                         'Bir kelime ya da kısa ifade girin (örn. "Aperatif").\n'
                         'Eğer satırın yanında bir sayı yer alacaksa, sayının '
-                        'yerine büyük "X" harfini kullanın. X yerleştirebileceğiniz '
-                        'üç şekil vardır:\n'
+                        'yerine büyük "X" harfini kullanın. X başta, ortada ya '
+                        'da sonda olabilir:\n'
                         '  • Sonda:   "Haftada X"\n'
                         '  • Ortada:  "Günde X defa"\n'
                         '  • Başta:   "X defa"\n\n'
+                        'Birden fazla X kullanabilirsiniz; örn. "Haftada X Gün" '
+                        'veya "Haftada X Gün X Defa". İki X yan yana olamaz '
+                        '(aralarında en az bir kelime bulunmalıdır).\n'
                         'X büyük harf olarak ve tek başına bir kelime gibi '
-                        'yazılmalıdır (boşluklarla ayrılmış). Aynı şablon birden '
-                        'fazla X içeremez.',
+                        'yazılmalıdır (boşluklarla ayrılmış).',
                         style: TextStyle(fontSize: 13),
                       ),
                     ),
@@ -358,10 +351,12 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
                     child: Text(
                       'Sayı içerecek özel satırlarda, sayının olacağı yere '
                       'büyük "X" harfini yazın. X şablonun başında, ortasında '
-                      'ya da sonunda olabilir.\n'
-                      '  • "Haftada X"     → "Haftada 2", "Haftada 5"\n'
-                      '  • "Günde X defa"  → "Günde 3 defa"\n'
-                      '  • "X defa"        → "5 defa"',
+                      'ya da sonunda olabilir; birden fazla da kullanılabilir.\n'
+                      '  • "Haftada X"          → "Haftada 2", "Haftada 5"\n'
+                      '  • "Günde X defa"       → "Günde 3 defa"\n'
+                      '  • "Haftada X Gün"      → "Haftada 1 Gün"\n'
+                      '  • "Haftada X Gün X Defa" → "Haftada 1 Gün 2 Defa"\n'
+                      '  • "X defa"             → "5 defa"',
                       style: TextStyle(fontSize: 13),
                     ),
                   ),

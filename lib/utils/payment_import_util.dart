@@ -376,6 +376,8 @@ class PaymentImportUtil {
           amount: payment.amount,
           paymentDate: payment.date,
           status: PaymentStatus.completed,
+          // Excel imports don't carry a payment type; default to cash.
+          paymentType: PaymentType.nakit,
           notes: 'Excel içe aktarım',
         );
         paymentsCreated++;

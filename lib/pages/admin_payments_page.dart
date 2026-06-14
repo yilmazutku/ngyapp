@@ -966,6 +966,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
   DateTime? _selectedPaymentDate = DateTime.now();
   DateTime? _selectedDueDate;
   PaymentStatus _paymentStatus = PaymentStatus.completed;
+  PaymentType _paymentType = PaymentType.nakit;
   File? _dekontImage;
 
   @override
@@ -1117,6 +1118,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
               Text('Miktar: ${_amountController.text} TL'),
               Text('Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}'),
               Text('Durum: ${_paymentStatus.label}'),
+              Text('Ödeme Türü: ${_paymentType.label}'),
               if (_selectedDueDate != null)
                 Text(
                   'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
@@ -1158,6 +1160,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
         amount: paymentAmount,
         paymentDate: _selectedPaymentDate,
         status: _paymentStatus,
+        paymentType: _paymentType,
         dekontImage: _dekontImage,
         dueDate: _selectedDueDate,
       );
@@ -1189,6 +1192,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
               'Miktar: ${_amountController.text} TL\n'
               'Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}\n'
               'Durum: ${_paymentStatus.label}\n'
+              'Ödeme Türü: ${_paymentType.label}\n'
               '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
               '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
         );
@@ -1352,6 +1356,25 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                   ),
                   const SizedBox(height: 16),
 
+                  // Payment type dropdown (Nakit / Pos / Iban)
+                  DropdownButtonFormField<PaymentType>(
+                    value: _paymentType,
+                    items: PaymentType.selectableValues.map((PaymentType type) {
+                      return DropdownMenuItem<PaymentType>(
+                        value: type,
+                        child: Text(type.label),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) {
+                      setState(() => _paymentType = newValue!);
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Ödeme Türü',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
                   // Due Date Picker (for planned)
                   if (_paymentStatus == PaymentStatus.planned) ...[
                     ListTile(
@@ -1476,6 +1499,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
   DateTime? _selectedPaymentDate;
   DateTime? _selectedDueDate;
   late PaymentStatus _paymentStatus;
+  // Null means "unspecified" (PaymentType.na); legacy payments start unselected.
+  PaymentType? _paymentType;
   File? _dekontImage;
 
   @override
@@ -1492,6 +1517,9 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     _selectedPaymentDate = widget.payment.paymentDate ?? DateTime.now();
     _selectedDueDate = widget.payment.dueDate;
     _paymentStatus = widget.payment.status;
+    _paymentType = widget.payment.paymentType == PaymentType.na
+        ? null
+        : widget.payment.paymentType;
     _selectedSubscriptionId = widget.payment.subscriptionId;
 
     _loadSubscriptions();
@@ -1724,6 +1752,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                 Text('Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}'),
                 Text('Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL'),
                 Text('Durum: ${_paymentStatus.label}'),
+                Text('Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}'),
                 if (_selectedSubscriptionId != null)
                   Text('Bağlı Paket: $newSubName')
                 else
@@ -1847,6 +1876,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
           amount: newAmount,
           paymentDate: _selectedPaymentDate,
           status: _paymentStatus,
+          paymentType: _paymentType ?? PaymentType.na,
           dekontImage: _dekontImage,
           dueDate: _selectedDueDate,
         );
@@ -1889,6 +1919,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
           subscriptionId: _selectedSubscriptionId,
           amount: newAmount,
           status: _paymentStatus,
+          paymentType: _paymentType ?? PaymentType.na,
           paymentDate: _selectedPaymentDate,
           dueDate: _selectedDueDate,
           dekontUrl: dekontUrl,
@@ -2030,6 +2061,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
               'Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}\n'
               'Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL\n'
               'Durum: ${_paymentStatus.label}\n'
+              'Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}\n'
               '${newSubName != null ? 'Bağlı Paket: $newSubName\n' : 'Bağlı Paket: Yok\n'}'
               '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
               '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
@@ -2198,6 +2230,23 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                       });
                     },
                     decoration: const InputDecoration(labelText: 'Ödeme Durumu'),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Payment type dropdown (Nakit / Pos / Iban)
+                  DropdownButtonFormField<PaymentType>(
+                    value: _paymentType,
+                    hint: const Text('Belirtilmemiş'),
+                    items: PaymentType.selectableValues.map((PaymentType type) {
+                      return DropdownMenuItem<PaymentType>(
+                        value: type,
+                        child: Text(type.label),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) {
+                      setState(() => _paymentType = newValue);
+                    },
+                    decoration: const InputDecoration(labelText: 'Ödeme Türü'),
                   ),
                   const SizedBox(height: 16),
 

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/logger.dart';
+import '../models/payment_model.dart';
 import '../models/subs_model.dart';
+import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
 
@@ -34,6 +37,15 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   late SubsMeetingType _meetingType;
   bool _isPaymentIncomplete = false;
 
+  final Logger _logger = Logger.forClass(EditSubscriptionDialog);
+
+  // Payment type of the payment(s) linked to this subscription.
+  // Null = unspecified (PaymentType.na). Loaded from the linked payment so the
+  // admin can review/change it; changes are propagated back to the payment(s).
+  PaymentType? _paymentType;
+  PaymentType? _originalPaymentType;
+  bool _loadingPaymentType = true;
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +76,40 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     
     // Add listener to update allowed postponements when total meetings changes
     _totalMeetingsController.addListener(_updateState);
+
+    _loadLinkedPaymentType();
+  }
+
+  /// Loads the payment type from the payment(s) linked to this subscription so
+  /// the dropdown reflects the current value. Uses the most recent payment.
+  Future<void> _loadLinkedPaymentType() async {
+    try {
+      final paymentProvider =
+          Provider.of<PaymentProvider>(context, listen: false);
+      final payments = await paymentProvider.fetchPayments(
+        widget.subscription.subscriptionId,
+        userId: widget.subscription.userId,
+        showAllPayments: false,
+      );
+
+      PaymentType? type;
+      if (payments.isNotEmpty && payments.first.paymentType != PaymentType.na) {
+        type = payments.first.paymentType;
+      }
+
+      if (mounted) {
+        setState(() {
+          _paymentType = type;
+          _originalPaymentType = type;
+          _loadingPaymentType = false;
+        });
+      }
+    } catch (e) {
+      _logger.err('Error loading linked payment type: {}', [e]);
+      if (mounted) {
+        setState(() => _loadingPaymentType = false);
+      }
+    }
   }
   
   void _updatePaymentStatus() {
@@ -165,6 +211,29 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   return null;
                 },
               ),
+              const SizedBox(height: 16),
+
+              // Payment type of the linked payment (Nakit / Pos / Iban).
+              // Changing it updates the corresponding payment record(s).
+              if (_loadingPaymentType)
+                const Center(child: CircularProgressIndicator())
+              else
+                DropdownButtonFormField<PaymentType>(
+                  value: _paymentType,
+                  hint: const Text('Belirtilmemiş'),
+                  items: PaymentType.selectableValues.map((PaymentType type) {
+                    return DropdownMenuItem<PaymentType>(
+                      value: type,
+                      child: Text(type.label),
+                    );
+                  }).toList(),
+                  onChanged: (newValue) => setState(() => _paymentType = newValue),
+                  decoration: const InputDecoration(
+                    labelText: 'Ödeme Türü',
+                    border: OutlineInputBorder(),
+                    helperText: 'Bağlı ödeme kaydına uygulanır',
+                  ),
+                ),
               const SizedBox(height: 16),
               ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -397,12 +466,33 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
           updateData['faceToFaceMeetings'] = null;
         }
 
-        // Use the SubProvider to update the subscription
+        // Acquire providers before awaits to avoid context issues
         final subProvider = Provider.of<SubProvider>(context, listen: false);
+        final paymentProvider =
+            Provider.of<PaymentProvider>(context, listen: false);
+
+        final double oldTotalAmount = widget.subscription.totalAmount;
+        final double newTotalAmount = double.parse(_totalAmountController.text);
+
+        // Use the SubProvider to update the subscription
         await subProvider.updateSubscription(
           userId: userId,
           subscriptionId: subscriptionId,
           updateData: updateData,
+        );
+
+        // Propagate payment-type and amount changes to the linked payment(s).
+        // Only send a new payment type when the admin actually changed it.
+        final PaymentType? changedPaymentType =
+            (_paymentType != null && _paymentType != _originalPaymentType)
+                ? _paymentType
+                : null;
+        await paymentProvider.syncSubscriptionLinkedPayments(
+          userId: userId,
+          subscriptionId: subscriptionId,
+          newPaymentType: changedPaymentType,
+          oldAmount: oldTotalAmount,
+          newAmount: newTotalAmount,
         );
 
         if (!mounted) return;

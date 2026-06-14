@@ -12,6 +12,7 @@ class PaymentModel {
   final double amount;
   final DateTime? paymentDate; // Made nullable
   final PaymentStatus status;
+  final PaymentType paymentType;
   final String? dekontUrl;
   final DateTime? dueDate;
   final List<int>? notificationTimes;
@@ -28,6 +29,7 @@ class PaymentModel {
     required this.amount,
     this.paymentDate, // Nullable
     required this.status,
+    this.paymentType = PaymentType.na,
     this.dekontUrl,
     this.dueDate,
     this.notificationTimes,
@@ -49,6 +51,9 @@ class PaymentModel {
           ? (data['paymentDate'] as Timestamp).toDate()
           : null,
       status: PaymentStatus.fromLabel(data['status']),
+      // Legacy payments have no paymentType field; fromLabel maps null to
+      // PaymentType.na so the UI shows "-" until an admin sets a real type.
+      paymentType: PaymentType.fromLabel(data['paymentType']),
       dekontUrl: data['dekontUrl'],
       dueDate: data['dueDate'] != null
           ? (data['dueDate'] as Timestamp).toDate()
@@ -81,6 +86,9 @@ class PaymentModel {
       'paymentDate':
           paymentDate != null ? Timestamp.fromDate(paymentDate!) : null,
       'status': status.label,
+      // Persist null (not the "-" label) for the unspecified type so the data
+      // stays clean and round-trips back to PaymentType.na on read.
+      'paymentType': paymentType == PaymentType.na ? null : paymentType.label,
       'dekontUrl': dekontUrl,
       'dueDate': dueDate != null ? Timestamp.fromDate(dueDate!) : null,
       'notificationTimes': notificationTimes,
@@ -160,6 +168,8 @@ extension PaymentModelUIUser on PaymentModel {
                 'Ödendiği Tarih: ${DateFormat('dd/MM/yyyy').format(paymentDate!)}',
               ),
             Text('Durum: ${status.label}'),
+            if (status == PaymentStatus.completed)
+              Text('Ödeme Türü: ${paymentType.label}'),
             if (isOverdue) const Text('Ödeme tarihiniz gecikmiştir.'),
             // if (notes != null && notes!.isNotEmpty) Text('Not: $notes'),
           ],
@@ -238,6 +248,8 @@ extension PaymentModelUI on PaymentModel {
                 'Ödendiği Tarih: ${DateFormat('dd/MM/yyyy').format(paymentDate!)}',
               ),
             Text('Durum: ${status.label}'),
+            if (status == PaymentStatus.completed)
+              Text('Ödeme Türü: ${paymentType.label}'),
             if (notes != null && notes!.isNotEmpty) Text('Not: $notes'),
           ],
         ),
@@ -288,4 +300,37 @@ enum PaymentStatus {
   //     return null; // Return null if no match is found
   //   }
   // }
+}
+
+enum PaymentType {
+  nakit('Nakit'),
+  pos('Pos'),
+  iban('Iban'),
+
+  /// Placeholder for payments that never had a type set (e.g. legacy records
+  /// created before this field existed, or Excel imports). Displayed as "-".
+  /// It is intentionally NOT user-selectable; the admin must pick a real type
+  /// to move a payment out of this state. See [selectableValues].
+  na('-'),
+  ;
+
+  const PaymentType(this.label);
+
+  final String label;
+
+  /// The payment types an admin is allowed to choose in the UI.
+  /// Excludes [PaymentType.na], which only represents "unspecified".
+  static List<PaymentType> get selectableValues =>
+      values.where((type) => type != PaymentType.na).toList();
+
+  /// Resolves a [PaymentType] from its stored label.
+  /// Falls back to [PaymentType.na] for null/unknown values so legacy payments
+  /// without a stored type are surfaced as "-" instead of a real type.
+  static PaymentType fromLabel(String? label) {
+    if (label == null) return PaymentType.na;
+    return PaymentType.values.firstWhere(
+      (e) => e.label == label,
+      orElse: () => PaymentType.na,
+    );
+  }
 }

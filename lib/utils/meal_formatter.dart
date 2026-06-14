@@ -56,12 +56,21 @@ bool isVeyaOptionSeparator(String content) =>
 
 /// Strips the matched marker portion off a separator line and returns the
 /// trailing content. Returns [content] unchanged when no marker matches.
-/// No trim — mirrors the original `extractContentAfterMarker` exactly.
+///
+/// Uses the LONGEST separator match so overlapping markers strip correctly
+/// (e.g. "Haftada 1 gün" is removed whole rather than leaving "gün" behind).
 String extractContentAfterMarker(String content) {
+  SpecialLineConfig? best;
+  int bestLen = -1;
   for (final cfg in SpecialLinesRegistry.all) {
-    if (cfg.isSeparator(content)) {
-      return content.replaceFirst(cfg.separatorRegex, '');
+    final len = cfg.matchLength(content);
+    if (len > bestLen) {
+      bestLen = len;
+      best = cfg;
     }
+  }
+  if (best != null) {
+    return content.replaceFirst(best.separatorRegex, '');
   }
   return content;
 }

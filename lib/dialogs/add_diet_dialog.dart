@@ -498,7 +498,15 @@ class _AddDietDialogState extends State<AddDietDialog> {
         log.info('Found subtitle: {}', [foundSubtitle['name']]);
         currentSubtitle = foundSubtitle;
 
-        // Extract numeric time part if present
+        // A meal-header line is expected to contain ONLY the meal name and its
+        // time (e.g. "ÖĞLE (11.30) :"). By design we read just the time from
+        // this line and do NOT treat any leftover text on it as food content.
+        // So if a header arrives glued to a food item (e.g.
+        // "ÖĞLE (11.30) :2 adet yumurta" — `docx_to_text` dropping the Word
+        // <w:tab/> after the time), that trailing text is intentionally
+        // ignored: the document is malformed and the item belongs on its own
+        // line. This is not a bug; food items must start on the line after the
+        // header.
         final timeMatch = RegExp(r'(\d{1,2}[:.](\d{2}))').firstMatch(line);
         if (timeMatch != null) {
           String timeStr = timeMatch.group(0)!;

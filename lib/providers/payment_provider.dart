@@ -202,6 +202,7 @@ class PaymentProvider extends ChangeNotifier {
       required double amount,
       DateTime? paymentDate,
       PaymentStatus status = PaymentStatus.completed,
+      PaymentType paymentType = PaymentType.nakit,
       File? dekontImage,
       DateTime? dueDate,
       List<int>? notificationTimes,
@@ -228,6 +229,7 @@ class PaymentProvider extends ChangeNotifier {
         amount: amount,
         paymentDate: paymentDate,
         status: status,
+        paymentType: paymentType,
         dekontUrl: dekontUrl,
         dueDate: dueDate,
         notificationTimes: notificationTimes,
@@ -304,6 +306,87 @@ class PaymentProvider extends ChangeNotifier {
       subProvider.markChanged();
     } catch (e) {
       logger.err('Error updating payment: $e');
+      rethrow;
+    }
+  }
+
+  /// Propagates subscription-level changes to the payment record(s) linked to
+  /// [subscriptionId]. Used when a subscription is edited so its "corresponding"
+  /// payment stays in sync with the subscription.
+  ///
+  /// - [newPaymentType]: when provided, set on every linked payment.
+  /// - [oldAmount] / [newAmount]: when both are provided and differ, any linked
+  ///   payment whose amount equals [oldAmount] (i.e. the payment that mirrored
+  ///   the subscription total, as created by the add-subscription flow) is
+  ///   updated to [newAmount]. Payments with a different amount (e.g. manual
+  ///   installments) are left untouched to avoid clobbering them.
+  ///
+  /// Returns the number of payments that were updated.
+  Future<int> syncSubscriptionLinkedPayments({
+    required String userId,
+    required String subscriptionId,
+    PaymentType? newPaymentType,
+    double? oldAmount,
+    double? newAmount,
+  }) async {
+    try {
+      final bool amountChanged = oldAmount != null &&
+          newAmount != null &&
+          (oldAmount - newAmount).abs() >= 0.001;
+
+      // Nothing to do.
+      if (newPaymentType == null && !amountChanged) return 0;
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('payments')
+          .where('subscriptionId', isEqualTo: subscriptionId)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        logger.info('No linked payments found for subscription $subscriptionId');
+        return 0;
+      }
+
+      final batch = FirebaseFirestore.instance.batch();
+      int updatedCount = 0;
+
+      for (final doc in snapshot.docs) {
+        final Map<String, dynamic> changes = {};
+
+        if (newPaymentType != null) {
+          changes['paymentType'] =
+              newPaymentType == PaymentType.na ? null : newPaymentType.label;
+        }
+
+        if (amountChanged) {
+          final currentAmount = (doc.data()['amount'] ?? 0).toDouble();
+          if ((currentAmount - oldAmount).abs() < 0.001) {
+            changes['amount'] = newAmount;
+          }
+        }
+
+        if (changes.isNotEmpty) {
+          changes['updateDate'] = Timestamp.fromDate(DateTime.now());
+          changes['updateUser'] = 'admin';
+          batch.update(doc.reference, changes);
+          updatedCount++;
+        }
+      }
+
+      if (updatedCount > 0) {
+        await batch.commit();
+        logger.info(
+            'Synced $updatedCount linked payment(s) for subscription $subscriptionId');
+        _paymentChanged = true;
+        notifyListeners();
+        subProvider.markChanged();
+      }
+
+      return updatedCount;
+    } catch (e) {
+      logger.err('Error syncing linked payments for subscription $subscriptionId: $e');
       rethrow;
     }
   }

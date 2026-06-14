@@ -92,6 +92,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
   DateTime? _selectedPaymentDate=DateTime.now();
   DateTime? _selectedDueDate;
   PaymentStatus _paymentStatus = PaymentStatus.completed;
+  PaymentType _paymentType = PaymentType.nakit;
   File? _dekontImage;
   final ImagePicker _picker = ImagePicker();
 
@@ -193,7 +194,28 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
               ),
             ),
             const SizedBox(height: 16),
-            
+
+            // Payment type dropdown (Nakit / Pos / Iban)
+            DropdownButtonFormField<PaymentType>(
+              value: _paymentType,
+              items: PaymentType.selectableValues.map((PaymentType type) {
+                return DropdownMenuItem<PaymentType>(
+                  value: type,
+                  child: Text(type.label),
+                );
+              }).toList(),
+              onChanged: (newValue) {
+                setState(() {
+                  _paymentType = newValue!;
+                });
+              },
+              decoration: const InputDecoration(
+                labelText: 'Ödeme Türü',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
             // Due Date Picker (Visible only when status is 'Planlandı')
             if (_paymentStatus == PaymentStatus.planned) ...[
               ListTile(
@@ -344,6 +366,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
               Text('Miktar: ${_amountController.text} TL'),
               Text('Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}'),
               Text('Durum: ${_paymentStatus.label}'),
+              Text('Ödeme Türü: ${_paymentType.label}'),
               if (_selectedDueDate != null)
                 Text(
                   'Planlanan Tarih: ${df.format(_selectedDueDate!)}',
@@ -388,6 +411,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
         amount: paymentAmount,
         paymentDate: _selectedPaymentDate,
         status: _paymentStatus,
+        paymentType: _paymentType,
         dekontImage: _dekontImage,
         dueDate: _selectedDueDate,
       );
@@ -424,6 +448,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
               'Miktar: ${_amountController.text} TL\n'
               'Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}\n'
               'Durum: ${_paymentStatus.label}\n'
+              'Ödeme Türü: ${_paymentType.label}\n'
               '${_selectedDueDate != null ? 'Planlanan Tarih: ${df.format(_selectedDueDate!)}\n' : ''}'
               '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}\n' : ''}',
         );

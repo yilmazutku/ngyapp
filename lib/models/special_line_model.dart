@@ -1,155 +1,198 @@
+/// A single token of a special-line template: either fixed literal text or the
+/// integer placeholder ("X").
+class SpecialLineSegment {
+  /// Literal text for a fixed token; `null` marks a number placeholder.
+  final String? literal;
+
+  const SpecialLineSegment.literal(String text) : literal = text;
+  const SpecialLineSegment.number() : literal = null;
+
+  bool get isNumber => literal == null;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SpecialLineSegment && other.literal == literal;
+
+  @override
+  int get hashCode => literal?.hashCode ?? 0;
+}
+
 /// Represents the configuration of a "special line" inside a meal's content.
 ///
 /// A special line is a content row that should be rendered as a section
-/// separator (like the existing "Veya" / "Haftada X" rows) instead of as
-/// a regular meal item. Each config has up to three pieces:
-///   - [prefix]   : literal text BEFORE the optional number (e.g. "Haftada",
-///                  "Günde"); may be empty when the marker starts with the
-///                  number itself.
-///   - [hasNumber]: whether an integer is part of the marker.
-///   - [suffix]   : literal text AFTER the number (e.g. "defa" in
-///                  "Günde 3 defa"). Must be empty when [hasNumber] is false.
+/// separator (like the existing "Veya" / "Haftada X" rows) instead of as a
+/// regular meal item.
 ///
-/// Examples:
-///   * `Veya`            → prefix=`Veya`,    hasNumber=false, suffix=``
-///   * `Haftada X`       → prefix=`Haftada`, hasNumber=true,  suffix=``
-///   * `Günde X defa`    → prefix=`Günde`,   hasNumber=true,  suffix=`defa`
-///   * `Iki Kelime X`    → prefix=`Iki Kelime`, hasNumber=true, suffix=``
-///   * `X defa`          → prefix=``,        hasNumber=true,  suffix=`defa`
+/// A config is modelled as an ordered list of [segments], where each segment
+/// is either fixed literal text or an integer placeholder. This supports an
+/// arbitrary number of numbers, e.g.:
+///   * `Veya`                  → [lit "Veya"]
+///   * `Haftada X`             → [lit "Haftada", num]
+///   * `Günde X defa`          → [lit "Günde", num, lit "defa"]
+///   * `Haftada X Gün`         → [lit "Haftada", num, lit "Gün"]
+///   * `Haftada X Gün X Defa`  → [lit "Haftada", num, lit "Gün", num, lit "Defa"]
+///   * `X defa`                → [num, lit "defa"]
 ///
-/// IMPORTANT — for the legacy markers (`Veya`, `Haftada X` with empty suffix)
-/// these matchers stay byte-for-byte identical with the original hard-coded
-/// regexes in `meal_formatter.dart`:
-///   * `VEYA_OPTION_SEPARATOR_REGEX    = ^Veya\s+`
-///   * `HAFTADA_OPTION_SEPARATOR_REGEX = ^Haftada\s+\d+\s*`   (note `\s*`)
-///   * `isStandaloneMarker(content)`   was the lax check
-///         `t == prefix || t.startsWith('$prefix ')`
-///   * `SPECIAL_MARKERS.contains(t)`   was the strict check
-///         `t == prefix` exactly
+/// Matching is intentionally tolerant:
+///   * Case-insensitive — Word documents capitalise inconsistently (e.g. the
+///     marker template "Haftada X Gün" must still match "Haftada 1 gün").
+///   * Glue-tolerant — `docx_to_text` drops Word <w:tab/> separators, so the
+///     marker frequently arrives glued directly to its content
+///     ("Veya2 yumurta", "Haftada 1 gün1 porsiyon"). Inter-segment and trailing
+///     separators therefore use `\s*` (zero-or-more whitespace).
+///
+/// Because two markers can now share a leading word ("Haftada X" vs
+/// "Haftada X Gün"), the registry resolves ambiguity by preferring the
+/// LONGEST match (see [SpecialLinesRegistry.detect]).
 class SpecialLineConfig {
+  /// Token used in admin templates as the placeholder for an integer.
+  static const String numberPlaceholder = 'X';
+
+  /// Canonical persisted field — the template string, e.g. "Haftada X Gün".
+  static const String templateField = 'template';
+
+  // Legacy persisted fields, still read for backward compatibility.
   static const String prefixField = 'prefix';
   static const String hasNumberField = 'hasNumber';
   static const String suffixField = 'suffix';
 
-  /// Token used in admin templates as the placeholder for the integer.
-  static const String numberPlaceholder = 'X';
+  final List<SpecialLineSegment> segments;
 
-  final String prefix;
-  final bool hasNumber;
-  final String suffix;
+  const SpecialLineConfig._(this.segments);
 
-  const SpecialLineConfig({
-    required this.prefix,
-    required this.hasNumber,
-    this.suffix = '',
-  });
+  /// Builds a config from a template string (e.g. "Haftada X Gün").
+  /// Throws [ArgumentError] for an invalid template; use [tryParseTemplate]
+  /// when the input is untrusted.
+  factory SpecialLineConfig.fromTemplate(String template) {
+    final parsed = tryParseTemplate(template);
+    if (parsed == null) {
+      throw ArgumentError('Invalid special line template: "$template"');
+    }
+    return parsed;
+  }
 
-  /// Regex that matches a "marker + inline content" line. Pattern is built
-  /// from the prefix/number/suffix triple; trailing `\s*` (instead of `\s+`)
-  /// keeps the legacy behavior where a bare "Haftada 2" — i.e. the marker
-  /// with no inline content — still counts as a separator.
+  bool get hasNumber => segments.any((s) => s.isNumber);
+
+  /// Leading literal text before the first number (or the whole literal text
+  /// when there is no number). Empty when the template starts with a number.
+  String get prefix {
+    final parts = <String>[];
+    for (final s in segments) {
+      if (s.isNumber) break;
+      parts.add(s.literal!);
+    }
+    return parts.join(' ');
+  }
+
+  /// Case-insensitive identity used for de-duplication. Two templates that
+  /// render to the same text (ignoring case) are considered the same marker.
+  String get identityKey => toTemplate().toLowerCase();
+
+  /// Regex matching a "marker + (optional) inline content" line.
+  ///
+  /// Case-insensitive and glue-tolerant (see class docs). Trailing `\s*` keeps
+  /// a bare marker ("Haftada 2", "Veya") matching as a separator with no inline
+  /// content.
   RegExp get separatorRegex {
     final buffer = StringBuffer('^');
-    if (prefix.isNotEmpty) {
-      buffer.write(RegExp.escape(prefix));
-      if (hasNumber) buffer.write(r'\s+');
+    for (int i = 0; i < segments.length; i++) {
+      if (i > 0) buffer.write(r'\s*');
+      final seg = segments[i];
+      buffer.write(seg.isNumber ? r'\d+' : RegExp.escape(seg.literal!));
     }
-    if (hasNumber) {
-      buffer.write(r'\d+');
-      if (suffix.isNotEmpty) {
-        buffer.write(r'\s+');
-        buffer.write(RegExp.escape(suffix));
-      }
-    }
-    // For non-numbered, non-suffixed markers we still require at least one
-    // space after the prefix (otherwise "Veyax foo" would match "Veya").
-    final tail = hasNumber || prefix.isEmpty ? r'\s*' : r'\s+';
-    buffer.write(tail);
-    return RegExp(buffer.toString());
+    buffer.write(r'\s*');
+    return RegExp(buffer.toString(), caseSensitive: false);
   }
 
   bool isSeparator(String content) => separatorRegex.hasMatch(content);
 
-  /// Lax standalone check. Mirrors the original `isStandaloneMarker`
-  /// semantics: trimmed content equals the prefix exactly OR begins with
-  /// `"$prefix "`. Empty-prefix configs (e.g. `X defa`) opt out — there is
-  /// no meaningful "lax prefix" check for them, so they only match via the
-  /// separator regex.
-  bool isStandalone(String content) {
-    if (prefix.isEmpty) return false;
-    final t = content.trim();
-    return t == prefix || t.startsWith('$prefix ');
+  /// Length of the marker portion this config matches at the start of
+  /// [content], or -1 when it does not match. Used to pick the most specific
+  /// (longest) marker among overlapping configs.
+  int matchLength(String content) {
+    final m = separatorRegex.firstMatch(content);
+    return m == null ? -1 : m.group(0)!.length;
   }
 
-  /// Strict marker check. Mirrors the original `SPECIAL_MARKERS.contains`:
-  /// trimmed content equals the prefix exactly. The renderer uses this to
-  /// decide whether to skip a row entirely instead of stripping a marker.
-  bool isExactMarker(String content) =>
-      prefix.isNotEmpty && content.trim() == prefix;
+  /// Lax standalone check: trimmed content equals the leading literal exactly
+  /// OR begins with `"$prefix "`. Number-leading configs opt out.
+  bool isStandalone(String content) {
+    final p = prefix;
+    if (p.isEmpty) return false;
+    final t = content.trim();
+    final lower = t.toLowerCase();
+    final lowerP = p.toLowerCase();
+    return lower == lowerP || lower.startsWith('$lowerP ');
+  }
 
-  /// Returns the marker substring matched on a separator line, e.g.
-  /// "Haftada 2" from "Haftada 2 Yulaflı kahvaltı" or
-  /// "Günde 3 defa" from "Günde 3 defa yumurta". Falls back to [prefix]
-  /// when the line only matched via the lax standalone check.
+  /// Strict marker check: trimmed content equals the leading literal exactly.
+  bool isExactMarker(String content) {
+    final p = prefix;
+    return p.isNotEmpty && content.trim().toLowerCase() == p.toLowerCase();
+  }
+
+  /// Returns the concrete marker substring matched on a separator line, e.g.
+  /// "Haftada 2" / "Haftada 1 gün". Falls back to [prefix] when only the lax
+  /// standalone check matched.
   String extractMarkerLabel(String content) {
     final sepMatch = separatorRegex.firstMatch(content);
     if (sepMatch != null) return sepMatch.group(0)!.trim();
     return prefix;
   }
 
-  /// Returns the part of [content] that follows the marker for separator
-  /// lines. Mirrors `extractContentAfterMarker` exactly: no trim, single
-  /// `replaceFirst` so multi-space prefixes leave their original whitespace
-  /// unchanged.
+  /// Returns the part of [content] following the marker on a separator line.
   String stripMarker(String content) {
     if (!isSeparator(content)) return content;
     return content.replaceFirst(separatorRegex, '');
   }
 
-  Map<String, dynamic> toMap() => {
-        prefixField: prefix,
-        hasNumberField: hasNumber,
-        if (suffix.isNotEmpty) suffixField: suffix,
-      };
+  Map<String, dynamic> toMap() => {templateField: toTemplate()};
 
   factory SpecialLineConfig.fromMap(Map<String, dynamic> map) {
-    return SpecialLineConfig(
-      prefix: (map[prefixField] ?? '').toString(),
-      hasNumber: map[hasNumberField] == true,
-      suffix: (map[suffixField] ?? '').toString(),
-    );
+    // Preferred (new) format: a single template string.
+    final tmpl = map[templateField];
+    if (tmpl is String && tmpl.trim().isNotEmpty) {
+      final parsed = tryParseTemplate(tmpl);
+      if (parsed != null) return parsed;
+    }
+
+    // Legacy format: { prefix, hasNumber, suffix }. Reconstruct a template.
+    final legacyPrefix = (map[prefixField] ?? '').toString().trim();
+    final legacyHasNumber = map[hasNumberField] == true;
+    final legacySuffix = (map[suffixField] ?? '').toString().trim();
+    final parts = <String>[
+      if (legacyPrefix.isNotEmpty) legacyPrefix,
+      if (legacyHasNumber) numberPlaceholder,
+      if (legacySuffix.isNotEmpty) legacySuffix,
+    ];
+    final parsed = tryParseTemplate(parts.join(' '));
+    // Empty/invalid legacy entries become an empty config that the registry
+    // filters out in setCustomLines.
+    return parsed ?? const SpecialLineConfig._([]);
   }
 
-  /// Renders this config as the admin-facing template, e.g.
-  ///   * `Veya`            (no number)
-  ///   * `Haftada X`       (number at the end)
-  ///   * `Günde X defa`    (number in the middle)
-  ///   * `X defa`          (number at the start)
+  /// Renders this config as the admin-facing template, e.g. "Haftada X Gün".
   String toTemplate() => _renderWith(numberPlaceholder);
 
-  /// Same as [toTemplate] but with `X` replaced by [n]. Useful for showing
-  /// concrete examples in admin UI (e.g. "Günde 3 defa").
+  /// Same as [toTemplate] but with every `X` replaced by [n]. Useful for
+  /// concrete examples in admin UI (e.g. "Haftada 2 Gün").
   String formatWithNumber(int n) => _renderWith(n.toString());
 
-  String _renderWith(String numberToken) {
-    if (!hasNumber) return prefix;
-    final parts = <String>[
-      if (prefix.isNotEmpty) prefix,
-      numberToken,
-      if (suffix.isNotEmpty) suffix,
-    ];
-    return parts.join(' ');
-  }
+  String _renderWith(String numberToken) => segments
+      .map((s) => s.isNumber ? numberToken : s.literal!)
+      .join(' ');
 
-  /// Parses an admin-entered template back into a [SpecialLineConfig].
+  /// Parses an admin-entered template into a [SpecialLineConfig].
   ///
   /// Rules:
-  ///   * The placeholder is the literal uppercase token `X`.
-  ///   * `X` may appear ZERO or ONE times.
-  ///   * When present, `X` must be a standalone token surrounded by spaces
-  ///     (or by a word boundary at the start/end of the template).
-  ///   * Lowercase `x`, multiple `X`s, or an `X` glued to other text (e.g.
-  ///     `Xfoo`, `fooX`) are rejected.
+  ///   * Tokens are whitespace-separated.
+  ///   * Each token exactly equal to the uppercase placeholder `X` becomes a
+  ///     number segment; everything else is literal text.
+  ///   * Multiple `X`s are allowed (e.g. "Haftada X Gün X Defa") but two
+  ///     numbers may not be adjacent (there must be literal text between them).
+  ///   * There must be at least one literal token so the regex has an anchor;
+  ///     a template made only of numbers (e.g. "X", "X X") is rejected.
   ///
   /// Returns `null` for an invalid template.
   static SpecialLineConfig? tryParseTemplate(String template) {
@@ -157,47 +200,48 @@ class SpecialLineConfig {
     if (trimmed.isEmpty) return null;
 
     final tokens = trimmed.split(RegExp(r'\s+'));
-    final xPositions = <int>[];
-    for (int i = 0; i < tokens.length; i++) {
-      if (tokens[i] == numberPlaceholder) xPositions.add(i);
-    }
-    // No more than one X. (Zero is fine — that's a fixed-text marker.)
-    if (xPositions.length > 1) return null;
+    final segments = <SpecialLineSegment>[];
+    final literalBuffer = <String>[];
 
-    if (xPositions.isEmpty) {
-      // Reject things like "Haftada X" written with lowercase x — at this
-      // point we only have non-X tokens, so the template is treated as a
-      // fixed-text marker.
-      return SpecialLineConfig(prefix: trimmed, hasNumber: false);
+    void flushLiteral() {
+      if (literalBuffer.isNotEmpty) {
+        segments.add(SpecialLineSegment.literal(literalBuffer.join(' ')));
+        literalBuffer.clear();
+      }
     }
 
-    final xIndex = xPositions.first;
-    final beforeTokens = tokens.sublist(0, xIndex);
-    final afterTokens = tokens.sublist(xIndex + 1);
+    for (final token in tokens) {
+      if (token == numberPlaceholder) {
+        flushLiteral();
+        // No two adjacent number placeholders.
+        if (segments.isNotEmpty && segments.last.isNumber) return null;
+        segments.add(const SpecialLineSegment.number());
+      } else {
+        literalBuffer.add(token);
+      }
+    }
+    flushLiteral();
 
-    final prefix = beforeTokens.join(' ').trim();
-    final suffix = afterTokens.join(' ').trim();
-    // At least one of prefix/suffix must be non-empty so the regex anchors
-    // somewhere; an isolated "X" template doesn't define a marker.
-    if (prefix.isEmpty && suffix.isEmpty) return null;
+    // Need at least one literal segment to anchor the pattern.
+    if (!segments.any((s) => !s.isNumber)) return null;
 
-    return SpecialLineConfig(
-      prefix: prefix,
-      hasNumber: true,
-      suffix: suffix,
-    );
+    return SpecialLineConfig._(segments);
   }
 
   @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is SpecialLineConfig &&
-          other.prefix == prefix &&
-          other.hasNumber == hasNumber &&
-          other.suffix == suffix;
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! SpecialLineConfig) return false;
+    if (other.segments.length != segments.length) return false;
+    for (int i = 0; i < segments.length; i++) {
+      if (segments[i] != other.segments[i]) return false;
+    }
+    return true;
+  }
 
   @override
-  int get hashCode => Object.hash(prefix, hasNumber, suffix);
+  int get hashCode =>
+      Object.hashAll(segments.map((s) => s.isNumber ? '#X#' : s.literal));
 }
 
 /// Process-wide registry of special line configurations consulted by the meal
@@ -207,32 +251,36 @@ class SpecialLineConfig {
 /// app keeps working even before the admin-configured list has been loaded.
 /// Admin-defined entries are layered on top via [setCustomLines].
 class SpecialLinesRegistry {
-  static const SpecialLineConfig veya =
-      SpecialLineConfig(prefix: 'Veya', hasNumber: false);
-  static const SpecialLineConfig haftada =
-      SpecialLineConfig(prefix: 'Haftada', hasNumber: true);
+  static final SpecialLineConfig veya =
+      SpecialLineConfig.fromTemplate('Veya');
+  static final SpecialLineConfig haftada =
+      SpecialLineConfig.fromTemplate('Haftada X');
 
-  static const List<SpecialLineConfig> _builtIn = [veya, haftada];
+  static final List<SpecialLineConfig> _builtIn = [veya, haftada];
 
   static List<SpecialLineConfig> _custom = const [];
 
   /// Replaces the admin-configured list. Built-in markers are always retained.
   ///
-  /// Two safety filters are applied:
-  ///   * Drop fully-empty configs (both prefix and suffix blank — these
-  ///     would build a regex that matches nothing meaningful).
-  ///   * Drop configs whose non-empty prefix collides with a built-in
-  ///     prefix, so an admin entry can never silently override `Veya` or
-  ///     `Haftada`.
+  /// Filters applied:
+  ///   * Drop empty configs (no segments — e.g. an invalid legacy entry).
+  ///   * Drop configs whose template exactly matches a built-in template, so
+  ///     an admin entry can never duplicate `Veya` / `Haftada X`.
+  ///   * Drop duplicates within the custom list itself.
+  ///
+  /// Sharing a leading word with another marker is now allowed (e.g.
+  /// "Haftada X" + "Haftada X Gün"); [detect] resolves overlaps by length.
   static void setCustomLines(List<SpecialLineConfig> lines) {
-    final builtInPrefixes =
-        _builtIn.map((c) => c.prefix.toLowerCase()).toSet();
+    final builtInKeys = _builtIn.map((c) => c.identityKey).toSet();
+    final seen = <String>{};
     _custom = List.unmodifiable(
       lines.where((c) {
-        final hasAnyText = c.prefix.trim().isNotEmpty || c.suffix.trim().isNotEmpty;
-        if (!hasAnyText) return false;
-        if (c.prefix.trim().isEmpty) return true; // empty prefix is allowed
-        return !builtInPrefixes.contains(c.prefix.toLowerCase());
+        if (c.segments.isEmpty) return false;
+        final key = c.identityKey;
+        if (builtInKeys.contains(key)) return false;
+        if (seen.contains(key)) return false;
+        seen.add(key);
+        return true;
       }),
     );
   }
@@ -241,51 +289,72 @@ class SpecialLinesRegistry {
 
   static List<SpecialLineConfig> get custom => List.unmodifiable(_custom);
 
-  /// Finds the first config whose marker matches [content] either as a
-  /// standalone marker line or as a separator line; returns null otherwise.
+  /// Finds the config that best matches [content], preferring the LONGEST
+  /// separator match (so "Haftada X Gün" wins over "Haftada X"). Falls back to
+  /// a lax standalone match. Returns null when nothing matches.
   static SpecialLineConfig? matching(String content) {
     final t = content.trim();
+    final sep = _longestSeparatorMatch(t);
+    if (sep != null) return sep;
     for (final cfg in all) {
-      if (cfg.isStandalone(t) || cfg.isSeparator(t)) return cfg;
+      if (cfg.isStandalone(t)) return cfg;
     }
     return null;
   }
 
-  /// Inspects [line] and returns a [SpecialLineMatch] describing how it
-  /// should be split between a leading marker entry and (optional) trailing
-  /// content. Returns null when [line] is a regular meal-content row.
+  /// Inspects [line] and returns a [SpecialLineMatch] describing how it should
+  /// be split between a leading marker entry and (optional) trailing content.
+  /// Returns null when [line] is a regular meal-content row.
   ///
-  /// Detection order — separator first, lax standalone second — matches what
-  /// the original parser/renderer pipeline did: a "marker + content" line is
-  /// always cleanly split, while bare-prefix lines (e.g. "Veya") become
-  /// standalone markers with no trailing content.
+  /// The most specific (longest) separator wins, so a line like
+  /// "Haftada 1 gün1 porsiyon" is matched by "Haftada X Gün" (marker
+  /// "Haftada 1 gün", content "1 porsiyon") rather than by "Haftada X".
   static SpecialLineMatch? detect(String line) {
     final t = line.trim();
+
+    final sepCfg = _longestSeparatorMatch(t);
+    if (sepCfg != null) {
+      return SpecialLineMatch(
+        config: sepCfg,
+        markerLabel: sepCfg.extractMarkerLabel(t),
+        contentAfter: sepCfg.stripMarker(t).trim(),
+      );
+    }
+
+    // Fallback: lax standalone (prefix + non-numeric tail), longest prefix.
+    SpecialLineConfig? bestStandalone;
     for (final cfg in all) {
-      if (cfg.isSeparator(t)) {
-        return SpecialLineMatch(
-          config: cfg,
-          markerLabel: cfg.extractMarkerLabel(t),
-          contentAfter: cfg.stripMarker(t).trim(),
-        );
-      }
-      if (cfg.isStandalone(t)) {
-        // Lax standalone covers two shapes:
-        //   - exact "Veya" / "Haftada"      → no trailing content
-        //   - "Haftada foo" (prefix + space + non-numeric tail for a numbered
-        //      marker, which the separator regex rejected) → keep tail as
-        //      regular content so it isn't lost.
-        final tail = t == cfg.prefix
-            ? ''
-            : t.substring(cfg.prefix.length).trim();
-        return SpecialLineMatch(
-          config: cfg,
-          markerLabel: cfg.prefix,
-          contentAfter: tail,
-        );
+      if (!cfg.isStandalone(t)) continue;
+      if (bestStandalone == null ||
+          cfg.prefix.length > bestStandalone.prefix.length) {
+        bestStandalone = cfg;
       }
     }
+    if (bestStandalone != null) {
+      final p = bestStandalone.prefix;
+      final tail = t.length == p.length ? '' : t.substring(p.length).trim();
+      return SpecialLineMatch(
+        config: bestStandalone,
+        markerLabel: p,
+        contentAfter: tail,
+      );
+    }
     return null;
+  }
+
+  /// Returns the config whose separator regex matches [content] with the
+  /// longest matched marker, or null when none match.
+  static SpecialLineConfig? _longestSeparatorMatch(String content) {
+    SpecialLineConfig? best;
+    int bestLen = -1;
+    for (final cfg in all) {
+      final len = cfg.matchLength(content);
+      if (len > bestLen) {
+        bestLen = len;
+        best = cfg;
+      }
+    }
+    return best;
   }
 }
 
@@ -294,11 +363,11 @@ class SpecialLineMatch {
   final SpecialLineConfig config;
 
   /// Exact marker text to persist as the standalone marker entry, e.g.
-  /// "Veya", "Haftada 2".
+  /// "Veya", "Haftada 2", "Haftada 1 gün".
   final String markerLabel;
 
-  /// Trailing content after the marker, or empty when [line] was a
-  /// standalone marker.
+  /// Trailing content after the marker, or empty when [line] was a standalone
+  /// marker.
   final String contentAfter;
 
   const SpecialLineMatch({
