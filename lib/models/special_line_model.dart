@@ -187,10 +187,13 @@ class SpecialLineConfig {
   ///
   /// Rules:
   ///   * Tokens are whitespace-separated.
-  ///   * Each token exactly equal to the uppercase placeholder `X` becomes a
-  ///     number segment; everything else is literal text.
-  ///   * Multiple `X`s are allowed (e.g. "Haftada X Gün X Defa") but two
-  ///     numbers may not be adjacent (there must be literal text between them).
+  ///   * Each token that is a lone `X` / `x` (case-insensitive) becomes a
+  ///     number segment; everything else is literal text. Lowercase `x` is
+  ///     accepted so admin input is forgiving (e.g. "haftada x gün" works the
+  ///     same as "Haftada X Gün").
+  ///   * Multiple placeholders are allowed (e.g. "Haftada X Gün X Defa") but
+  ///     two numbers may not be adjacent (there must be literal text between
+  ///     them).
   ///   * There must be at least one literal token so the regex has an anchor;
   ///     a template made only of numbers (e.g. "X", "X X") is rejected.
   ///
@@ -211,7 +214,7 @@ class SpecialLineConfig {
     }
 
     for (final token in tokens) {
-      if (token == numberPlaceholder) {
+      if (token == 'X' || token == 'x') {
         flushLiteral();
         // No two adjacent number placeholders.
         if (segments.isNotEmpty && segments.last.isNumber) return null;

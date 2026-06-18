@@ -414,6 +414,31 @@ class _AddDietDialogState extends State<AddDietDialog> {
     );
   }
 
+  /// Whether [keyword] appears in [lowerLine] as a standalone word (Turkish
+  /// letters are treated as word characters so the boundary check is accurate
+  /// for Turkish text).
+  ///
+  /// With [atStart] true the keyword must be the FIRST word of the line. A meal
+  /// header always leads with the meal name (e.g. "ARA (13.00) :"), so meal
+  /// detection requires this stricter form. It is not enough for the keyword to
+  /// merely appear somewhere as a word: the Turkish word "ara" can legitimately
+  /// occur mid-sentence in food content (e.g. "2 saat ara verin"), and "ara" is
+  /// also a substring of unrelated words like "şarap" (ş-ara-p). Anchoring to
+  /// the start of the line ensures the whole leading word really is the meal
+  /// name rather than an incidental match.
+  ///
+  /// With [atStart] false (the default) the keyword may appear anywhere as a
+  /// whole word; used for the "öğün" exclusion that distinguishes a bare "Ara"
+  /// header from "Ara Öğün N".
+  bool _containsMealWord(String lowerLine, String keyword,
+      {bool atStart = false}) {
+    final escaped = RegExp.escape(keyword);
+    final pattern = atStart
+        ? '^$escaped(?![a-zçğıiöşü])'
+        : '(?<![a-zçğıiöşü])$escaped(?![a-zçğıiöşü])';
+    return RegExp(pattern, caseSensitive: false).hasMatch(lowerLine);
+  }
+
   /// EXACT logic from your FileHandlerPage's _extractSubtitles
   void _extractSubtitles(String text) {
     log.info('text={}', [text]);
@@ -423,7 +448,80 @@ class _AddDietDialogState extends State<AddDietDialog> {
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .toList();
-    
+
+    // ----------------------------------------------------------------------
+    // TEMP DIAGNOSTIC (remove after debugging). For every parsed line dumps:
+    //   * exact characters with whitespace made visible,
+    //   * raw codeUnits,
+    //   * whether it is detected as a meal header (and which meal), and
+    //   * what SpecialLinesRegistry.detect() returns (marker + content).
+    //   » = TAB(0x09)  · = SPACE(0x20)  ⍽ = NBSP(0xA0)  ∅ = ZWSP(0x200B)
+    //   \xNN = any other control char (shown by hex code)
+    String visualize(String s) {
+      final sb = StringBuffer();
+      for (final r in s.runes) {
+        switch (r) {
+          case 0x09:
+            sb.write('»');
+            break;
+          case 0x20:
+            sb.write('·');
+            break;
+          case 0xA0:
+            sb.write('⍽');
+            break;
+          case 0x200B:
+            sb.write('∅');
+            break;
+          default:
+            if (r < 0x20) {
+              sb.write('\\x${r.toRadixString(16).padLeft(2, '0')}');
+            } else {
+              sb.writeCharCode(r);
+            }
+        }
+      }
+      return sb.toString();
+    }
+
+    String mealHit(String dl) {
+      final low = dl.toLowerCase();
+      if (_containsMealWord(low, 'sabah', atStart: true) ||
+          _containsMealWord(low, 'kahvaltı', atStart: true)) return 'SABAH';
+      if (_containsMealWord(low, 'öğle', atStart: true)) return 'ÖĞLE';
+      if (_containsMealWord(low, 'akşam', atStart: true)) return 'AKŞAM';
+      if (_containsMealWord(low, 'ara öğün 1', atStart: true)) {
+        return 'ARA ÖĞÜN 1';
+      }
+      if (_containsMealWord(low, 'ara öğün 2', atStart: true)) {
+        return 'ARA ÖĞÜN 2';
+      }
+      if (_containsMealWord(low, 'ara öğün 3', atStart: true)) {
+        return 'ARA ÖĞÜN 3';
+      }
+      if (_containsMealWord(low, 'ara', atStart: true) &&
+          !_containsMealWord(low, 'öğün')) return 'ARA(bare)';
+      return '-';
+    }
+
+    log.info('[DIET-DIAG] Special markers loaded: {}',
+        [SpecialLinesRegistry.all.map((c) => c.toTemplate()).join(' | ')]);
+    for (int d = 0; d < lines.length; d++) {
+      final dl = lines[d];
+      final match = SpecialLinesRegistry.detect(dl);
+      log.info(
+          '[DIET-DIAG] LINE[{}] meal={} text="{}" | detect={} | codeUnits={}', [
+        d,
+        mealHit(dl),
+        visualize(dl),
+        match == null
+            ? 'NONE'
+            : 'marker="${match.markerLabel}" after="${visualize(match.contentAfter)}"',
+        dl.codeUnits,
+      ]);
+    }
+    // -------------------------- END TEMP DIAGNOSTIC --------------------------
+
     Map<String, dynamic>? currentSubtitle;
     
     // Create a map of meal types for better matching
@@ -445,17 +543,23 @@ class _AddDietDialogState extends State<AddDietDialog> {
       
       Map<String, dynamic> foundSubtitle = {};
       
-      // Check if this line matches a meal type
-      if (lowerLine.contains('sabah') || lowerLine.contains('kahvaltı')) {
+      // Check if this line matches a meal type. The meal name must be the FIRST
+      // word of the line (see [_containsMealWord] with atStart) so that a
+      // keyword buried inside another word (e.g. "ara" inside "şarap") or used
+      // mid-sentence in content (e.g. "2 saat ara verin") never creates a
+      // phantom meal. The "öğün" exclusion stays an anywhere check.
+      if (_containsMealWord(lowerLine, 'sabah', atStart: true) ||
+          _containsMealWord(lowerLine, 'kahvaltı', atStart: true)) {
         foundSubtitle = mealMatchers['sabah'] ?? {};
         mealSequence = 1;
-      } else if (lowerLine.contains('öğle')) {
+      } else if (_containsMealWord(lowerLine, 'öğle', atStart: true)) {
         foundSubtitle = mealMatchers['öğle'] ?? {};
         mealSequence = 3;
-      } else if (lowerLine.contains('akşam')) {
+      } else if (_containsMealWord(lowerLine, 'akşam', atStart: true)) {
         foundSubtitle = mealMatchers['akşam'] ?? {};
         mealSequence = 5;
-      } else if (lowerLine.contains('ara') && !lowerLine.contains('öğün')) {
+      } else if (_containsMealWord(lowerLine, 'ara', atStart: true) &&
+          !_containsMealWord(lowerLine, 'öğün')) {
         // Just "Ara" without a number - determine which one based on sequence
         switch (mealSequence) {
           case 1: // After Sabah
@@ -483,13 +587,13 @@ class _AddDietDialogState extends State<AddDietDialog> {
               mealSequence = 6;
             }
         }
-      } else if (lowerLine.contains('ara öğün 1')) {
+      } else if (_containsMealWord(lowerLine, 'ara öğün 1', atStart: true)) {
         foundSubtitle = mealMatchers['ara öğün 1'] ?? {};
         mealSequence = 2;
-      } else if (lowerLine.contains('ara öğün 2')) {
+      } else if (_containsMealWord(lowerLine, 'ara öğün 2', atStart: true)) {
         foundSubtitle = mealMatchers['ara öğün 2'] ?? {};
         mealSequence = 4;
-      } else if (lowerLine.contains('ara öğün 3')) {
+      } else if (_containsMealWord(lowerLine, 'ara öğün 3', atStart: true)) {
         foundSubtitle = mealMatchers['ara öğün 3'] ?? {};
         mealSequence = 6;
       }

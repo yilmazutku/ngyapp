@@ -245,8 +245,10 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
                         'Birden fazla X kullanabilirsiniz; örn. "Haftada X Gün" '
                         'veya "Haftada X Gün X Defa". İki X yan yana olamaz '
                         '(aralarında en az bir kelime bulunmalıdır).\n'
-                        'X büyük harf olarak ve tek başına bir kelime gibi '
-                        'yazılmalıdır (boşluklarla ayrılmış).',
+                        'X tek başına bir kelime gibi yazılmalıdır (boşluklarla '
+                        'ayrılmış).\n'
+                        'Büyük/küçük harf farketmez: "X" ya da "x", "Haftada" '
+                        'ya da "haftada" fark etmeden tanınır.',
                         style: TextStyle(fontSize: 13),
                       ),
                     ),
@@ -350,13 +352,16 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
                   const Expanded(
                     child: Text(
                       'Sayı içerecek özel satırlarda, sayının olacağı yere '
-                      'büyük "X" harfini yazın. X şablonun başında, ortasında '
+                      '"X" harfini yazın. X şablonun başında, ortasında '
                       'ya da sonunda olabilir; birden fazla da kullanılabilir.\n'
                       '  • "Haftada X"          → "Haftada 2", "Haftada 5"\n'
                       '  • "Günde X defa"       → "Günde 3 defa"\n'
                       '  • "Haftada X Gün"      → "Haftada 1 Gün"\n'
                       '  • "Haftada X Gün X Defa" → "Haftada 1 Gün 2 Defa"\n'
-                      '  • "X defa"             → "5 defa"',
+                      '  • "X defa"             → "5 defa"\n'
+                      'Büyük/küçük harf farketmez: "Haftada X Gün", '
+                      '"haftada x gün" ve "HAFTADA X GÜN" aynı şekilde '
+                      'çalışır; belgedeki yazım da büyük/küçük olabilir.',
                       style: TextStyle(fontSize: 13),
                     ),
                   ),
