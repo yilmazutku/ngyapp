@@ -26,6 +26,7 @@ class _DetailsTabState extends State<DetailsTab>
   final _ageController = TextEditingController();
   final _referenceController = TextEditingController();
   final _notesController = TextEditingController();
+  final _dosyaNoController = TextEditingController();
 
   final _scrollCtrl = ScrollController();
 
@@ -62,6 +63,7 @@ class _DetailsTabState extends State<DetailsTab>
     _ageController.dispose();
     _referenceController.dispose();
     _notesController.dispose();
+    _dosyaNoController.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -73,6 +75,7 @@ class _DetailsTabState extends State<DetailsTab>
     _ageController.text = user.age?.toString() ?? '';
     _referenceController.text = user.reference ?? '';
     _notesController.text = user.notes ?? '';
+    _dosyaNoController.text = user.dosyaNo ?? '';
   }
 
   Future<void> _saveChanges(UserModel user) async {
@@ -103,6 +106,7 @@ class _DetailsTabState extends State<DetailsTab>
         age: _ageController.text.isEmpty ? null : int.tryParse(_ageController.text),
         reference: _referenceController.text.isEmpty ? null : _referenceController.text,
         notes: _notesController.text.isEmpty ? null : _notesController.text,
+        dosyaNo: _dosyaNoController.text.trim().isEmpty ? null : _dosyaNoController.text.trim(),
       );
 
       await userProvider.updateUserDetails(updatedUser);
@@ -179,6 +183,7 @@ class _DetailsTabState extends State<DetailsTab>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          _buildReadOnlyField('Dosya NO', user.dosyaNo ?? ''),
                           _buildReadOnlyField('Ad', user.name),
                           _buildReadOnlyField('Soyisim', user.surname ?? ''),
                           _buildReadOnlyField('E-posta', user.email),
@@ -234,6 +239,7 @@ class _DetailsTabState extends State<DetailsTab>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          _buildEditableField('Dosya NO', _dosyaNoController),
                           _buildEditableField('Ad', _nameController, required: true),
                           _buildEditableField('Soyisim', _surnameController),
                           _buildEditableField('E-posta', _emailController,

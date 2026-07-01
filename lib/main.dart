@@ -41,6 +41,7 @@ import 'pages/admin_create_user_page.dart';
 import 'pages/admin_payments_page.dart';
 import 'pages/admin_timeslots_page.dart';
 import 'pages/appointments_page.dart';
+import 'pages/danisanlar_ozet_page.dart';
 import 'pages/kvkk_consent_page.dart';
 import 'pages/login_page.dart';
 import 'pages/meal_upload_page.dart';
@@ -48,6 +49,7 @@ import 'pages/meas_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/user_payments_page.dart';
 import 'providers/appointment_manager.dart';
+import 'providers/customer_summary_provider.dart';
 import 'providers/daily_data_provider.dart';
 import 'providers/event_provider.dart';
 import 'providers/diet_provider.dart';
@@ -206,6 +208,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SpecialLinesProvider()),
         ChangeNotifierProvider(create: (_) => AppointmentColorsProvider()),
         ChangeNotifierProvider(create: (_) => NewsProvider()),
+        ChangeNotifierProvider(create: (_) => CustomerSummaryProvider()),
       ],
       child: AppLifecycleManager(
         child: MaterialApp(
@@ -555,6 +558,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _navigateToCustomerSummary(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const DanisanlarOzetPage(),
+      ),
+    );
+  }
+
   void _navigateToAdminUsers(BuildContext context) {
     Navigator.push(
       context,
@@ -695,6 +707,11 @@ class _HomePageState extends State<HomePage> {
               'icon': Icons.calendar_today,
               'label': 'Randevu Yönetimi',
               'onTap': () => _navigateToAdminAppointments(context),
+            },
+            {
+              'icon': Icons.table_chart,
+              'label': 'Danışanlar Özet',
+              'onTap': () => _navigateToCustomerSummary(context),
             },
             {
               'icon': Icons.image,

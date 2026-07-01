@@ -56,6 +56,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _dosyaNoController = TextEditingController();
 
   Future<void> createUser({
     required String name,
@@ -65,6 +66,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
     int? age,
     String? reference,
     String? notes,
+    String? dosyaNo,
   }) async {
     if (name.isEmpty) {
       _showMessageDialog('Hata', 'Lütfen isim alanını doldurunuz.');
@@ -143,6 +145,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
         age: age,
         reference: reference,
         notes: notes,
+        dosyaNo: dosyaNo,
       );
 
       // Store user data in Firestore
@@ -191,6 +194,14 @@ class _CreateUserPageState extends State<CreateUserPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              TextField(
+                controller: _dosyaNoController,
+                decoration: const InputDecoration(
+                  labelText: 'Dosya NO (Opsiyonel)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
               TextField(
                 controller: _nameController,
                 decoration: const InputDecoration(
@@ -262,6 +273,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   final reference = _referenceController.text.trim();
                   final notes = _notesController.text.trim();
                   final email = _emailController.text.trim();
+                  final dosyaNo = _dosyaNoController.text.trim();
                   final password = _passwordController.text.trim().isNotEmpty
                       ? _passwordController.text.trim()
                       : null;
@@ -274,6 +286,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
                     age: age,
                     reference: reference.isNotEmpty ? reference : null,
                     notes: notes.isNotEmpty ? notes : null,
+                    dosyaNo: dosyaNo.isNotEmpty ? dosyaNo : null,
                   );
                 },
                 child: const Text('Kullanıcı Oluştur'),
@@ -294,6 +307,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
     _notesController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _dosyaNoController.dispose();
     super.dispose();
   }
 }
