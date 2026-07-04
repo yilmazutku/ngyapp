@@ -378,7 +378,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 items: SubActiveStatus.values.map((SubActiveStatus status) {
                   return DropdownMenuItem<SubActiveStatus>(
                     value: status,
-                    child: Text(status.label == 'active' ? 'Aktif' : 'Tamamlandı'),
+                    child: Text(status.displayName),
                   );
                 }).toList(),
                 onChanged: (newValue) {

@@ -240,7 +240,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   @override
   Widget buildFilterContent(BuildContext context, List<dynamic> allItems, List<dynamic> filteredItems) {
     final statusOptions = {
-      for (var st in SubActiveStatus.values) st: st == SubActiveStatus.active ? 'Aktif' : 'Tamamlandı',
+      for (var st in SubActiveStatus.values) st: st.displayName,
     };
 
     return buildFilterSection(
@@ -572,13 +572,21 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: s.status == SubActiveStatus.active ? Colors.green.shade100 : Colors.grey.shade200,
+                color: switch (s.status) {
+                  SubActiveStatus.active => Colors.green.shade100,
+                  SubActiveStatus.frozen => Colors.blue.shade100,
+                  SubActiveStatus.completed => Colors.grey.shade200,
+                },
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                s.status == SubActiveStatus.active ? 'Aktif' : 'Tamamlandı',
+                s.status.displayName,
                 style: TextStyle(
-                  color: s.status == SubActiveStatus.active ? Colors.green.shade800 : Colors.grey.shade700,
+                  color: switch (s.status) {
+                    SubActiveStatus.active => Colors.green.shade800,
+                    SubActiveStatus.frozen => Colors.blue.shade800,
+                    SubActiveStatus.completed => Colors.grey.shade700,
+                  },
                   fontWeight: FontWeight.bold,
                 ),
               ),

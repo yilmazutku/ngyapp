@@ -38,6 +38,13 @@ class CustomerSummaryRow {
   /// Always [maxSeans] entries; unused trailing slots are empty cells.
   final List<SummaryCell> seans;
 
+  /// Dates of postponed ("Ertelendi") appointments for the active subscription.
+  /// Variable length; the table pads shorter rows to a common width.
+  final List<SummaryCell> postponedDates;
+
+  /// Remaining postponement rights: allowedPostponements - postponementsUsed.
+  final SummaryCell remainingPostponements;
+
   const CustomerSummaryRow({
     required this.userId,
     required this.dosyaNo,
@@ -47,5 +54,7 @@ class CustomerSummaryRow {
     required this.paymentType,
     required this.packageInfo,
     required this.seans,
+    required this.postponedDates,
+    required this.remainingPostponements,
   });
 }

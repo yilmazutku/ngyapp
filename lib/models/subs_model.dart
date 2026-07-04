@@ -134,12 +134,14 @@ class SubscriptionModel {
 }
 
 enum SubActiveStatus {
-  active('active'),
-  completed('completed');
+  active('active', 'Aktif'),
+  completed('completed', 'Tamamlandı'),
+  frozen('frozen', 'Donduruldu');
 
-  const SubActiveStatus(this.label);
+  const SubActiveStatus(this.label, this.displayName);
 
   final String label;
+  final String displayName;
 
   static SubActiveStatus fromLabel(String label) {
     return SubActiveStatus.values.firstWhere((e) => e.label == label);

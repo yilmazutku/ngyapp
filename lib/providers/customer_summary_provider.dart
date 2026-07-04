@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 
+import '../models/appointment_model.dart';
 import '../models/customer_summary_row.dart';
 import '../models/logger.dart';
 import '../models/payment_model.dart';
@@ -75,7 +76,13 @@ class CustomerSummaryProvider extends ChangeNotifier {
         : const SummaryCell.error();
 
     final payment = await _resolveLastPayment(user.userId);
-    final seans = await _resolveSeans(user.userId, activeSub.subscriptionId);
+    final appts =
+        await _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
+
+    // Remaining postponement rights for the active subscription.
+    final int remaining =
+        activeSub.allowedPostponements - activeSub.postponementsUsed;
+    final remainingCell = SummaryCell((remaining < 0 ? 0 : remaining).toString());
 
     return CustomerSummaryRow(
       userId: user.userId,
@@ -85,7 +92,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
       paymentAmount: payment.amount,
       paymentType: payment.type,
       packageInfo: packageInfo,
-      seans: seans,
+      seans: appts.seans,
+      postponedDates: appts.postponedDates,
+      remainingPostponements: remainingCell,
     );
   }
 
@@ -164,11 +173,15 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Resolves the session (seans) date cells for the active subscription.
-  /// Non-deleted appointments linked to [subscriptionId] are used, ordered by
-  /// date. Missing/`null` appointment dates become "Hata" cells. The returned
-  /// list always has [CustomerSummaryRow.maxSeans] entries (empty-padded).
-  Future<List<SummaryCell>> _resolveSeans(
+  /// Resolves both the session (seans) cells and the postponed-appointment
+  /// date cells for the active subscription from a single appointment query.
+  ///
+  /// - Seans: non-deleted appointments ordered by [appointmentDateTime]; missing
+  ///   dates become "Hata". Always [CustomerSummaryRow.maxSeans] entries.
+  /// - Postponed dates: appointments with status "Ertelendi" ordered by
+  ///   [postponedDate]; a postponed appointment with no postponedDate becomes
+  ///   "Hata". Variable length (only the postponed ones).
+  Future<_AppointmentCells> _resolveAppointmentCells(
       String userId, String subscriptionId) async {
     const int max = CustomerSummaryRow.maxSeans;
     try {
@@ -178,8 +191,11 @@ class CustomerSummaryProvider extends ChangeNotifier {
           .where('subscriptionId', isEqualTo: subscriptionId)
           .get();
 
-      final validDates = <DateTime>[];
-      int nullDateCount = 0;
+      final seansDates = <DateTime>[];
+      int seansNullCount = 0;
+
+      final postponedDates = <DateTime>[];
+      int postponedNullCount = 0;
 
       for (final doc in snap.docs) {
         final data = doc.data();
@@ -188,41 +204,92 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
         final rawDate = data['appointmentDateTime'];
         if (rawDate is Timestamp) {
-          validDates.add(rawDate.toDate());
+          seansDates.add(rawDate.toDate());
         } else {
           // Field expected but missing/null => surface as an error cell.
-          nullDateCount++;
+          seansNullCount++;
+        }
+
+        // Collect postponed ("Ertelendi") appointments separately.
+        if (data['status'] == AppointmentStatus.postponed.label) {
+          final rawPostponed = data['postponedDate'];
+          if (rawPostponed is Timestamp) {
+            postponedDates.add(rawPostponed.toDate());
+          } else {
+            // Postponed but the new date is missing => error.
+            postponedNullCount++;
+          }
         }
       }
 
-      validDates.sort((a, b) => a.compareTo(b));
-
-      // Keep the most recent [max] when a package has more sessions than slots.
-      final trimmed = validDates.length > max
-          ? validDates.sublist(validDates.length - max)
-          : validDates;
-
-      final cells = <SummaryCell>[
-        ...trimmed.map((d) => SummaryCell(_dateFormat.format(d))),
-      ];
-
-      // Append error cells for appointments whose date is broken/null.
-      for (int i = 0; i < nullDateCount && cells.length < max; i++) {
-        cells.add(const SummaryCell.error());
-      }
-
-      // Pad remaining slots so every row has a fixed column count.
-      while (cells.length < max) {
-        cells.add(const SummaryCell.empty());
-      }
-
-      return cells;
+      return _AppointmentCells(
+        seans: _buildDateCells(
+          dates: seansDates,
+          nullCount: seansNullCount,
+          cap: max,
+          padToCap: true,
+        ),
+        postponedDates: _buildDateCells(
+          dates: postponedDates,
+          nullCount: postponedNullCount,
+          cap: null,
+          padToCap: false,
+        ),
+      );
     } catch (e) {
-      logger.err('Error resolving seans for user {} sub {}: {}',
+      logger.err('Error resolving appointments for user {} sub {}: {}',
           [userId, subscriptionId, e]);
-      return List<SummaryCell>.filled(max, const SummaryCell.error());
+      return _AppointmentCells(
+        seans: List<SummaryCell>.filled(max, const SummaryCell.error()),
+        postponedDates: const [SummaryCell.error()],
+      );
     }
   }
+
+  /// Turns sorted dates (+ a count of broken/null dates) into display cells.
+  /// When [cap] is set, keeps the most recent [cap] dates; when [padToCap] is
+  /// true the result is padded with empty cells up to [cap].
+  List<SummaryCell> _buildDateCells({
+    required List<DateTime> dates,
+    required int nullCount,
+    required int? cap,
+    required bool padToCap,
+  }) {
+    dates.sort((a, b) => a.compareTo(b));
+
+    var trimmed = dates;
+    if (cap != null && dates.length > cap) {
+      trimmed = dates.sublist(dates.length - cap);
+    }
+
+    final cells = <SummaryCell>[
+      ...trimmed.map((d) => SummaryCell(_dateFormat.format(d))),
+    ];
+
+    for (int i = 0; i < nullCount; i++) {
+      if (cap != null && cells.length >= cap) break;
+      cells.add(const SummaryCell.error());
+    }
+
+    if (padToCap && cap != null) {
+      while (cells.length < cap) {
+        cells.add(const SummaryCell.empty());
+      }
+    }
+
+    return cells;
+  }
+}
+
+/// Internal holder for the appointment-derived cells (seans + postponed dates).
+class _AppointmentCells {
+  final List<SummaryCell> seans;
+  final List<SummaryCell> postponedDates;
+
+  const _AppointmentCells({
+    required this.seans,
+    required this.postponedDates,
+  });
 }
 
 /// Internal holder for the three payment-related cells.
