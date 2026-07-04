@@ -3,12 +3,15 @@ import 'package:provider/provider.dart';
 
 import '../models/customer_summary_row.dart';
 import '../models/logger.dart';
+import '../models/subs_model.dart';
 import '../providers/customer_summary_provider.dart';
 
 final Logger logger = Logger.forClass(DanisanlarOzetPage);
 
-/// Admin overview: every customer with an active subscription, with their
-/// latest payment (date / amount / type), the active package, and up to
+/// Admin overview: customers grouped by subscription status. The first tab
+/// lists everyone with an *active* subscription; the second lists everyone
+/// with a *frozen* (Donduruldu) subscription. Each row shows the latest
+/// payment (date / amount / type), the package, and up to
 /// [CustomerSummaryRow.maxSeans] session (seans) dates.
 class DanisanlarOzetPage extends StatefulWidget {
   const DanisanlarOzetPage({super.key});
@@ -17,13 +20,101 @@ class DanisanlarOzetPage extends StatefulWidget {
   State<DanisanlarOzetPage> createState() => _DanisanlarOzetPageState();
 }
 
-class _DanisanlarOzetPageState extends State<DanisanlarOzetPage> {
+class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  final GlobalKey<_CustomerSummaryTabState> _activeKey = GlobalKey();
+  final GlobalKey<_CustomerSummaryTabState> _frozenKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _refreshCurrent() {
+    final key = _tabController.index == 0 ? _activeKey : _frozenKey;
+    key.currentState?.reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Danışanlar Özet'),
+        backgroundColor: Colors.blue.shade800,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Yenile',
+            onPressed: _refreshCurrent,
+          ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: Colors.white,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          tabs: const [
+            Tab(text: 'Aktif Paketler'),
+            Tab(text: 'Dondurulmuş Paketler'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _CustomerSummaryTab(
+            key: _activeKey,
+            status: SubActiveStatus.active,
+            emptyMessage: 'Aktif aboneliği olan danışan bulunamadı.',
+          ),
+          _CustomerSummaryTab(
+            key: _frozenKey,
+            status: SubActiveStatus.frozen,
+            emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Loads and renders the customer-summary table for a single subscription
+/// [status]. Keeps its own scroll/loading state so switching tabs does not
+/// discard already-loaded data.
+class _CustomerSummaryTab extends StatefulWidget {
+  final SubActiveStatus status;
+  final String emptyMessage;
+
+  const _CustomerSummaryTab({
+    super.key,
+    required this.status,
+    required this.emptyMessage,
+  });
+
+  @override
+  State<_CustomerSummaryTab> createState() => _CustomerSummaryTabState();
+}
+
+class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
+    with AutomaticKeepAliveClientMixin {
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
 
   bool _loading = true;
   String? _error;
   List<CustomerSummaryRow> _rows = const [];
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -38,6 +129,9 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage> {
     super.dispose();
   }
 
+  /// Public entry point so the parent page can trigger a refresh.
+  Future<void> reload() => _load();
+
   Future<void> _load() async {
     if (!mounted) return;
     setState(() {
@@ -48,7 +142,8 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage> {
     try {
       final provider =
           Provider.of<CustomerSummaryProvider>(context, listen: false);
-      final rows = await provider.fetchActiveCustomerSummaries();
+      final rows =
+          await provider.fetchCustomerSummariesByStatus(widget.status);
       if (!mounted) return;
       setState(() {
         _rows = rows;
@@ -66,21 +161,8 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Danışanlar Özet'),
-        backgroundColor: Colors.blue.shade800,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Yenile',
-            onPressed: _loading ? null : _load,
-          ),
-        ],
-      ),
-      body: _buildBody(),
-    );
+    super.build(context);
+    return _buildBody();
   }
 
   Widget _buildBody() {
@@ -108,9 +190,7 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage> {
     }
 
     if (_rows.isEmpty) {
-      return const Center(
-        child: Text('Aktif aboneliği olan danışan bulunamadı.'),
-      );
+      return Center(child: Text(widget.emptyMessage));
     }
 
     return _buildTable();

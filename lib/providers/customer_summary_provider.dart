@@ -28,7 +28,20 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// Builds the overview rows for every customer with at least one active
   /// subscription. Customers without an active subscription are skipped.
   /// Rows are sorted alphabetically by full name.
-  Future<List<CustomerSummaryRow>> fetchActiveCustomerSummaries() async {
+  Future<List<CustomerSummaryRow>> fetchActiveCustomerSummaries() =>
+      fetchCustomerSummariesByStatus(SubActiveStatus.active);
+
+  /// Builds the overview rows for every customer with at least one frozen
+  /// (Donduruldu) subscription. Customers without a frozen subscription are
+  /// skipped. Rows are sorted alphabetically by full name.
+  Future<List<CustomerSummaryRow>> fetchFrozenCustomerSummaries() =>
+      fetchCustomerSummariesByStatus(SubActiveStatus.frozen);
+
+  /// Builds the overview rows for every customer that owns at least one
+  /// subscription with the given [status]. Customers without such a
+  /// subscription are skipped. Rows are sorted alphabetically by full name.
+  Future<List<CustomerSummaryRow>> fetchCustomerSummariesByStatus(
+      SubActiveStatus status) async {
     try {
       // 1) Start from all non-admin customers.
       final customersSnap =
@@ -40,17 +53,17 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       logger.info('Building summary for {} customer(s)', [customers.length]);
 
-      // 2) Resolve each customer in parallel; null => no active subscription.
+      // 2) Resolve each customer in parallel; null => no matching subscription.
       final rows = await Future.wait(
-        customers.map(_buildRowForCustomer),
+        customers.map((c) => _buildRowForCustomer(c, status)),
       );
 
       final result = rows.whereType<CustomerSummaryRow>().toList()
         ..sort((a, b) =>
             a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()));
 
-      logger.info('Summary built: {} customer(s) with active subscription',
-          [result.length]);
+      logger.info('Summary built: {} customer(s) with {} subscription',
+          [result.length, status.label]);
       return result;
     } catch (e) {
       logger.err('Error building customer summaries: {}', [e]);
@@ -58,11 +71,13 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Returns a row for [user] if they have an active subscription, otherwise
-  /// null. Per-section failures degrade to "Hata" cells rather than dropping
-  /// the whole customer.
-  Future<CustomerSummaryRow?> _buildRowForCustomer(UserModel user) async {
-    final SubscriptionModel? activeSub = await _findActiveSubscription(user.userId);
+  /// Returns a row for [user] if they have a subscription with [status],
+  /// otherwise null. Per-section failures degrade to "Hata" cells rather than
+  /// dropping the whole customer.
+  Future<CustomerSummaryRow?> _buildRowForCustomer(
+      UserModel user, SubActiveStatus status) async {
+    final SubscriptionModel? activeSub =
+        await _findSubscriptionByStatus(user.userId, status);
     if (activeSub == null) return null;
 
     final fullName = '${user.name} ${user.surname}'.trim();
@@ -98,14 +113,15 @@ class CustomerSummaryProvider extends ChangeNotifier {
     );
   }
 
-  /// Finds the customer's active subscription (most recent by start date when
-  /// several are active). Returns null when none is active.
-  Future<SubscriptionModel?> _findActiveSubscription(String userId) async {
+  /// Finds the customer's subscription with [status] (most recent by start date
+  /// when several match). Returns null when none matches.
+  Future<SubscriptionModel?> _findSubscriptionByStatus(
+      String userId, SubActiveStatus status) async {
     try {
       final snap = await _usersRef
           .doc(userId)
           .collection('subscriptions')
-          .where('status', isEqualTo: SubActiveStatus.active.label)
+          .where('status', isEqualTo: status.label)
           .get();
 
       if (snap.docs.isEmpty) return null;
@@ -124,8 +140,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
       subs.sort((a, b) => b.startDate.compareTo(a.startDate));
       return subs.first;
     } catch (e) {
-      logger.err('Error fetching active subscription for user {}: {}',
-          [userId, e]);
+      logger.err('Error fetching {} subscription for user {}: {}',
+          [status.label, userId, e]);
       return null;
     }
   }

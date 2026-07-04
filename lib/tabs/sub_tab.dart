@@ -314,6 +314,30 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     final appointments = _getCachedAppointments(s.subscriptionId);
     return _buildSubscriptionCardContent(context, s, appointments);
   }
+
+  Widget _buildStatusBadge(SubActiveStatus status) {
+    final Color bgColor = switch (status) {
+      SubActiveStatus.active => Colors.green.shade100,
+      SubActiveStatus.frozen => Colors.blue.shade100,
+      SubActiveStatus.completed => Colors.grey.shade200,
+    };
+    final Color fgColor = switch (status) {
+      SubActiveStatus.active => Colors.green.shade800,
+      SubActiveStatus.frozen => Colors.blue.shade800,
+      SubActiveStatus.completed => Colors.grey.shade700,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        status.displayName,
+        style: TextStyle(color: fgColor, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
   
   Widget _buildSubscriptionCardContent(BuildContext context, SubscriptionModel s, List<AppointmentModel> appointments) {
     final remainingPostponements = s.allowedPostponements - s.postponementsUsed;
@@ -321,7 +345,14 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     return Card(
       key: ValueKey(s.subscriptionId),
       margin: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-      child: Padding(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade400, width: 2.5),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _showEditSubscriptionDialog(context, s),
+        child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // Quick summary banner
@@ -364,12 +395,18 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
           ),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             Expanded(
-              child: Text(
-                s.packageName,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
+              child: Row(children: [
+                Flexible(
+                  child: Text(
+                    s.packageName,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _buildStatusBadge(s.status),
+              ]),
             ),
             Row(children: [
               IconButton(
@@ -566,33 +603,8 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             }(),
           ],
 
-          const SizedBox(height: 8),
-          Row(children: [
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: switch (s.status) {
-                  SubActiveStatus.active => Colors.green.shade100,
-                  SubActiveStatus.frozen => Colors.blue.shade100,
-                  SubActiveStatus.completed => Colors.grey.shade200,
-                },
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                s.status.displayName,
-                style: TextStyle(
-                  color: switch (s.status) {
-                    SubActiveStatus.active => Colors.green.shade800,
-                    SubActiveStatus.frozen => Colors.blue.shade800,
-                    SubActiveStatus.completed => Colors.grey.shade700,
-                  },
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ]),
         ]),
+        ),
       ),
     );
   }

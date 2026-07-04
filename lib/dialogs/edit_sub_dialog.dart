@@ -31,11 +31,16 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   late TextEditingController _onlineMeetingsController;
   late TextEditingController _faceToFaceMeetingsController;
   late TextEditingController _postponementsUsedController;
+  late TextEditingController _allowedPostponementsController;
   DateTime? _startDate;
   bool _isLoading = false;
   late SubActiveStatus _status;
   late SubsMeetingType _meetingType;
   bool _isPaymentIncomplete = false;
+
+  // Tracks whether the admin has manually overridden the auto-calculated
+  // allowed postponements. Once true, we stop auto-updating that field.
+  bool _allowedPostponementsEditedManually = false;
 
   final Logger _logger = Logger.forClass(EditSubscriptionDialog);
 
@@ -63,6 +68,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         text: widget.subscription.faceToFaceMeetings?.toString() ?? "0");
     _postponementsUsedController = TextEditingController(
         text: widget.subscription.postponementsUsed.toString());
+    _allowedPostponementsController = TextEditingController(
+        text: widget.subscription.allowedPostponements.toString());
     _startDate = widget.subscription.startDate;
     _status = widget.subscription.status;
     _meetingType = widget.subscription.meetingType;
@@ -122,6 +129,16 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   }
 
   void _updateState() {
+    // Keep the allowed-postponements field in sync with the auto-calculated
+    // value while the admin has not manually edited it.
+    if (!_allowedPostponementsEditedManually) {
+      final total = int.tryParse(_totalMeetingsController.text) ?? 0;
+      final suggested =
+          SubscriptionModel.calculateAllowedPostponements(total).toString();
+      if (_allowedPostponementsController.text != suggested) {
+        _allowedPostponementsController.text = suggested;
+      }
+    }
     // This will refresh the UI, updating the helper text for postponements
     setState(() {});
   }
@@ -334,16 +351,41 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   ],
                 ),
               const SizedBox(height: 16),
+
+              // Allowed Postponements (auto-calculated, editable)
+              TextFormField(
+                controller: _allowedPostponementsController,
+                decoration: const InputDecoration(
+                  labelText: 'Toplam İzin Verilen Erteleme Sayısı',
+                  border: OutlineInputBorder(),
+                  helperText: 'Görüşme sayısına göre otomatik hesaplanır, değiştirilebilir.',
+                  helperStyle: TextStyle(fontStyle: FontStyle.italic),
+                ),
+                keyboardType: TextInputType.number,
+                onChanged: (_) => _allowedPostponementsEditedManually = true,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Lütfen izin verilen erteleme sayısını girin.';
+                  }
+                  final parsed = int.tryParse(value);
+                  if (parsed == null) {
+                    return 'Geçerli bir sayı girin.';
+                  }
+                  if (parsed < 0) {
+                    return 'Erteleme sayısı negatif olamaz.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
               
               // Postponements Used field
               TextFormField(
                 controller: _postponementsUsedController,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Kullanılan Erteleme Sayısı',
-                  border: const OutlineInputBorder(),
+                  border: OutlineInputBorder(),
                   hintText: 'Müşteri tarafından kullanılan erteleme sayısı',
-                  helperText: 'İzin verilen maksimum erteleme: ${widget.subscription.allowedPostponements}',
-                  helperStyle: const TextStyle(fontStyle: FontStyle.italic),
                 ),
                 keyboardType: TextInputType.number,
                 validator: (value) {
@@ -356,9 +398,9 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     return 'Geçerli bir sayı girin.';
                   }
                   
-                  // Calculate allowed postponements (same calculation as in update method)
-                  final totalMeetings = int.tryParse(_totalMeetingsController.text) ?? 0;
-                  final allowedPostponements = (totalMeetings / 4).ceil();
+                  // Max is the admin-editable allowed postponements value above
+                  final allowedPostponements =
+                      int.tryParse(_allowedPostponementsController.text) ?? 0;
                   
                   if (postponements < 0) {
                     return 'Erteleme sayısı negatif olamaz.';
@@ -436,17 +478,15 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         final subscriptionId = widget.subscription.subscriptionId;
         final totalMeetings = int.parse(_totalMeetingsController.text);
         
-        // Calculate allowed postponements per month (totalMeetings / 4, rounded up)
-        final allowedPostponements = totalMeetings % 4 == 0
-            ? ((totalMeetings / 4)).toInt()
-            : (totalMeetings / 4).ceil();
+        // Admin-editable allowed postponements (pre-filled with the auto-calculated value)
+        final allowedPostponements = int.parse(_allowedPostponementsController.text);
         
         // Create an update map with raw data - no subscription model objects
         final Map<String, dynamic> updateData = {
           'packageName': _packageNameController.text,
           'startDate': _startDate!,
           'totalMeetings': totalMeetings,
-          'allowedPostponementsPerMonth': allowedPostponements,
+          'allowedPostponements': allowedPostponements,
           'postponementsUsed': int.parse(_postponementsUsedController.text),
           'totalAmount': double.parse(_totalAmountController.text),
           'amountPaid': double.parse(_amountPaidController.text),
@@ -539,6 +579,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     _onlineMeetingsController.dispose();
     _faceToFaceMeetingsController.dispose();
     _postponementsUsedController.dispose();
+    _allowedPostponementsController.dispose();
     super.dispose();
   }
 }

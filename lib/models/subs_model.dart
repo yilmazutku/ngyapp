@@ -122,6 +122,13 @@ class SubscriptionModel {
     return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
   }
 
+  /// Auto-calculates the suggested allowed postponements for a package
+  /// (one per month, i.e. one for every 4 meetings, rounded up).
+  static int calculateAllowedPostponements(int totalMeetings) {
+    if (totalMeetings <= 0) return 0;
+    return (totalMeetings / 4).ceil();
+  }
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||

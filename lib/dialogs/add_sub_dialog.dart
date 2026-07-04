@@ -33,12 +33,35 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   final TextEditingController _totalAmountController = TextEditingController();
   final TextEditingController _onlineMeetingsController = TextEditingController();
   final TextEditingController _faceToFaceMeetingsController = TextEditingController();
+  final TextEditingController _allowedPostponementsController = TextEditingController();
   
   DateTime? _startDate=DateTime.now();
   bool _isLoading = false;
   bool _isPaymentReceived = false;
   PaymentType _paymentType = PaymentType.nakit;
   SubsMeetingType _selectedMeetingType = SubsMeetingType.faceToFace;
+
+  // Tracks whether the admin has manually overridden the auto-calculated
+  // allowed postponements. Once true, we stop auto-updating that field.
+  bool _allowedPostponementsEditedManually = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _totalMeetingsController.addListener(_syncAllowedPostponements);
+  }
+
+  /// Keeps the allowed-postponements field in sync with the auto-calculated
+  /// value while the admin has not manually edited it.
+  void _syncAllowedPostponements() {
+    if (_allowedPostponementsEditedManually) return;
+    final total = int.tryParse(_totalMeetingsController.text) ?? 0;
+    final suggested =
+        SubscriptionModel.calculateAllowedPostponements(total).toString();
+    if (_allowedPostponementsController.text != suggested) {
+      _allowedPostponementsController.text = suggested;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +98,27 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Lütfen toplam görüşme sayısını girin.';
                     if (int.tryParse(v) == null) return 'Geçerli bir sayı girin.';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // Allowed Postponements (auto-calculated, editable)
+                TextFormField(
+                  controller: _allowedPostponementsController,
+                  decoration: const InputDecoration(
+                    labelText: 'Toplam İzin Verilen Erteleme Sayısı',
+                    border: OutlineInputBorder(),
+                    helperText: 'Görüşme sayısına göre otomatik hesaplanır, değiştirilebilir.',
+                    helperStyle: TextStyle(fontStyle: FontStyle.italic),
+                  ),
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => _allowedPostponementsEditedManually = true,
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Lütfen izin verilen erteleme sayısını girin.';
+                    final parsed = int.tryParse(v);
+                    if (parsed == null) return 'Geçerli bir sayı girin.';
+                    if (parsed < 0) return 'Erteleme sayısı negatif olamaz.';
                     return null;
                   },
                 ),
@@ -275,10 +319,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
 
       final totalMeetings = int.parse(_totalMeetingsController.text);
       
-      // Calculate allowed postponements per month (totalMeetings / 4, rounded up)
-      final allowedPostponements = totalMeetings % 4 == 0
-          ? ((totalMeetings / 4)).toInt()
-          : (totalMeetings / 4).ceil();
+      // Admin-editable allowed postponements (pre-filled with the auto-calculated value)
+      final allowedPostponements = int.parse(_allowedPostponementsController.text);
 
       // Prepare subscription data
       final subscriptionData = {
@@ -329,10 +371,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
               userId: widget.userId,
               packageName: _packageNameController.text,
               startDate: _startDate!,
-              totalMeetings: int.parse(_totalMeetingsController.text),
-              allowedPostponements: int.parse(_totalMeetingsController.text) % 4 == 0
-                ? ((int.parse(_totalMeetingsController.text) / 4)).toInt()
-                : (int.parse(_totalMeetingsController.text) / 4).ceil(),
+              totalMeetings: totalMeetings,
+              allowedPostponements: allowedPostponements,
               totalAmount: paymentAmount,
               meetingType: _selectedMeetingType,
             ),
@@ -385,11 +425,13 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
 
   @override
   void dispose() {
+    _totalMeetingsController.removeListener(_syncAllowedPostponements);
     _packageNameController.dispose();
     _totalMeetingsController.dispose();
     _totalAmountController.dispose();
     _onlineMeetingsController.dispose();
     _faceToFaceMeetingsController.dispose();
+    _allowedPostponementsController.dispose();
     super.dispose();
   }
 }
