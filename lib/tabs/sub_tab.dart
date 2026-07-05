@@ -422,7 +422,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             ]),
           ]),
 
-          if (noPostponeLeft)
+          if (noPostponeLeft && s.allowedPostponements > 0)
             Row(
               children: [
                 Container(
@@ -470,7 +470,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
               .clamp(0, s.totalMeetings) : 0}/${s.totalMeetings} görüşme',style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             Text(
               'Erteleme: ${s.postponementsUsed}/${s.allowedPostponements}',
-              style: noPostponeLeft
+              style: noPostponeLeft && s.allowedPostponements > 0
                   ? TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)
                   : null,
             ),
