@@ -77,7 +77,7 @@ class _AddImageDialogState extends State<AddImageDialog> {
             context,
             title: 'Uyarı',
             message:
-                'Bu kullanıcının aktif aboneliği bulunmamaktadır. Fotoğraf eklemek için önce bir abonelik eklemelisiniz.',
+                'Bu kullanıcının aktif paketi bulunmamaktadır. Fotoğraf eklemek için önce bir paket eklemelisiniz.',
           );
         }
       }
@@ -90,7 +90,7 @@ class _AddImageDialogState extends State<AddImageDialog> {
         await DialogUtils.openError(
           context,
           title: 'Hata',
-          message: 'Abonelikler yüklenirken bir hata oluştu: $e',
+          message: 'Paketler yüklenirken bir hata oluştu: $e',
         );
       }
     }
@@ -128,9 +128,9 @@ class _AddImageDialogState extends State<AddImageDialog> {
               DropdownButtonFormField<SubscriptionModel>(
                 value: _selectedSubscription,
                 decoration: const InputDecoration(
-                  labelText: 'Abonelik *',
+                  labelText: 'Paket *',
                   border: OutlineInputBorder(),
-                  hintText: 'Abonelik seçin',
+                  hintText: 'Paket seçin',
                 ),
                 items: _subscriptions.map((sub) {
                   return DropdownMenuItem<SubscriptionModel>(

@@ -7,6 +7,7 @@ import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/date_formatter.dart';
 
 class EditSubscriptionDialog extends StatefulWidget {
   final SubscriptionModel subscription;
@@ -41,6 +42,10 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   // Tracks whether the admin has manually overridden the auto-calculated
   // allowed postponements. Once true, we stop auto-updating that field.
   bool _allowedPostponementsEditedManually = false;
+
+  // Weight-tracking packages have no payment; payment widgets are hidden.
+  bool get _isWeightTracking =>
+      _status == SubActiveStatus.activeWeightTracking;
 
   final Logger _logger = Logger.forClass(EditSubscriptionDialog);
 
@@ -146,12 +151,33 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Abonelik Düzenle'),
+      title: const Text('Paket Düzenle'),
       content: SingleChildScrollView(
         child: Form(
           key: _formKey,
           child: ListBody(
             children: [
+              const SizedBox(height: 16),
+              // Package type / status (topmost). Selecting Aktif/Kilo Takip
+              // hides the payment widgets.
+              DropdownButtonFormField<SubActiveStatus>(
+                value: _status,
+                items: SubActiveStatus.values.map((SubActiveStatus status) {
+                  return DropdownMenuItem<SubActiveStatus>(
+                    value: status,
+                    child: Text(status.displayName),
+                  );
+                }).toList(),
+                onChanged: (newValue) {
+                  setState(() {
+                    _status = newValue!;
+                  });
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Paket Tipi',
+                  border: OutlineInputBorder(),
+                ),
+              ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _packageNameController,
@@ -184,79 +210,88 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   return null;
                 },
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _totalAmountController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Toplam Ücret (TL)',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Lütfen toplam ödeme miktarını giriniz.';
-                  }
-                  if (double.tryParse(value) == null) {
-                    return 'Geçersiz ödeme miktarı. Lütfen kontrol ediniz.';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _amountPaidController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'Ödenmiş Miktar (TL)',
-                  border: const OutlineInputBorder(),
-                  filled: _isPaymentIncomplete,
-                  fillColor: _isPaymentIncomplete ? Colors.red.shade100 : null,
-                  labelStyle: _isPaymentIncomplete 
-                    ? TextStyle(color: Colors.red.shade800)
-                    : null,
-                ),
-                style: _isPaymentIncomplete 
-                  ? TextStyle(color: Colors.red.shade800, fontWeight: FontWeight.bold)
-                  : null,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Lütfen ödenmiş miktarı giriniz.';
-                  }
-                  if (double.tryParse(value) == null) {
-                    return 'Geçerli bir miktar girin.';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // Payment type of the linked payment (Nakit / Pos / Iban).
-              // Changing it updates the corresponding payment record(s).
-              if (_loadingPaymentType)
-                const Center(child: CircularProgressIndicator())
-              else
-                DropdownButtonFormField<PaymentType>(
-                  value: _paymentType,
-                  hint: const Text('Belirtilmemiş'),
-                  items: PaymentType.selectableValues.map((PaymentType type) {
-                    return DropdownMenuItem<PaymentType>(
-                      value: type,
-                      child: Text(type.label),
-                    );
-                  }).toList(),
-                  onChanged: (newValue) => setState(() => _paymentType = newValue),
+              // Fee + payment widgets are hidden entirely for free
+              // weight-tracking packages.
+              if (!_isWeightTracking) ...[
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _totalAmountController,
+                  keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: 'Ödeme Türü',
+                    labelText: 'Toplam Ücret (TL)',
                     border: OutlineInputBorder(),
-                    helperText: 'Bağlı ödeme kaydına uygulanır',
                   ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Lütfen toplam ödeme miktarını giriniz.';
+                    }
+                    if (double.tryParse(value) == null) {
+                      return 'Geçersiz ödeme miktarı. Lütfen kontrol ediniz.';
+                    }
+                    return null;
+                  },
                 ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _amountPaidController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Ödenmiş Miktar (TL)',
+                    border: const OutlineInputBorder(),
+                    filled: _isPaymentIncomplete,
+                    fillColor: _isPaymentIncomplete ? Colors.red.shade100 : null,
+                    labelStyle: _isPaymentIncomplete
+                      ? TextStyle(color: Colors.red.shade800)
+                      : null,
+                  ),
+                  style: _isPaymentIncomplete
+                    ? TextStyle(color: Colors.red.shade800, fontWeight: FontWeight.bold)
+                    : null,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Lütfen ödenmiş miktarı giriniz.';
+                    }
+                    if (double.tryParse(value) == null) {
+                      return 'Geçerli bir miktar girin.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // Payment type of the linked payment (Nakit / Pos / Iban).
+                // Changing it updates the corresponding payment record(s).
+                if (_loadingPaymentType)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  DropdownButtonFormField<PaymentType>(
+                    value: _paymentType,
+                    hint: const Text('Belirtilmemiş'),
+                    items: PaymentType.selectableValues.map((PaymentType type) {
+                      return DropdownMenuItem<PaymentType>(
+                        value: type,
+                        child: Text(type.label),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) => setState(() => _paymentType = newValue),
+                    decoration: const InputDecoration(
+                      labelText: 'Ödeme Türü',
+                      border: OutlineInputBorder(),
+                      helperText: 'Bağlı ödeme kaydına uygulanır',
+                    ),
+                  ),
+              ],
               const SizedBox(height: 16),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(_startDate == null
-                    ? 'Başlangıç Tarihi Seçimi'
-                    : 'Başlangıç Tarihi: ${_startDate!.toLocal().toString().split(' ')[0]}'),
+                title: Text(
+                  _startDate == null
+                      ? 'Başlangıç Tarihi Seçimi'
+                      : 'Başlangıç Tarihi: ${DateFormatter.formatNumericDate(_startDate!)}',
+                  style: _startDate != null
+                      ? const TextStyle(fontWeight: FontWeight.bold)
+                      : null,
+                ),
                 trailing: const Icon(Icons.calendar_today),
                 onTap: () async {
                   DateTime? pickedDate = await showDatePicker(
@@ -266,10 +301,13 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                         DateTime.now().subtract(const Duration(days: 365)),
                     lastDate: DateTime.now().add(const Duration(days: 365)),
                   );
-                  setState(() {
-                    _startDate = pickedDate;
-                  });
-                                },
+                  // Keep the previously selected date if the user cancels.
+                  if (pickedDate != null) {
+                    setState(() {
+                      _startDate = pickedDate;
+                    });
+                  }
+                },
               ),
               const SizedBox(height: 16),
               // Meeting Type Selection
@@ -413,26 +451,6 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   return null;
                 },
               ),
-              const SizedBox(height: 16),
-              
-              DropdownButtonFormField<SubActiveStatus>(
-                value: _status,
-                items: SubActiveStatus.values.map((SubActiveStatus status) {
-                  return DropdownMenuItem<SubActiveStatus>(
-                    value: status,
-                    child: Text(status.displayName),
-                  );
-                }).toList(),
-                onChanged: (newValue) {
-                  setState(() {
-                    _status = newValue!;
-                  });
-                },
-                decoration: const InputDecoration(
-                  labelText: 'Paket Durumu',
-                  border: OutlineInputBorder(),
-                ),
-              ),
             ],
           ),
         ),
@@ -480,6 +498,12 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         
         // Admin-editable allowed postponements (pre-filled with the auto-calculated value)
         final allowedPostponements = int.parse(_allowedPostponementsController.text);
+
+        // Weight-tracking packages are free: no fee and no payment.
+        final double totalAmount =
+            _isWeightTracking ? 0.0 : double.parse(_totalAmountController.text);
+        final double amountPaid =
+            _isWeightTracking ? 0.0 : double.parse(_amountPaidController.text);
         
         // Create an update map with raw data - no subscription model objects
         final Map<String, dynamic> updateData = {
@@ -488,8 +512,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
           'totalMeetings': totalMeetings,
           'allowedPostponements': allowedPostponements,
           'postponementsUsed': int.parse(_postponementsUsedController.text),
-          'totalAmount': double.parse(_totalAmountController.text),
-          'amountPaid': double.parse(_amountPaidController.text),
+          'totalAmount': totalAmount,
+          'amountPaid': amountPaid,
           'status': _status.label,
           'meetingType': _meetingType.label,
           'updateDate': DateTime.now(),
@@ -512,7 +536,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
             Provider.of<PaymentProvider>(context, listen: false);
 
         final double oldTotalAmount = widget.subscription.totalAmount;
-        final double newTotalAmount = double.parse(_totalAmountController.text);
+        final double newTotalAmount = totalAmount;
 
         // Use the SubProvider to update the subscription
         await subProvider.updateSubscription(
@@ -539,7 +563,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         await DialogUtils.openInfo(
           context,
           title: 'Başarılı',
-          message: 'Abonelik başarıyla güncellendi.',
+          message: 'Paket başarıyla güncellendi.',
         );
         
         // Close dialog first, then notify parent about the update
@@ -552,7 +576,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         await DialogUtils.openError(
           context,
           title: 'Hata',
-          message: 'Abonelik güncellenirken bir hata oluştu: $e',
+          message: 'Paket güncellenirken bir hata oluştu: $e',
         );
       } finally {
         if (mounted) {

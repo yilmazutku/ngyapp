@@ -47,7 +47,7 @@ class SubscriptionModel {
     required this.allowedPostponements,
     required this.totalAmount,
     this.amountPaid = 0.0,
-    this.status = SubActiveStatus.active,
+    this.status = SubActiveStatus.activeWeekly,
     required this.meetingType,
     this.onlineMeetings,
     this.faceToFaceMeetings,
@@ -141,7 +141,8 @@ class SubscriptionModel {
 }
 
 enum SubActiveStatus {
-  active('active', 'Aktif'),
+  activeWeekly('active', 'Aktif/Haftalık'),
+  activeWeightTracking('active_kt', 'Aktif/Kilo Takip'),
   completed('completed', 'Tamamlandı'),
   frozen('frozen', 'Donduruldu');
 
@@ -149,6 +150,13 @@ enum SubActiveStatus {
 
   final String label;
   final String displayName;
+
+  /// Whether this status represents a live/active package (weekly or weight
+  /// tracking). Business rule: only one active package may exist per customer
+  /// at a time.
+  bool get isActive =>
+      this == SubActiveStatus.activeWeekly ||
+      this == SubActiveStatus.activeWeightTracking;
 
   static SubActiveStatus fromLabel(String label) {
     return SubActiveStatus.values.firstWhere((e) => e.label == label);

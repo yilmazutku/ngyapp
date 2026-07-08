@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/logger.dart';
 import '../models/meas_model.dart';
 import '../providers/meas_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/date_formatter.dart';
 
 class AddMeasurementDialog extends StatefulWidget {
   final String userId;
@@ -95,7 +95,7 @@ class _AddMeasurementDialogState extends State<AddMeasurementDialog> {
       context,
       title: 'Ölçüm Ekle',
       message: 'Bu ölçümü eklemek istediğinize emin misiniz?\n'
-          'Tarih: ${DateFormat('d MMMM yyyy', 'tr_TR').format(_measDate)}',
+          'Tarih: ${DateFormatter.formatNumericDate(_measDate)}',
       confirmText: 'Evet',
       cancelText: 'İptal',
     );
@@ -169,7 +169,11 @@ class _AddMeasurementDialogState extends State<AddMeasurementDialog> {
                 // Date picker (required)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text('Tarih: ${DateFormat('d MMMM yyyy', 'tr_TR').format(_measDate)}'),
+                  title: const Text('Tarih'),
+                  subtitle: Text(
+                    DateFormatter.formatNumericDate(_measDate),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                   trailing: const Icon(Icons.calendar_today),
                   onTap: _pickDate,
                 ),

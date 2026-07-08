@@ -10,7 +10,7 @@ import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
-import 'package:intl/intl.dart';
+import '../utils/date_formatter.dart';
 import '../dialogs/dialog_widgets.dart'; // Import dialog widgets
 import '../widgets/loading_overlay.dart';
 
@@ -167,6 +167,21 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
     }
   }
 
+  /// Picks the default appointment type from the (selected) subscription:
+  /// Aktif/Kilo Takip -> Kilo Takip, Aktif/Haftalık -> Haftalık Görüşme,
+  /// anything else (completed/frozen/none) -> Diğer. Also refreshes the
+  /// duration to match. Call inside a setState block.
+  void _applyAppointmentTypeForSubscription(SubscriptionModel? sub) {
+    _selectedAppointmentType = switch (sub?.status) {
+      SubActiveStatus.activeWeightTracking => AppointmentType.kgtakip,
+      SubActiveStatus.activeWeekly => AppointmentType.haftalik,
+      _ => AppointmentType.diger,
+    };
+    _durationController.text = _selectedAppointmentType
+        .getDurationForMeetingType(_selectedMeetingType)
+        .toString();
+  }
+
   Future<void> _fetchSubscriptions(String userId) async {
     setState(() {
       _isLoadingSubscriptions = true;
@@ -174,22 +189,21 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
 
     try {
       final subProvider = Provider.of<SubProvider>(context, listen: false);
-      final List<SubscriptionModel> activeSubscriptions =
-      await subProvider.fetchSubscriptions(
+      final fetched = await subProvider.fetchSubscriptions(
         userId: userId,
-        showAllSubscriptions: false, // Only active subscriptions
+        showAllSubscriptions: false,
       );
+      // Only active packages (weekly / weight-tracking) can receive new
+      // appointments; frozen or completed packages are excluded.
+      final List<SubscriptionModel> activeSubscriptions =
+          fetched.where((s) => s.status.isActive).toList();
 
       setState(() {
         _subscriptions = activeSubscriptions;
         _isLoadingSubscriptions = false;
-        
-        // Select the first subscription if available
-        if (_subscriptions.isNotEmpty) {
-          _selectedSubscription = _subscriptions.first;
-        } else {
-          _selectedSubscription = null;
-        }
+        _selectedSubscription =
+            _subscriptions.isNotEmpty ? _subscriptions.first : null;
+        _applyAppointmentTypeForSubscription(_selectedSubscription);
       });
       
       // Show error if no active subscriptions found
@@ -202,7 +216,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
             context,
             title: 'Uyarı',
             message:
-                'Bu kullanıcının aktif aboneliği bulunmamaktadır. Randevu eklemek için önce bir abonelik eklemelisiniz.',
+                'Bu kullanıcının aktif paketi bulunmamaktadır. Randevu eklemek için önce bir paket eklemelisiniz.',
           );
         }
       }
@@ -215,7 +229,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         await DialogUtils.openError(
           context,
           title: 'Hata',
-          message: 'Abonelikler yüklenirken bir hata oluştu: $e',
+          message: 'Paketler yüklenirken bir hata oluştu: $e',
         );
       }
     }
@@ -285,7 +299,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Lütfen bir abonelik seçin.',
+        message: 'Lütfen bir paket seçin.',
       );
       return;
     }
@@ -314,7 +328,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   'Aşağıdaki randevuyu eklemek istediğinizden emin misiniz?'),
               const SizedBox(height: 16),
               Text('Kullanıcı: ${_selectedUser!.name}'),
-              Text('Tarih: ${DateFormat('d MMMM yyyy', 'tr_TR').format(_selectedDate)}'),
+              Text('Tarih: ${DateFormatter.formatNumericDate(_selectedDate)}'),
               Text('Saat: ${_selectedTime.format(context)}'),
               Text('Görüşme Tipi: ${_selectedMeetingType.label}'),
               Text('Randevu Türü: ${_selectedAppointmentType.lbl}'),
@@ -322,10 +336,10 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               Text('Durum: ${_selectedStatus.label}'),
               if (_selectedStatus == AppointmentStatus.postponed && _postponedDate != null)
                 Text(
-                  'Ertelenen Tarih: ${DateFormat('d MMMM yyyy, HH:mm', 'tr_TR').format(_postponedDate!)}',
+                  'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
-              Text('Abonelik: ${_selectedSubscription!.packageName}'),
+              Text('Paket: ${_selectedSubscription!.packageName}'),
               if (_notesController.text.isNotEmpty)
                 Text('Notlar: ${_notesController.text}'),
             ],
@@ -383,14 +397,14 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
           title: 'Başarılı',
           message: 'Randevu detayları:\n\n'
               'Kullanıcı: ${widget.userId != null ? _selectedUser!.name : _selectedUser!.name}\n'
-              'Tarih: ${DateFormat('d MMMM yyyy', 'tr_TR').format(_selectedDate)}\n'
+              'Tarih: ${DateFormatter.formatNumericDate(_selectedDate)}\n'
               'Saat: ${_selectedTime.format(context)}\n'
               'Görüşme Tipi: ${_selectedMeetingType.label}\n'
               'Randevu Türü: ${_selectedAppointmentType.lbl}\n'
               'Görüşme Süresi: $durationMinutes dk\n'
               'Durum: ${_selectedStatus.label}\n'
-              '${_selectedStatus == AppointmentStatus.postponed && _postponedDate != null ? 'Ertelenen Tarih: ${DateFormat('d MMMM yyyy, HH:mm', 'tr_TR').format(_postponedDate!)}\n' : ''}'
-              'Abonelik: ${_selectedSubscription!.packageName}'
+              '${_selectedStatus == AppointmentStatus.postponed && _postponedDate != null ? 'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}\n' : ''}'
+              'Paket: ${_selectedSubscription!.packageName}'
               '${_notesController.text.isNotEmpty ? '\nNotlar: ${_notesController.text}' : ''}',
         );
       }
@@ -514,9 +528,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                 DropdownButtonFormField<SubscriptionModel>(
                   value: _selectedSubscription,
                   decoration: const InputDecoration(
-                    labelText: 'Abonelik *',
+                    labelText: 'Paket *',
                     border: OutlineInputBorder(),
-                    hintText: 'Abonelik seçin',
+                    hintText: 'Paket seçin',
                   ),
                   items: _subscriptions.map((sub) {
                     return DropdownMenuItem<SubscriptionModel>(
@@ -530,11 +544,13 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   onChanged: (value) {
                     setState(() {
                       _selectedSubscription = value;
+                      // Keep the appointment type in sync with the chosen package.
+                      _applyAppointmentTypeForSubscription(value);
                     });
                   },
                   validator: (value) {
                     if (value == null) {
-                      return 'Lütfen bir abonelik seçin';
+                      return 'Lütfen bir paket seçin';
                     }
                     return null;
                   },
@@ -626,7 +642,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   ),
                   subtitle: _postponedDate != null
                       ? Text(
-                    DateFormat('d MMMM , HH:mm', 'tr_TR').format(_postponedDate!),
+                    DateFormatter.formatNumericDateTime(_postponedDate!),
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
@@ -685,7 +701,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                 ListTile(
                   title: const Text('Tarih'),
                   subtitle: Text(
-                    DateFormat('d MMMM yyyy, EEEE', 'tr_TR').format(_selectedDate),
+                    DateFormatter.formatNumericDate(_selectedDate),
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   leading: const Icon(Icons.calendar_today),

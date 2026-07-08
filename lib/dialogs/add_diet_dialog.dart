@@ -122,7 +122,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
             context,
             title: 'Uyarı',
             message:
-                'Bu kullanıcının aktif aboneliği bulunmamaktadır. Diyet listesi eklemek için önce bir abonelik eklemelisiniz.',
+                'Bu kullanıcının aktif paketi bulunmamaktadır. Diyet listesi eklemek için önce bir paket eklemelisiniz.',
           );
         }
       }
@@ -137,7 +137,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Abonelikler yüklenirken bir hata oluştu: $e',
+        message: 'Paketler yüklenirken bir hata oluştu: $e',
       );
     }
   }
@@ -188,7 +188,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Seçili Abonelik:',
+                        'Seçili Paket:',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 14,
@@ -211,9 +211,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
           DropdownButtonFormField<SubscriptionModel>(
             value: _selectedSubscription,
             decoration: const InputDecoration(
-              labelText: 'Abonelik *',
+              labelText: 'Paket *',
               border: OutlineInputBorder(),
-              hintText: 'Abonelik seçin',
+              hintText: 'Paket seçin',
             ),
             items: _subscriptions.map((sub) {
               return DropdownMenuItem<SubscriptionModel>(
@@ -257,7 +257,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             child: Text(
-              'Seçili abonelik: ${_selectedSubscription!.packageName}',
+              'Seçili paket: ${_selectedSubscription!.packageName}',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
@@ -672,7 +672,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
       await DialogUtils.openError(
         context,
         title: 'Uyarı',
-        message: 'Lütfen bir abonelik seçiniz.',
+        message: 'Lütfen bir paket seçiniz.',
       );
       return;
     }

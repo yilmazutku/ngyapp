@@ -51,10 +51,18 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
 
   // kept for future use
   final bool _enableNotifications = false;
-  final DateFormat df=DateFormat('d MMMM yyyy', 'tr_TR');
+  final DateFormat df=DateFormat('dd.MM.yyyy', 'tr_TR');
   // Subscription selection
   List<SubscriptionModel> _availableSubscriptions = [];
   String? _selectedSubscriptionId;
+
+  /// Active packages plus the currently-linked one (even if passive) so the
+  /// dropdown value stays valid. Passive packages cannot be newly assigned.
+  List<SubscriptionModel> get _selectableSubscriptions =>
+      _availableSubscriptions
+          .where((s) =>
+              s.status.isActive || s.subscriptionId == _selectedSubscriptionId)
+          .toList();
 
   @override
   void initState() {
@@ -140,7 +148,7 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                     value: null,
                     child: Text('Paketsiz ödeme'),
                   ),
-                  ..._availableSubscriptions.map((sub) {
+                  ..._selectableSubscriptions.map((sub) {
                     return DropdownMenuItem<String?>(
                       value: sub.subscriptionId,
                       child: Text(
@@ -148,7 +156,7 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                         overflow: TextOverflow.ellipsis,
                       ),
                     );
-                  }).toList(),
+                  }),
                 ],
                 onChanged: (newValue) {
                   setState(() {
@@ -215,10 +223,13 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                     firstDate: now.subtract(const Duration(days: 365)),
                     lastDate: now.add(const Duration(days: 365)),
                   );
-                  setState(() {
-                    _selectedDueDate = pickedDate;
-                    // DO NOT clear _selectedPaymentDate
-                  });
+                  // Keep the previously selected date if the user cancels.
+                  if (pickedDate != null) {
+                    setState(() {
+                      _selectedDueDate = pickedDate;
+                      // DO NOT clear _selectedPaymentDate
+                    });
+                  }
                 },
               ),
               const SizedBox(height: 16),
@@ -241,10 +252,13 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                     firstDate: DateTime(2000),
                     lastDate: DateTime.now(),
                   );
-                  setState(() {
-                    _selectedPaymentDate = pickedDate;
-                    // DO NOT clear _selectedDueDate
-                  });
+                  // Keep the previously selected date if the user cancels.
+                  if (pickedDate != null) {
+                    setState(() {
+                      _selectedPaymentDate = pickedDate;
+                      // DO NOT clear _selectedDueDate
+                    });
+                  }
                 },
               ),
               const SizedBox(height: 16),

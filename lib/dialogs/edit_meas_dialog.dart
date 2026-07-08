@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/logger.dart';
 import '../models/meas_model.dart';
 import '../providers/meas_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/date_formatter.dart';
 
 class EditMeasurementDialog extends StatefulWidget {
   final String userId;
@@ -25,7 +25,6 @@ class EditMeasurementDialog extends StatefulWidget {
 
 class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
   final Logger logger = Logger.forClass(EditMeasurementDialog);
-  final DateFormat df=DateFormat('d MMMM y', 'tr_TR');
   final _formKey = GlobalKey<FormState>();
   bool _isSaving = false;
 
@@ -147,7 +146,7 @@ class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
       context,
       title: 'Ölçüm Güncelle',
       message: 'Bu ölçümü güncellemek istediğinize emin misiniz?\n'
-          'Tarih: ${df.format(updated.measDate)}',
+          'Tarih: ${DateFormatter.formatNumericDate(updated.measDate)}',
       confirmText: 'Evet',
       cancelText: 'İptal',
     );
@@ -184,7 +183,7 @@ class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final dateLabel = df.format(_dateOnly);
+    final dateLabel = DateFormatter.formatNumericDate(_dateOnly);
     logger.info('EditMeasDialog build.');
     return AlertDialog(
       title: const Text('Ölçüm Düzenle'),
@@ -196,7 +195,11 @@ class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
               // Date (required)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text('Tarih: $dateLabel'),
+                title: const Text('Tarih'),
+                subtitle: Text(
+                  dateLabel,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
                 trailing: const Icon(Icons.calendar_today),
                 onTap: _pickDate,
               ),

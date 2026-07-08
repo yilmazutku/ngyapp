@@ -159,7 +159,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
     if (_subscriptions.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 8.0),
-        child: Text('Kullanıcının aktif aboneliği bulunmamaktadır'),
+        child: Text('Kullanıcının aktif paketi bulunmamaktadır'),
       );
     }
     
@@ -167,7 +167,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: DropdownButton<SubscriptionModel>(
         value: _selectedSubscription,
-        hint: const Text('Abonelik Seçin'),
+        hint: const Text('Paket Seçin'),
         onChanged: (SubscriptionModel? newValue) {
           setState(() {
             _selectedSubscription = newValue;
@@ -276,13 +276,13 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
         await DialogUtils.openInfo(
           context,
           title: 'Bilgi',
-          message: 'Bu kullanıcının aktif aboneliği bulunmamaktadır. Diyet yüklemek için önce bir abonelik ekleyin.',
+          message: 'Bu kullanıcının aktif paketi bulunmamaktadır. Diyet yüklemek için önce bir paket ekleyin.',
         );
       }
     } catch (e) {
       log.err('Error fetching subscriptions: {}', [e.toString()]);
       if (mounted) {
-        _showSnackbar('Abonelikler yüklenirken hata oluştu.');
+        _showSnackbar('Paketler yüklenirken hata oluştu.');
       }
     }
   }
@@ -297,7 +297,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
     
     if (_selectedSubscription == null) {
       log.warn('Please select a subscription first.');
-      _showSnackbar('Lütfen önce bir abonelik seçin.');
+      _showSnackbar('Lütfen önce bir paket seçin.');
       return;
     }
     
@@ -527,7 +527,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
     
     if (_selectedSubscription == null) {
       log.warn('No subscription selected for upload.');
-      _showSnackbar('Lütfen önce bir abonelik seçin.');
+      _showSnackbar('Lütfen önce bir paket seçin.');
       return;
     }
 

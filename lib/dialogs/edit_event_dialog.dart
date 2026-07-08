@@ -29,8 +29,8 @@ class _EditEventDialogState extends State<EditEventDialog>
   static final Logger _logger = Logger.forClass(EditEventDialog);
 
   final _nameController = TextEditingController();
-  final DateFormat _dateFmt = DateFormat('d MMMM yyyy', 'tr_TR');
-  final DateFormat _fullFmt = DateFormat('d MMMM yyyy, HH:mm', 'tr_TR');
+  final DateFormat _dateFmt = DateFormat('dd.MM.yyyy', 'tr_TR');
+  final DateFormat _fullFmt = DateFormat('dd.MM.yyyy HH:mm', 'tr_TR');
 
   late DateTime _startDateTime;
   late DateTime _endDateTime;

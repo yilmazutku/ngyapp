@@ -36,6 +36,9 @@ const double kTimeColumnWidth = 50.0; // Width of the time labels column
 const double kDayHeaderHeight = 54.0; // Height for day title + add button
 const double kDayDividerWidth = 1; // Width of vertical dividing lines between days (editable)
 
+const double kCanceledCardHeight = 26.0;
+const double kCanceledDividerHeight = 8.0;
+
 // Calculated: pixels per minute based on total height and hours
 // 11 hours (9-20) = 660 minutes, so kTotalGridHeight / 660 = pixels per minute
 const double kPixelsPerMinute = kTotalGridHeight / ((kEndHour - kStartHour) * 60);
@@ -43,7 +46,7 @@ const double kPixelsPerMinute = kTotalGridHeight / ((kEndHour - kStartHour) * 60
 // Hoisted formatters (avoid re-creating in every build)
 final DateFormat _dayTitleFmt = DateFormat('d MMMM EEEE', 'tr_TR');
 final DateFormat _rangeFmt = DateFormat('d MMMM', 'tr_TR');
-final DateFormat _fullFmt = DateFormat('d MMMM yyyy, HH:mm', 'tr_TR');
+final DateFormat _fullFmt = DateFormat('dd.MM.yyyy HH:mm', 'tr_TR');
 final DateFormat _timeFmt = DateFormat('HH:mm');
 
 class AdminAppointmentsPage extends StatefulWidget {
@@ -751,6 +754,71 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     );
   }
 
+  Widget _buildCanceledCard(AppointmentModel appt) {
+    final String name =
+        '${appt.user?.name ?? ''} ${appt.user?.surname ?? ''}'.trim();
+    final String notes = appt.notes?.trim() ?? '';
+    return GestureDetector(
+      onTap: () => _showEditAppointmentDialog(context, appt),
+      child: Container(
+        height: kCanceledCardHeight,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(1),
+          border: Border.all(color: Colors.grey.shade400, width: 1),
+        ),
+        child: Text.rich(
+          TextSpan(
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade700,
+              decoration: TextDecoration.lineThrough,
+            ),
+            children: [
+              TextSpan(text: name, style: const TextStyle(fontWeight: FontWeight.bold)),
+              if (notes.isNotEmpty) TextSpan(text: ' - ($notes)'),
+            ],
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCanceledSection(List<AppointmentModel> canceled) {
+    if (canceled.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          height: 2,
+          margin: const EdgeInsets.symmetric(vertical: (kCanceledDividerHeight - 2) / 2),
+          color: Colors.grey.shade500,
+        ),
+        ...canceled.map(_buildCanceledCard),
+      ],
+    );
+  }
+
+  double _canceledSectionHeight(int count) =>
+      count > 0 ? kCanceledDividerHeight + count * kCanceledCardHeight : 0;
+
+  int _maxCanceledCount(Map<DateTime, List<AppointmentModel>> byDay) {
+    int maxCount = 0;
+    byDay.forEach((_, list) {
+      final c = list.where((a) => a.status == AppointmentStatus.canceled).length;
+      if (c > maxCount) maxCount = c;
+    });
+    return maxCount;
+  }
+
+  List<AppointmentModel> _canceledOf(List<AppointmentModel> list) =>
+      list.where((a) => a.status == AppointmentStatus.canceled).toList();
+
   /// Build the time column on the left side
   /// [headerHeight] allows adjusting the top spacer to align with different header sizes
   Widget _buildTimeColumn({double? headerHeight}) {
@@ -911,6 +979,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               ],
             ),
           ),
+          _buildCanceledSection(_canceledOf(dayAppointments)),
         ],
       ),
     );
@@ -1121,7 +1190,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final dayKey = _dateOnly(_selectedDay);
     final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
     
-    final totalHeight = _kMobileHeaderHeight + _timeGridHeight;
+    final totalHeight = _kMobileHeaderHeight +
+        _timeGridHeight +
+        _canceledSectionHeight(_canceledOf(dayAppointments).length);
 
     Widget gridContent = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1247,6 +1318,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             ],
           ),
         ),
+        _buildCanceledSection(_canceledOf(dayAppointments)),
       ],
     );
   }
@@ -1255,7 +1327,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   Widget _buildWeeklyView(Map<DateTime, List<AppointmentModel>> byDay, double screenWidth) {
     final columnWidth = screenWidth / kDaysToShow;
     final List<DateTime> weekDays = List.generate(kDaysToShow, (index) => startDate!.add(Duration(days: index)));
-    final totalHeight = kDayHeaderHeight + _timeGridHeight;
+    final totalHeight = kDayHeaderHeight +
+        _timeGridHeight +
+        _canceledSectionHeight(_maxCanceledCount(byDay));
 
     Widget dayColumnsRow = Row(
       mainAxisSize: MainAxisSize.min,

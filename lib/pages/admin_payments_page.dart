@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
@@ -15,12 +14,13 @@ import '../models/user_model.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
+import '../utils/amount_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/loading_overlay.dart';
 
 final Logger logger = Logger.forClass(AdminPaymentsPage);
-final DateFormat kDateFormat = DateFormat('d MMMM yyyy', 'tr_TR');
+final DateFormat kDateFormat = DateFormat('dd.MM.yyyy', 'tr_TR');
 
 class AdminPaymentsPage extends StatefulWidget {
   const AdminPaymentsPage({super.key});
@@ -29,7 +29,8 @@ class AdminPaymentsPage extends StatefulWidget {
   createState() => _AdminPaymentsPageState();
 }
 
-class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
+class _AdminPaymentsPageState extends State<AdminPaymentsPage>
+    with SingleTickerProviderStateMixin {
   // Data
   List<PaymentModel> _allPayments = [];
   List<PaymentModel> _filteredPayments = [];
@@ -57,14 +58,31 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
   // Cached tab counts (avoid recomputing in build)
   int _countThisWeek = 0;
   int _countNextWeek = 0;
+  int _countThisMonth = 0;
+  int _countLastMonth = 0;
   int _countUpcoming = 0;
   int _countCompleted = 0;
   int _countOverdue = 0;
+
+  // Tab positions referenced by index-based logic (date pre-fill / active tab).
+  // Full order: Tümü(0) · Bu Hafta(1) · Gelecek Hafta(2) · Bu Ay(3) ·
+  // Geçen Ay(4) · Gelecek(5) · Tamamlanan(6) · Geciken(7).
+  static const int _tabThisWeek = 1;
+  static const int _tabNextWeek = 2;
+  static const int _tabThisMonth = 3;
+  static const int _tabLastMonth = 4;
+  static const int _tabCount = 8;
+
+  /// Explicit controller so the app-bar filter action can read the active tab
+  /// (a DefaultTabController is not visible from the app-bar's context).
+  late final TabController _tabController;
 
   /// One controller per tab list. Each Scrollbar + ListView shares the same controller.
   late final ScrollController _allCtrl;
   late final ScrollController _thisWeekCtrl;
   late final ScrollController _nextWeekCtrl;
+  late final ScrollController _thisMonthCtrl;
+  late final ScrollController _lastMonthCtrl;
   late final ScrollController _upcomingCtrl;
   late final ScrollController _completedCtrl;
   late final ScrollController _overdueCtrl;
@@ -72,9 +90,12 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: _tabCount, vsync: this);
     _allCtrl = ScrollController();
     _thisWeekCtrl = ScrollController();
     _nextWeekCtrl = ScrollController();
+    _thisMonthCtrl = ScrollController();
+    _lastMonthCtrl = ScrollController();
     _upcomingCtrl = ScrollController();
     _completedCtrl = ScrollController();
     _overdueCtrl = ScrollController();
@@ -83,9 +104,12 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _allCtrl.dispose();
     _thisWeekCtrl.dispose();
     _nextWeekCtrl.dispose();
+    _thisMonthCtrl.dispose();
+    _lastMonthCtrl.dispose();
     _upcomingCtrl.dispose();
     _completedCtrl.dispose();
     _overdueCtrl.dispose();
@@ -152,15 +176,34 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
     final endOfNextWeek =
     startOfNextWeek.add(const Duration(days: 6, hours: 23, minutes: 59, seconds: 59));
 
+    // This month range (1st .. last day of the current month)
+    final startOfThisMonth = DateTime(now.year, now.month, 1);
+    final endOfThisMonth =
+    DateTime(now.year, now.month + 1, 1).subtract(const Duration(seconds: 1));
+
+    // Last month range (1st .. last day of the previous month)
+    final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
+    final endOfLastMonth =
+    DateTime(now.year, now.month, 1).subtract(const Duration(seconds: 1));
+
     bool inRange(DateTime d, DateTime s, DateTime e) =>
         d.isAfter(s.subtract(const Duration(seconds: 1))) &&
             d.isBefore(e.add(const Duration(seconds: 1)));
 
-    int thisWeek = 0, nextWeek = 0, upcoming = 0, completed = 0, overdue = 0;
+    int thisWeek = 0, nextWeek = 0, thisMonth = 0, lastMonth = 0, upcoming = 0, completed = 0, overdue = 0;
 
     for (final p in source) {
       if (p.status == PaymentStatus.completed) {
         completed++;
+        // Month tabs only count completed payments by their payment date.
+        if (p.paymentDate != null) {
+          if (inRange(p.paymentDate!, startOfThisMonth, endOfThisMonth)) {
+            thisMonth++;
+          }
+          if (inRange(p.paymentDate!, startOfLastMonth, endOfLastMonth)) {
+            lastMonth++;
+          }
+        }
       } else if (p.status == PaymentStatus.planned && p.dueDate != null) {
         if (p.dueDate!.isAfter(now)) {
           upcoming++;
@@ -181,9 +224,44 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
     _countThisWeek = thisWeek;
     _countNextWeek = nextWeek;
+    _countThisMonth = thisMonth;
+    _countLastMonth = lastMonth;
     _countUpcoming = upcoming;
     _countCompleted = completed;
     _countOverdue = overdue;
+  }
+
+  /// Monday 00:00:00 of the current week.
+  DateTime _startOfThisWeek() {
+    final now = DateTime.now();
+    final firstDayOfWeek = now.subtract(Duration(days: now.weekday - 1));
+    return DateTime(firstDayOfWeek.year, firstDayOfWeek.month, firstDayOfWeek.day);
+  }
+
+  /// The date window a given tab represents, or null for tabs that are not
+  /// bounded by a fixed range (Tümü / Gelecek / Tamamlanan / Geciken).
+  /// The end is expressed at day granularity; date filtering widens it to
+  /// 23:59:59 where needed.
+  DateTimeRange? _tabDateRange(int tabIndex) {
+    final now = DateTime.now();
+    switch (tabIndex) {
+      case _tabThisWeek:
+        final start = _startOfThisWeek();
+        return DateTimeRange(start: start, end: start.add(const Duration(days: 6)));
+      case _tabNextWeek:
+        final start = _startOfThisWeek().add(const Duration(days: 7));
+        return DateTimeRange(start: start, end: start.add(const Duration(days: 6)));
+      case _tabThisMonth:
+        final start = DateTime(now.year, now.month, 1);
+        final end = DateTime(now.year, now.month + 1, 1).subtract(const Duration(days: 1));
+        return DateTimeRange(start: start, end: end);
+      case _tabLastMonth:
+        final start = DateTime(now.year, now.month - 1, 1);
+        final end = DateTime(now.year, now.month, 1).subtract(const Duration(days: 1));
+        return DateTimeRange(start: start, end: end);
+      default:
+        return null;
+    }
   }
 
   /// Apply client-side filters (search, date range, and sorting)
@@ -565,6 +643,119 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
     );
   }
 
+  /// Shared builder for the month-based tabs (Bu Ay / Geçen Ay): lists the
+  /// completed payments whose payment date falls inside [tabIndex]'s window and
+  /// shows a matching stats card at the top.
+  Widget _buildMonthPaymentsTab({
+    required int tabIndex,
+    required ScrollController controller,
+    required String storageKey,
+    required String statsTitle,
+    required String emptyMessage,
+  }) {
+    final range = _tabDateRange(tabIndex)!;
+    final start = range.start;
+    final end = DateTime(range.end.year, range.end.month, range.end.day, 23, 59, 59);
+
+    // Month tabs: only completed payments, matched by their payment date.
+    final payments = _filteredPayments.where((payment) {
+      if (payment.status != PaymentStatus.completed) return false;
+      final date = payment.paymentDate;
+      return date != null && !date.isBefore(start) && !date.isAfter(end);
+    }).toList();
+
+    final totalPaid = payments.fold<double>(0, (sum, p) => sum + p.amount);
+
+    return _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: ElevatedButton.icon(
+            onPressed: _onStatsButtonPressed,
+            icon: Icon(_showStats ? Icons.expand_less : Icons.expand_more),
+            label: Text(_showStats ? 'İstatistikleri Gizle' : 'İstatistikleri Göster'),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: _buildMonthStatsCard(
+            title: statsTitle,
+            count: payments.length,
+            totalPaid: totalPaid,
+            start: start,
+            end: range.end,
+          ),
+          secondChild: const SizedBox.shrink(),
+          crossFadeState:
+          _showStats ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+          duration: const Duration(milliseconds: 300),
+        ),
+        Expanded(
+          child: payments.isEmpty
+              ? Center(child: Text(emptyMessage))
+              : Scrollbar(
+            thickness: 8.0,
+            radius: const Radius.circular(4.0),
+            controller: controller,
+            child: ListView.builder(
+              key: PageStorageKey(storageKey),
+              controller: controller,
+              addAutomaticKeepAlives: false,
+              itemCount: payments.length,
+              itemBuilder: (context, index) {
+                return _buildPaymentCard(payments[index]);
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMonthStatsCard({
+    required String title,
+    required int count,
+    required double totalPaid,
+    required DateTime start,
+    required DateTime end,
+  }) {
+    final rangeText = '${kDateFormat.format(start)} - ${kDateFormat.format(end)}';
+    final average = count > 0 ? totalPaid / count : 0.0;
+
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(title,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(rangeText, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _statItem('Tamamlanan Ödemeler', count.toString(),
+                    Icons.check_circle, Colors.green),
+                _statItem('Toplam Ödenen', '${totalPaid.toStringAsFixed(2)} ₺',
+                    Icons.paid, Colors.green),
+                _statItem('Ortalama Ödeme', '${average.toStringAsFixed(2)} ₺',
+                    Icons.trending_up, Colors.blue),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildUpcomingPaymentsTab() {
     final now = DateTime.now();
     final upcomingPayments = _filteredPayments.where((payment) {
@@ -662,10 +853,14 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
               onPressed: () => _showAddPaymentDialog(context),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.filter_list),
-            tooltip: 'Filtrele',
-            onPressed: () => _showFilterDialog(context),
+          Tooltip(
+            message: 'Filtrele',
+            preferBelow: false,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.filter_list),
+              label: const Text('Filtrele'),
+              onPressed: () => _showFilterDialog(context),
+            ),
           ),
           if (_statusFilter != null || _startDate != null || _endDate != null || _searchQuery != null)
             IconButton(
@@ -698,51 +893,72 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
           ),
         ],
       ),
-      body: DefaultTabController(
-        length: 6,
-        child: Column(
-          children: [
-            Container(
-              color: Colors.blue.shade50,
-              child: TabBar(
-                tabs: [
-                  Tab(text: 'Tüm Ödemeler (${_filteredPayments.length})'),
-                  Tab(text: 'Bu Hafta (${_countThisWeek})'),
-                  Tab(text: 'Gelecek Hafta (${_countNextWeek})'),
-                  Tab(text: 'Gelecek (${_countUpcoming})'),
-                  Tab(text: 'Tamamlanan (${_countCompleted})'),
-                  Tab(text: 'Geciken (${_countOverdue})'),
-                ],
-                isScrollable: true,
-                labelColor: Colors.blue,
-                unselectedLabelColor: Colors.grey,
-                indicatorColor: Colors.blue,
-              ),
+      body: Column(
+        children: [
+          Container(
+            color: Colors.blue.shade50,
+            child: TabBar(
+              controller: _tabController,
+              tabs: [
+                Tab(text: 'Tüm Ödemeler (${_filteredPayments.length})'),
+                Tab(text: 'Bu Hafta (${_countThisWeek})'),
+                Tab(text: 'Gelecek Hafta (${_countNextWeek})'),
+                Tab(text: 'Bu Ay (${_countThisMonth})'),
+                Tab(text: 'Geçen Ay (${_countLastMonth})'),
+                Tab(text: 'Gelecek (${_countUpcoming})'),
+                Tab(text: 'Tamamlanan (${_countCompleted})'),
+                Tab(text: 'Geciken (${_countOverdue})'),
+              ],
+              isScrollable: true,
+              labelColor: Colors.blue,
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: Colors.blue,
             ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _buildAllPaymentsTab(),
-                  _buildThisWeekPaymentsTab(),
-                  _buildNextWeekPaymentsTab(),
-                  _buildUpcomingPaymentsTab(),
-                  _buildCompletedPaymentsTab(),
-                  _buildOverduePaymentsTab(),
-                ],
-              ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildAllPaymentsTab(),
+                _buildThisWeekPaymentsTab(),
+                _buildNextWeekPaymentsTab(),
+                _buildMonthPaymentsTab(
+                  tabIndex: _tabThisMonth,
+                  controller: _thisMonthCtrl,
+                  storageKey: 'this_month',
+                  statsTitle: 'Bu Ay İstatistikleri',
+                  emptyMessage: 'Bu ay için tamamlanan ödeme bulunamadı.',
+                ),
+                _buildMonthPaymentsTab(
+                  tabIndex: _tabLastMonth,
+                  controller: _lastMonthCtrl,
+                  storageKey: 'last_month',
+                  statsTitle: 'Geçen Ay İstatistikleri',
+                  emptyMessage: 'Geçen ay için tamamlanan ödeme bulunamadı.',
+                ),
+                _buildUpcomingPaymentsTab(),
+                _buildCompletedPaymentsTab(),
+                _buildOverduePaymentsTab(),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   /// Show filter dialog for payments
   void _showFilterDialog(BuildContext context) {
+    // Date-bounded tabs (Bu Hafta / Gelecek Hafta / Geçen Ay) open the filter with
+    // their own date window pre-selected. Open-ended tabs (Tümü / Gelecek /
+    // Tamamlanan / Geciken) keep whatever range is currently applied, so by default
+    // Gelecek and Geciken open with no date selection.
+    final tabRange = _tabDateRange(_tabController.index);
+
     // Create temporary filter values
     PaymentStatus? tempStatus = _statusFilter;
-    DateTime? tempStartDate = _startDate;
-    DateTime? tempEndDate = _endDate;
+    DateTime? tempStartDate = tabRange?.start ?? _startDate;
+    DateTime? tempEndDate = tabRange?.end ?? _endDate;
     String? tempSearchQuery = _searchQuery;
     String? tempSortBy = _sortBy;
     bool tempSortAscending = _sortAscending;
@@ -949,7 +1165,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
   final Logger _logger = Logger.forClass(_AdminAddPaymentDialog);
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _userSearchController = TextEditingController();
-  final DateFormat _df = DateFormat('d MMMM yyyy', 'tr_TR');
+  final DateFormat _df = DateFormat('dd.MM.yyyy', 'tr_TR');
   final ImagePicker _picker = ImagePicker();
 
   // User selection
@@ -1036,7 +1252,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
         await DialogUtils.openError(
           context,
           title: 'Hata',
-          message: 'Abonelikler yüklenirken bir hata oluştu: $e',
+          message: 'Paketler yüklenirken bir hata oluştu: $e',
         );
       }
     }
@@ -1068,13 +1284,26 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
       return;
     }
 
-    if (_amountController.text.isEmpty) {
+    if (_amountController.text.trim().isEmpty) {
       _logger.err('_addPayment: Amount is required.');
       if (mounted) {
         await DialogUtils.openError(
           context,
           title: 'Hata',
           message: 'Lütfen miktarı giriniz.',
+        );
+      }
+      return;
+    }
+
+    final parsedAmount = parseAmountOrNull(_amountController.text);
+    if (parsedAmount == null) {
+      _logger.warn('_addPayment: Invalid amount input: "{}"', [_amountController.text]);
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Miktar geçersiz. Lütfen sayısal bir değer giriniz.\nÖrnek: 1200,50',
         );
       }
       return;
@@ -1152,7 +1381,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
 
     try {
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
-      final paymentAmount = double.parse(_amountController.text);
+      final paymentAmount = parsedAmount;
 
       await paymentProvider.addPayment(
         userId: _selectedUser!.userId,
@@ -1321,7 +1550,9 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                   // Amount Field
                   TextFormField(
                     controller: _amountController,
-                    keyboardType: TextInputType.number,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true, signed: false),
+                    inputFormatters: amountInputFormatters,
                     decoration: const InputDecoration(
                       labelText: 'Miktar (TL)',
                       border: OutlineInputBorder(),
@@ -1423,7 +1654,10 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                           firstDate: DateTime(2000),
                           lastDate: DateTime.now(),
                         );
-                        setState(() => _selectedPaymentDate = pickedDate);
+                        // Keep the previously selected date if the user cancels.
+                        if (pickedDate != null) {
+                          setState(() => _selectedPaymentDate = pickedDate);
+                        }
                       },
                     ),
                     const SizedBox(height: 16),
@@ -1481,7 +1715,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
   final Logger _logger = Logger.forClass(_AdminEditPaymentDialog);
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _userSearchController = TextEditingController();
-  final DateFormat _df = DateFormat('d MMMM yyyy', 'tr_TR');
+  final DateFormat _df = DateFormat('dd.MM.yyyy', 'tr_TR');
   final ImagePicker _picker = ImagePicker();
 
   // User selection
@@ -1620,28 +1854,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     });
   }
 
-  /// TR/EN-friendly numeric parser - matches EditPaymentDialog
-  double? _parseAmountOrNull(String text) {
-    String s = text.trim().replaceAll(' ', '');
-    if (s.isEmpty) return null;
-
-    if (s.contains('.') && s.contains(',')) {
-      s = s.replaceAll('.', '');
-      s = s.replaceAll(',', '.');
-    } else if (s.contains(',')) {
-      s = s.replaceAll(',', '.');
-    }
-    if (!RegExp(r'^\d+(\.\d+)?$').hasMatch(s)) return null;
-
-    try {
-      final v = double.parse(s);
-      if (v.isNaN || v.isInfinite) return null;
-      return v;
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _updatePayment() async {
     // Validation - matches EditPaymentDialog
     if (_selectedUser == null) {
@@ -1669,7 +1881,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
       return;
     }
 
-    final parsedAmount = _parseAmountOrNull(rawAmount);
+    final parsedAmount = parseAmountOrNull(rawAmount);
     if (parsedAmount == null) {
       _logger.warn('Invalid amount input: "{}"', [rawAmount]);
       if (mounted) {
@@ -2177,9 +2389,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                   TextField(
                     controller: _amountController,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: false),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                    ],
+                    inputFormatters: amountInputFormatters,
                     decoration: const InputDecoration(labelText: 'Miktar (TL)'),
                   ),
                   const SizedBox(height: 16),
@@ -2268,9 +2478,12 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                           firstDate: now.subtract(const Duration(days: 365)),
                           lastDate: now.add(const Duration(days: 365)),
                         );
-                        setState(() {
-                          _selectedDueDate = pickedDate;
-                        });
+                        // Keep the previously selected date if the user cancels.
+                        if (pickedDate != null) {
+                          setState(() {
+                            _selectedDueDate = pickedDate;
+                          });
+                        }
                       },
                     ),
                     const SizedBox(height: 16),
@@ -2293,9 +2506,12 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                           firstDate: DateTime(2000),
                           lastDate: DateTime.now(),
                         );
-                        setState(() {
-                          _selectedPaymentDate = pickedDate;
-                        });
+                        // Keep the previously selected date if the user cancels.
+                        if (pickedDate != null) {
+                          setState(() {
+                            _selectedPaymentDate = pickedDate;
+                          });
+                        }
                       },
                     ),
                     const SizedBox(height: 16),

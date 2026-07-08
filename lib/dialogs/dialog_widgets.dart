@@ -44,12 +44,17 @@ class DatePickerFormField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final DateFormat format = dateFormat ?? DateFormat('d MMMM yyyy', 'tr_TR');
+    final DateFormat format = dateFormat ?? DateFormat('dd.MM.yyyy', 'tr_TR');
 
     return ListTile(
-      title: Text(selectedDate == null
-          ? label
-          : '$selectedLabel: ${format.format(selectedDate!)}'),
+      title: Text(
+        selectedDate == null
+            ? label
+            : '$selectedLabel: ${format.format(selectedDate!)}',
+        style: selectedDate != null
+            ? const TextStyle(fontWeight: FontWeight.bold)
+            : null,
+      ),
       trailing: trailingIcon,
       onTap: () async {
         final DateTime? pickedDate = await showDatePicker(

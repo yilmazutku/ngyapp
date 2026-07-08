@@ -57,3 +57,51 @@ class DateInputFormatter extends TextInputFormatter {
     );
   }
 }
+
+/// Date formatter that keeps the two `.` separators permanently visible in a
+/// fixed `dd.mm.yyyy` mask. Unlike [DateInputFormatter], the dots are present
+/// from the start (an empty field shows [emptyMask]); the user only types the
+/// digits, which fill the day/month/year slots left-to-right around the dots.
+class MaskedDateInputFormatter extends TextInputFormatter {
+  /// Value shown before any digit is entered (dots already in place).
+  static const String emptyMask = '..';
+
+  static final RegExp _nonDigits = RegExp(r'[^0-9]');
+  static final RegExp _digit = RegExp(r'[0-9]');
+
+  /// Builds the `dd.mm.yyyy` mask from a raw [text] (non-digits are ignored,
+  /// digits beyond 8 are dropped). The two dots are always included.
+  static String mask(String text) {
+    final digits = text.replaceAll(_nonDigits, '');
+    final trimmed = digits.length > 8 ? digits.substring(0, 8) : digits;
+    final day = trimmed.length >= 2 ? trimmed.substring(0, 2) : trimmed;
+    final month = trimmed.length >= 4
+        ? trimmed.substring(2, 4)
+        : (trimmed.length > 2 ? trimmed.substring(2) : '');
+    final year = trimmed.length > 4 ? trimmed.substring(4) : '';
+    return '$day.$month.$year';
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final end = newValue.selection.end.clamp(0, newValue.text.length);
+    final digitsBeforeCursor =
+        newValue.text.substring(0, end).replaceAll(_nonDigits, '').length;
+    final formatted = mask(newValue.text);
+
+    // Position the cursor right after the nth typed digit, skipping the dots.
+    int offset = 0;
+    int seen = 0;
+    while (offset < formatted.length && seen < digitsBeforeCursor) {
+      if (_digit.hasMatch(formatted[offset])) seen++;
+      offset++;
+    }
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+}

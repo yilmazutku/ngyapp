@@ -73,10 +73,10 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
     Tab(icon: Icon(Icons.calendar_today), text: 'Randevu'),
     Tab(icon: Icon(Icons.payment), text: 'Ödeme'),
     Tab(icon: Icon(Icons.image), text: 'Veriler'),
-    Tab(icon: Icon(Icons.list_alt), text: 'Tahliller'),
+    Tab(icon: Icon(Icons.list_alt), text: 'Dokümanlar'),
     Tab(icon: Icon(Icons.monitor_weight), text: 'Ölçüm'),
     Tab(icon: Icon(Icons.food_bank), text: 'Diyet'),
-    Tab(icon: Icon(Icons.card_membership), text: 'Abonelik'),
+    Tab(icon: Icon(Icons.card_membership), text: 'Paket'),
   ];
 
   // Build a tab body only on first visit; keep it alive afterwards.

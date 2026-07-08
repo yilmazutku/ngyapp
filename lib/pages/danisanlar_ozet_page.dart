@@ -23,13 +23,14 @@ class DanisanlarOzetPage extends StatefulWidget {
 class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  final GlobalKey<_CustomerSummaryTabState> _activeKey = GlobalKey();
+  final GlobalKey<_CustomerSummaryTabState> _weeklyKey = GlobalKey();
+  final GlobalKey<_CustomerSummaryTabState> _weightTrackingKey = GlobalKey();
   final GlobalKey<_CustomerSummaryTabState> _frozenKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -39,7 +40,11 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
   }
 
   void _refreshCurrent() {
-    final key = _tabController.index == 0 ? _activeKey : _frozenKey;
+    final key = switch (_tabController.index) {
+      0 => _weeklyKey,
+      1 => _weightTrackingKey,
+      _ => _frozenKey,
+    };
     key.currentState?.reload();
   }
 
@@ -59,12 +64,14 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
           tabs: const [
-            Tab(text: 'Aktif Paketler'),
-            Tab(text: 'Dondurulmuş Paketler'),
+            Tab(text: 'Aktif / Haftalık'),
+            Tab(text: 'Aktif / Kilo Takip'),
+            Tab(text: 'Dondurulmuş'),
           ],
         ),
       ),
@@ -72,9 +79,16 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
         controller: _tabController,
         children: [
           _CustomerSummaryTab(
-            key: _activeKey,
-            status: SubActiveStatus.active,
-            emptyMessage: 'Aktif aboneliği olan danışan bulunamadı.',
+            key: _weeklyKey,
+            status: SubActiveStatus.activeWeekly,
+            emptyMessage: 'Aktif/Haftalık paketi olan danışan bulunamadı.',
+          ),
+          _CustomerSummaryTab(
+            key: _weightTrackingKey,
+            status: SubActiveStatus.activeWeightTracking,
+            emptyMessage: 'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
+            // Weight-tracking packages have no payment; hide payment columns.
+            showPayment: false,
           ),
           _CustomerSummaryTab(
             key: _frozenKey,
@@ -93,11 +107,13 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
 class _CustomerSummaryTab extends StatefulWidget {
   final SubActiveStatus status;
   final String emptyMessage;
+  final bool showPayment;
 
   const _CustomerSummaryTab({
     super.key,
     required this.status,
     required this.emptyMessage,
+    this.showPayment = true,
   });
 
   @override
@@ -204,28 +220,34 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       (m, r) => r.postponedDates.length > m ? r.postponedDates.length : m,
     );
 
+    // Both scrollbars wrap both scroll views (canonical two-axis pattern) so
+    // the vertical and horizontal thumbs are always visible and draggable,
+    // even when the table is smaller than the window.
     return Scrollbar(
       controller: _verticalController,
       thumbVisibility: true,
-      child: SingleChildScrollView(
-        controller: _verticalController,
-        child: Scrollbar(
-          controller: _horizontalController,
-          thumbVisibility: true,
-          notificationPredicate: (n) => n.depth == 1,
+      child: Scrollbar(
+        controller: _horizontalController,
+        thumbVisibility: true,
+        notificationPredicate: (notification) => notification.depth == 1,
+        child: SingleChildScrollView(
+          controller: _verticalController,
+          scrollDirection: Axis.vertical,
           child: SingleChildScrollView(
             controller: _horizontalController,
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-            child: DataTable(
-              headingRowColor: WidgetStateProperty.all(Colors.blue.shade50),
-              headingTextStyle: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.all(Colors.blue.shade50),
+                headingTextStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+                border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+                columns: _buildColumns(postponedColumns),
+                rows: _rows.map((r) => _buildRow(r, postponedColumns)).toList(),
               ),
-              border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-              columns: _buildColumns(postponedColumns),
-              rows: _rows.map((r) => _buildRow(r, postponedColumns)).toList(),
             ),
           ),
         ),
@@ -237,9 +259,11 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     return <DataColumn>[
       const DataColumn(label: Text('Dosya No')),
       const DataColumn(label: Text('Ad-Soyad')),
-      const DataColumn(label: Text('Ödeme Alınan Tarih')),
-      const DataColumn(label: Text('Ödeme Tutarı'), numeric: true),
-      const DataColumn(label: Text('Ödeme Şekli')),
+      if (widget.showPayment) ...[
+        const DataColumn(label: Text('Ödeme Alınan Tarih')),
+        const DataColumn(label: Text('Ödeme Tutarı'), numeric: true),
+        const DataColumn(label: Text('Ödeme Şekli')),
+      ],
       const DataColumn(label: Text('Paket Bilgisi')),
       for (int i = 1; i <= CustomerSummaryRow.maxSeans; i++)
         DataColumn(label: Text('$i.Seans')),
@@ -259,9 +283,11 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
-        _cell(row.paymentDate),
-        _cell(row.paymentAmount),
-        _cell(row.paymentType),
+        if (widget.showPayment) ...[
+          _cell(row.paymentDate),
+          _cell(row.paymentAmount),
+          _cell(row.paymentType),
+        ],
         _cell(row.packageInfo),
         for (final seans in row.seans) _cell(seans),
         for (int i = 0; i < postponedColumns; i++)

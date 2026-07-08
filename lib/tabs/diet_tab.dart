@@ -149,7 +149,7 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
             context,
             title: 'Uyarı',
             message:
-            'Bu kullanıcının aktif aboneliği bulunmamaktadır. Diyet listesi eklemek için önce bir abonelik eklemelisiniz.',
+            'Bu kullanıcının aktif paketi bulunmamaktadır. Diyet listesi eklemek için önce bir paket eklemelisiniz.',
           );
         }
         return null;
@@ -164,20 +164,20 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
         builder: (context) => StatefulBuilder(
           builder: (context, setState) {
             return AlertDialog(
-              title: const Text('Abonelik Seçin'),
+              title: const Text('Paket Seçin'),
               content: SizedBox(
                 width: 300,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('Lütfen diyet listesini eklemek için bir abonelik seçin:'),
+                    const Text('Lütfen diyet listesini eklemek için bir paket seçin:'),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<SubscriptionModel>(
                       value: selected,
                       decoration: const InputDecoration(
-                        labelText: 'Abonelik',
+                        labelText: 'Paket',
                         border: OutlineInputBorder(),
-                        hintText: 'Abonelik seçin',
+                        hintText: 'Paket seçin',
                       ),
                       items: subs
                           .map((s) => DropdownMenuItem(
@@ -208,7 +208,7 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
     } catch (e) {
       logger.err('Error selecting subscription: {}', [e]);
       if (context.mounted) {
-        await DialogUtils.openError(context, title: 'Hata', message: 'Abonelikler yüklenirken bir hata oluştu: $e');
+        await DialogUtils.openError(context, title: 'Hata', message: 'Paketler yüklenirken bir hata oluştu: $e');
       }
       return null;
     }

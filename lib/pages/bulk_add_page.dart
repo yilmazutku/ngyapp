@@ -27,13 +27,11 @@ class BulkAddPage extends StatefulWidget {
   State<BulkAddPage> createState() => _BulkAddPageState();
 }
 
-class _BulkAddPageState extends State<BulkAddPage>
-    with SingleTickerProviderStateMixin, LoadingStateMixin {
-  static const String _bulkButtonLabel = 'Toplu Ödeme/Randevu Ekle';
+class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
+  /// Note stamped on every record created through this bulk page.
+  static const String _bulkNote = 'Toplu ekleme ile eklendi';
 
   final Logger logger = Logger.forClass(BulkAddPage);
-
-  late final TabController _tabController;
 
   final List<_ApptEntry> _apptEntries = [];
   final List<_PaymentEntry> _paymentEntries = [];
@@ -41,14 +39,12 @@ class _BulkAddPageState extends State<BulkAddPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     _apptEntries.add(_ApptEntry());
     _paymentEntries.add(_PaymentEntry());
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
     for (final e in _apptEntries) {
       e.dispose();
     }
@@ -112,6 +108,7 @@ class _BulkAddPageState extends State<BulkAddPage>
           appointmentDateTime:
               DateTime(date.year, date.month, date.day, 0, 0),
           status: AppointmentStatus.completed,
+          notes: _bulkNote,
           createDate: DateTime.now(),
           createUser: 'admin',
           durationMinutes: 30,
@@ -213,6 +210,7 @@ class _BulkAddPageState extends State<BulkAddPage>
           paymentDate: parsedDates[i],
           status: PaymentStatus.completed,
           paymentType: PaymentType.nakit,
+          notes: _bulkNote,
         );
         added++;
       }
@@ -260,22 +258,13 @@ class _BulkAddPageState extends State<BulkAddPage>
             title: Text('Toplu Ekle - $_userName'),
             backgroundColor: Colors.blue.shade800,
             foregroundColor: Colors.white,
-            bottom: TabBar(
-              controller: _tabController,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white70,
-              tabs: const [
-                Tab(icon: Icon(Icons.calendar_today), text: 'Randevu'),
-                Tab(icon: Icon(Icons.payment), text: 'Ödeme'),
-              ],
-            ),
           ),
-          body: TabBarView(
-            controller: _tabController,
+          // Page is split in two: appointments on top, payments below.
+          body: Column(
             children: [
-              _buildAppointmentTab(),
-              _buildPaymentTab(),
+              Expanded(child: _buildAppointmentSection()),
+              const Divider(height: 1, thickness: 1),
+              Expanded(child: _buildPaymentSection()),
             ],
           ),
         ),
@@ -284,26 +273,29 @@ class _BulkAddPageState extends State<BulkAddPage>
     );
   }
 
-  Widget _buildAppointmentTab() {
+  Widget _buildAppointmentSection() {
     return Column(
       children: [
-        const _FixedInfoBanner(
-          text: 'Sabit alanlar: Randevu Türü: Haftalık Görüşme · '
-              'Görüşme Süresi: 30 dk · Durum: Yapıldı · Saat: 00:00',
+        _SectionHeader(
+          icon: Icons.calendar_today,
+          title: 'Randevular',
+          info: '',
+          color: Colors.blue,
+          addLabel: 'Randevu Ekle',
+          onAdd: isLoading
+              ? null
+              : () => setState(() => _apptEntries.add(_ApptEntry())),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(12),
+          child: _EntryGrid(
             itemCount: _apptEntries.length,
-            itemBuilder: (context, index) =>
-                _buildAppointmentCard(index),
+            itemBuilder: _buildAppointmentCard,
           ),
         ),
-        _buildAddRowButton(
-          label: 'Randevu Satırı Ekle',
-          onPressed: () => setState(() => _apptEntries.add(_ApptEntry())),
+        _buildSubmitBar(
+          label: 'Randevuları Kaydet',
+          onPressed: _submitAppointments,
         ),
-        _buildSubmitBar(onPressed: _submitAppointments),
       ],
     );
   }
@@ -311,7 +303,7 @@ class _BulkAddPageState extends State<BulkAddPage>
   Widget _buildAppointmentCard(int index) {
     final entry = _apptEntries[index];
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -337,7 +329,6 @@ class _BulkAddPageState extends State<BulkAddPage>
             const SizedBox(height: 8),
             _DateField(
               controller: entry.dateController,
-              separator: '.',
               label: 'Tarih (gg.aa.yyyy)',
             ),
             const SizedBox(height: 12),
@@ -379,25 +370,29 @@ class _BulkAddPageState extends State<BulkAddPage>
     );
   }
 
-  Widget _buildPaymentTab() {
+  Widget _buildPaymentSection() {
     return Column(
       children: [
-        const _FixedInfoBanner(
-          text: 'Sabit alanlar: Ödeme Türü: Nakit · Durum: Tamamlandı',
+        _SectionHeader(
+          icon: Icons.payment,
+          title: 'Ödemeler',
+          info: '',
+          color: Colors.green,
+          addLabel: 'Ödeme Ekle',
+          onAdd: isLoading
+              ? null
+              : () => setState(() => _paymentEntries.add(_PaymentEntry())),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(12),
+          child: _EntryGrid(
             itemCount: _paymentEntries.length,
-            itemBuilder: (context, index) => _buildPaymentCard(index),
+            itemBuilder: _buildPaymentCard,
           ),
         ),
-        _buildAddRowButton(
-          label: 'Ödeme Satırı Ekle',
-          onPressed: () =>
-              setState(() => _paymentEntries.add(_PaymentEntry())),
+        _buildSubmitBar(
+          label: 'Ödemeleri Kaydet',
+          onPressed: _submitPayments,
         ),
-        _buildSubmitBar(onPressed: _submitPayments),
       ],
     );
   }
@@ -405,7 +400,7 @@ class _BulkAddPageState extends State<BulkAddPage>
   Widget _buildPaymentCard(int index) {
     final entry = _paymentEntries[index];
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -431,7 +426,6 @@ class _BulkAddPageState extends State<BulkAddPage>
             const SizedBox(height: 8),
             _DateField(
               controller: entry.dateController,
-              separator: '.',
               label: 'Tarih (gg.aa.yyyy)',
             ),
             const SizedBox(height: 12),
@@ -453,38 +447,23 @@ class _BulkAddPageState extends State<BulkAddPage>
     );
   }
 
-  Widget _buildAddRowButton({
+  Widget _buildSubmitBar({
     required String label,
     required VoidCallback onPressed,
   }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
-          onPressed: isLoading ? null : onPressed,
-          icon: const Icon(Icons.add),
-          label: Text(label),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSubmitBar({required VoidCallback onPressed}) {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: SizedBox(
-          width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+        child: Center(
           child: ElevatedButton.icon(
             onPressed: isLoading ? null : onPressed,
             icon: const Icon(Icons.save),
-            label: const Text(_bulkButtonLabel),
+            label: Text(label),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blue.shade800,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
             ),
           ),
         ),
@@ -493,26 +472,61 @@ class _BulkAddPageState extends State<BulkAddPage>
   }
 }
 
-/// A small banner that describes the fixed (non-editable) fields of a tab.
-class _FixedInfoBanner extends StatelessWidget {
-  final String text;
+/// Compact section header: title + fixed-field info + an "add row" action.
+class _SectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String info;
+  final MaterialColor color;
+  final String addLabel;
+  final VoidCallback? onAdd;
 
-  const _FixedInfoBanner({required this.text});
+  const _SectionHeader({
+    required this.icon,
+    required this.title,
+    required this.info,
+    required this.color,
+    required this.addLabel,
+    required this.onAdd,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: Colors.blue.shade50,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      color: color.shade50,
+      padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
       child: Row(
         children: [
-          Icon(Icons.info_outline, size: 18, color: Colors.blue.shade700),
+          TextButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add, size: 18),
+            label: Text(
+              addLabel,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            style: TextButton.styleFrom(foregroundColor: color.shade700),
+          ),
+          const SizedBox(width: 8),
+          Icon(icon, size: 20, color: color.shade700),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              text,
-              style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: color.shade900,
+                  ),
+                ),
+                Text(
+                  info,
+                  style: TextStyle(fontSize: 11, color: color.shade700),
+                ),
+              ],
             ),
           ),
         ],
@@ -521,15 +535,52 @@ class _FixedInfoBanner extends StatelessWidget {
   }
 }
 
-/// Masked date text field that auto-inserts [separator] as the user types.
+/// Scrollable, responsive grid that lays entry cards out in two columns
+/// (falling back to a single column on narrow screens) so they no longer
+/// stretch across the full width.
+class _EntryGrid extends StatelessWidget {
+  final int itemCount;
+  final Widget Function(int index) itemBuilder;
+
+  const _EntryGrid({
+    required this.itemCount,
+    required this.itemBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const double spacing = 12;
+          final int columns = constraints.maxWidth < 520 ? 1 : 2;
+          final double itemWidth =
+              (constraints.maxWidth - (columns - 1) * spacing) / columns;
+          return SingleChildScrollView(
+            child: Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (int i = 0; i < itemCount; i++)
+                  SizedBox(width: itemWidth, child: itemBuilder(i)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Date text field pre-filled with the `.` separators; the user only types
+/// the digits, which fill the day/month/year slots around the fixed dots.
 class _DateField extends StatelessWidget {
   final TextEditingController controller;
-  final String separator;
   final String label;
 
   const _DateField({
     required this.controller,
-    required this.separator,
     required this.label,
   });
 
@@ -538,7 +589,7 @@ class _DateField extends StatelessWidget {
     return TextField(
       controller: controller,
       keyboardType: TextInputType.number,
-      inputFormatters: [DateInputFormatter(separator)],
+      inputFormatters: [MaskedDateInputFormatter()],
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
@@ -549,7 +600,8 @@ class _DateField extends StatelessWidget {
 }
 
 class _ApptEntry {
-  final TextEditingController dateController = TextEditingController();
+  final TextEditingController dateController =
+      TextEditingController(text: MaskedDateInputFormatter.emptyMask);
   MeetingType meetingType = MeetingType.f2f;
 
   void dispose() {
@@ -558,7 +610,8 @@ class _ApptEntry {
 }
 
 class _PaymentEntry {
-  final TextEditingController dateController = TextEditingController();
+  final TextEditingController dateController =
+      TextEditingController(text: MaskedDateInputFormatter.emptyMask);
   final TextEditingController amountController = TextEditingController();
 
   void dispose() {

@@ -11,10 +11,11 @@ import '../models/user_model.dart';
 
 final Logger logger = Logger.forClass(CustomerSummaryProvider);
 
-/// Aggregates, for every non-admin customer that owns an *active*
-/// subscription, the data needed by the "Danışanlar Özet" overview page:
-/// last payment (date / amount / type), the active package name, and up to
-/// [CustomerSummaryRow.maxSeans] session (appointment) dates.
+/// Aggregates, for every non-admin customer that owns a subscription with a
+/// given status (e.g. Aktif/Haftalık, Aktif/Kilo Takip, Donduruldu), the data
+/// needed by the "Danışanlar Özet" overview page: last payment (date / amount
+/// / type), the package name, and up to [CustomerSummaryRow.maxSeans] session
+/// (appointment) dates.
 ///
 /// All Firestore access lives here (per project provider convention); the UI
 /// only renders the returned [CustomerSummaryRow]s.
@@ -24,18 +25,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
   CollectionReference<Map<String, dynamic>> get _usersRef =>
       FirebaseFirestore.instance.collection('users');
-
-  /// Builds the overview rows for every customer with at least one active
-  /// subscription. Customers without an active subscription are skipped.
-  /// Rows are sorted alphabetically by full name.
-  Future<List<CustomerSummaryRow>> fetchActiveCustomerSummaries() =>
-      fetchCustomerSummariesByStatus(SubActiveStatus.active);
-
-  /// Builds the overview rows for every customer with at least one frozen
-  /// (Donduruldu) subscription. Customers without a frozen subscription are
-  /// skipped. Rows are sorted alphabetically by full name.
-  Future<List<CustomerSummaryRow>> fetchFrozenCustomerSummaries() =>
-      fetchCustomerSummariesByStatus(SubActiveStatus.frozen);
 
   /// Builds the overview rows for every customer that owns at least one
   /// subscription with the given [status]. Customers without such a

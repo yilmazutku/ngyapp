@@ -16,7 +16,7 @@ import 'filterable_tab.dart';
 final Logger logger = Logger.forClass(SubscriptionsTab);
 class SubscriptionsTab extends BaseTab<SubProvider> {
   const SubscriptionsTab({super.key, required super.userId})
-      : super(allDataLabel: 'Tüm Abonelikler', subscriptionDataLabel: 'Aktif Abonelikler');
+      : super(allDataLabel: 'Tüm Paketler', subscriptionDataLabel: 'Aktif Paketler');
 
   @override
   SubProvider getProvider(BuildContext context) => Provider.of<SubProvider>(context, listen: false);
@@ -185,8 +185,17 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   Widget buildList(BuildContext context, List<dynamic> dataList) {
     final filteredItems = getFilteredItems(dataList);
 
+    // Business rule: a customer may only have one active package at a time.
+    // Detect (from the full fetched set, not the client-filtered view) whether
+    // this customer has more than one active package and warn the admin.
+    final activeSubs = dataList
+        .cast<SubscriptionModel>()
+        .where((s) => s.status.isActive)
+        .toList();
+
     return Column(
       children: [
+        if (activeSubs.length > 1) _buildMultipleActiveWarning(activeSubs),
         Container(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -203,7 +212,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
               ElevatedButton.icon(
                 onPressed: () => _showAddSubscriptionDialog(context),
                 icon: const Icon(Icons.add),
-                label: const Text('Yeni abonelik ekle'),
+                label: const Text('Yeni paket ekle'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,
@@ -219,6 +228,60 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
           child: filteredItems.isEmpty ? buildEmptyState() : buildFilteredContent(context, filteredItems),
         ),
       ],
+    );
+  }
+
+  /// Impossible-to-miss banner shown at the very top of the subscriptions list
+  /// when a customer has more than one active package, violating the
+  /// "one active package at a time" rule.
+  Widget _buildMultipleActiveWarning(List<SubscriptionModel> activeSubs) {
+    final packageNames = activeSubs
+        .map((s) => s.packageName.trim().isNotEmpty
+            ? s.packageName.trim()
+            : '(İsimsiz paket)')
+        .join(', ');
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.shade600,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red.shade900, width: 2),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 32),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'DİKKAT: Birden fazla aktif paket bulundu!',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Bir danışanın aynı anda yalnızca bir aktif paketi olabilir. '
+                  'Lütfen adı şu olan paketleri inceleyiniz: $packageNames',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -244,7 +307,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     };
 
     return buildFilterSection(
-      title: 'Abonelik Yönetimi',
+      title: 'Paket Yönetimi',
       filterWidgets: [
         buildSearchField(hintText: 'Paket adına göre ara...'),
         const SizedBox(height: 16),
@@ -282,7 +345,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     if (subs.isEmpty) {
       return buildEmptyState(
         icon: Icons.calendar_today,
-        message: 'Abonelik bulunamadı',
+        message: 'Paket bulunamadı',
         submessage: 'Filtreleri değiştirerek tekrar deneyin',
       );
     }
@@ -317,12 +380,14 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
 
   Widget _buildStatusBadge(SubActiveStatus status) {
     final Color bgColor = switch (status) {
-      SubActiveStatus.active => Colors.green.shade100,
+      SubActiveStatus.activeWeekly => Colors.green.shade100,
+      SubActiveStatus.activeWeightTracking => Colors.teal.shade100,
       SubActiveStatus.frozen => Colors.blue.shade100,
       SubActiveStatus.completed => Colors.grey.shade200,
     };
     final Color fgColor = switch (status) {
-      SubActiveStatus.active => Colors.green.shade800,
+      SubActiveStatus.activeWeekly => Colors.green.shade800,
+      SubActiveStatus.activeWeightTracking => Colors.teal.shade800,
       SubActiveStatus.frozen => Colors.blue.shade800,
       SubActiveStatus.completed => Colors.grey.shade700,
     };
@@ -342,6 +407,8 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   Widget _buildSubscriptionCardContent(BuildContext context, SubscriptionModel s, List<AppointmentModel> appointments) {
     final remainingPostponements = s.allowedPostponements - s.postponementsUsed;
     final noPostponeLeft = remainingPostponements <= 0;
+    // Weight-tracking packages are free: don't show any payment info.
+    final bool showPayment = s.status != SubActiveStatus.activeWeightTracking;
     return Card(
       key: ValueKey(s.subscriptionId),
       margin: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
@@ -373,23 +440,24 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                   'Özet: ${s.totalMeetings} görüşme, ${s.meetingsCompleted + s.meetingsBurned} tamamlandı',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                  decoration: BoxDecoration(
-                    color: s.amountPaid < s.totalAmount ? Colors.red.shade50 : Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    s.amountPaid < s.totalAmount 
-                        ? 'Eksik Ödeme' 
-                        : 'Ödeme Tamam',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                      color: s.amountPaid < s.totalAmount ? Colors.red : Colors.green,
+                if (showPayment)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                    decoration: BoxDecoration(
+                      color: s.amountPaid < s.totalAmount ? Colors.red.shade50 : Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      s.amountPaid < s.totalAmount 
+                          ? 'Eksik Ödeme' 
+                          : 'Ödeme Tamam',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        color: s.amountPaid < s.totalAmount ? Colors.red : Colors.green,
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -476,51 +544,53 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             ),
           ]),
           
-          // Payment information
-          const SizedBox(height: 8),
-          const Divider(height: 1),
-          const SizedBox(height: 8),
-          
-          // Payment summary
-          Row(
-            children: [
-              const Text('Ödeme Bilgisi: ', style: TextStyle(fontWeight: FontWeight.bold)),
-              Text(
-                '${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.amountPaid)} / ',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: s.amountPaid < s.totalAmount ? Colors.red : Colors.green,
+          // Payment information (hidden for free weight-tracking packages)
+          if (showPayment) ...[
+            const SizedBox(height: 8),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            
+            // Payment summary
+            Row(
+              children: [
+                const Text('Ödeme Bilgisi: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  '${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.amountPaid)} / ',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: s.amountPaid < s.totalAmount ? Colors.red : Colors.green,
+                  ),
+                ),
+                Text(
+                  NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            
+            // Payment status indicator
+            if (s.amountPaid < s.totalAmount)
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Eksik Ödeme: ${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount - s.amountPaid)}',
+                      style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          
-          // Payment status indicator
-          if (s.amountPaid < s.totalAmount)
-            Container(
-              margin: const EdgeInsets.only(top: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.red.shade200),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 16),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Eksik Ödeme: ${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount - s.amountPaid)}',
-                    style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
+          ],
             
           // Appointment dates section
           if (appointments.isNotEmpty) ...[
@@ -626,7 +696,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       );
     } catch (e) {
       if (!mounted) return;
-      await DialogUtils.openError(context, title: 'Hata', message: 'Abonelik düzenleme açılamadı: $e');
+      await DialogUtils.openError(context, title: 'Hata', message: 'Paket düzenleme açılamadı: $e');
     }
   }
 
@@ -634,8 +704,8 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     try {
       final confirmed = await DialogUtils.openConfirm(
         context,
-        title: 'Abonelik Silme Onayı',
-        message: 'Bu aboneliği silmek istediğinizden emin misiniz?\n\n${s.packageName}\n\nBu işlem geri alınamaz.',
+        title: 'Paket Silme Onayı',
+        message: 'Bu paketi silmek istediğinizden emin misiniz?\n\n${s.packageName}\n\nBu işlem geri alınamaz.',
         confirmText: 'Sil',
         cancelText: 'İptal',
       );
@@ -653,7 +723,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       // Show loading dialog
       bool loadingOpen = false;
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Abonelik siliniyor...');
+        DialogUtils.openLoading(context, message: 'Paket siliniyor...');
         loadingOpen = true;
       }
       
@@ -667,13 +737,13 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       }
       
       if (success && mounted) {
-        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Abonelik silindi.');
+        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Paket silindi.');
         // Note: refreshData is triggered automatically via _onSubChanged listener
         // when provider calls notifyListeners() - no need to call it here
       }
     } catch (e) {
       if (!mounted) return;
-      await DialogUtils.openError(context, title: 'Hata', message: 'Abonelik silinirken bir hata oluştu: $e');
+      await DialogUtils.openError(context, title: 'Hata', message: 'Paket silinirken bir hata oluştu: $e');
     }
   }
   

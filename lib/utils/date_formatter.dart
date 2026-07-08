@@ -3,6 +3,16 @@ import 'package:intl/intl.dart';
 /// A utility class to standardize date formatting throughout the app
 /// Uses Turkish locale for all date/time formatting
 class DateFormatter {
+  /// Numeric date shown across the app / dialogs: 01.02.2023 (gg.aa.yyyy)
+  static String formatNumericDate(DateTime date) {
+    return DateFormat('dd.MM.yyyy', 'tr_TR').format(date);
+  }
+
+  /// Numeric date with time: 01.02.2023 14:30 (gg.aa.yyyy SS:dd)
+  static String formatNumericDateTime(DateTime date) {
+    return DateFormat('dd.MM.yyyy HH:mm', 'tr_TR').format(date);
+  }
+
   /// Format: 01.02.2023
   static String formatShortDate(DateTime date) {
     return DateFormat('d MMMM y', 'tr_TR').format(date);

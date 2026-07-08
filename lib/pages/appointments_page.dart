@@ -132,7 +132,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       final activeSubscription = subscriptions
           .cast<SubscriptionModel?>()
           .firstWhere(
-            (sub) => sub!.status == SubActiveStatus.active,
+            (sub) => sub!.status.isActive,
             orElse: () => null,
           );
 
@@ -319,7 +319,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
               child: ListTile(
                 leading: const Icon(Icons.calendar_today, color: Colors.blueAccent),
                 title: Text(
-                  DateFormat('dd MMMM yyyy', 'tr_TR').format(_selectedDate),
+                  DateFormat('dd.MM.yyyy', 'tr_TR').format(_selectedDate),
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold),
                 ),
@@ -501,7 +501,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           child: ListTile(
             leading: const Icon(Icons.event_note, color: Colors.deepPurple),
             title: Text(
-              DateFormat('dd MMMM yyyy - HH:mm', 'tr_TR')
+              DateFormat('dd.MM.yyyy - HH:mm', 'tr_TR')
                   .format(appointment.appointmentDateTime),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
@@ -702,7 +702,7 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
                             ),
                             leading: _getAppointmentStatusIcon(appointment.status),
                             title: Text(
-                              DateFormat('dd MMMM yyyy - HH:mm', 'tr_TR')
+                              DateFormat('dd.MM.yyyy - HH:mm', 'tr_TR')
                                 .format(appointment.appointmentDateTime),
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
@@ -807,8 +807,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
         return 'Yapıldı';
       case AppointmentStatus.postponed:
         return 'Ertelendi';
-      case AppointmentStatus.canceled:
-        return 'İptal Edildi';
     }
   }
 

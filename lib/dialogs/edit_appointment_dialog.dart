@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
 import '../models/subs_model.dart';
@@ -8,6 +7,7 @@ import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/date_formatter.dart';
 import '../widgets/loading_overlay.dart';
 
 class EditAppointmentDialog extends StatefulWidget {
@@ -33,11 +33,18 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
   DateTime? _postponedDate;
   final _notesController = TextEditingController();
   final _durationController = TextEditingController();
-  final DateFormat df=DateFormat('d MMMM yyyy, HH:mm', 'tr_TR');
   // For subscription selection
   String? _selectedSubscriptionId;
   List<SubscriptionModel> _availableSubscriptions = [];
   bool _isLoadingSubscriptions = true; // Start as true to prevent dropdown render before data loads
+
+  /// Active packages plus the currently-linked one (even if passive) so the
+  /// dropdown value stays valid. Passive packages cannot be newly assigned.
+  List<SubscriptionModel> get _selectableSubscriptions =>
+      _availableSubscriptions
+          .where((s) =>
+              s.status.isActive || s.subscriptionId == _selectedSubscriptionId)
+          .toList();
   
   // Track original status and postponement deduction decision
   late AppointmentStatus _originalStatus;
@@ -248,13 +255,13 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               Text('Durum: ${_appointmentStatus.label}'),
               if (_appointmentStatus == AppointmentStatus.postponed && _postponedDate != null)
                 Text(
-                  'Ertelenen Tarih: ${df.format(_postponedDate!)}',
+                  'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Abonelik: '),
+                  const Text('Paket: '),
                   Expanded(
                     child: Text(
                       selectedSubName,
@@ -267,7 +274,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 ],
               ),
               Text(
-                  'Tarih: ${df.format(_appointmentDateTime)}'),
+                  'Tarih: ${DateFormatter.formatNumericDateTime(_appointmentDateTime)}'),
               if (_notesController.text.isNotEmpty)
                 Text('Notlar: ${_notesController.text}'),
             ],
@@ -331,7 +338,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
           
           final subscription = subscriptions.firstWhere(
             (s) => s.subscriptionId == _selectedSubscriptionId,
-            orElse: () => throw Exception('Abonelik bulunamadı'),
+            orElse: () => throw Exception('Paket bulunamadı'),
           );
           
           // Increment postponementsUsed by 1
@@ -461,9 +468,10 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                     )
                   : Text(
                       _userName ?? 'Bilinmiyor',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
                     ),
             ),
             // 1) Meeting Type
@@ -567,7 +575,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 ),
                 subtitle: _postponedDate != null
                     ? Text(
-                  df.format(_postponedDate!),
+                  DateFormatter.formatNumericDateTime(_postponedDate!),
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -612,7 +620,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
             
             // 3) Subscription Dropdown
             ListTile(
-              title: const Text('Abonelik Paketi'),
+              title: const Text('Paket'),
               subtitle: _isLoadingSubscriptions
                   ? const Row(
                       children: [
@@ -641,7 +649,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                           value: null,
                           child: Text('Tanımsız'),
                         ),
-                        ..._availableSubscriptions.map<DropdownMenuItem<String?>>(
+                        ..._selectableSubscriptions.map<DropdownMenuItem<String?>>(
                           (SubscriptionModel sub) {
                             return DropdownMenuItem<String?>(
                               value: sub.subscriptionId,
@@ -658,7 +666,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
             // 4) Date & Time
             ListTile(
               title: Text(
-                'Tarih: ${df.format(_appointmentDateTime)}',
+                'Tarih: ${DateFormatter.formatNumericDateTime(_appointmentDateTime)}',
                 style: const TextStyle(fontSize: 18,fontWeight: FontWeight.bold),
               ),
               trailing: const Icon(Icons.calendar_today),

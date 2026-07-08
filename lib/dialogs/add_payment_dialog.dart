@@ -35,7 +35,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
   List<SubscriptionModel> _subscriptions = [];
   SubscriptionModel? _selectedSubscription;
   bool _isLoadingSubscriptions = true;
-  final DateFormat df=DateFormat('d MMMM yyyy', 'tr_TR');
+  final DateFormat df=DateFormat('dd.MM.yyyy', 'tr_TR');
   @override
   void initState() {
     super.initState();
@@ -50,25 +50,19 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
 
     try {
       final subProvider = Provider.of<SubProvider>(context, listen: false);
-      final List<SubscriptionModel> activeSubscriptions =
-      await subProvider.fetchSubscriptions(
+      final fetched = await subProvider.fetchSubscriptions(
         userId: widget.userId,
-        showAllSubscriptions: false, // Only active subscriptions
+        showAllSubscriptions: false,
       );
-
-
-      // Filter to only show active subscriptions
+      // Only active packages can receive payments; frozen/completed are excluded.
+      final List<SubscriptionModel> activeSubscriptions =
+          fetched.where((s) => s.status.isActive).toList();
 
       setState(() {
         _subscriptions = activeSubscriptions;
         _isLoadingSubscriptions = false;
-
-        // Default to first active subscription if available, otherwise null (paketsiz)
-        if (_subscriptions.isNotEmpty) {
-          _selectedSubscription = _subscriptions.first;
-        } else {
-          _selectedSubscription = null;
-        }
+        _selectedSubscription =
+            _subscriptions.isNotEmpty ? _subscriptions.first : null;
       });
 
       // No longer show error if no active subscriptions - allow "paketsiz ödeme"
@@ -81,7 +75,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
         await DialogUtils.openError(
           context,
           title: 'Hata',
-          message: 'Abonelikler yüklenirken bir hata oluştu: $e',
+          message: 'Paketler yüklenirken bir hata oluştu: $e',
         );
       }
     }
@@ -262,10 +256,13 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                     firstDate: DateTime(2000),
                     lastDate: DateTime.now(),
                   );
-                  setState(() {
-                    _selectedPaymentDate = pickedDate;
-                  });
-                                },
+                  // Keep the previously selected date if the user cancels.
+                  if (pickedDate != null) {
+                    setState(() {
+                      _selectedPaymentDate = pickedDate;
+                    });
+                  }
+                },
               ),
               const SizedBox(height: 16),
               ElevatedButton(
