@@ -661,8 +661,32 @@ class _AppointmentsTabState
 
               const SizedBox(height: 12),
 
-              // Subscription package name (all appointments must have subscriptionId)
-              if (appointment.subscriptionId != null)
+              // Subscription package name ("Paketsiz" when no package linked)
+              if (appointment.subscriptionId == null)
+                Column(
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.card_membership, size: 14, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            'Paket: Paketsiz',
+                            style: TextStyle(
+                              color: Colors.grey[700],
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                )
+              else
                 FutureBuilder<String>(
                   future: _getSubscriptionName(appointment.subscriptionId!),
                   builder: (context, snapshot) {

@@ -217,15 +217,16 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       }
     }
     
-    // Get the selected subscription name for display
-    final selectedSubName = _selectedSubscriptionId != null
-        ? _availableSubscriptions
+    // Get the selected subscription name for display ("Paketsiz" when none).
+    final selectedSubName = _selectedSubscriptionId == null
+        ? 'Paketsiz'
+        : _availableSubscriptions
             .firstWhere(
               (s) => s.subscriptionId == _selectedSubscriptionId,
               orElse: () => SubscriptionModel(
                 subscriptionId: '',
                 userId: '',
-                packageName: 'Tanımsız',
+                packageName: 'Silinmiş Paket',
                 startDate: DateTime.now(),
                 totalMeetings: 0,
                 allowedPostponements: 0,
@@ -233,8 +234,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 meetingType: SubsMeetingType.faceToFace,
               ),
             )
-            .packageName
-        : 'Tanımsız';
+            .packageName;
     
     // Show confirmation dialog
     final shouldUpdate = await showDialog<bool>(
@@ -265,10 +265,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                   Expanded(
                     child: Text(
                       selectedSubName,
-                      style: TextStyle(
-                        color: _selectedSubscriptionId != null ? Colors.black87 : Colors.red,
-                        fontWeight: _selectedSubscriptionId != null ? FontWeight.normal : FontWeight.bold,
-                      ),
+                      style: const TextStyle(color: Colors.black87),
                     ),
                   ),
                 ],
@@ -647,7 +644,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                       items: [
                         const DropdownMenuItem<String?>(
                           value: null,
-                          child: Text('Tanımsız'),
+                          child: Text('Paketsiz'),
                         ),
                         ..._selectableSubscriptions.map<DropdownMenuItem<String?>>(
                           (SubscriptionModel sub) {

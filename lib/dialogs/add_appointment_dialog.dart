@@ -169,13 +169,13 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
 
   /// Picks the default appointment type from the (selected) subscription:
   /// Aktif/Kilo Takip -> Kilo Takip, Aktif/Haftalık -> Haftalık Görüşme,
-  /// anything else (completed/frozen/none) -> Diğer. Also refreshes the
-  /// duration to match. Call inside a setState block.
+  /// no package -> Ön Görüşme (the only type allowed without a package).
+  /// Also refreshes the duration to match. Call inside a setState block.
   void _applyAppointmentTypeForSubscription(SubscriptionModel? sub) {
     _selectedAppointmentType = switch (sub?.status) {
       SubActiveStatus.activeWeightTracking => AppointmentType.kgtakip,
       SubActiveStatus.activeWeekly => AppointmentType.haftalik,
-      _ => AppointmentType.diger,
+      _ => AppointmentType.og,
     };
     _durationController.text = _selectedAppointmentType
         .getDurationForMeetingType(_selectedMeetingType)
@@ -206,17 +206,15 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         _applyAppointmentTypeForSubscription(_selectedSubscription);
       });
       
-      // Show error if no active subscriptions found
-      if ((activeSubscriptions.isEmpty || _selectedSubscription == null)) {
-        logger.err(
-            'Error setting selectedSubscription. activeSubscriptions.isEmpty={}, _selectedSub==null={}',
-            [activeSubscriptions.isEmpty, _selectedSubscription == null]);
+      // Warn (but still allow) when the user has no active package: only an
+      // "Ön Görüşme" appointment may be added without a package.
+      if (activeSubscriptions.isEmpty || _selectedSubscription == null) {
         if (mounted) {
-          await DialogUtils.openError(
+          await DialogUtils.openInfo(
             context,
             title: 'Uyarı',
             message:
-                'Bu kullanıcının aktif paketi bulunmamaktadır. Randevu eklemek için önce bir paket eklemelisiniz.',
+                'Kullanıcının aktif paketi bulunmuyor. Bu yüzden sadece ÖN GÖRÜŞME randevusu ekleyiniz, veya bir paket ekleyip sonrasında randevu ekleyiniz.',
           );
         }
       }
@@ -294,12 +292,15 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       return;
     }
 
-    // Additional validation for required subscription
-    if (_selectedSubscription == null) {
+    // A package is required unless this is an "Ön Görüşme" appointment, which
+    // may be added without one (e.g. when the user has no active package yet).
+    if (_selectedSubscription == null &&
+        _selectedAppointmentType != AppointmentType.og) {
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Lütfen bir paket seçin.',
+        message:
+            'Paketsiz randevu yalnızca ÖN GÖRÜŞME türünde eklenebilir. Lütfen bir paket seçin veya randevu türünü Ön Görüşme yapın.',
       );
       return;
     }
@@ -339,7 +340,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
-              Text('Paket: ${_selectedSubscription!.packageName}'),
+              Text('Paket: ${_selectedSubscription?.packageName ?? 'Paketsiz (Ön Görüşme)'}'),
               if (_notesController.text.isNotEmpty)
                 Text('Notlar: ${_notesController.text}'),
             ],
@@ -369,7 +370,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       final appointment = AppointmentModel(
         appointmentId: DateTime.now().millisecondsSinceEpoch.toString(),
         userId: widget.userId ?? _selectedUser!.userId,
-        subscriptionId: _selectedSubscription!.subscriptionId,
+        subscriptionId: _selectedSubscription?.subscriptionId,
         appointmentDateTime: DateTime(
           _selectedDate.year,
           _selectedDate.month,
@@ -404,7 +405,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               'Görüşme Süresi: $durationMinutes dk\n'
               'Durum: ${_selectedStatus.label}\n'
               '${_selectedStatus == AppointmentStatus.postponed && _postponedDate != null ? 'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}\n' : ''}'
-              'Paket: ${_selectedSubscription!.packageName}'
+              'Paket: ${_selectedSubscription?.packageName ?? 'Paketsiz (Ön Görüşme)'}'
               '${_notesController.text.isNotEmpty ? '\nNotlar: ${_notesController.text}' : ''}',
         );
       }
@@ -527,10 +528,13 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               else
                 DropdownButtonFormField<SubscriptionModel>(
                   value: _selectedSubscription,
-                  decoration: const InputDecoration(
-                    labelText: 'Paket *',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: 'Paket',
+                    border: const OutlineInputBorder(),
                     hintText: 'Paket seçin',
+                    helperText: _subscriptions.isEmpty
+                        ? 'Aktif paket yok — sadece Ön Görüşme eklenebilir'
+                        : null,
                   ),
                   items: _subscriptions.map((sub) {
                     return DropdownMenuItem<SubscriptionModel>(
@@ -549,8 +553,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                     });
                   },
                   validator: (value) {
-                    if (value == null) {
-                      return 'Lütfen bir paket seçin';
+                    if (value == null &&
+                        _selectedAppointmentType != AppointmentType.og) {
+                      return 'Lütfen bir paket seçin veya türü Ön Görüşme yapın';
                     }
                     return null;
                   },
