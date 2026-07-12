@@ -729,7 +729,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       
       final subProvider = context.read<SubProvider>();
       final success = await subProvider.deleteSubscription(userId: s.userId, subscriptionId: s.subscriptionId);
-      
+
       // Close loading dialog
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();

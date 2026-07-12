@@ -280,11 +280,18 @@ class SubProvider extends ChangeNotifier {
   //   }
   // }
 
-  /// Deletes a subscription
-  /// 
+  /// Deletes a subscription together with every record linked to it.
+  ///
+  /// Appointments and payments point back to their subscription through the
+  /// `subscriptionId` foreign key (see [AppointmentModel] / [PaymentModel]), so
+  /// the relationship is resolved by querying those collections rather than by
+  /// duplicating references on the subscription document. Removing a
+  /// subscription cascade-deletes its linked appointments and payments so no
+  /// orphaned records are left behind.
+  ///
   /// @param userId The ID of the user whose subscription to delete
   /// @param subscriptionId The ID of the subscription to delete
-  /// 
+  ///
   /// @return A boolean indicating whether the deletion was successful
   Future<bool> deleteSubscription({
     required String userId,
@@ -292,32 +299,34 @@ class SubProvider extends ChangeNotifier {
   }) async {
     try {
       final db = FirebaseFirestore.instance;
-      final batch = db.batch();
-      
-      // First, find all appointments with this subscriptionId
-      final appointmentsSnap = await db
-          .collection('users')
-          .doc(userId)
+      final userRef = db.collection('users').doc(userId);
+
+      // Kick off both lookups in parallel: everything linked to this
+      // subscription is found via the `subscriptionId` foreign key.
+      final appointmentsFuture = userRef
           .collection('appointments')
           .where('subscriptionId', isEqualTo: subscriptionId)
           .get();
-      
-      // Set subscriptionId to null for all related appointments
-      for (final doc in appointmentsSnap.docs) {
-        batch.update(doc.reference, {'subscriptionId': null});
-      }
-      
-      // Delete the subscription
-      batch.delete(db
-          .collection('users')
-          .doc(userId)
-          .collection('subscriptions')
-          .doc(subscriptionId));
-      
-      // Commit all changes in a single batch
-      await batch.commit();
+      final paymentsFuture = userRef
+          .collection('payments')
+          .where('subscriptionId', isEqualTo: subscriptionId)
+          .get();
 
-      logger.info('Subscription deleted and ${appointmentsSnap.docs.length} appointments updated: {}', [subscriptionId]);
+      final appointmentsSnap = await appointmentsFuture;
+      final paymentsSnap = await paymentsFuture;
+
+      // Cascade-delete the subscription and all of its linked records.
+      final refsToDelete = <DocumentReference<Map<String, dynamic>>>[
+        ...appointmentsSnap.docs.map((doc) => doc.reference),
+        ...paymentsSnap.docs.map((doc) => doc.reference),
+        userRef.collection('subscriptions').doc(subscriptionId),
+      ];
+      await _commitDeletesInChunks(db, refsToDelete);
+
+      logger.info(
+        'Subscription {} deleted with {} linked appointment(s) and {} linked payment(s)',
+        [subscriptionId, appointmentsSnap.docs.length, paymentsSnap.docs.length],
+      );
       _subChanged = true;
       notifyListeners();
       return true;
@@ -325,6 +334,26 @@ class SubProvider extends ChangeNotifier {
       logger.err('Error deleting subscription id={} for userId={}: {}', 
           [subscriptionId, userId, e]);
       rethrow;
+    }
+  }
+
+  /// Deletes [refs] using Firestore write batches, splitting them so each batch
+  /// stays within Firestore's 500-write limit.
+  Future<void> _commitDeletesInChunks(
+    FirebaseFirestore db,
+    List<DocumentReference<Map<String, dynamic>>> refs,
+  ) async {
+    if (refs.isEmpty) return;
+    const int maxPerBatch = 450; // safety margin below Firestore's 500 cap
+    for (var start = 0; start < refs.length; start += maxPerBatch) {
+      final end = (start + maxPerBatch < refs.length)
+          ? start + maxPerBatch
+          : refs.length;
+      final batch = db.batch();
+      for (final ref in refs.sublist(start, end)) {
+        batch.delete(ref);
+      }
+      await batch.commit();
     }
   }
 

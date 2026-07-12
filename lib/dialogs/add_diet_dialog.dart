@@ -602,21 +602,21 @@ class _AddDietDialogState extends State<AddDietDialog> {
         log.info('Found subtitle: {}', [foundSubtitle['name']]);
         currentSubtitle = foundSubtitle;
 
-        // A meal-header line is expected to contain ONLY the meal name and its
-        // time (e.g. "ÖĞLE (11.30) :"). By design we read just the time from
-        // this line and do NOT treat any leftover text on it as food content.
-        // So if a header arrives glued to a food item (e.g.
-        // "ÖĞLE (11.30) :2 adet yumurta" — `docx_to_text` dropping the Word
-        // <w:tab/> after the time), that trailing text is intentionally
-        // ignored: the document is malformed and the item belongs on its own
-        // line. This is not a bug; food items must start on the line after the
-        // header.
+        // A meal-header line leads with the meal name and its time, e.g.
+        // "ÖĞLE (11:30): yulaf ezmesi". We read the time from this line, and
+        // any food glued onto the header after the separator ":" is real
+        // content, so it is captured as the meal's first content row instead
+        // of being discarded.
         final timeMatch = RegExp(r'(\d{1,2}[:.](\d{2}))').firstMatch(line);
+        // Index from which to search for the separator ":" that precedes any
+        // inline food. Starting after the time skips the time's own ":".
+        int contentSearchStart = 0;
         if (timeMatch != null) {
           String timeStr = timeMatch.group(0)!;
           // Ensure consistent format with colon
           timeStr = timeStr.replaceAll('.', ':');
           currentSubtitle['time'] = timeStr;
+          contentSearchStart = timeMatch.end;
           log.info('Extracted time for subtitle {}: {}',
               [currentSubtitle['name'], currentSubtitle['time']]);
         } else {
@@ -631,24 +631,23 @@ class _AddDietDialogState extends State<AddDietDialog> {
             }
           }
         }
+
+        // Capture food written on the header line after the separator ":"
+        // (e.g. "ÖĞLE (11:30): yulaf ezmesi" -> "yulaf ezmesi").
+        final separatorIdx = line.indexOf(':', contentSearchStart);
+        if (separatorIdx != -1) {
+          final inlineContent = line.substring(separatorIdx + 1).trim();
+          if (inlineContent.isNotEmpty) {
+            log.info('Adding inline header content to subtitle {}: {}',
+                [currentSubtitle['name'], inlineContent]);
+            _addContentLine(currentSubtitle, inlineContent);
+          }
+        }
       } else if (currentSubtitle != null) {
         // If we have an active subtitle, treat this line as content
         log.info('Adding content to subtitle {}: {}',
             [currentSubtitle['name'], line]);
-
-        // Detect any configured special-line marker (Veya, Haftada X, plus
-        // every admin-defined entry). Marker is stored as its own row so the
-        // formatter can render it as a section divider; trailing content (if
-        // any) is stored as the next regular row.
-        final match = SpecialLinesRegistry.detect(line);
-        if (match != null) {
-          currentSubtitle['content'].add({'content': match.markerLabel});
-          if (match.contentAfter.isNotEmpty) {
-            currentSubtitle['content'].add({'content': match.contentAfter});
-          }
-        } else {
-          currentSubtitle['content'].add({'content': line});
-        }
+        _addContentLine(currentSubtitle, line);
       }
     }
 
@@ -663,6 +662,28 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
     if (!foundAnyContent) {
       log.warn('No content found in parsed document');
+    }
+  }
+
+  /// Adds a single food line to [currentSubtitle]'s content.
+  ///
+  /// Detects any configured special-line marker (Veya, Haftada X, plus every
+  /// admin-defined entry): the marker is stored as its own row so the formatter
+  /// can render it as a section divider, and any trailing content is stored as
+  /// the next regular row. Non-marker lines are added verbatim. Empty lines are
+  /// ignored.
+  void _addContentLine(Map<String, dynamic> currentSubtitle, String line) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) return;
+
+    final match = SpecialLinesRegistry.detect(trimmed);
+    if (match != null) {
+      currentSubtitle['content'].add({'content': match.markerLabel});
+      if (match.contentAfter.isNotEmpty) {
+        currentSubtitle['content'].add({'content': match.contentAfter});
+      }
+    } else {
+      currentSubtitle['content'].add({'content': trimmed});
     }
   }
 
