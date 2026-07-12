@@ -2,15 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/appointment_color_palette.dart';
+import '../models/appointment_duration_config.dart';
 import '../models/logger.dart';
 import '../models/special_line_model.dart';
 import '../providers/appointment_colors_provider.dart';
+import '../providers/appointment_durations_provider.dart';
 import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
 
 final Logger _specialLinesLogger = Logger.forClass(_SpecialLinesSection);
 final Logger _appointmentColorsLogger =
     Logger.forClass(_AppointmentColorsSection);
+final Logger _appointmentDurationsLogger =
+    Logger.forClass(_AppointmentDurationsSection);
 
 class TestingPage extends StatefulWidget {
   const TestingPage({super.key});
@@ -35,6 +39,8 @@ class _TestingPageState extends State<TestingPage> {
                 _SpecialLinesSection(),
                 SizedBox(height: 16),
                 _AppointmentColorsSection(),
+                SizedBox(height: 16),
+                _AppointmentDurationsSection(),
               ],
             ),
           ),
@@ -853,6 +859,313 @@ class _ColorSwatch extends StatelessWidget {
         color: color,
         borderRadius: BorderRadius.circular(4),
         border: Border.all(color: Colors.black26),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Appointment default-duration management section.
+// Lets the admin set the default meeting duration (minutes) pre-filled when
+// creating an appointment of each type. Stored at
+// `admininput/appointmentDurations`. `AppointmentType.getDurationForMeetingType`
+// consults the registry these settings populate, so the appointment dialogs
+// reflect the admin choices.
+// ---------------------------------------------------------------------------
+class _AppointmentDurationsSection extends StatefulWidget {
+  const _AppointmentDurationsSection();
+
+  @override
+  State<_AppointmentDurationsSection> createState() =>
+      _AppointmentDurationsSectionState();
+}
+
+class _AppointmentDurationsSectionState
+    extends State<_AppointmentDurationsSection> {
+  bool _loading = true;
+  bool _saving = false;
+
+  /// One controller per slot, holding the effective minutes (override when set,
+  /// otherwise the built-in default).
+  final Map<AppointmentDurationSlot, TextEditingController> _controllers = {};
+
+  /// Snapshot of the saved overrides (slots whose value differs from the
+  /// built-in default), used to enable/disable the Save button.
+  Map<AppointmentDurationSlot, int> _saved = const {};
+
+  @override
+  void initState() {
+    super.initState();
+    for (final slot in AppointmentDurationSlot.values) {
+      _controllers[slot] = TextEditingController();
+    }
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+    try {
+      final provider =
+          Provider.of<AppointmentDurationsProvider>(context, listen: false);
+      final overrides = await provider.fetchDurations(force: true);
+      if (!mounted) return;
+      setState(() {
+        _saved = Map<AppointmentDurationSlot, int>.from(overrides);
+        for (final slot in AppointmentDurationSlot.values) {
+          final effective = overrides[slot] ?? slot.defaultMinutes;
+          _controllers[slot]!.text = effective.toString();
+        }
+        _loading = false;
+      });
+    } catch (e) {
+      _appointmentDurationsLogger
+          .err('Failed to load appointment durations: {}', [e.toString()]);
+      if (!mounted) return;
+      setState(() => _loading = false);
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Randevu süreleri yüklenirken bir hata oluştu.',
+      );
+    }
+  }
+
+  /// Parsed minutes for [slot], or null when the field is empty / not a number.
+  int? _parsedMinutes(AppointmentDurationSlot slot) =>
+      int.tryParse(_controllers[slot]!.text.trim());
+
+  bool _isSlotValid(AppointmentDurationSlot slot) {
+    final value = _parsedMinutes(slot);
+    return value != null && AppointmentDurationsRegistry.isValidMinutes(value);
+  }
+
+  bool get _allValid =>
+      AppointmentDurationSlot.values.every(_isSlotValid);
+
+  /// Overrides derived from the current field values: only slots whose value
+  /// differs from the built-in default are persisted, so the doc stays minimal
+  /// and unchanged slots keep following the built-in defaults.
+  Map<AppointmentDurationSlot, int> _currentOverrides() {
+    final overrides = <AppointmentDurationSlot, int>{};
+    for (final slot in AppointmentDurationSlot.values) {
+      final value = _parsedMinutes(slot);
+      if (value == null) continue;
+      if (value != slot.defaultMinutes) overrides[slot] = value;
+    }
+    return overrides;
+  }
+
+  bool get _hasUnsavedChanges =>
+      _allValid && !_sameOverrides(_currentOverrides(), _saved);
+
+  bool _sameOverrides(Map<AppointmentDurationSlot, int> a,
+      Map<AppointmentDurationSlot, int> b) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (b[entry.key] != entry.value) return false;
+    }
+    return true;
+  }
+
+  Future<void> _save() async {
+    if (!_allValid) return;
+    setState(() => _saving = true);
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: 'Süreler kaydediliyor...');
+      loadingOpen = true;
+    }
+    try {
+      final overrides = _currentOverrides();
+      final provider =
+          Provider.of<AppointmentDurationsProvider>(context, listen: false);
+      await provider.saveDurations(overrides);
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (!mounted) return;
+      setState(() => _saved = overrides);
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Randevu süreleri güncellendi.',
+      );
+    } catch (e) {
+      _appointmentDurationsLogger
+          .err('Failed to save appointment durations: {}', [e.toString()]);
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Randevu süreleri kaydedilirken bir hata oluştu.',
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _resetToDefaults() async {
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Varsayılana Döndür',
+      message:
+          'Tüm randevu türleri varsayılan sürelerine döndürülecek. Devam etmek istiyor musunuz?',
+      confirmText: 'Sıfırla',
+      cancelText: 'İptal',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() {
+      for (final slot in AppointmentDurationSlot.values) {
+        _controllers[slot]!.text = slot.defaultMinutes.toString();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.timer_outlined, size: 28),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Randevu Görüşme Süreleri',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Yeni randevu oluştururken her randevu türü için otomatik dolan '
+              'varsayılan görüşme süresini (dakika) buradan belirleyebilirsiniz. '
+              'Randevu oluştururken bu süre yine tek tek değiştirilebilir.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
+              Column(
+                children: [
+                  for (final slot in AppointmentDurationSlot.values) ...[
+                    _buildSlotRow(slot),
+                    if (slot != AppointmentDurationSlot.values.last)
+                      const Divider(height: 1),
+                  ],
+                ],
+              ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: (_loading || _saving) ? null : _resetToDefaults,
+                  icon: const Icon(Icons.restore),
+                  label: const Text('Varsayılana Döndür'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  onPressed: (_loading || _saving || !_hasUnsavedChanges)
+                      ? null
+                      : _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('Kaydet'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSlotRow(AppointmentDurationSlot slot) {
+    final isUsingDefault =
+        _parsedMinutes(slot) == slot.defaultMinutes;
+    final invalid = !_isSlotValid(slot);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  slot.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isUsingDefault
+                      ? 'Varsayılan: ${slot.defaultMinutes} dk'
+                      : 'Varsayılan ${slot.defaultMinutes} dk yerine özel süre',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 120,
+            child: TextField(
+              controller: _controllers[slot],
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
+              enabled: !_saving,
+              decoration: InputDecoration(
+                isDense: true,
+                border: const OutlineInputBorder(),
+                suffixText: 'dk',
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                errorText: invalid
+                    ? '${AppointmentDurationsRegistry.minMinutes}-${AppointmentDurationsRegistry.maxMinutes}'
+                    : null,
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+        ],
       ),
     );
   }

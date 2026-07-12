@@ -7,6 +7,7 @@ import 'package:ngy_app/providers/timeslot_manager.dart';
 import '../models/appointment_model.dart';
 import '../models/logger.dart';
 import '../models/subs_model.dart';
+import '../providers/appointment_durations_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
@@ -44,6 +45,20 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     super.initState();
     logger.debug('Initializing AppointmentsPage state.');
     _fetchAvailableTimes();
+    // Load admin-configured default durations so the duration derived at
+    // booking time reflects the values set in the Testing page.
+    _preloadDurations();
+  }
+
+  /// Fire-and-forget load of the admin-configured default durations into the
+  /// registry. Failures fall back to the built-in defaults.
+  Future<void> _preloadDurations() async {
+    try {
+      await Provider.of<AppointmentDurationsProvider>(context, listen: false)
+          .fetchDurations();
+    } catch (_) {
+      // Falls back to built-in defaults when the load fails.
+    }
   }
 
   void _fetchAvailableTimes() {

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ngy_app/models/user_model.dart';
 
 import 'appointment_color_palette.dart';
+import 'appointment_duration_config.dart';
 
 class AppointmentModel {
   final String appointmentId;
@@ -333,13 +334,16 @@ enum AppointmentType {
     );
   }
 
-  /// Returns the duration for this appointment type based on meeting type.
-  /// For haftalik: online=20min, f2f=30min. Others use their default durationMinutes.
+  /// Returns the default duration (minutes) for this appointment type based on
+  /// meeting type. The values come from [AppointmentDurationsRegistry], which
+  /// layers admin-configured overrides (see the Testing page /
+  /// `admininput/appointmentDurations`) on top of the built-in defaults, so
+  /// this reflects the durations configured by the admin. The built-in
+  /// fallbacks match the original hard-coded behavior (haftalik: online=20,
+  /// f2f=30; pb=60; og=45; kgtakip=30; diger=30).
   int getDurationForMeetingType(MeetingType meetingType) {
-    if (this == AppointmentType.haftalik) {
-      return meetingType == MeetingType.online ? 20 : 30;
-    }
-    return durationMinutes;
+    final slot = AppointmentDurationSlot.forAppointment(this, meetingType);
+    return AppointmentDurationsRegistry.minutesFor(slot);
   }
 
   /// Returns the background color for this appointment type. The mapping is

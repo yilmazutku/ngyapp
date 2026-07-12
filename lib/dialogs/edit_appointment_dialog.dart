@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
 import '../models/subs_model.dart';
+import '../providers/appointment_durations_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
@@ -66,6 +67,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     _notesController.text = widget.appointment.notes ?? '';
     _durationController.text = widget.appointment.durationMinutes.toString();
     _selectedSubscriptionId = widget.appointment.subscriptionId;
+
+    // Preload admin-configured default durations so that changing the
+    // appointment/meeting type re-derives the duration from the admin values.
+    // The stored duration above is left untouched.
+    _preloadDurations();
     
     // Fetch all subscriptions for the user
     _fetchAvailableSubscriptions();
@@ -80,7 +86,19 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     _durationController.dispose();
     super.dispose();
   }
-  
+
+  /// Loads the admin-configured default durations into the registry so a later
+  /// appointment/meeting-type change re-derives the duration from the admin
+  /// values. Fire-and-forget; failures fall back to the built-in defaults.
+  Future<void> _preloadDurations() async {
+    try {
+      await Provider.of<AppointmentDurationsProvider>(context, listen: false)
+          .fetchDurations();
+    } catch (_) {
+      // Falls back to built-in defaults when the load fails.
+    }
+  }
+
   Future<void> _fetchUserDetails() async {
     try {
       final userProvider = Provider.of<UserProvider>(context, listen: false);

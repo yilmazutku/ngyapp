@@ -6,6 +6,7 @@ import '../models/appointment_model.dart';
 import '../models/user_model.dart';
 import '../models/logger.dart';
 import '../models/subs_model.dart';
+import '../providers/appointment_durations_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
@@ -62,6 +63,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   
   // Duration controller
   final _durationController = TextEditingController();
+  // Whether the admin has manually edited the duration field. Once touched we
+  // never overwrite it with a recomputed default.
+  bool _durationTouched = false;
 
   @override
   void initState() {
@@ -72,6 +76,10 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
     
     // Initialize duration with selected appointment type's default (considering meeting type)
     _durationController.text = _selectedAppointmentType.getDurationForMeetingType(_selectedMeetingType).toString();
+    // Ensure admin-configured default durations are loaded, then refresh the
+    // pre-filled value (unless the admin already changed it). No-op after the
+    // first call per session.
+    _ensureDurationsLoaded();
     
     if (widget.userId != null) {
       // If userId is provided, we're in customer scenario
@@ -90,6 +98,25 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
     _durationController.dispose();
     _userSearchController.dispose();
     super.dispose();
+  }
+
+  /// Loads the admin-configured default durations and, if the admin has not
+  /// manually edited the field yet, refreshes the pre-filled value so it
+  /// reflects the durations set in the Testing page.
+  Future<void> _ensureDurationsLoaded() async {
+    try {
+      await Provider.of<AppointmentDurationsProvider>(context, listen: false)
+          .fetchDurations();
+    } catch (_) {
+      // Failures fall back to built-in default durations; nothing to do.
+      return;
+    }
+    if (!mounted || _durationTouched) return;
+    setState(() {
+      _durationController.text = _selectedAppointmentType
+          .getDurationForMeetingType(_selectedMeetingType)
+          .toString();
+    });
   }
 
   /// Filters [_users] using the entered query (matches name, surname, full
@@ -610,6 +637,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                       controller: _durationController,
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
+                      onChanged: (_) => _durationTouched = true,
                       decoration: const InputDecoration(
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
