@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/logger.dart';
 import '../models/user_model.dart';
+import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../pages/customer_sum.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -73,8 +74,10 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
       
       // Hide users with incomplete profile data (empty name, surname, or email).
       // These are typically corrupt or partially-created records that should not
-      // appear in the admin user management list.
+      // appear in the admin user management list. Admin accounts are always
+      // kept so an admin can find (and manage) their own record here.
       final validUsers = users.where((u) {
+        if (ChatManager.isAdminUid(u.userId)) return true;
         return u.name.trim().isNotEmpty &&
             u.surname.trim().isNotEmpty &&
             u.email.trim().isNotEmpty;

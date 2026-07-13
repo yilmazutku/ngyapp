@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class DialogUtils {
@@ -90,6 +91,35 @@ class DialogUtils {
               const CircularProgressIndicator(),
               const SizedBox(width: 20),
               Text(message),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Shows a non-dismissible loading dialog whose message updates live via
+  /// [messageListenable]. Useful for multi-step / bulk operations that want to
+  /// surface progress (e.g. "Yükleniyor (2/5)...").
+  static Future<void> openLoadingProgress(
+    BuildContext context, {
+    required ValueListenable<String> messageListenable,
+  }) {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 20),
+              Expanded(
+                child: ValueListenableBuilder<String>(
+                  valueListenable: messageListenable,
+                  builder: (_, message, __) => Text(message),
+                ),
+              ),
             ],
           ),
         );

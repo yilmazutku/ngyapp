@@ -79,6 +79,7 @@ class FcmService {
   // Admin UIDs for routing notifications
   static const Set<String> _adminUids = {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+    'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
   };
 
   // Global navigator key for notification tap navigation

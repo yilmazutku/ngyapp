@@ -136,6 +136,68 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  /// Admin-only: confirm and permanently delete this chat.
+  ///
+  /// Deletes all messages and every photo uploaded in the chat, then returns
+  /// to the previous screen (the admin chat list).
+  Future<void> _confirmAndDeleteChat() async {
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Sohbeti Sil',
+      message: 'Bu sohbet, tüm mesajlar ve yüklenen fotoğraflar kalıcı olarak silinecek. '
+          'Bu işlem geri alınamaz.\n\nDevam etmek istiyor musunuz?',
+      confirmText: 'Sil',
+      cancelText: 'İptal',
+    );
+
+    if (!confirmed) {
+      logger.debug('Chat deletion cancelled by admin. chatId={}', [_chatId]);
+      return;
+    }
+
+    final chat = context.read<ChatManager>();
+
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: 'Sohbet siliniyor...');
+      loadingOpen = true;
+    }
+
+    try {
+      logger.info('Deleting chat (admin). chatId={}', [_chatId]);
+      await chat.deleteChat(_chatId);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (mounted) {
+        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Sohbet silindi.');
+      }
+
+      // Return to the chat list now that this chat no longer exists
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e, st) {
+      logger.err('Chat deletion failed. chatId={} error={}', [_chatId, e]);
+      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Sohbet silinemedi. Lütfen tekrar deneyin.',
+      );
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
@@ -543,6 +605,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         title: widget.overrideChatId != null && _isAdminUser
             ? _buildUserNameTitle(_chatId)
             : Text(PushNotificationReference.chatAdminToUserTitle),
+        actions: [
+          // Admins can permanently delete the chat (and its uploaded photos)
+          if (_isAdminUser)
+            IconButton(
+              tooltip: 'Sohbeti Sil',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _confirmAndDeleteChat,
+            ),
+        ],
       ),
       body: Column(
         children: [

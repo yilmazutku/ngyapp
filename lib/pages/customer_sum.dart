@@ -16,7 +16,6 @@ import '../dialogs/add_diet_dialog.dart';
 import '../models/user_model.dart';
 import '../models/logger.dart';
 import '../tabs/sub_tab.dart';
-import 'bulk_add_page.dart';
 import 'diagnostics_page.dart';
 
 final Logger logger = Logger.forClass(CustomerSummaryPage);
@@ -123,17 +122,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.playlist_add),
-            tooltip: 'Toplu Ödeme/Randevu Ekle',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => BulkAddPage(user: widget.user),
-                ),
-              );
-            },
-          ),
           IconButton(
             icon: const Icon(Icons.bug_report),
             tooltip: 'Test / Doğrulama',

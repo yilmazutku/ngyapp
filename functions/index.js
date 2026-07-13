@@ -10,6 +10,7 @@ admin.initializeApp();
 // =============================================================================
 const ADMIN_UIDS = new Set([
   '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+  'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
 ]);
 
 // =============================================================================

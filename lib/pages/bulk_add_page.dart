@@ -7,21 +7,24 @@ import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
 import '../models/logger.dart';
 import '../models/payment_model.dart';
-import '../models/user_model.dart';
+import '../models/subs_model.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/payment_provider.dart';
+import '../providers/sub_provider.dart';
 import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/loading_overlay.dart';
 
-/// Admin page for adding multiple appointments and payments for a single
-/// customer at once. Both tabs intentionally skip the linked subscription
-/// selection: appointments use fixed defaults (Haftalık Görüşme, 30 dk,
-/// Yapıldı, 00:00) and payments are assumed to be cash (Nakit / Tamamlandı).
+/// Admin page for adding multiple appointments and payments linked to a single
+/// subscription at once. Every created record is linked to [subscription] (its
+/// id and owner), so they show up under the package and are cascade-deleted
+/// with it. Appointments use fixed defaults (Haftalık Görüşme, 30 dk, Yapıldı,
+/// 00:00) and payments are assumed to be cash (Nakit / Tamamlandı); the
+/// completed payments are also added to the subscription's paid total.
 class BulkAddPage extends StatefulWidget {
-  final UserModel user;
+  final SubscriptionModel subscription;
 
-  const BulkAddPage({super.key, required this.user});
+  const BulkAddPage({super.key, required this.subscription});
 
   @override
   State<BulkAddPage> createState() => _BulkAddPageState();
@@ -36,11 +39,19 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
   final List<_ApptEntry> _apptEntries = [];
   final List<_PaymentEntry> _paymentEntries = [];
 
+  /// Package the created records link to. Defaults to the package whose card
+  /// opened this page; can be set to `null` (the "Paketsiz" item) to add
+  /// records without a package — mirrors the nullable subscription convention
+  /// used by the add/edit payment dialogs.
+  SubscriptionModel? _selectedSubscription;
+
   @override
   void initState() {
     super.initState();
     _apptEntries.add(_ApptEntry());
     _paymentEntries.add(_PaymentEntry());
+    // Default the app-bar dropdown to the package whose card opened this page.
+    _selectedSubscription = widget.subscription;
   }
 
   @override
@@ -54,7 +65,11 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     super.dispose();
   }
 
-  String get _userName => '${widget.user.name} ${widget.user.surname}'.trim();
+  /// Human-readable target for confirmation messages: the selected package
+  /// name, or "paketsiz" when no package is linked.
+  String get _targetLabel => _selectedSubscription != null
+      ? "'${_selectedSubscription!.packageName}' paketine"
+      : 'paketsiz olarak';
 
   // ---------------------- Appointment actions ----------------------
 
@@ -86,7 +101,7 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Toplu Randevu Ekle',
-      message: '$_userName için ${_apptEntries.length} randevu eklenecek. '
+      message: '${_apptEntries.length} randevu $_targetLabel eklenecek. '
           'Devam edilsin mi?',
     );
     if (!confirmed) return;
@@ -101,8 +116,8 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
         final date = parsedDates[i];
         final appointment = AppointmentModel(
           appointmentId: '${baseId}_$i',
-          userId: widget.user.userId,
-          subscriptionId: null,
+          userId: widget.subscription.userId,
+          subscriptionId: _selectedSubscription?.subscriptionId,
           meetingType: entry.meetingType,
           appointmentType: AppointmentType.haftalik,
           appointmentDateTime:
@@ -192,7 +207,7 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Toplu Ödeme Ekle',
-      message: '$_userName için ${_paymentEntries.length} ödeme eklenecek. '
+      message: '${_paymentEntries.length} ödeme $_targetLabel eklenecek. '
           'Devam edilsin mi?',
     );
     if (!confirmed) return;
@@ -202,17 +217,34 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     try {
       final paymentProvider =
           Provider.of<PaymentProvider>(context, listen: false);
+      final subProvider = Provider.of<SubProvider>(context, listen: false);
+      final SubscriptionModel? linkedSub = _selectedSubscription;
+      double addedAmount = 0;
       for (int i = 0; i < _paymentEntries.length; i++) {
         await paymentProvider.addPayment(
-          userId: widget.user.userId,
-          subscription: null,
+          userId: widget.subscription.userId,
+          subscription: linkedSub,
           amount: parsedAmounts[i],
           paymentDate: parsedDates[i],
           status: PaymentStatus.completed,
           paymentType: PaymentType.nakit,
           notes: _bulkNote,
         );
+        addedAmount += parsedAmounts[i];
         added++;
+      }
+
+      // Reflect the completed payments in the subscription's paid total so the
+      // package summary stays accurate (mirrors the single add-payment flow).
+      // Skipped for "Paketsiz" payments, which are not tied to any package.
+      if (linkedSub != null && addedAmount > 0) {
+        final newAmountPaid = linkedSub.amountPaid + addedAmount;
+        await subProvider.updateAmountPaid(
+          userId: widget.subscription.userId,
+          subscriptionId: linkedSub.subscriptionId,
+          amountPaid: newAmountPaid,
+        );
+        linkedSub.amountPaid = newAmountPaid;
       }
 
       if (mounted) {
@@ -255,9 +287,10 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
       children: [
         Scaffold(
           appBar: AppBar(
-            title: Text('Toplu Ekle - $_userName'),
+            title: const Text('Toplu Ekle'),
             backgroundColor: Colors.blue.shade800,
             foregroundColor: Colors.white,
+            bottom: _buildSubscriptionBar(),
           ),
           // Page is split in two: appointments on top, payments below.
           body: Column(
@@ -270,6 +303,68 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
         ),
         if (isLoading) const LoadingOverlay(message: 'Kaydediliyor...'),
       ],
+    );
+  }
+
+  /// App-bar row letting the admin pick where the created records go: the
+  /// card's own package (default) or "Paketsiz" (null) to add them without a
+  /// package.
+  PreferredSizeWidget _buildSubscriptionBar() {
+    const double barHeight = 60;
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(barHeight),
+      child: SizedBox(
+        height: barHeight,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          child: Row(
+            children: [
+              const Icon(Icons.card_membership, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'Bağlı Paket:',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<SubscriptionModel?>(
+                      isExpanded: true,
+                      value: _selectedSubscription,
+                      items: [
+                        DropdownMenuItem<SubscriptionModel?>(
+                          value: widget.subscription,
+                          child: Text(
+                            widget.subscription.packageName,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const DropdownMenuItem<SubscriptionModel?>(
+                          value: null,
+                          child: Text('Paketsiz'),
+                        ),
+                      ],
+                      onChanged: isLoading
+                          ? null
+                          : (value) =>
+                              setState(() => _selectedSubscription = value),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

@@ -58,52 +58,74 @@ class _TestsTabState extends State<TestsTab> {
     setState(() { _filesFuture = _fetchFiles(); });
   }
 
-  Future<void> _pickAndUploadFile() async {
+  /// Picks one or more files and uploads them in sequence. A single failing
+  /// file does not abort the batch; a summary reports how many succeeded and
+  /// which (if any) failed.
+  Future<void> _pickAndUploadFiles() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic'],
+        allowMultiple: true,
       );
       if (result == null || result.files.isEmpty) return;
 
       if (mounted) setState(() { _busy = true; });
 
-      final file = result.files.single;
-      final name = file.name;
-
-      List<int> bytes;
-      if (file.bytes != null) {
-        bytes = file.bytes!;
-      } else if (file.path != null) {
-        bytes = await File(file.path!).readAsBytes();
-      } else {
-        throw Exception('Dosya okunamadı.');
-      }
+      final files = result.files;
+      final total = files.length;
+      final progress = ValueNotifier<String>('Dosyalar yükleniyor (1/$total)...');
 
       // --- SHOW LOADING (do not await) ---
       bool loadingOpen = false;
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Dosya yükleniyor...');
+        DialogUtils.openLoadingProgress(context, messageListenable: progress);
         loadingOpen = true;
       }
 
+      int success = 0;
+      final List<String> failed = [];
       try {
         final provider = Provider.of<TestProvider>(context, listen: false);
-        await provider.uploadTestAttachmentFile(
-          userId: widget.userId,
-          fileName: name,
-          fileBytes: bytes,
-        );
+        for (int i = 0; i < total; i++) {
+          final file = files[i];
+          progress.value = 'Dosyalar yükleniyor (${i + 1}/$total)...';
+          try {
+            final bytes = await _readFileBytes(file);
+            await provider.uploadTestAttachmentFile(
+              userId: widget.userId,
+              fileName: file.name,
+              fileBytes: bytes,
+            );
+            success++;
+          } catch (e) {
+            log.err('Error uploading test attachment {}: {}', [file.name, e]);
+            failed.add(file.name);
+          }
+        }
 
-        // Close loading BEFORE showing info
+        // Close loading BEFORE showing info/error
         if (mounted && loadingOpen) {
           Navigator.of(context, rootNavigator: true).pop(); // close loading dialog
           loadingOpen = false;
         }
 
         if (mounted) {
-          await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Dosya yüklendi.');
           setState(() { _filesFuture = _fetchFiles(); });
+          if (failed.isEmpty) {
+            await DialogUtils.openInfo(
+              context,
+              title: 'Başarılı',
+              message: '$success dosya yüklendi.',
+            );
+          } else {
+            await DialogUtils.openError(
+              context,
+              title: success > 0 ? 'Kısmen Tamamlandı' : 'Hata',
+              message: '$success dosya yüklendi, ${failed.length} dosya '
+                  'yüklenemedi:\n${failed.join('\n')}',
+            );
+          }
         }
       } catch (e) {
         if (mounted && loadingOpen) {
@@ -114,12 +136,22 @@ class _TestsTabState extends State<TestsTab> {
           await DialogUtils.openError(context, title: 'Hata', message: 'Dosya yükleme hatası: $e');
         }
       } finally {
+        progress.dispose();
         if (mounted) setState(() { _busy = false; });
       }
     } catch (e) {
       if (!mounted) return;
       await DialogUtils.openError(context, title: 'Hata', message: 'Dosya seçme hatası: $e');
     }
+  }
+
+  /// Reads a picked file's bytes, preferring the in-memory [PlatformFile.bytes]
+  /// and falling back to reading from [PlatformFile.path] on platforms that
+  /// only expose a file path.
+  Future<List<int>> _readFileBytes(PlatformFile file) async {
+    if (file.bytes != null) return file.bytes!;
+    if (file.path != null) return File(file.path!).readAsBytes();
+    throw Exception('Dosya okunamadı.');
   }
 
   Future<void> _deleteFile(_TestAttachmentModel f) async {
@@ -210,11 +242,11 @@ class _TestsTabState extends State<TestsTab> {
           ),
           const SizedBox(width: 8),
           ElevatedButton.icon(
-            onPressed: _busy ? null : _pickAndUploadFile,
+            onPressed: _busy ? null : _pickAndUploadFiles,
             icon: _busy
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.add),
-            label: const Text('Yeni Tahlil'),
+            label: const Text('Tahlil Ekle'),
           ),
         ],
       ),

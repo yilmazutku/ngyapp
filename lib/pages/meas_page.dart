@@ -10,6 +10,10 @@ import '../models/meas_model.dart';
 import '../providers/meas_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/measurement_line_chart.dart';
+
+/// How the measurement data is presented to the user.
+enum _MeasView { table, chart }
 
 /// User-facing measurement page (read-only view)
 class MeasurementPage extends StatefulWidget {
@@ -23,10 +27,13 @@ class MeasurementPage extends StatefulWidget {
 class _MeasurementPageState extends State<MeasurementPage> {
   List<MeasurementModel> _measurements = [];
   bool _isLoading = true;
-  
+
+  _MeasView _view = _MeasView.table;
+
   // Scroll controllers
   final ScrollController _verticalCtrl = ScrollController();
   final ScrollController _horizontalCtrl = ScrollController();
+  final ScrollController _chartsCtrl = ScrollController();
 
   // Column widths for table alignment
   static const double _wDate = 110;
@@ -48,6 +55,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
   void dispose() {
     _verticalCtrl.dispose();
     _horizontalCtrl.dispose();
+    _chartsCtrl.dispose();
     super.dispose();
   }
 
@@ -86,7 +94,9 @@ class _MeasurementPageState extends State<MeasurementPage> {
                 Expanded(
                   child: _measurements.isEmpty
                       ? _buildEmptyState()
-                      : _buildMeasurementsTable(),
+                      : (_view == _MeasView.table
+                          ? _buildMeasurementsTable()
+                          : _buildChartsView()),
                 ),
               ],
             ),
@@ -106,10 +116,56 @@ class _MeasurementPageState extends State<MeasurementPage> {
         children: [
           // Latest measurement summary (if exists)
           if (_measurements.isNotEmpty) _buildLatestSummaryCard(),
+          // Table / chart view switch (only meaningful when data exists)
+          if (_measurements.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildViewToggle(),
+          ],
           const SizedBox(height: 12),
           // Tanita button
           _buildTanitaButton(),
         ],
+      ),
+    );
+  }
+
+  /// Segmented control to switch between the table and the charts view.
+  Widget _buildViewToggle() {
+    return SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<_MeasView>(
+        segments: const [
+          ButtonSegment(
+            value: _MeasView.table,
+            icon: Icon(Icons.table_rows, size: 18),
+            label: Text('Tablo'),
+          ),
+          ButtonSegment(
+            value: _MeasView.chart,
+            icon: Icon(Icons.show_chart, size: 18),
+            label: Text('Grafik'),
+          ),
+        ],
+        selected: {_view},
+        showSelectedIcon: false,
+        onSelectionChanged: (selection) {
+          setState(() => _view = selection.first);
+        },
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return Colors.blue.shade600;
+            }
+            return Colors.white;
+          }),
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return Colors.white;
+            }
+            return Colors.blue.shade700;
+          }),
+        ),
       ),
     );
   }
@@ -172,7 +228,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.15),
+          color: Colors.white.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Column(
@@ -445,6 +501,185 @@ class _MeasurementPageState extends State<MeasurementPage> {
     );
   }
 
+  /// Metrics that can be charted over time (y = value, x = date).
+  List<_ChartMetric> get _chartMetrics => const [
+        _ChartMetric('Ağırlık', 'kg', Color(0xFF2563EB), _MetricField.weight),
+        _ChartMetric('Yağ', 'kg', Color(0xFFDB2777), _MetricField.fatKg),
+        _ChartMetric('Bel', 'cm', Color(0xFF059669), _MetricField.waist),
+        _ChartMetric('Göğüs', 'cm', Color(0xFF7C3AED), _MetricField.chest),
+        _ChartMetric('Sırt', 'cm', Color(0xFF0891B2), _MetricField.back),
+        _ChartMetric('Kalça', 'cm', Color(0xFFEA580C), _MetricField.hips),
+        _ChartMetric('Bacak', 'cm', Color(0xFF16A34A), _MetricField.leg),
+        _ChartMetric('Kol', 'cm', Color(0xFFCA8A04), _MetricField.arm),
+        _ChartMetric('Kalori', 'kcal', Color(0xFFDC2626), _MetricField.calorie),
+      ];
+
+  /// Charts view: one line chart per metric that has data.
+  Widget _buildChartsView() {
+    // Chart the oldest -> newest, independent of the table's ordering.
+    final ascending = [..._measurements]
+      ..sort((a, b) => a.measDate.compareTo(b.measDate));
+
+    // Keep only metrics that actually have at least one value.
+    final series = <_MetricSeries>[];
+    for (final metric in _chartMetrics) {
+      final points = <ChartPoint>[];
+      for (final m in ascending) {
+        final value = metric.valueOf(m);
+        if (value != null) points.add(ChartPoint(m.measDate, value));
+      }
+      if (points.isNotEmpty) series.add(_MetricSeries(metric, points));
+    }
+
+    if (series.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            'Grafik oluşturmak için sayısal ölçüm verisi bulunmuyor.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+          ),
+        ),
+      );
+    }
+
+    return Scrollbar(
+      controller: _chartsCtrl,
+      thumbVisibility: true,
+      child: ListView.separated(
+        controller: _chartsCtrl,
+        primary: false,
+        padding: const EdgeInsets.all(16),
+        itemCount: series.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 16),
+        itemBuilder: (_, i) => _buildMetricCard(series[i]),
+      ),
+    );
+  }
+
+  Widget _buildMetricCard(_MetricSeries series) {
+    final metric = series.metric;
+    final points = series.points;
+
+    final values = points.map((p) => p.value).toList();
+    final last = values.last;
+    final minV = values.reduce(math.min);
+    final maxV = values.reduce(math.max);
+    final double? prev = points.length >= 2 ? values[values.length - 2] : null;
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title + latest value + delta
+            Row(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration:
+                      BoxDecoration(color: metric.color, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${metric.label} (${metric.unit})',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${_formatMetric(last)} ${metric.unit}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: metric.color,
+                      ),
+                    ),
+                    if (prev != null) _buildDeltaChip(last - prev, metric.unit),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            MeasurementLineChart(
+              points: points,
+              color: metric.color,
+              unit: metric.unit,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildStat('En düşük', '${_formatMetric(minV)} ${metric.unit}'),
+                _buildStat('En yüksek', '${_formatMetric(maxV)} ${metric.unit}'),
+                _buildStat('Kayıt', '${points.length}'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeltaChip(double delta, String unit) {
+    final isFlat = delta.abs() < 1e-6;
+    final isUp = delta > 0;
+    final color = isFlat
+        ? Colors.grey.shade600
+        : (isUp ? const Color(0xFFEA580C) : const Color(0xFF16A34A));
+    final icon = isFlat
+        ? Icons.remove
+        : (isUp ? Icons.arrow_upward : Icons.arrow_downward);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 2),
+        Text(
+          '${_formatMetric(delta.abs())} $unit',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStat(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+      ],
+    );
+  }
+
+  String _formatMetric(double v) {
+    if ((v - v.roundToDouble()).abs() < 1e-6) return v.round().toString();
+    return v.toStringAsFixed(1);
+  }
+
   /// Measurements table (matching admin style)
   Widget _buildMeasurementsTable() {
     return LayoutBuilder(
@@ -585,4 +820,48 @@ class _TanitaPdf {
     required this.fileName,
     this.uploadTime,
   });
+}
+
+/// Numeric fields of [MeasurementModel] that can be plotted.
+enum _MetricField { chest, back, waist, hips, leg, arm, weight, fatKg, calorie }
+
+/// Describes a single chartable metric (label, unit, colour and source field).
+class _ChartMetric {
+  final String label;
+  final String unit;
+  final Color color;
+  final _MetricField field;
+
+  const _ChartMetric(this.label, this.unit, this.color, this.field);
+
+  double? valueOf(MeasurementModel m) {
+    switch (field) {
+      case _MetricField.chest:
+        return m.chest;
+      case _MetricField.back:
+        return m.back;
+      case _MetricField.waist:
+        return m.waist;
+      case _MetricField.hips:
+        return m.hips;
+      case _MetricField.leg:
+        return m.leg;
+      case _MetricField.arm:
+        return m.arm;
+      case _MetricField.weight:
+        return m.weight;
+      case _MetricField.fatKg:
+        return m.fatKg;
+      case _MetricField.calorie:
+        return m.calorie?.toDouble();
+    }
+  }
+}
+
+/// A metric paired with its non-null data points, ready to chart.
+class _MetricSeries {
+  final _ChartMetric metric;
+  final List<ChartPoint> points;
+
+  const _MetricSeries(this.metric, this.points);
 }

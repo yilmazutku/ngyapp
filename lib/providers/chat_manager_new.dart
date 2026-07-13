@@ -94,6 +94,7 @@ class ChatManager extends ChangeNotifier {
   /// Admin user IDs - these users have elevated permissions and are participants in all chats
   static const Set<String> adminIds = {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+    'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
   };
 
   /// Check if a given UID belongs to an admin user
@@ -607,6 +608,84 @@ class ChatManager extends ChangeNotifier {
     } catch (e) {
       logger.warn('Upload cancellation failed: {}', [e]);
     }
+  }
+
+  /// Permanently delete an entire chat and all of its data.
+  ///
+  /// This is an ADMIN-ONLY destructive operation that:
+  /// 1. Deletes every image referenced by the chat's messages from Firebase
+  ///    Storage. This covers both direct chat uploads (chats/{chatId}/...) and
+  ///    meal photos that were posted to the chat. Storage deletion is
+  ///    best-effort per file: a single failure (e.g. the file was already
+  ///    removed) is logged and does not abort the rest of the operation.
+  /// 2. Deletes all message documents in the messages subcollection
+  ///    (in batches, since a document delete does not cascade to subcollections).
+  /// 3. Deletes the chat document itself.
+  ///
+  /// NOTE: Meal photos are shared with the user's meal-tracking history, so
+  /// deleting them here also removes those images from the meal records.
+  ///
+  /// Throws [StateError] if the caller is not an admin.
+  ///
+  /// @param chatId The chat to delete (user UID in our one-chat-per-user model)
+  Future<void> deleteChat(String chatId) async {
+    final currentUid = auth.currentUser?.uid;
+    if (currentUid == null || !isAdminUid(currentUid)) {
+      logger.warn('deleteChat denied: caller is not an admin. currentUid={}', [currentUid]);
+      throw StateError('Bu işlem için yetkiniz yok.');
+    }
+
+    logger.info('Deleting chat. chatId={} adminUid={}', [chatId, currentUid]);
+
+    final messagesRef = _chatDoc(chatId).collection('messages');
+
+    // Step 1: Fetch all message documents
+    final snapshot = await messagesRef.get();
+    logger.debug('Fetched {} messages for deletion. chatId={}', [snapshot.docs.length, chatId]);
+
+    // Step 2: Delete referenced images from Storage (best-effort, de-duplicated).
+    // refFromURL works for both direct chat uploads and meal photos since both
+    // store full download URLs in the message's imageUrl field.
+    final imageUrls = <String>{};
+    for (final doc in snapshot.docs) {
+      final url = (doc.data()['imageUrl'] as String?)?.trim() ?? '';
+      if (url.isNotEmpty) imageUrls.add(url);
+    }
+
+    int deletedImages = 0;
+    for (final url in imageUrls) {
+      try {
+        await storage.refFromURL(url).delete();
+        deletedImages++;
+      } catch (e) {
+        logger.warn('Failed to delete chat image from storage. chatId={} url={} error={}', [chatId, url, e]);
+      }
+    }
+    logger.info('Deleted {}/{} chat images from storage. chatId={}', [deletedImages, imageUrls.length, chatId]);
+
+    // Step 3: Delete message documents in batches (Firestore limit: 500 ops/batch)
+    const batchLimit = 450;
+    var batch = db.batch();
+    var opCount = 0;
+    for (final doc in snapshot.docs) {
+      batch.delete(doc.reference);
+      opCount++;
+      if (opCount >= batchLimit) {
+        await batch.commit();
+        batch = db.batch();
+        opCount = 0;
+      }
+    }
+    if (opCount > 0) {
+      await batch.commit();
+    }
+    logger.debug('Deleted {} message documents. chatId={}', [snapshot.docs.length, chatId]);
+
+    // Step 4: Delete the chat document itself
+    await _chatDoc(chatId).delete();
+
+    logger.info('Chat deleted successfully. chatId={}', [chatId]);
+    notifyListeners();
   }
 
   /// Compress an image to meet the maximum size requirement (5MB).

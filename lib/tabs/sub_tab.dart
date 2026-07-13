@@ -8,6 +8,7 @@ import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../models/appointment_model.dart';
 import '../models/filter_params.dart';
+import '../pages/bulk_add_page.dart';
 import '../providers/sub_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../utils/dialog_utils.dart';
@@ -478,6 +479,11 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             ),
             Row(children: [
               IconButton(
+                icon: const Icon(Icons.playlist_add, color: Colors.green),
+                tooltip: 'Toplu Ödeme/Randevu Ekle',
+                onPressed: () => _openBulkAdd(context, s),
+              ),
+              IconButton(
                 icon: const Icon(Icons.edit, color: Colors.blue),
                 tooltip: 'Düzenle',
                 onPressed: () => _showEditSubscriptionDialog(context, s),
@@ -680,6 +686,17 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   }
 
   // ---------- Dialogs / Actions ----------
+
+  /// Opens the bulk add page for this package. Every appointment/payment created
+  /// there is linked to [s]. Data is refreshed on return so the card reflects
+  /// the newly added appointments and updated paid total.
+  void _openBulkAdd(BuildContext context, SubscriptionModel s) {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => BulkAddPage(subscription: s)))
+        .then((_) {
+      if (mounted) refreshData();
+    });
+  }
 
   Future<void> _showEditSubscriptionDialog(BuildContext context, SubscriptionModel s) async {
     try {

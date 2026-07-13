@@ -10,6 +10,7 @@ import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
+import 'package:ngy_app/utils/dialog_utils.dart';
 
 /// Admin chat list page displaying all chats where the admin is a participant.
 /// 
@@ -84,6 +85,64 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
       );
     } else {
       logger.debug('New chat dialog cancelled or no user selected');
+    }
+  }
+
+  /// Confirm and permanently delete a chat (with all messages and photos).
+  ///
+  /// Runs from the page's own context so the confirm/loading/info dialogs stay
+  /// valid even after the deleted item disappears from the streamed list.
+  Future<void> _handleDeleteChat(String chatId, String displayName) async {
+    logger.info('Delete chat requested from list. chatId={} name="{}"', [chatId, displayName]);
+
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Sohbeti Sil',
+      message: '"$displayName" ile olan sohbet, tüm mesajlar ve yüklenen fotoğraflar '
+          'kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\nDevam etmek istiyor musunuz?',
+      confirmText: 'Sil',
+      cancelText: 'İptal',
+    );
+
+    if (!confirmed) {
+      logger.debug('Chat deletion cancelled. chatId={}', [chatId]);
+      return;
+    }
+
+    if (!mounted) return;
+    final chatManager = Provider.of<ChatManager>(context, listen: false);
+
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: 'Sohbet siliniyor...');
+      loadingOpen = true;
+    }
+
+    try {
+      await chatManager.deleteChat(chatId);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (mounted) {
+        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Sohbet silindi.');
+      }
+    } catch (e) {
+      logger.err('Chat deletion failed. chatId={} error={}', [chatId, e]);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Sohbet silinemedi. Lütfen tekrar deneyin.',
+      );
     }
   }
 
@@ -226,6 +285,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
                 hasImage: hasImage,
                 unreadCount: unreadCount,
                 logger: logger,
+                onDelete: _handleDeleteChat,
               );
             },
           );
@@ -248,6 +308,10 @@ class _ChatListItem extends StatelessWidget {
   final int unreadCount;
   final Logger logger;
 
+  /// Called when the admin long-presses to delete this chat.
+  /// Receives the chatId and the resolved display name for the confirmation.
+  final void Function(String chatId, String displayName) onDelete;
+
   const _ChatListItem({
     required this.chatId,
     required this.lastMsg,
@@ -256,6 +320,7 @@ class _ChatListItem extends StatelessWidget {
     required this.hasImage,
     required this.unreadCount,
     required this.logger,
+    required this.onDelete,
   });
 
   @override
@@ -360,6 +425,10 @@ class _ChatListItem extends StatelessWidget {
                     builder: (_) => ChatPage(overrideChatId: chatId),
                   ),
                 );
+              },
+              onLongPress: () {
+                logger.debug('Chat item long-pressed for delete. chatId={}', [chatId]);
+                onDelete(chatId, displayName);
               },
             ),
             
