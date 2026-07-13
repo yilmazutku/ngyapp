@@ -308,7 +308,7 @@ class _ChatListItem extends StatelessWidget {
   final int unreadCount;
   final Logger logger;
 
-  /// Called when the admin long-presses to delete this chat.
+  /// Called when the admin taps the delete (trash) icon for this chat.
   /// Receives the chatId and the resolved display name for the confirmation.
   final void Function(String chatId, String displayName) onDelete;
 
@@ -381,36 +381,50 @@ class _ChatListItem extends StatelessWidget {
                     ),
                 ],
               ),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    timeStr,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: unreadCount > 0 ? Colors.green.shade700 : Colors.grey,
-                      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  if (unreadCount > 0) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.green,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        unreadCount > 99 ? '99+' : unreadCount.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        timeStr,
+                        style: TextStyle(
                           fontSize: 12,
-                          fontWeight: FontWeight.bold,
+                          color: unreadCount > 0 ? Colors.green.shade700 : Colors.grey,
+                          fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
                         ),
                       ),
-                    ),
-                  ],
+                      if (unreadCount > 0) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            unreadCount > 99 ? '99+' : unreadCount.toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  // Delete chat (and all its photos) — admin only
+                  IconButton(
+                    tooltip: 'Sohbeti Sil',
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: () {
+                      logger.debug('Chat delete icon tapped. chatId={}', [chatId]);
+                      onDelete(chatId, displayName);
+                    },
+                  ),
                 ],
               ),
               onTap: () async {
@@ -425,10 +439,6 @@ class _ChatListItem extends StatelessWidget {
                     builder: (_) => ChatPage(overrideChatId: chatId),
                   ),
                 );
-              },
-              onLongPress: () {
-                logger.debug('Chat item long-pressed for delete. chatId={}', [chatId]);
-                onDelete(chatId, displayName);
               },
             ),
             
