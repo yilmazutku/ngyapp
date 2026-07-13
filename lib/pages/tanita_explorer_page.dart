@@ -21,6 +21,7 @@ class TanitaExplorerPage extends StatefulWidget {
 
 class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
   late Future<List<TanitaPdfModel>> _pdfListFuture;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -56,44 +57,94 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
     }).toList();
   }
 
-  Future<void> _pickAndUploadPdf() async {
+  /// Picks one or more PDFs and uploads them in sequence. A single failing file
+  /// does not abort the batch; a summary reports how many succeeded and which
+  /// (if any) failed.
+  Future<void> _pickAndUploadPdfs() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
+        allowMultiple: true,
       );
       if (result == null || result.files.isEmpty) {
         log.info('No PDF selected.');
         return;
       }
 
-      final file = result.files.single;
-      final fileBytes = file.bytes;
-      final filePath = file.path;
-      final fileName = file.name;
+      if (mounted) setState(() { _busy = true; });
 
-      if (fileBytes != null) {
-        await _uploadToProvider(fileName, fileBytes);
-      } else if (filePath != null) {
-        final f = File(filePath);
-        if (await f.exists()) {
-          final readBytes = await f.readAsBytes();
-          await _uploadToProvider(fileName, readBytes);
-        } else {
-          if (!mounted) return;
+      final files = result.files;
+      final total = files.length;
+      final progress =
+          ValueNotifier<String>('PDF yükleniyor (1/$total)...');
+
+      // --- SHOW LOADING (do not await) ---
+      bool loadingOpen = false;
+      if (mounted) {
+        DialogUtils.openLoadingProgress(context, messageListenable: progress);
+        loadingOpen = true;
+      }
+
+      int success = 0;
+      final List<String> failed = [];
+      try {
+        final provider = Provider.of<MeasProvider>(context, listen: false);
+        for (int i = 0; i < total; i++) {
+          final file = files[i];
+          progress.value = 'PDF yükleniyor (${i + 1}/$total)...';
+          try {
+            final bytes = await _readFileBytes(file);
+            await provider.uploadTanitaPdfFile(
+              userId: widget.userId,
+              fileName: file.name,
+              fileBytes: bytes,
+            );
+            success++;
+          } catch (e) {
+            log.err('Error uploading Tanita PDF {}: {}', [file.name, e]);
+            failed.add(file.name);
+          }
+        }
+
+        // Close loading BEFORE showing info/error
+        if (mounted && loadingOpen) {
+          Navigator.of(context, rootNavigator: true).pop();
+          loadingOpen = false;
+        }
+
+        if (mounted) {
+          setState(() { _pdfListFuture = _fetchTanitaPdfs(); });
+          if (failed.isEmpty) {
+            await DialogUtils.openInfo(
+              context,
+              title: 'Başarılı',
+              message: '$success PDF yüklendi.',
+            );
+          } else {
+            await DialogUtils.openError(
+              context,
+              title: success > 0 ? 'Kısmen Tamamlandı' : 'Hata',
+              message: '$success PDF yüklendi, ${failed.length} PDF '
+                  'yüklenemedi:\n${failed.join('\n')}',
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted && loadingOpen) {
+          Navigator.of(context, rootNavigator: true).pop();
+          loadingOpen = false;
+        }
+        if (mounted) {
           await DialogUtils.openError(
             context,
             title: 'Hata',
-            message: 'Dosya bulunamadı.',
+            message: 'PDF yükleme hatası: $e',
           );
         }
-      } else {
-        if (!mounted) return;
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message: 'Dosya okunamadı.',
-        );
+      } finally {
+        progress.dispose();
+        if (mounted) setState(() { _busy = false; });
       }
     } catch (e) {
       log.err('File pick error: {}', [e]);
@@ -106,56 +157,13 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
     }
   }
 
-  Future<void> _uploadToProvider(String fileName, List<int> fileBytes) async {
-    final provider = Provider.of<MeasProvider>(context, listen: false);
-
-    // Show blocking loading (do NOT await)
-    bool loadingOpen = false;
-    if (mounted) {
-      DialogUtils.openLoading(context, message: 'PDF yükleniyor...');
-      loadingOpen = true;
-    }
-
-    try {
-      await provider.uploadTanitaPdfFile(
-        userId: widget.userId,
-        fileName: fileName,
-        fileBytes: fileBytes,
-      );
-
-      // Close loading BEFORE success dialog
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
-
-      if (mounted) {
-        await DialogUtils.openInfo(
-          context,
-          title: 'Başarılı',
-          message: 'PDF yüklendi.',
-        );
-        setState(() {
-          _pdfListFuture = _fetchTanitaPdfs();
-        });
-      }
-    } catch (e) {
-      log.err('Error uploading PDF: {}', [e]);
-
-      // Close loading BEFORE error dialog
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
-
-      if (mounted) {
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message: 'PDF yükleme hatası: $e',
-        );
-      }
-    }
+  /// Reads a picked file's bytes, preferring the in-memory [PlatformFile.bytes]
+  /// and falling back to reading from [PlatformFile.path] on platforms that
+  /// only expose a file path.
+  Future<List<int>> _readFileBytes(PlatformFile file) async {
+    if (file.bytes != null) return file.bytes!;
+    if (file.path != null) return File(file.path!).readAsBytes();
+    throw Exception('Dosya okunamadı.');
   }
 
   Widget _buildHeader(BuildContext context) {
@@ -176,9 +184,16 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
           ),
           const SizedBox(width: 8),
           ElevatedButton.icon(
-            onPressed: _pickAndUploadPdf,
-            icon: const Icon(Icons.add),
-            label: const Text('Yeni PDF ekle'),
+            onPressed: _busy ? null : _pickAndUploadPdfs,
+            icon: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.add),
+            label: const Text('PDF Ekle'),
           ),
         ],
       ),
