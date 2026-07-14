@@ -33,17 +33,35 @@ class AppointmentsPage extends StatefulWidget {
 }
 
 class _AppointmentsPageState extends State<AppointmentsPage> {
-  DateTime _selectedDate = DateTime.now();
+  /// Minimum lead time (in days) before a user can book an appointment.
+  /// Users can only see/select available slots starting this many days from
+  /// today (e.g. if today is the 14th, the earliest selectable day is the 16th).
+  static const int _minLeadDays = 2;
+
+  /// Display format for the selected date, including the day-of-week name
+  /// (e.g. "16.07.2026 Perşembe").
+  static const String _dateWithDayFormat = 'dd.MM.yyyy EEEE';
+
+  late DateTime _selectedDate;
   MeetingType _selectedMeetingType = MeetingType.f2f;
   AppointmentType _selectedAppointmentType = AppointmentType.diger;
   TimeOfDay? _selectedTime;
   late Future<List<TimeOfDay>> _availableTimesFuture;
   late Future<List<AppointmentModel>> _userAppointmentsFuture;
 
+  /// The earliest date a user is allowed to book, normalized to midnight.
+  DateTime get _earliestSelectableDate {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day)
+        .add(const Duration(days: _minLeadDays));
+  }
+
   @override
   void initState() {
     super.initState();
     logger.debug('Initializing AppointmentsPage state.');
+    // Default to the earliest bookable date (today + minimum lead time).
+    _selectedDate = _earliestSelectableDate;
     _fetchAvailableTimes();
     // Load admin-configured default durations so the duration derived at
     // booking time reflects the values set in the Testing page.
@@ -334,18 +352,20 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
               child: ListTile(
                 leading: const Icon(Icons.calendar_today, color: Colors.blueAccent),
                 title: Text(
-                  DateFormat('dd.MM.yyyy', 'tr_TR').format(_selectedDate),
+                  DateFormat(_dateWithDayFormat, 'tr_TR').format(_selectedDate),
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 trailing:
                     const Icon(Icons.edit_calendar, color: Colors.blueAccent),
                 onTap: () async {
+                  final earliest = _earliestSelectableDate;
                   final DateTime? picked = await showDatePicker(
                     context: context,
-                    initialDate: _selectedDate,
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 45)),
+                    initialDate:
+                        _selectedDate.isBefore(earliest) ? earliest : _selectedDate,
+                    firstDate: earliest,
+                    lastDate: earliest.add(const Duration(days: 45)),
                     locale: const Locale('tr', 'TR'),
                   );
                   if (picked != null && picked != _selectedDate) {

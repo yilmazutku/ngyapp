@@ -418,6 +418,10 @@ class _HomePageState extends State<HomePage> {
   /// Whether the stream has been initialized
   bool _streamInitialized = false;
 
+  /// Whether the home page shows items as a grid (squares) or a list.
+  /// Toggled by the user via a button in the AppBar.
+  bool _isGridView = true;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -645,14 +649,10 @@ class _HomePageState extends State<HomePage> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        final role = snapshot.data ?? 'user';
         final isAdmin = FcmService.isAdmin(userId);
 
-        // Build grid items based on user role
-        final List<Map<String, dynamic>> gridItems = [];
-
-        // Common items for all users
-        gridItems.addAll([
+        // Items shown on the "Kullanıcı Tarafı" (user side)
+        final List<Map<String, dynamic>> userItems = [
           {
             'icon': Icons.chat,
             'label': 'Chat',
@@ -690,11 +690,11 @@ class _HomePageState extends State<HomePage> {
             'label': 'Duyurular',
             'onTap': () => _navigateToNews(context),
           },
-        ]);
+        ];
 
-        // Add admin management items if user is admin
-        if (isAdmin) {
-          gridItems.addAll([
+        // Items shown on the "Yönetici Tarafı" (admin side): from
+        // "Kullanıcı Ekle" through "Ayarlar". Only populated for admins.
+        final List<Map<String, dynamic>> adminItems = [
             {
               'icon': Icons.admin_panel_settings,
               'label': 'Kullanıcı Ekle',
@@ -736,15 +736,13 @@ class _HomePageState extends State<HomePage> {
               'onTap': () => _navigateToNotificationTest(context),
             },
             {
-              'icon': Icons.science,
-              'label': 'Testing',
+              'icon': Icons.settings,
+              'label': 'Ayarlar',
               'onTap': () => _navigateToTesting(context),
             },
-          ]);
-        }
+        ];
 
-        return Scaffold(
-          appBar: AppBar(
+        final appBar = AppBar(
             title: const Text('Ana Sayfa'),
             centerTitle: true,
             elevation: 4.0,
@@ -753,6 +751,24 @@ class _HomePageState extends State<HomePage> {
                 bottom: Radius.circular(10),
               ),
             ),
+            bottom: isAdmin
+                ? const TabBar(
+                    indicatorColor: Colors.white,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white70,
+                    labelStyle: TextStyle(fontWeight: FontWeight.bold),
+                    tabs: [
+                      Tab(
+                        icon: Icon(Icons.people),
+                        text: 'Kullanıcı Tarafı',
+                      ),
+                      Tab(
+                        icon: Icon(Icons.admin_panel_settings),
+                        text: 'Yönetici Tarafı',
+                      ),
+                    ],
+                  )
+                : null,
             actions: [
               IconButton(
                 icon: const Icon(Icons.logout),
@@ -796,88 +812,203 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
             ],
-          ),
-          body: LayoutBuilder(
-            builder: (context, constraints) {
-              // Responsive grid layout based on screen width
-              final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
+          );
 
-              return GridView.builder(
-                padding: const EdgeInsets.all(16),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  childAspectRatio: 1.5,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                ),
-                itemCount: gridItems.length,
-                itemBuilder: (context, index) {
-                  final item = gridItems[index];
-                  final badgeStream = item['badgeStream'] as Stream<int>?;
-                  
-                  return Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+        if (isAdmin) {
+          // Admins get two tabs: user side and admin side.
+          return DefaultTabController(
+            length: 2,
+            initialIndex: 1,
+            child: Scaffold(
+              appBar: appBar,
+              body: Column(
+                children: [
+                  _buildViewToggle(),
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        _buildItemsView(userItems),
+                        _buildItemsView(adminItems),
+                      ],
                     ),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: item['onTap'],
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Icon with optional badge
-                          if (badgeStream != null)
-                            StreamBuilder<int>(
-                              stream: badgeStream,
-                              builder: (context, snapshot) {
-                                // Handle stream errors gracefully
-                                if (snapshot.hasError) {
-                                  logger.warn('Badge stream error: ${snapshot.error}');
-                                }
-                                
-                                final count = snapshot.data ?? 0;
-                                return Badge(
-                                  isLabelVisible: count > 0,
-                                  label: Text(
-                                    count > 99 ? '99+' : count.toString(),
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  backgroundColor: Colors.red,
-                                  child: Icon(
-                                    item['icon'],
-                                    size: 48,
-                                    color: const Color(0xFFA16AEC),
-                                  ),
-                                );
-                              },
-                            )
-                          else
-                            Icon(
-                              item['icon'],
-                              size: 48,
-                              color: const Color(0xFFA16AEC),
-                            ),
-                          const SizedBox(height: 8),
-                          Text(
-                            item['label'],
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // Regular users only see their own side.
+        return Scaffold(
+          appBar: appBar,
+          body: Column(
+            children: [
+              _buildViewToggle(),
+              Expanded(child: _buildItemsView(userItems)),
+            ],
           ),
+        );
+      },
+    );
+  }
+
+  /// Prominent toggle that lets the user switch between grid (squares) and
+  /// list layouts on the home page.
+  Widget _buildViewToggle() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: SegmentedButton<bool>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment<bool>(
+              value: true,
+              icon: Icon(Icons.grid_view),
+              label: Text('Kareler'),
+            ),
+            ButtonSegment<bool>(
+              value: false,
+              icon: Icon(Icons.view_list),
+              label: Text('Liste'),
+            ),
+          ],
+          selected: {_isGridView},
+          onSelectionChanged: (selection) {
+            setState(() => _isGridView = selection.first);
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Builds either a grid (squares) or a list of the given [items], based on
+  /// the currently selected view mode.
+  Widget _buildItemsView(List<Map<String, dynamic>> items) {
+    if (_isGridView) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          // Responsive grid layout based on screen width
+          final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
+
+          return GridView.builder(
+            padding: const EdgeInsets.all(16),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
+              childAspectRatio: 1.5,
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 16,
+            ),
+            itemCount: items.length,
+            itemBuilder: (context, index) => _buildGridCard(items[index]),
+          );
+        },
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: items.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 12),
+      itemBuilder: (context, index) => _buildListTile(items[index]),
+    );
+  }
+
+  /// A single square card used in the grid layout.
+  Widget _buildGridCard(Map<String, dynamic> item) {
+    final badgeStream = item['badgeStream'] as Stream<int>?;
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: item['onTap'],
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildIcon(item, badgeStream, size: 48),
+            const SizedBox(height: 8),
+            Text(
+              item['label'],
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A single row used in the list layout.
+  Widget _buildListTile(Map<String, dynamic> item) {
+    final badgeStream = item['badgeStream'] as Stream<int>?;
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        leading: _buildIcon(item, badgeStream, size: 32),
+        title: Text(
+          item['label'],
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: item['onTap'],
+      ),
+    );
+  }
+
+  /// Builds the icon for an item, wrapping it in a [Badge] when the item has
+  /// an unread-count stream.
+  Widget _buildIcon(
+    Map<String, dynamic> item,
+    Stream<int>? badgeStream, {
+    required double size,
+  }) {
+    final icon = Icon(
+      item['icon'],
+      size: size,
+      color: const Color(0xFFA16AEC),
+    );
+
+    if (badgeStream == null) {
+      return icon;
+    }
+
+    return StreamBuilder<int>(
+      stream: badgeStream,
+      builder: (context, snapshot) {
+        // Handle stream errors gracefully
+        if (snapshot.hasError) {
+          logger.warn('Badge stream error: ${snapshot.error}');
+        }
+
+        final count = snapshot.data ?? 0;
+        return Badge(
+          isLabelVisible: count > 0,
+          label: Text(
+            count > 99 ? '99+' : count.toString(),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          backgroundColor: Colors.red,
+          child: icon,
         );
       },
     );
