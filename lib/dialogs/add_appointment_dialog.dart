@@ -1,5 +1,6 @@
 // dialogs/add_appointment_dialog.dart
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
@@ -45,6 +46,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   TimeOfDay _selectedTime = const TimeOfDay(hour: 9, minute: 0);
   DateTime _selectedDate = DateTime.now();
   DateTime? _postponedDate;
+  // Source of the postponement (user vs admin). Only user-originated
+  // postponements consume the customer's postponement rights.
+  PostponeSource _postponedBy = PostponeSource.user;
   List<UserModel> _users = [];
 
   // User search (admin scenario only)
@@ -342,6 +346,26 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       return;
     }
 
+    // A user-originated postponement consumes a postponement right; admin-
+    // originated ones do not. Warn the admin when a user-originated
+    // postponement is recorded but the customer has no rights left.
+    final bool isUserPostponement =
+        _selectedStatus == AppointmentStatus.postponed &&
+        _postponedBy == PostponeSource.user;
+    if (isUserPostponement && _selectedSubscription != null) {
+      if (!_selectedSubscription!.hasPostponementsLeft) {
+        final proceedAnyway = await DialogUtils.openConfirm(
+          context,
+          title: 'Erteleme Hakkı Yok',
+          message:
+              'Danışanın erteleme hakkı bulunmamaktadır. Yine de bu randevuyu ertelemek istediğinize emin misiniz?',
+          confirmText: 'Evet',
+          cancelText: 'Hayır',
+        );
+        if (!proceedAnyway) return;
+      }
+    }
+
     // Show confirmation dialog
     final shouldSave = await showDialog<bool>(
       context: context,
@@ -367,6 +391,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
+              if (_selectedStatus == AppointmentStatus.postponed)
+                Text('Erteleme Kaynağı: ${_postponedBy.label}'),
               Text('Paket: ${_selectedSubscription?.packageName ?? 'Paketsiz (Ön Görüşme)'}'),
               if (_notesController.text.isNotEmpty)
                 Text('Notlar: ${_notesController.text}'),
@@ -412,10 +438,32 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         createUser: widget.userId != null ? 'user' : 'admin',
         notes: _notesController.text,
         postponedDate: _selectedStatus == AppointmentStatus.postponed ? _postponedDate : null,
+        postponedBy: _selectedStatus == AppointmentStatus.postponed ? _postponedBy : null,
         durationMinutes: durationMinutes,
       );
 
         await appointmentManager.addAppointment(appointment);
+
+        // Only user-originated postponements consume a postponement right. Use
+        // an atomic increment so concurrent edits can't clobber the counter.
+        if (isUserPostponement && _selectedSubscription != null) {
+          try {
+            final subProvider =
+                Provider.of<SubProvider>(context, listen: false);
+            await subProvider.updateSubscription(
+              userId: appointment.userId,
+              subscriptionId: _selectedSubscription!.subscriptionId,
+              updateData: {
+                'postponementsUsed': FieldValue.increment(1),
+                'updateDate': Timestamp.fromDate(DateTime.now()),
+                'updateUser': 'admin',
+              },
+            );
+          } catch (e) {
+            logger.err('Error updating postponement: {}', [e]);
+          }
+        }
+
         widget.onAppointmentAdded();
 
       if (mounted) {
@@ -666,6 +714,25 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               ),
               const SizedBox(height: 16),
               
+              // Postponement source (shown only when status is Postponed).
+              // Only user-originated postponements consume the customer's rights.
+              if (_selectedStatus == AppointmentStatus.postponed) ...[
+                StatusDropdown<PostponeSource>(
+                  selectedStatus: _postponedBy,
+                  onStatusChanged: (value) {
+                    if (value != null) {
+                      setState(() => _postponedBy = value);
+                    }
+                  },
+                  statusOptions: {
+                    for (final source in PostponeSource.values)
+                      source: source.label
+                  },
+                  label: 'Erteleme Kaynağı',
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // Postponed date picker (shown only when status is Postponed)
               if (_selectedStatus == AppointmentStatus.postponed)
                 ListTile(

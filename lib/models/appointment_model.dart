@@ -23,6 +23,7 @@ class AppointmentModel {
   String? canceledBy; // 'user' or 'admin'
   DateTime? canceledAt;
   DateTime? postponedDate; // New date when appointment is postponed
+  PostponeSource? postponedBy; // Who initiated the postponement (see PostponeSource)
   UserModel?
       user; //sonradan eklendi, userid var ama user yok gosterirken hangi username e ait old icin
   bool? isDeleted = false;
@@ -44,6 +45,7 @@ class AppointmentModel {
     this.canceledBy,
     this.canceledAt,
     this.postponedDate,
+    this.postponedBy,
     this.user,
     this.isDeleted,
     required this.durationMinutes,
@@ -94,6 +96,7 @@ class AppointmentModel {
       postponedDate: data['postponedDate'] != null
           ? (data['postponedDate'] as Timestamp).toDate()
           : null,
+      postponedBy: PostponeSource.fromValue(data['postponedBy'] as String?),
       isDeleted: data['isDeleted'],
     );
   }
@@ -102,7 +105,7 @@ class AppointmentModel {
 
   @override
   String toString() {
-    return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, canceledBy: $canceledBy, canceledAt: $canceledAt, postponedDate: $postponedDate, duration: $durationMinutes}';
+    return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, canceledBy: $canceledBy, canceledAt: $canceledAt, postponedDate: $postponedDate, postponedBy: $postponedBy, duration: $durationMinutes}';
   }
 
   Map<String, dynamic> toMap() {
@@ -122,6 +125,7 @@ class AppointmentModel {
       'canceledBy': canceledBy,
       'canceledAt': canceledAt != null ? Timestamp.fromDate(canceledAt!) : null,
       'postponedDate': postponedDate != null ? Timestamp.fromDate(postponedDate!) : null,
+      'postponedBy': postponedBy?.value,
       'isDeleted': isDeleted,
     };
   }
@@ -280,6 +284,34 @@ enum AppointmentStatus {
 
   static AppointmentStatus fromLabel(String label) {
     return AppointmentStatus.values.firstWhere((e) => e.label == label);
+  }
+}
+
+/// Who initiated an appointment postponement.
+///
+/// Only [PostponeSource.user] postponements consume a customer's postponement
+/// rights (see `SubscriptionModel.postponementsUsed`); [PostponeSource.admin]
+/// postponements do not affect the remaining rights.
+enum PostponeSource {
+  user('user', 'Kullanıcı Kaynaklı'),
+  admin('admin', 'Admin Kaynaklı');
+
+  const PostponeSource(this.value, this.label);
+
+  /// Stored value in Firestore.
+  final String value;
+
+  /// Human-readable label shown in the UI.
+  final String label;
+
+  /// Parses the stored [value] back into a [PostponeSource]; returns null when
+  /// the appointment has no recorded source (e.g. legacy/non-postponed data).
+  static PostponeSource? fromValue(String? value) {
+    if (value == null) return null;
+    for (final source in PostponeSource.values) {
+      if (source.value == value) return source;
+    }
+    return null;
   }
 }
 

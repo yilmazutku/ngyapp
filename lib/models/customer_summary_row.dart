@@ -35,6 +35,9 @@ class CustomerSummaryRow {
   final SummaryCell paymentType;
   final SummaryCell packageInfo;
 
+  /// Free-text notes attached to the active subscription (may be empty).
+  final SummaryCell notes;
+
   /// Always [maxSeans] entries; unused trailing slots are empty cells.
   final List<SummaryCell> seans;
 
@@ -42,7 +45,9 @@ class CustomerSummaryRow {
   /// Variable length; the table pads shorter rows to a common width.
   final List<SummaryCell> postponedDates;
 
-  /// Remaining postponement rights: allowedPostponements - postponementsUsed.
+  /// Remaining postponement rights, based on user-originated postponements only
+  /// (admin postponements do not reduce it). See
+  /// SubscriptionModel.remainingPostponements.
   final SummaryCell remainingPostponements;
 
   const CustomerSummaryRow({
@@ -53,6 +58,7 @@ class CustomerSummaryRow {
     required this.paymentAmount,
     required this.paymentType,
     required this.packageInfo,
+    required this.notes,
     required this.seans,
     required this.postponedDates,
     required this.remainingPostponements,

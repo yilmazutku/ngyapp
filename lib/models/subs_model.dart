@@ -18,10 +18,15 @@ class SubscriptionModel {
   final String subscriptionId;
   final String userId;
   final String packageName;
+  final String? notes;
   final DateTime startDate;
   final int totalMeetings;
   int meetingsCompleted;
   int meetingsBurned;
+
+  /// Number of postponement rights the customer has consumed. Only
+  /// user-originated postponements increment this; admin-initiated
+  /// postponements never do, so it always reflects the customer's own usage.
   int postponementsUsed;
   final int allowedPostponements;
   final double totalAmount;
@@ -39,6 +44,7 @@ class SubscriptionModel {
     required this.subscriptionId,
     required this.userId,
     required this.packageName,
+    this.notes,
     required this.startDate,
     required this.totalMeetings,
     this.meetingsCompleted = 0,
@@ -63,6 +69,7 @@ class SubscriptionModel {
       subscriptionId: doc.id,
       userId: data['userId'],
       packageName: data['packageName'],
+      notes: data['notes'],
       startDate: (data['startDate'] as Timestamp).toDate(),
       totalMeetings: data['totalMeetings'],
       meetingsCompleted: data['meetingsCompleted'] ?? 0,
@@ -89,6 +96,7 @@ class SubscriptionModel {
       'subscriptionId': subscriptionId,
       'userId': userId,
       'packageName': packageName,
+      if (notes != null) 'notes': notes,
       'startDate': Timestamp.fromDate(startDate),
       'totalMeetings': totalMeetings,
       'meetingsCompleted': meetingsCompleted,
@@ -119,7 +127,7 @@ class SubscriptionModel {
 
   @override
   String toString() {
-    return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
+    return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, notes: $notes, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
   }
 
   /// Auto-calculates the suggested allowed postponements for a package
@@ -128,6 +136,19 @@ class SubscriptionModel {
     if (totalMeetings <= 0) return 0;
     return (totalMeetings / 4).ceil();
   }
+
+  /// Remaining postponement rights ("kalan erteleme hakkı"), i.e.
+  /// [allowedPostponements] minus the postponements already used. Because
+  /// [postponementsUsed] only tracks user-originated postponements, this never
+  /// counts admin-initiated ones. Clamped so it is never negative. This is the
+  /// single source of truth used everywhere the remaining right is shown.
+  int get remainingPostponements {
+    final remaining = allowedPostponements - postponementsUsed;
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  /// Whether the customer still has any postponement rights left.
+  bool get hasPostponementsLeft => remainingPostponements > 0;
 
   @override
   bool operator ==(Object other) =>

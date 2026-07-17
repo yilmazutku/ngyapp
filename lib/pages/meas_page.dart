@@ -213,8 +213,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
             children: [
               _buildSummaryItem('Ağırlık', latest.weight, 'kg', Icons.monitor_weight),
               const SizedBox(width: 8),
-              _buildSummaryItem('Yağ', latest.fatKg, 'kg', Icons.water_drop),
-              const SizedBox(width: 8),
               _buildSummaryItem('Bel', latest.waist, 'cm', Icons.straighten),
             ],
           ),
@@ -504,7 +502,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
   /// Metrics that can be charted over time (y = value, x = date).
   List<_ChartMetric> get _chartMetrics => const [
         _ChartMetric('Ağırlık', 'kg', Color(0xFF2563EB), _MetricField.weight),
-        _ChartMetric('Yağ', 'kg', Color(0xFFDB2777), _MetricField.fatKg),
         _ChartMetric('Bel', 'cm', Color(0xFF059669), _MetricField.waist),
         _ChartMetric('Göğüs', 'cm', Color(0xFF7C3AED), _MetricField.chest),
         _ChartMetric('Sırt', 'cm', Color(0xFF0891B2), _MetricField.back),
@@ -783,7 +780,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
           _hCell('Bacak\n(cm)', _wNum),
           _hCell('Kol\n(cm)', _wNum),
           _hCell('Ağırlık\n(kg)', _wNum),
-          _hCell('Yağ\n(kg)', _wNum),
         ],
       ),
     );
@@ -802,7 +798,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
           _dCell(_formatNum(m.leg), _wNum),
           _dCell(_formatNum(m.arm), _wNum),
           _dCell(_formatNum(m.weight), _wNum),
-          _dCell(_formatNum(m.fatKg), _wNum),
         ],
       ),
     );

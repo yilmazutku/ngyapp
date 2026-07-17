@@ -71,7 +71,7 @@ class _DetailsTabState extends State<DetailsTab>
   void _populateFields(UserModel user) {
     _nameController.text = user.name;
     _emailController.text = user.email;
-    _surnameController.text = user.surname ?? '';
+    _surnameController.text = user.surname;
     _ageController.text = user.age?.toString() ?? '';
     _referenceController.text = user.reference ?? '';
     _notesController.text = user.notes ?? '';
@@ -79,52 +79,104 @@ class _DetailsTabState extends State<DetailsTab>
   }
 
   Future<void> _saveChanges(UserModel user) async {
+    final newEmail = _emailController.text.trim();
+
     if (_nameController.text.trim().isEmpty) {
       DialogUtils.openError(context, title: 'Hata', message: 'Ad alanı boş bırakılamaz.');
       return;
     }
-    if (_emailController.text.trim().isEmpty || !_emailController.text.contains('@')) {
+    if (newEmail.isEmpty || !newEmail.contains('@')) {
       DialogUtils.openError(context, title: 'Hata', message: 'Geçerli bir e-posta adresi giriniz.');
       return;
     }
 
-    setState(() => _isLoading = true);
+    // Changing the email also changes the account the user signs in with, so
+    // confirm with the admin before touching Firebase Authentication.
+    final emailChanged = newEmail.toLowerCase() != user.email.trim().toLowerCase();
+    if (emailChanged) {
+      final confirmed = await DialogUtils.openConfirm(
+        context,
+        title: 'E-posta Değişikliği',
+        message: 'Giriş e-postası "${user.email}" adresinden "$newEmail" adresine '
+            'değiştirilecek.\n\nKullanıcı bundan sonra yeni e-postası ve mevcut '
+            'şifresiyle giriş yapacak; eski e-posta ile giriş yapılamayacak.\n\n'
+            'Devam etmek istiyor musunuz?',
+        confirmText: 'Evet, Değiştir',
+        cancelText: 'Vazgeç',
+      );
+      if (!confirmed) return;
+    }
+
+    if (!mounted) return;
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
+    final updatedUser = UserModel(
+      userId: user.userId,
+      name: _nameController.text,
+      email: newEmail,
+      password: user.password,
+      role: user.role,
+      createDate: user.createDate,
+      createUser: user.createUser,
+      updateDate: DateTime.now(),
+      updateUser: 'admin',
+      surname: _surnameController.text,
+      age: _ageController.text.isEmpty ? null : int.tryParse(_ageController.text),
+      reference: _referenceController.text.isEmpty ? null : _referenceController.text,
+      notes: _notesController.text.isEmpty ? null : _notesController.text,
+      dosyaNo: _dosyaNoController.text.trim().isEmpty ? null : _dosyaNoController.text.trim(),
+    );
+
+    setState(() => _isLoading = true);
+
+    bool loadingOpen = false;
+    if (emailChanged && mounted) {
+      DialogUtils.openLoading(context, message: 'E-posta güncelleniyor...');
+      loadingOpen = true;
+    }
+
     try {
-      final updatedUser = UserModel(
-        userId: user.userId,
-        name: _nameController.text,
-        email: _emailController.text,
-        password: user.password,
-        role: user.role,
-        createDate: user.createDate,
-        createUser: user.createUser,
-        updateDate: DateTime.now(),
-        updateUser: 'admin',
-        surname: _surnameController.text,
-        age: _ageController.text.isEmpty ? null : int.tryParse(_ageController.text),
-        reference: _referenceController.text.isEmpty ? null : _referenceController.text,
-        notes: _notesController.text.isEmpty ? null : _notesController.text,
-        dosyaNo: _dosyaNoController.text.trim().isEmpty ? null : _dosyaNoController.text.trim(),
-      );
+      // Update the sign-in email first (Auth + Firestore via Cloud Function) so
+      // we never persist a Firestore email the user cannot log in with.
+      if (emailChanged) {
+        await userProvider.updateUserEmail(userId: user.userId, newEmail: newEmail);
+      }
 
       await userProvider.updateUserDetails(updatedUser);
 
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (!mounted) return;
       setState(() {
-        _isLoading = false;
         _isEditing = false;
         _userFuture = userProvider.fetchUserDetails(userId: user.userId);
       });
 
-      DialogUtils.openInfo(context, title: 'Başarılı', message: 'Kullanıcı bilgileri başarıyla güncellendi.');
-    } catch (e) {
-      setState(() => _isLoading = false);
-      DialogUtils.openError(
+      DialogUtils.openInfo(
         context,
-        title: 'Hata',
-        message: 'Kullanıcı bilgileri güncellenirken bir hata oluştu: $e',
+        title: 'Başarılı',
+        message: emailChanged
+            ? 'Kullanıcı bilgileri güncellendi. Kullanıcı artık yeni e-postası '
+                've mevcut şifresiyle giriş yapabilir.'
+            : 'Kullanıcı bilgileri başarıyla güncellendi.',
       );
+    } catch (e) {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (mounted) {
+        DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Kullanıcı bilgileri güncellenirken bir hata oluştu: $e',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -185,7 +237,7 @@ class _DetailsTabState extends State<DetailsTab>
                         children: [
                           _buildReadOnlyField('Dosya NO', user.dosyaNo ?? ''),
                           _buildReadOnlyField('Ad', user.name),
-                          _buildReadOnlyField('Soyisim', user.surname ?? ''),
+                          _buildReadOnlyField('Soyisim', user.surname),
                           _buildReadOnlyField('E-posta', user.email),
                           _buildReadOnlyField('Yaş', user.age?.toString() ?? ''),
                           _buildReadOnlyField('Referans', user.reference ?? ''),
@@ -318,7 +370,7 @@ class _DetailsTabState extends State<DetailsTab>
             ),
             const SizedBox(height: 16),
             Text(
-              '${user.name} ${user.surname ?? ""}',
+              '${user.name} ${user.surname}',
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),

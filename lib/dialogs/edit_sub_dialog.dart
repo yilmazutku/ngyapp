@@ -26,6 +26,7 @@ class EditSubscriptionDialog extends StatefulWidget {
 class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _packageNameController;
+  late TextEditingController _notesController;
   late TextEditingController _totalMeetingsController;
   late TextEditingController _totalAmountController;
   late TextEditingController _amountPaidController;
@@ -56,11 +57,22 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   PaymentType? _originalPaymentType;
   bool _loadingPaymentType = true;
 
+  // Whether a payment has been received for this package. Controls the payment
+  // detail fields (amount paid + type) and, on save, whether the linked payment
+  // record is created, kept in sync, or deleted.
+  bool _isPaymentReceived = false;
+
+  // Payment records currently linked to this subscription (loaded once). Used
+  // to decide between creating, syncing, or deleting the payment on save.
+  List<PaymentModel> _linkedPayments = [];
+
   @override
   void initState() {
     super.initState();
     _packageNameController =
         TextEditingController(text: widget.subscription.packageName);
+    _notesController =
+        TextEditingController(text: widget.subscription.notes ?? '');
     _totalMeetingsController = TextEditingController(
         text: widget.subscription.totalMeetings.toString());
     _totalAmountController =
@@ -81,6 +93,10 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     
     // Check if payment is incomplete
     _isPaymentIncomplete = widget.subscription.amountPaid < widget.subscription.totalAmount;
+
+    // Consider payment received when some amount has been paid; refined once the
+    // linked payment record(s) are loaded.
+    _isPaymentReceived = widget.subscription.amountPaid > 0;
     
     // Add listeners to update payment status
     _totalAmountController.addListener(_updatePaymentStatus);
@@ -111,8 +127,12 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
 
       if (mounted) {
         setState(() {
+          _linkedPayments = payments;
           _paymentType = type;
           _originalPaymentType = type;
+          // Payment is "received" when a record exists or an amount was paid.
+          _isPaymentReceived =
+              payments.isNotEmpty || widget.subscription.amountPaid > 0;
           _loadingPaymentType = false;
         });
       }
@@ -194,6 +214,17 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
               ),
               const SizedBox(height: 16),
               TextFormField(
+                controller: _notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notlar',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+                maxLines: 3,
+                textInputAction: TextInputAction.newline,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
                 controller: _totalMeetingsController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
@@ -232,6 +263,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   },
                 ),
                 const SizedBox(height: 16),
+
+                // Amount paid is always visible/editable.
                 TextFormField(
                   controller: _amountPaidController,
                   keyboardType: TextInputType.number,
@@ -239,14 +272,17 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     labelText: 'Ödenmiş Miktar (TL)',
                     border: const OutlineInputBorder(),
                     filled: _isPaymentIncomplete,
-                    fillColor: _isPaymentIncomplete ? Colors.red.shade100 : null,
+                    fillColor:
+                        _isPaymentIncomplete ? Colors.red.shade100 : null,
                     labelStyle: _isPaymentIncomplete
-                      ? TextStyle(color: Colors.red.shade800)
-                      : null,
+                        ? TextStyle(color: Colors.red.shade800)
+                        : null,
                   ),
                   style: _isPaymentIncomplete
-                    ? TextStyle(color: Colors.red.shade800, fontWeight: FontWeight.bold)
-                    : null,
+                      ? TextStyle(
+                          color: Colors.red.shade800,
+                          fontWeight: FontWeight.bold)
+                      : null,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Lütfen ödenmiş miktarı giriniz.';
@@ -257,29 +293,62 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
 
-                // Payment type of the linked payment (Nakit / Pos / Iban).
-                // Changing it updates the corresponding payment record(s).
-                if (_loadingPaymentType)
-                  const Center(child: CircularProgressIndicator())
-                else
-                  DropdownButtonFormField<PaymentType>(
-                    value: _paymentType,
-                    hint: const Text('Belirtilmemiş'),
-                    items: PaymentType.selectableValues.map((PaymentType type) {
-                      return DropdownMenuItem<PaymentType>(
-                        value: type,
-                        child: Text(type.label),
-                      );
-                    }).toList(),
-                    onChanged: (newValue) => setState(() => _paymentType = newValue),
-                    decoration: const InputDecoration(
-                      labelText: 'Ödeme Türü',
-                      border: OutlineInputBorder(),
-                      helperText: 'Bağlı ödeme kaydına uygulanır',
+                // Whether a payment has been received. Unchecking it and saving
+                // deletes the linked payment record and clears the paid amount;
+                // checking it (when none exists) creates a payment record.
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Ödeme Alındı mı?'),
+                  value: _isPaymentReceived,
+                  onChanged: (val) {
+                    final received = val ?? false;
+                    if (received) {
+                      // Default the amount to the package total and pick a real
+                      // payment type when turning payment on.
+                      final paid =
+                          double.tryParse(_amountPaidController.text) ?? 0.0;
+                      if (paid <= 0) {
+                        _amountPaidController.text = _totalAmountController.text;
+                      }
+                      _paymentType ??= PaymentType.nakit;
+                    } else {
+                      // Keep the visible amount consistent with "not received".
+                      _amountPaidController.text = '0';
+                    }
+                    setState(() => _isPaymentReceived = received);
+                  },
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+
+                // Payment type is only relevant when a payment was received.
+                if (_isPaymentReceived) ...[
+                  const SizedBox(height: 8),
+                  // Payment type of the linked payment (Nakit / Pos / Iban).
+                  // Changing it updates the corresponding payment record(s).
+                  if (_loadingPaymentType)
+                    const Center(child: CircularProgressIndicator())
+                  else
+                    DropdownButtonFormField<PaymentType>(
+                      value: _paymentType,
+                      hint: const Text('Belirtilmemiş'),
+                      items:
+                          PaymentType.selectableValues.map((PaymentType type) {
+                        return DropdownMenuItem<PaymentType>(
+                          value: type,
+                          child: Text(type.label),
+                        );
+                      }).toList(),
+                      onChanged: (newValue) =>
+                          setState(() => _paymentType = newValue),
+                      decoration: const InputDecoration(
+                        labelText: 'Ödeme Türü',
+                        border: OutlineInputBorder(),
+                        helperText: 'Bağlı ödeme kaydına uygulanır',
+                      ),
                     ),
-                  ),
+                ],
               ],
               const SizedBox(height: 16),
               ListTile(
@@ -461,7 +530,10 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
           child: const Text('İptal'),
         ),
         ElevatedButton(
-          onPressed: _isLoading ? null : _updateSubscription,
+          // Disabled while the linked payment is still loading so we never
+          // create a duplicate payment record by acting on stale data.
+          onPressed:
+              (_isLoading || _loadingPaymentType) ? null : _updateSubscription,
           child: _isLoading
               ? const CircularProgressIndicator()
               : const Text('Paket Güncelle'),
@@ -499,15 +571,20 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         // Admin-editable allowed postponements (pre-filled with the auto-calculated value)
         final allowedPostponements = int.parse(_allowedPostponementsController.text);
 
-        // Weight-tracking packages are free: no fee and no payment.
+        // Weight-tracking packages are free: no fee and no payment. When the
+        // admin marks the payment as not received, nothing is considered paid.
         final double totalAmount =
             _isWeightTracking ? 0.0 : double.parse(_totalAmountController.text);
-        final double amountPaid =
-            _isWeightTracking ? 0.0 : double.parse(_amountPaidController.text);
+        final double amountPaid = (_isWeightTracking || !_isPaymentReceived)
+            ? 0.0
+            : double.parse(_amountPaidController.text);
         
+        final String notes = _notesController.text.trim();
+
         // Create an update map with raw data - no subscription model objects
         final Map<String, dynamic> updateData = {
           'packageName': _packageNameController.text,
+          'notes': notes.isNotEmpty ? notes : null,
           'startDate': _startDate!,
           'totalMeetings': totalMeetings,
           'allowedPostponements': allowedPostponements,
@@ -545,19 +622,52 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
           updateData: updateData,
         );
 
-        // Propagate payment-type and amount changes to the linked payment(s).
-        // Only send a new payment type when the admin actually changed it.
-        final PaymentType? changedPaymentType =
-            (_paymentType != null && _paymentType != _originalPaymentType)
-                ? _paymentType
-                : null;
-        await paymentProvider.syncSubscriptionLinkedPayments(
-          userId: userId,
-          subscriptionId: subscriptionId,
-          newPaymentType: changedPaymentType,
-          oldAmount: oldTotalAmount,
-          newAmount: newTotalAmount,
-        );
+        // Reconcile the linked payment record with the "Ödeme Alındı mı?"
+        // selection: create one when payment is now received but none exists,
+        // keep it in sync when it already exists, or delete it when payment is
+        // no longer received. Weight-tracking packages never carry a payment.
+        if (!_isWeightTracking) {
+          if (_isPaymentReceived) {
+            if (_linkedPayments.isEmpty) {
+              await paymentProvider.addPayment(
+                userId: userId,
+                subscription: SubscriptionModel(
+                  subscriptionId: subscriptionId,
+                  userId: userId,
+                  packageName: _packageNameController.text,
+                  startDate: _startDate!,
+                  totalMeetings: totalMeetings,
+                  allowedPostponements: allowedPostponements,
+                  totalAmount: totalAmount,
+                  meetingType: _meetingType,
+                ),
+                amount: amountPaid,
+                paymentDate: _startDate,
+                status: PaymentStatus.completed,
+                paymentType: _paymentType ?? PaymentType.nakit,
+                notes: 'Paket ödemesi: ${_packageNameController.text}',
+              );
+            } else {
+              // Only send a new payment type when the admin actually changed it.
+              final PaymentType? changedPaymentType =
+                  (_paymentType != null && _paymentType != _originalPaymentType)
+                      ? _paymentType
+                      : null;
+              await paymentProvider.syncSubscriptionLinkedPayments(
+                userId: userId,
+                subscriptionId: subscriptionId,
+                newPaymentType: changedPaymentType,
+                oldAmount: oldTotalAmount,
+                newAmount: newTotalAmount,
+              );
+            }
+          } else {
+            // Payment no longer received: remove the linked record(s).
+            for (final payment in _linkedPayments) {
+              await paymentProvider.deletePayment(payment.paymentId, userId);
+            }
+          }
+        }
 
         if (!mounted) return;
         await DialogUtils.openInfo(
@@ -597,6 +707,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     
     // Dispose controllers
     _packageNameController.dispose();
+    _notesController.dispose();
     _totalMeetingsController.dispose();
     _totalAmountController.dispose();
     _amountPaidController.dispose();

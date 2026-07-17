@@ -264,7 +264,8 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         const DataColumn(label: Text('Ödeme Tutarı'), numeric: true),
         const DataColumn(label: Text('Ödeme Şekli')),
       ],
-      const DataColumn(label: Text('Paket Bilgisi')),
+      const DataColumn(label: Text('Paket Adı')),
+      const DataColumn(label: Text('Notlar (Paket Bilgisi)')),
       for (int i = 1; i <= CustomerSummaryRow.maxSeans; i++)
         DataColumn(label: Text('$i.Seans')),
       for (int i = 1; i <= postponedColumns; i++)
@@ -289,6 +290,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
           _cell(row.paymentType),
         ],
         _cell(row.packageInfo),
+        _cell(row.notes),
         for (final seans in row.seans) _cell(seans),
         for (int i = 0; i < postponedColumns; i++)
           _cell(i < row.postponedDates.length

@@ -79,14 +79,19 @@ class CustomerSummaryProvider extends ChangeNotifier {
         ? SummaryCell(activeSub.packageName.trim())
         : const SummaryCell.error();
 
+    final notes = (activeSub.notes != null && activeSub.notes!.trim().isNotEmpty)
+        ? SummaryCell(activeSub.notes!.trim())
+        : const SummaryCell.empty();
+
     final payment = await _resolveLastPayment(user.userId);
     final appts =
         await _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
 
-    // Remaining postponement rights for the active subscription.
-    final int remaining =
-        activeSub.allowedPostponements - activeSub.postponementsUsed;
-    final remainingCell = SummaryCell((remaining < 0 ? 0 : remaining).toString());
+    // Remaining postponement rights for the active subscription. Computed from
+    // user-originated postponements only (admin postponements do not reduce the
+    // right) via SubscriptionModel.remainingPostponements.
+    final remainingCell =
+        SummaryCell(activeSub.remainingPostponements.toString());
 
     return CustomerSummaryRow(
       userId: user.userId,
@@ -96,6 +101,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
       paymentAmount: payment.amount,
       paymentType: payment.type,
       packageInfo: packageInfo,
+      notes: notes,
       seans: appts.seans,
       postponedDates: appts.postponedDates,
       remainingPostponements: remainingCell,

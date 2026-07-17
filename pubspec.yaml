@@ -38,6 +38,7 @@ dependencies:
   excel: ^2.0.4
   firebase_storage: any
   cloud_firestore: any
+  http: any
   provider: ^6.0.1
   path_provider: ^2.0.0
   permission_handler: ^11.3.1

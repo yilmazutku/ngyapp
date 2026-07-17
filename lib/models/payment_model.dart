@@ -168,8 +168,6 @@ extension PaymentModelUIUser on PaymentModel {
                 'Ödendiği Tarih: ${DateFormat('dd/MM/yyyy').format(paymentDate!)}',
               ),
             Text('Durum: ${status.label}'),
-            if (status == PaymentStatus.completed)
-              Text('Ödeme Türü: ${paymentType.label}'),
             if (isOverdue) const Text('Ödeme tarihiniz gecikmiştir.'),
             // if (notes != null && notes!.isNotEmpty) Text('Not: $notes'),
           ],

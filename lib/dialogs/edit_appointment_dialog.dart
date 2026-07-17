@@ -47,9 +47,12 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               s.status.isActive || s.subscriptionId == _selectedSubscriptionId)
           .toList();
   
-  // Track original status and postponement deduction decision
+  // Track original status and who initiated the postponement.
   late AppointmentStatus _originalStatus;
-  bool _shouldDeductPostponement = false;
+  // Source of the postponement (user vs admin). Only user-originated
+  // postponements consume the customer's postponement rights. Defaults to
+  // "user" since that is the common case (the client requests a new date).
+  PostponeSource _postponedBy = PostponeSource.user;
   
   // User name display
   String? _userName;
@@ -64,6 +67,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     _originalStatus = widget.appointment.status;
     _appointmentDateTime = widget.appointment.appointmentDateTime;
     _postponedDate = widget.appointment.postponedDate;
+    _postponedBy = widget.appointment.postponedBy ?? PostponeSource.user;
     _notesController.text = widget.appointment.notes ?? '';
     _durationController.text = widget.appointment.durationMinutes.toString();
     _selectedSubscriptionId = widget.appointment.subscriptionId;
@@ -161,30 +165,24 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     }
   }
   
-  Future<void> _handleStatusChange(AppointmentStatus newStatus) async {
-    // Reset postponement deduction flag
-    _shouldDeductPostponement = false;
-    
-    // If status changed to "Ertelendi" and it wasn't already "Ertelendi"
-    if (newStatus == AppointmentStatus.postponed && 
-        _originalStatus != AppointmentStatus.postponed) {
-      // Ask user if postponement should be deducted
-      final shouldDeduct = await DialogUtils.openConfirm(
-        context,
-        title: 'Erteleme Hakkı',
-        message: 'Danışanın erteleme hakkından düşülsün mü?',
-        confirmText: 'Evet',
-        cancelText: 'Hayır',
-      );
-      
-      if (shouldDeduct) {
-        _shouldDeductPostponement = true;
-      }
-    }
-    
+  void _handleStatusChange(AppointmentStatus newStatus) {
+    // The postponement source (user vs admin) is chosen inline via the
+    // "Erteleme Kaynağı" selector shown while the status is "Ertelendi".
     setState(() {
       _appointmentStatus = newStatus;
     });
+  }
+
+  /// Remaining postponement rights for the currently selected subscription,
+  /// or null when no (valid) subscription is selected. Only user-originated
+  /// postponements count against the right (admin's never do), via
+  /// SubscriptionModel.remainingPostponements.
+  int? get _remainingPostponements {
+    if (_selectedSubscriptionId == null) return null;
+    final matches = _availableSubscriptions
+        .where((s) => s.subscriptionId == _selectedSubscriptionId);
+    if (matches.isEmpty) return null;
+    return matches.first.remainingPostponements;
   }
 
   Future<void> _updateAppointment() async {
@@ -198,31 +196,19 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       return;
     }
     
-    // Check if status is being changed to "Ertelendi" and subscription has no remaining rights
-    if (_appointmentStatus == AppointmentStatus.postponed && 
+    // A user-originated postponement that is newly applied (the appointment was
+    // not already postponed). Only these consume the customer's postponement
+    // rights; admin-originated postponements never do.
+    final bool isNewUserPostponement =
+        _appointmentStatus == AppointmentStatus.postponed &&
         _originalStatus != AppointmentStatus.postponed &&
-        _selectedSubscriptionId != null) {
-      // Find the selected subscription
-      final selectedSubscription = _availableSubscriptions.firstWhere(
-        (s) => s.subscriptionId == _selectedSubscriptionId,
-        orElse: () => SubscriptionModel(
-          subscriptionId: '',
-          userId: '',
-          packageName: 'Tanımsız',
-          startDate: DateTime.now(),
-          totalMeetings: 0,
-          allowedPostponements: 0,
-          totalAmount: 0,
-          meetingType: SubsMeetingType.faceToFace,
-        ),
-      );
-      
-      // Check if no postponement rights remain
-      final remainingPostponements = selectedSubscription.allowedPostponements - 
-                                     selectedSubscription.postponementsUsed;
-      
-      if (remainingPostponements <= 0) {
-        // Show warning dialog
+        _postponedBy == PostponeSource.user;
+
+    // Warn the admin when a user-originated postponement is applied but the
+    // customer has no postponement rights left.
+    if (isNewUserPostponement && _selectedSubscriptionId != null) {
+      final remaining = _remainingPostponements ?? 0;
+      if (remaining <= 0) {
         final proceedAnyway = await DialogUtils.openConfirm(
           context,
           title: 'Erteleme Hakkı Yok',
@@ -230,7 +216,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
           confirmText: 'Evet',
           cancelText: 'Hayır',
         );
-        
+
         if (!proceedAnyway) return;
       }
     }
@@ -276,6 +262,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                   'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
+              if (_appointmentStatus == AppointmentStatus.postponed)
+                Text('Erteleme Kaynağı: ${_postponedBy.label}'),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -334,36 +322,23 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         canceledBy: widget.appointment.canceledBy,
         canceledAt: widget.appointment.canceledAt,
         postponedDate: _appointmentStatus == AppointmentStatus.postponed ? _postponedDate : null,
+        postponedBy: _appointmentStatus == AppointmentStatus.postponed ? _postponedBy : null,
         durationMinutes: durationMinutes,
       );
 
       // Send update to Firestore
       await appointmentManager.updateAppointment(updatedAppointment);
       
-      // If user agreed to deduct postponement, update the subscription
-      if (_shouldDeductPostponement && _selectedSubscriptionId != null) {
+      // Only user-originated postponements consume a postponement right. Use an
+      // atomic increment so concurrent edits can't clobber the counter.
+      if (isNewUserPostponement && _selectedSubscriptionId != null) {
         try {
           final subProvider = Provider.of<SubProvider>(context, listen: false);
-          
-          // Get the current subscription to check its current values
-          final subscriptions = await subProvider.fetchSubscriptions(
-            userId: widget.appointment.userId,
-            showAllSubscriptions: true,
-          );
-          
-          final subscription = subscriptions.firstWhere(
-            (s) => s.subscriptionId == _selectedSubscriptionId,
-            orElse: () => throw Exception('Paket bulunamadı'),
-          );
-          
-          // Increment postponementsUsed by 1
-          final newPostponementsUsed = subscription.postponementsUsed + 1;
-          
           await subProvider.updateSubscription(
             userId: widget.appointment.userId,
             subscriptionId: _selectedSubscriptionId!,
             updateData: {
-              'postponementsUsed': newPostponementsUsed,
+              'postponementsUsed': FieldValue.increment(1),
               'updateDate': Timestamp.fromDate(DateTime.now()),
               'updateUser': 'admin',
             },
@@ -581,6 +556,36 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               ),
             ),
             
+            // 2.4) Postponement source (shown only when status is Postponed).
+            // Only user-originated postponements consume the customer's rights.
+            if (_appointmentStatus == AppointmentStatus.postponed)
+              ListTile(
+                title: const Text('Erteleme Kaynağı'),
+                subtitle: Text(
+                  _postponedBy == PostponeSource.user
+                      ? 'Kullanıcının erteleme hakkından düşülür'
+                          '${_remainingPostponements != null ? ' • Kalan hak: $_remainingPostponements' : ''}'
+                      : 'Erteleme hakkından düşülmez',
+                ),
+                trailing: DropdownButton<PostponeSource>(
+                  value: _postponedBy,
+                  onChanged: (PostponeSource? newValue) {
+                    if (newValue != null) {
+                      setState(() => _postponedBy = newValue);
+                    }
+                  },
+                  items: PostponeSource.values
+                      .map<DropdownMenuItem<PostponeSource>>(
+                        (PostponeSource source) =>
+                            DropdownMenuItem<PostponeSource>(
+                          value: source,
+                          child: Text(source.label),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+
             // 2.5) Postponed Date Picker (shown only when status is Postponed)
             if (_appointmentStatus == AppointmentStatus.postponed)
               ListTile(

@@ -70,7 +70,6 @@ import 'tabs/admin_images_page.dart';
 import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
-import 'pages/notification_test_page.dart';
 import 'pages/testing_page.dart';
 
 /// Global platform configuration instance
@@ -618,15 +617,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _navigateToNotificationTest(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const NotificationTestPage(),
-      ),
-    );
-  }
-
   void _navigateToTesting(BuildContext context) {
     Navigator.push(
       context,
@@ -729,11 +719,6 @@ class _HomePageState extends State<HomePage> {
               'icon': Icons.campaign,
               'label': 'Duyuru Yönetimi',
               'onTap': () => _navigateToAdminNews(context),
-            },
-            {
-              'icon': Icons.notifications_active,
-              'label': 'Bildirim Testi',
-              'onTap': () => _navigateToNotificationTest(context),
             },
             {
               'icon': Icons.settings,

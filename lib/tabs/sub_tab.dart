@@ -406,7 +406,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   }
   
   Widget _buildSubscriptionCardContent(BuildContext context, SubscriptionModel s, List<AppointmentModel> appointments) {
-    final remainingPostponements = s.allowedPostponements - s.postponementsUsed;
+    final remainingPostponements = s.remainingPostponements;
     final noPostponeLeft = remainingPostponements <= 0;
     // Weight-tracking packages are free: don't show any payment info.
     final bool showPayment = s.status != SubActiveStatus.activeWeightTracking;

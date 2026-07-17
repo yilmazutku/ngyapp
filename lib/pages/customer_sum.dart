@@ -16,7 +16,6 @@ import '../dialogs/add_diet_dialog.dart';
 import '../models/user_model.dart';
 import '../models/logger.dart';
 import '../tabs/sub_tab.dart';
-import 'diagnostics_page.dart';
 
 final Logger logger = Logger.forClass(CustomerSummaryPage);
 
@@ -121,19 +120,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Test / Doğrulama',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => DiagnosticsPage(user: widget.user),
-                ),
-              );
-            },
-          ),
-        ],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: !isTablet,

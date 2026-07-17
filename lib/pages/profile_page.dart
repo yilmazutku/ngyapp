@@ -21,7 +21,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final _surnameController = TextEditingController();
   final _ageController = TextEditingController();
   bool _isLoading = true;
-  bool _mealNotificationsEnabled = false;
+  bool _mealNotificationsEnabled = true;
   bool _announcementNotificationsEnabled = true; // Default to true
   DateTime? _createDate;
 
@@ -55,7 +55,7 @@ class _ProfilePageState extends State<ProfilePage> {
               ? (data['createdAt'] as Timestamp).toDate() 
               : null);
         setState(() {
-          _mealNotificationsEnabled = data['mealNotificationsEnabled'] ?? false;
+          _mealNotificationsEnabled = data['mealNotificationsEnabled'] ?? true;
           _announcementNotificationsEnabled = data['announcementNotificationsEnabled'] ?? true;
         });
       } else {
@@ -70,9 +70,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _saveUserData() async {
-    if (_nameController.text.isEmpty ||
-        _surnameController.text.isEmpty ||
-        _ageController.text.isEmpty) {
+    if (_ageController.text.isEmpty) {
       _showInfoDialog('Lütfen tüm alanları doldurun.');
       return;
     }
@@ -90,8 +88,6 @@ class _ProfilePageState extends State<ProfilePage> {
           .collection('users')
           .doc(widget.userId)
           .set({
-        'name': _nameController.text,
-        'surname': _surnameController.text,
         'age': age,
         'mealNotificationsEnabled': _mealNotificationsEnabled,
         'announcementNotificationsEnabled': _announcementNotificationsEnabled,
@@ -213,12 +209,22 @@ class _ProfilePageState extends State<ProfilePage> {
                   const SizedBox(height: 16),
                   TextField(
                     controller: _nameController,
-                    decoration: const InputDecoration(labelText: 'Ad'),
+                    readOnly: true,
+                    enabled: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Ad',
+                      helperText: 'Ad bilgisi değiştirilemez',
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _surnameController,
-                    decoration: const InputDecoration(labelText: 'Soyad'),
+                    readOnly: true,
+                    enabled: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Soyad',
+                      helperText: 'Soyad bilgisi değiştirilemez',
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextField(

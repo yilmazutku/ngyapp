@@ -2,6 +2,7 @@ const admin = require('firebase-admin');
 const logger = require('firebase-functions/logger');
 const {onDocumentCreated, onDocumentUpdated} =
 require('firebase-functions/v2/firestore');
+const {onCall, HttpsError} = require('firebase-functions/v2/https');
 
 admin.initializeApp();
 
@@ -599,3 +600,98 @@ exports.notifyUsersOnNewsPublished = onDocumentUpdated(
       logger.info(`News publish notification sent for: ${newsId}`);
     },
 );
+
+// =============================================================================
+// ADMIN CALLABLE: UPDATE USER EMAIL
+// Changes a user's sign-in email on Firebase Authentication while keeping the
+// SAME UID and the SAME password, then keeps the Firestore user document in
+// sync. After this runs the user can sign in with the new email using their
+// existing password, and the old email can no longer be used to sign in.
+// Only admins (see ADMIN_UIDS) may call this.
+// =============================================================================
+
+/**
+ * Callable function that updates a user's sign-in email in place.
+ * Expects data: {uid: string, newEmail: string}.
+ * @return {Promise<{success: boolean, email: string}>} Result payload.
+ */
+exports.updateUserEmail = onCall(async (request) => {
+  // 1) Authorize: caller must be a signed-in admin.
+  const callerUid = request.auth ? request.auth.uid : null;
+  if (!callerUid || !ADMIN_UIDS.has(callerUid)) {
+    throw new HttpsError(
+        'permission-denied',
+        'Bu işlem için yönetici yetkisi gereklidir.',
+    );
+  }
+
+  // 2) Validate input.
+  const data = request.data || {};
+  const targetUid = typeof data.uid === 'string' ? data.uid.trim() : '';
+  const newEmail = typeof data.newEmail === 'string' ?
+      data.newEmail.trim().toLowerCase() : '';
+
+  if (!targetUid) {
+    throw new HttpsError('invalid-argument', 'Geçersiz kullanıcı.');
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(newEmail)) {
+    throw new HttpsError(
+        'invalid-argument',
+        'Geçerli bir e-posta adresi giriniz.',
+    );
+  }
+
+  // Never let an admin account's email be changed through this endpoint.
+  if (ADMIN_UIDS.has(targetUid)) {
+    throw new HttpsError(
+        'permission-denied',
+        'Yönetici hesabının e-postası bu işlemle değiştirilemez.',
+    );
+  }
+
+  try {
+    // 3) Change the email on the Auth account. UID and password are untouched.
+    await admin.auth().updateUser(targetUid, {
+      email: newEmail,
+      emailVerified: true,
+    });
+
+    // 4) Keep the Firestore user document consistent with Auth.
+    await admin.firestore().collection('users').doc(targetUid).set({
+      email: newEmail,
+      updateDate: admin.firestore.FieldValue.serverTimestamp(),
+      updateUser: 'admin',
+    }, {merge: true});
+
+    logger.info(`Updated sign-in email for user ${targetUid}`);
+    return {success: true, email: newEmail};
+  } catch (err) {
+    logger.error('updateUserEmail failed', {
+      uid: targetUid,
+      code: err.code,
+      message: err.message,
+    });
+
+    if (err.code === 'auth/email-already-exists') {
+      throw new HttpsError(
+          'already-exists',
+          'Bu e-posta adresi başka bir hesap tarafından kullanılıyor.',
+      );
+    }
+    if (err.code === 'auth/user-not-found') {
+      throw new HttpsError('not-found', 'Kullanıcı bulunamadı.');
+    }
+    if (err.code === 'auth/invalid-email') {
+      throw new HttpsError(
+          'invalid-argument',
+          'Geçerli bir e-posta adresi giriniz.',
+      );
+    }
+    throw new HttpsError(
+        'internal',
+        'E-posta güncellenirken bir hata oluştu.',
+    );
+  }
+});

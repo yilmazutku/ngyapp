@@ -26,6 +26,10 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
   bool _isLoading = false;
   bool _showCalendar = true;
 
+  /// Bulk (multi) selection mode used to delete several empty slots at once.
+  bool _bulkSelectMode = false;
+  final Set<String> _selectedSlots = {};
+
   /// Configurable day start/end used by interval generation and manual selection.
   TimeOfDay _dayStartTime = const TimeOfDay(hour: 9, minute: 30);
   TimeOfDay _dayEndTime = const TimeOfDay(hour: 18, minute: 30);
@@ -66,6 +70,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     if (_sameYMD(_selectedDate, selectedDay)) return; // no-op if unchanged
     setState(() {
       _selectedDate = selectedDay;
+      _selectedSlots.clear(); // selections are per-day
     });
     _fetchDayData(_selectedDate);
   }
@@ -746,6 +751,113 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     }
   }
 
+  /// Empty (appointment-free) slots for the selected day; only these can be
+  /// bulk-selected and deleted.
+  List<String> get _emptySlots =>
+      _storedTimesForDay.where((t) => !(_hasAppointment[t] ?? false)).toList();
+
+  /// Enter/exit bulk-selection mode. Selections are always cleared on toggle.
+  void _toggleBulkSelectMode() {
+    setState(() {
+      _bulkSelectMode = !_bulkSelectMode;
+      _selectedSlots.clear();
+    });
+  }
+
+  /// Toggle a single slot's selection. Booked slots can't be deleted, so they
+  /// can't be selected; tapping one surfaces a short explanation instead.
+  void _toggleSlotSelection(String timeStr) {
+    if (_hasAppointment[timeStr] ?? false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Randevulu zaman dilimi silinemez, seçilemez.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    setState(() {
+      // Set.add returns false when the value already existed -> toggle off.
+      if (!_selectedSlots.add(timeStr)) {
+        _selectedSlots.remove(timeStr);
+      }
+    });
+  }
+
+  void _selectAllEmptySlots() {
+    setState(() {
+      _selectedSlots
+        ..clear()
+        ..addAll(_emptySlots);
+    });
+  }
+
+  void _clearSelection() {
+    setState(() => _selectedSlots.clear());
+  }
+
+  /// Delete every currently selected (empty) slot at once, after confirmation.
+  Future<void> _deleteSelectedSlots() async {
+    if (_selectedSlots.isEmpty) return;
+
+    final count = _selectedSlots.length;
+    final confirm = await DialogUtils.openConfirm(
+      context,
+      title: 'Seçilenleri Sil',
+      message:
+          '$count zaman dilimini silmek istediğinize emin misiniz? Bu işlem geri alınamaz.',
+      confirmText: 'Evet, Sil',
+      cancelText: 'İptal',
+    );
+    if (!confirm) return;
+
+    // Re-read the latest data so we never clobber concurrent changes and never
+    // remove a slot that has meanwhile received an appointment.
+    final latestData = await _fetchLatestTimeSlotData();
+    final storedTimes = (latestData['storedTimes'] as List<dynamic>)
+        .map((e) => e.toString())
+        .toList();
+    final rawHasAppointment = latestData['hasAppointment'] as Map;
+    final hasAppointment = <String, bool>{};
+    rawHasAppointment.forEach((key, value) {
+      hasAppointment[key.toString()] = value as bool;
+    });
+
+    final toDelete =
+        _selectedSlots.where((s) => hasAppointment[s] != true).toSet();
+    final blockedCount = _selectedSlots.length - toDelete.length;
+
+    if (toDelete.isEmpty) {
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message:
+            'Seçilen zaman dilimlerinde randevu bulunmakta. Önce randevuları iptal etmeniz gerekiyor.',
+      );
+      return;
+    }
+
+    final updated = storedTimes.where((s) => !toDelete.contains(s)).toList();
+    final success = await _saveTimeslotsSilently(updated);
+    if (!mounted) return;
+    if (success) {
+      setState(() {
+        _bulkSelectMode = false;
+        _selectedSlots.clear();
+      });
+      await _fetchDayData(_selectedDate);
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: blockedCount > 0
+            ? '${toDelete.length} zaman dilimi silindi. Randevulu $blockedCount zaman dilimi korundu.'
+            : '${toDelete.length} zaman dilimi silindi.',
+      );
+    }
+  }
+
   /// Show appointment details for a time slot
   Future<void> _showAppointmentDetails(String timeStr) async {
     final time = _parseTimeSlot(timeStr);
@@ -800,6 +912,55 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     );
   }
 
+  /// Bottom action bar shown while in bulk-selection mode: selection count,
+  /// select-all/clear toggle, and the bulk delete action.
+  Widget _buildBulkActionBar() {
+    final empties = _emptySlots;
+    final allSelected =
+        empties.isNotEmpty && _selectedSlots.length == empties.length;
+    return SafeArea(
+      child: Material(
+        elevation: 8,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Seçimi İptal',
+                onPressed: _toggleBulkSelectMode,
+              ),
+              Expanded(
+                child: Text(
+                  '${_selectedSlots.length} seçildi',
+                  style:
+                      const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton(
+                onPressed: empties.isEmpty
+                    ? null
+                    : (allSelected ? _clearSelection : _selectAllEmptySlots),
+                child: Text(allSelected ? 'Temizle' : 'Tümünü Seç'),
+              ),
+              const SizedBox(width: 4),
+              ElevatedButton.icon(
+                onPressed: _selectedSlots.isEmpty ? null : _deleteSelectedSlots,
+                icon: const Icon(Icons.delete, size: 18),
+                label: Text('Sil (${_selectedSlots.length})'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Build individual time slot item
   String _formatEndTime(AppointmentModel appt) {
     final end = appt.appointmentDateTime
@@ -820,11 +981,14 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     final baseFontSize = isMobile ? 14.0 : 16.0;
 
     final bool hasEvent = slotEvents.isNotEmpty;
-    final Color cardColor = hasEvent
-        ? Colors.deepPurple.shade50
-        : hasAppt
-            ? Colors.red[50]!
-            : Colors.green[50]!;
+    final bool isSelected = _bulkSelectMode && _selectedSlots.contains(timeStr);
+    final Color cardColor = isSelected
+        ? Colors.blue.shade100
+        : hasEvent
+            ? Colors.deepPurple.shade50
+            : hasAppt
+                ? Colors.red[50]!
+                : Colors.green[50]!;
 
     // Determine what label/details to show
     String? detailName;
@@ -849,8 +1013,14 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     }
 
     return Card(
-      elevation: 2,
+      elevation: isSelected ? 4 : 2,
       color: cardColor,
+      shape: isSelected
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: Colors.blue.shade700, width: 2),
+            )
+          : null,
       child: Stack(
         children: [
           Padding(
@@ -896,11 +1066,35 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                  onTap: () =>
-                      hasAppt ? _showAppointmentDetails(timeStr) : null),
+                onTap: () {
+                  if (_bulkSelectMode) {
+                    _toggleSlotSelection(timeStr);
+                  } else if (hasAppt) {
+                    _showAppointmentDetails(timeStr);
+                  }
+                },
+              ),
             ),
           ),
-          if (!hasAppt)
+          // Selection indicator (bulk mode): a tick on selected slots, an empty
+          // circle on selectable (empty) ones. Purely visual — taps fall
+          // through to the InkWell above via IgnorePointer.
+          if (_bulkSelectMode && !hasAppt)
+            Positioned(
+              right: 2,
+              top: 2,
+              child: IgnorePointer(
+                child: Icon(
+                  isSelected
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  size: 20,
+                  color:
+                      isSelected ? Colors.blue.shade700 : Colors.grey.shade500,
+                ),
+              ),
+            ),
+          if (!hasAppt && !_bulkSelectMode)
             Positioned(
               right: 0,
               top: 0,
@@ -1626,6 +1820,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
           // Keep any existing actions here
         ],
       ),
+      bottomNavigationBar: _bulkSelectMode ? _buildBulkActionBar() : null,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -1758,6 +1953,18 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.red[100],
           foregroundColor: Colors.red[900],
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+      ),
+      ElevatedButton.icon(
+        onPressed: _toggleBulkSelectMode,
+        icon: Icon(_bulkSelectMode ? Icons.close : Icons.checklist),
+        label: Text(_bulkSelectMode ? 'Seçimi İptal' : 'Toplu Seç'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor:
+              _bulkSelectMode ? Colors.orange[100] : Colors.blueGrey[100],
+          foregroundColor:
+              _bulkSelectMode ? Colors.orange[900] : Colors.blueGrey[900],
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         ),
       ),

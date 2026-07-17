@@ -28,6 +28,7 @@ class AddSubscriptionDialog extends StatefulWidget {
 class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _packageNameController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
   final TextEditingController _totalMeetingsController =
       TextEditingController();
   final TextEditingController _totalAmountController = TextEditingController();
@@ -110,6 +111,19 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (v) => (v == null || v.isEmpty) ? 'Lütfen bir paket adı girin.' : null,
+                ),
+                const SizedBox(height: 16),
+
+                // Notes (optional)
+                TextFormField(
+                  controller: _notesController,
+                  decoration: const InputDecoration(
+                    labelText: 'Notlar',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                  maxLines: 3,
+                  textInputAction: TextInputAction.newline,
                 ),
                 const SizedBox(height: 16),
 
@@ -363,9 +377,12 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       final double totalAmount =
           _isWeightTracking ? 0.0 : double.parse(_totalAmountController.text);
 
+      final String notes = _notesController.text.trim();
+
       // Prepare subscription data
       final subscriptionData = {
         'packageName': _packageNameController.text,
+        if (notes.isNotEmpty) 'notes': notes,
         'startDate': _startDate!,
         'totalMeetings': totalMeetings,
         'meetingsCompleted': 0,
@@ -466,6 +483,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   void dispose() {
     _totalMeetingsController.removeListener(_syncAllowedPostponements);
     _packageNameController.dispose();
+    _notesController.dispose();
     _totalMeetingsController.dispose();
     _totalAmountController.dispose();
     _onlineMeetingsController.dispose();

@@ -11,9 +11,9 @@ import '../widgets/app_bar_with_back.dart';
 class _CapitalizeWordsFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
+      TextEditingValue oldValue,
+      TextEditingValue newValue,
+      ) {
     final text = newValue.text;
     if (text.isEmpty) return newValue;
 
@@ -43,7 +43,7 @@ final Logger logger = Logger.forClass(CreateUserPage);
 
 class CreateUserPage extends StatefulWidget {
   const CreateUserPage({super.key});
-  static const String tempPw = 'TempPassword123!';
+  static const String tempPw = '123456';
   @override
   createState() => _CreateUserPageState();
 }
@@ -116,7 +116,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
       try {
         final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
         final userCredential =
-            await secondaryAuth.createUserWithEmailAndPassword(
+        await secondaryAuth.createUserWithEmailAndPassword(
           email: email,
           password: password,
         );
@@ -228,7 +228,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   labelText: 'Şifre Giriniz',
                   border: OutlineInputBorder(),
                 ),
-                obscureText: true,
+                obscureText: false,
               ),
               const SizedBox(height: 10),
               TextField(

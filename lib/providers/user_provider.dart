@@ -1,27 +1,24 @@
 // user_provider.dart
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import '../main.dart';
+import 'package:http/http.dart' as http;
 import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../models/kvkk_consent_model.dart';
-import '../pages/admin_create_user_page.dart';
 
 final Logger logger = Logger.forClass(UserProvider);
 
 /// Provides user management functionality, including user data handling, authentication,
 /// and subscription management. Implements ChangeNotifier pattern for state management.
 class UserProvider extends ChangeNotifier {
-  static final List<String> collections = [
-    'subscriptions',
-    'appointments',
-    'dietlists',
-    'dailyData',
-    'meals',
-    'payments',
-    'measurements'
-  ];
+  /// Base URL for the project's HTTPS Cloud Functions (default us-central1
+  /// region). Callable functions are invoked over HTTP here instead of via the
+  /// `cloud_functions` plugin, which has no Windows desktop support.
+  static const String _functionsBaseUrl =
+      'https://us-central1-deneme2-bc96d.cloudfunctions.net';
 
   /// Fetches user details from Firestore based on the provided user ID
   /// 
@@ -69,163 +66,77 @@ class UserProvider extends ChangeNotifier {
     }
   }
 
-  /// Updates a user's email address and migrates all their data to a new account
-  /// 
-  /// This complex operation creates a new user with the new email, migrates all data from the old user,
-  /// and then deletes the old user account.
-  /// 
-  /// @param oldUid The user ID of the current user account
-  /// @param oldEmail The current email address of the user
-  /// @param password The password for authentication
-  /// @param newEmail The new email address to use for the user
-  /// @param updatedUser The UserModel containing updated user information
-  /// 
-  /// @return The new user ID if migration was successful, otherwise null
-  Future<String?> updateEmailAndMigrate({
-    required String oldUid,
-    required String oldEmail,
-    required String password,
+  /// Updates a user's sign-in email on Firebase Authentication and Firestore.
+  ///
+  /// Calls the `updateUserEmail` Cloud Function (Admin SDK) over HTTP using the
+  /// callable protocol, passing the caller's Firebase ID token for auth. The
+  /// function changes the email in place: the user keeps the SAME UID and the
+  /// SAME password. After this completes, the user signs in with [newEmail]
+  /// using their existing password and the old email can no longer be used.
+  ///
+  /// Authorization is enforced server-side (only admins may call it), so no
+  /// data migration, admin re-login, or password reset is required.
+  ///
+  /// @param userId The UID of the user whose email should change
+  /// @param newEmail The new email address
+  ///
+  /// @throws Exception with a user-friendly message when the update fails
+  Future<void> updateUserEmail({
+    required String userId,
     required String newEmail,
-    required UserModel updatedUser,
   }) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      throw Exception('Oturum bulunamadı. Lütfen tekrar giriş yapın.');
+    }
+
+    final String? idToken = await currentUser.getIdToken();
+    if (idToken == null) {
+      throw Exception('Kimlik doğrulanamadı. Lütfen tekrar giriş yapın.');
+    }
+
+    http.Response response;
     try {
-      final adminUser = FirebaseAuth.instance.currentUser;
-      if (adminUser == null) {
-        logger.err('updateEmailAndMigrate: Admin is not signed in.');
-        return null;
-      }
-
-      final newUid = await _migrateUserDataAndRecreateAuth(
-        oldUid: oldUid,
-        newEmail: newEmail,
-        password: password,
-        updatedUser: updatedUser,
+      response = await http.post(
+        Uri.parse('$_functionsBaseUrl/updateUserEmail'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'data': {'uid': userId, 'newEmail': newEmail},
+        }),
       );
+    } catch (e) {
+      logger.err('updateUserEmail network error: {}', [e]);
+      throw Exception(
+          'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.');
+    }
 
-      if (newUid == null) {
-        logger.err(
-            'updateEmailAndMigrate: Data migration or user creation failed.');
-        return null;
-      }
-
+    // Callable protocol: success => { "result": ... }, failure => non-2xx with
+    // { "error": { "message": ..., "status": ... } }.
+    Map<String, dynamic> decoded = <String, dynamic>{};
+    if (response.body.isNotEmpty) {
       try {
-        final oldUser = await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: oldEmail,
-          password: CreateUserPage.tempPw,
-        );
-        await oldUser.user?.delete();
-        logger.info(
-            'Deleted the old user and Successfully updated email and migrated data for oldUid={}',
-            [oldUid]);
-      } on Exception catch (e) {
-        logger.err('Exception when deleting old user: {}', [e]);
+        decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (_) {
+        // Ignore non-JSON bodies; handled by the status-code check below.
       }
+    }
 
-      await signInAutomatically(); //TODO TEST EDILMELI!!!
-
-      await FirebaseFirestore.instance.collection('users').doc(oldUid).delete();
-      logger.info('Deleted old Firestore user document for UID={}', [oldUid]);
-
-      return newUid;
-    } catch (e) {
-      logger.err(
-          'updateEmailAndMigrate: Error during email update and migration: {}',
-          [e]);
-      rethrow;
-    } finally {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      logger.info('Sign-in email updated for userId={}', [userId]);
       notifyListeners();
-    }
-  }
-
-  /// Migrates user data and recreates authentication for a user with a new email
-  /// 
-  /// This is a helper method for the updateEmailAndMigrate process.
-  /// 
-  /// @param oldUid The user ID of the current user account
-  /// @param newEmail The new email address to use for the user
-  /// @param password The password for authentication
-  /// @param updatedUser The UserModel containing updated user information
-  /// 
-  /// @return The new user ID if migration was successful, otherwise null
-  Future<String?> _migrateUserDataAndRecreateAuth({
-    required String oldUid,
-    required String newEmail,
-    required String password,
-    required UserModel updatedUser,
-  }) async {
-    try {
-      final newUid = FirebaseFirestore.instance.collection('users').doc().id;
-
-      await _migrateUserData(oldUid, newUid);
-
-      UserCredential newUserCred =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: newEmail,
-        password: password,
-      );
-
-      if (newUserCred.user == null) {
-        logger.err(
-            'Failed to create new Firebase user with email={}', [newEmail]);
-        return null;
-      }
-
-      final updatedUserMap = updatedUser.toMap();
-      updatedUserMap['userId'] = newUid;
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(newUid)
-          .set(updatedUserMap);
-
-      return newUid;
-    } catch (e) {
-      logger.err('Error during data migration and user recreation: {}', [e]);
-      rethrow;
-    }
-  }
-
-  /// Migrates user data from one user ID to another
-  /// 
-  /// @param oldUid The source user ID to migrate data from
-  /// @param newUid The destination user ID to migrate data to
-  Future<void> _migrateUserData(String oldUid, String newUid) async {
-    final oldDocRef =
-        FirebaseFirestore.instance.collection('users').doc(oldUid);
-    final newDocRef =
-        FirebaseFirestore.instance.collection('users').doc(newUid);
-
-    final oldDataSnapshot = await oldDocRef.get();
-    if (oldDataSnapshot.exists) {
-      final userData = oldDataSnapshot.data();
-      if (userData != null) {
-        userData['userId'] = newUid;
-        await newDocRef.set(userData, SetOptions(merge: true));
-        logger.info('Top-level data migrated from oldUid={} to newUid={}',
-            [oldUid, newUid]);
-      }
+      return;
     }
 
-    await _migrateSubcollections(oldDocRef, newDocRef);
-  }
-
-  /// Migrates all subcollections from one user document to another
-  /// 
-  /// @param oldDocRef The source document reference to migrate subcollections from
-  /// @param newDocRef The destination document reference to migrate subcollections to
-  Future<void> _migrateSubcollections(
-      DocumentReference oldDocRef, DocumentReference newDocRef) async {
-    for (String subcollectionName in collections) {
-      final oldSubcollectionRef = oldDocRef.collection(subcollectionName);
-      final querySnapshot = await oldSubcollectionRef.get();
-
-      for (final doc in querySnapshot.docs) {
-        final newDocRefSub =
-            newDocRef.collection(subcollectionName).doc(doc.id);
-        await newDocRefSub.set(doc.data());
-        logger.info('Migrated doc id={} in subcollection={} for newUid={}',
-            [doc.id, subcollectionName, newDocRef.id]);
-      }
-    }
+    final error = decoded['error'];
+    final message = (error is Map && error['message'] is String)
+        ? error['message'] as String
+        : 'E-posta güncellenirken bir hata oluştu.';
+    logger.err('updateUserEmail failed: status={}, body={}',
+        [response.statusCode, response.body]);
+    throw Exception(message);
   }
 
   // Subscription-related methods moved to SubProvider
