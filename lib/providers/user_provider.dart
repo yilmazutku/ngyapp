@@ -139,6 +139,104 @@ class UserProvider extends ChangeNotifier {
     throw Exception(message);
   }
 
+  /// Permanently deletes a user and EVERYTHING that belongs to them.
+  ///
+  /// Calls the admin-only `deleteUserAccount` Cloud Function (Admin SDK) over
+  /// HTTP using the callable protocol, passing the caller's Firebase ID token
+  /// for authorization. The function removes the user's Firestore document and
+  /// every subcollection (appointments, payments, subscriptions, measurements
+  /// + Tanita PDFs, tests/documents, diet lists, meals, daily data), their chat
+  /// and messages, every file stored under them in Firebase Storage
+  /// (users/{uid}/** and chats/{uid}/**) and finally their Firebase
+  /// Authentication account.
+  ///
+  /// Authorization is enforced server-side (only admins may call it and admin
+  /// accounts can never be deleted).
+  ///
+  /// @param userId The UID of the user to delete
+  ///
+  /// @throws Exception with a user-friendly message when the deletion fails
+  Future<void> deleteUserAccount({required String userId}) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      throw Exception('Oturum bulunamadı. Lütfen tekrar giriş yapın.');
+    }
+
+    final String? idToken = await currentUser.getIdToken();
+    if (idToken == null) {
+      throw Exception('Kimlik doğrulanamadı. Lütfen tekrar giriş yapın.');
+    }
+
+    http.Response response;
+    try {
+      response = await http.post(
+        Uri.parse('$_functionsBaseUrl/deleteUserAccount'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'data': {'uid': userId},
+        }),
+      );
+    } catch (e) {
+      logger.err('deleteUserAccount network error: {}', [e]);
+      throw Exception(
+          'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.');
+    }
+
+    // Callable protocol: success => { "result": ... }, failure => non-2xx with
+    // { "error": { "message": ..., "status": ... } }.
+    Map<String, dynamic> decoded = <String, dynamic>{};
+    if (response.body.isNotEmpty) {
+      try {
+        decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (_) {
+        // Ignore non-JSON bodies; handled by the status-code check below.
+      }
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      logger.info('User account deleted for userId={}', [userId]);
+      notifyListeners();
+      return;
+    }
+
+    final error = decoded['error'];
+    final message = (error is Map && error['message'] is String)
+        ? error['message'] as String
+        : 'Kullanıcı silinirken bir hata oluştu.';
+    logger.err('deleteUserAccount failed: status={}, body={}',
+        [response.statusCode, response.body]);
+    throw Exception(message);
+  }
+
+  /// Sends a Firebase password reset email to the currently signed-in user's
+  /// own email address.
+  ///
+  /// The address is read from [FirebaseAuth.instance.currentUser] so callers
+  /// (e.g. the profile page) never have to ask the user to type it. The user
+  /// must be signed in and have an email associated with their account.
+  ///
+  /// @throws Exception with a user-friendly message when there is no signed-in
+  ///         user/email or when Firebase rejects the request.
+  Future<void> sendPasswordResetEmailToCurrentUser() async {
+    final email = FirebaseAuth.instance.currentUser?.email;
+    if (email == null || email.isEmpty) {
+      throw Exception(
+          'Hesabınıza tanımlı bir e-posta adresi bulunmadığından şifre sıfırlama bağlantısı gönderilemedi.');
+    }
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      logger.info('Password reset email sent to signed-in user');
+    } on FirebaseAuthException catch (e) {
+      logger.err('sendPasswordResetEmailToCurrentUser failed: {}', [e.code]);
+      throw Exception(
+          'Şifre sıfırlama bağlantısı gönderilemedi. Lütfen tekrar deneyiniz.');
+    }
+  }
+
   // Subscription-related methods moved to SubProvider
 
   /// Fetches all users from the database

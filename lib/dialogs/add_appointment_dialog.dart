@@ -238,14 +238,15 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       });
       
       // Warn (but still allow) when the user has no active package: only an
-      // "Ön Görüşme" appointment may be added without a package.
+      // "Ön Görüşme" or "Program Başlangıcı" appointment may be added without
+      // a package.
       if (activeSubscriptions.isEmpty || _selectedSubscription == null) {
         if (mounted) {
           await DialogUtils.openInfo(
             context,
             title: 'Uyarı',
             message:
-                'Kullanıcının aktif paketi bulunmuyor. Bu yüzden sadece ÖN GÖRÜŞME randevusu ekleyiniz, veya bir paket ekleyip sonrasında randevu ekleyiniz.',
+                'Kullanıcının aktif paketi bulunmuyor. Bu yüzden sadece ÖN GÖRÜŞME veya PROGRAM BAŞLANGICI randevusu ekleyiniz, veya bir paket ekleyip sonrasında randevu ekleyiniz.',
           );
         }
       }
@@ -323,15 +324,16 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       return;
     }
 
-    // A package is required unless this is an "Ön Görüşme" appointment, which
-    // may be added without one (e.g. when the user has no active package yet).
+    // A package is required unless this is an "Ön Görüşme" or "Program
+    // Başlangıcı" appointment, which may be added without one (e.g. when the
+    // user has no active package yet).
     if (_selectedSubscription == null &&
-        _selectedAppointmentType != AppointmentType.og) {
+        !_selectedAppointmentType.allowedWithoutPackage) {
       await DialogUtils.openError(
         context,
         title: 'Hata',
         message:
-            'Paketsiz randevu yalnızca ÖN GÖRÜŞME türünde eklenebilir. Lütfen bir paket seçin veya randevu türünü Ön Görüşme yapın.',
+            'Paketsiz randevu yalnızca ÖN GÖRÜŞME veya PROGRAM BAŞLANGICI türünde eklenebilir. Lütfen bir paket seçin veya randevu türünü Ön Görüşme ya da Program Başlangıcı yapın.',
       );
       return;
     }
@@ -608,14 +610,14 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                     border: const OutlineInputBorder(),
                     hintText: 'Paket seçin',
                     helperText: _subscriptions.isEmpty
-                        ? 'Aktif paket yok — sadece Ön Görüşme eklenebilir'
+                        ? 'Aktif paket yok — sadece Ön Görüşme veya Program Başlangıcı eklenebilir'
                         : null,
                   ),
                   items: _subscriptions.map((sub) {
                     return DropdownMenuItem<SubscriptionModel>(
                       value: sub,
                       child: Text(
-                        '${sub.packageName} (Kalan: ${sub.totalMeetings - sub.meetingsCompleted - sub.meetingsBurned}/${sub.totalMeetings})',
+                        '${sub.packageName} (Kalan: ${sub.remainingMeetings}/${sub.totalMeetings})',
                         overflow: TextOverflow.ellipsis,
                       ),
                     );
@@ -629,8 +631,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   },
                   validator: (value) {
                     if (value == null &&
-                        _selectedAppointmentType != AppointmentType.og) {
-                      return 'Lütfen bir paket seçin veya türü Ön Görüşme yapın';
+                        !_selectedAppointmentType.allowedWithoutPackage) {
+                      return 'Lütfen bir paket seçin veya türü Ön Görüşme ya da Program Başlangıcı yapın';
                     }
                     return null;
                   },

@@ -14,10 +14,40 @@ enum SubsMeetingType {
   }
 }
 
+/// Package duration type. Selecting one auto-fills the suggested meeting count
+/// ([defaultMeetings]) in the add/edit dialogs, but the admin can still adjust
+/// the meeting count afterwards.
+enum SubsPackageType {
+  oneMonth('1 Aylık', 4),
+  threeMonth('3 Aylık', 12);
+
+  const SubsPackageType(this.label, this.defaultMeetings);
+
+  /// Human-readable label, also the value stored in Firestore.
+  final String label;
+
+  /// Suggested number of meetings pre-filled when this type is selected.
+  final int defaultMeetings;
+
+  /// Parses the stored [label] back into a [SubsPackageType]; returns null when
+  /// the subscription has no recorded type (e.g. legacy data).
+  static SubsPackageType? fromLabel(String? label) {
+    if (label == null) return null;
+    for (final type in SubsPackageType.values) {
+      if (type.label == label) return type;
+    }
+    return null;
+  }
+}
+
 class SubscriptionModel {
   final String subscriptionId;
   final String userId;
   final String packageName;
+
+  /// Package duration type (e.g. 1 Aylık / 3 Aylık). Nullable for legacy
+  /// subscriptions created before this field existed.
+  final SubsPackageType? packageType;
   final String? notes;
   final DateTime startDate;
   final int totalMeetings;
@@ -35,6 +65,10 @@ class SubscriptionModel {
   final SubsMeetingType meetingType;
   final int? onlineMeetings;
   final int? faceToFaceMeetings;
+
+  /// Date the package was frozen. Only meaningful when [status] is
+  /// [SubActiveStatus.frozen]; null for every other status.
+  DateTime? freezeDate;
   final DateTime createDate;
   final String? createUser;
   DateTime? updateDate;
@@ -44,6 +78,7 @@ class SubscriptionModel {
     required this.subscriptionId,
     required this.userId,
     required this.packageName,
+    this.packageType,
     this.notes,
     required this.startDate,
     required this.totalMeetings,
@@ -57,6 +92,7 @@ class SubscriptionModel {
     required this.meetingType,
     this.onlineMeetings,
     this.faceToFaceMeetings,
+    this.freezeDate,
     DateTime? createDate,
     this.createUser,
     this.updateDate,
@@ -69,6 +105,7 @@ class SubscriptionModel {
       subscriptionId: doc.id,
       userId: data['userId'],
       packageName: data['packageName'],
+      packageType: SubsPackageType.fromLabel(data['packageType']),
       notes: data['notes'],
       startDate: (data['startDate'] as Timestamp).toDate(),
       totalMeetings: data['totalMeetings'],
@@ -84,6 +121,7 @@ class SubscriptionModel {
           : SubsMeetingType.faceToFace,
       onlineMeetings: data['onlineMeetings'],
       faceToFaceMeetings: data['faceToFaceMeetings'],
+      freezeDate: data['freezeDate'] != null ? (data['freezeDate'] as Timestamp).toDate() : null,
       createDate: data['createDate'] != null ? (data['createDate'] as Timestamp).toDate() : DateTime.now(),
       createUser: data['createUser'],
       updateDate: data['updateDate'] != null ? (data['updateDate'] as Timestamp).toDate() : null,
@@ -96,6 +134,7 @@ class SubscriptionModel {
       'subscriptionId': subscriptionId,
       'userId': userId,
       'packageName': packageName,
+      if (packageType != null) 'packageType': packageType!.label,
       if (notes != null) 'notes': notes,
       'startDate': Timestamp.fromDate(startDate),
       'totalMeetings': totalMeetings,
@@ -107,6 +146,7 @@ class SubscriptionModel {
       'amountPaid': amountPaid,
       'status': status.label,
       'meetingType': meetingType.label,
+      if (freezeDate != null) 'freezeDate': Timestamp.fromDate(freezeDate!),
       'createDate': Timestamp.fromDate(createDate),
       if (createUser != null) 'createUser': createUser,
       if (updateDate != null) 'updateDate': Timestamp.fromDate(updateDate!),
@@ -127,7 +167,7 @@ class SubscriptionModel {
 
   @override
   String toString() {
-    return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, notes: $notes, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
+    return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, packageType: $packageType, notes: $notes, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, freezeDate: $freezeDate, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
   }
 
   /// Auto-calculates the suggested allowed postponements for a package
@@ -149,6 +189,18 @@ class SubscriptionModel {
 
   /// Whether the customer still has any postponement rights left.
   bool get hasPostponementsLeft => remainingPostponements > 0;
+
+  /// Remaining meeting rights ("kalan görüşme hakkı"), i.e. [totalMeetings]
+  /// minus the meetings already completed and burned. Clamped so it is never
+  /// negative and never exceeds [totalMeetings]. This is the single source of
+  /// truth used everywhere the remaining meeting count is shown/checked.
+  int get remainingMeetings {
+    final remaining = totalMeetings - meetingsCompleted - meetingsBurned;
+    return remaining.clamp(0, totalMeetings);
+  }
+
+  /// Whether the customer still has any meeting rights left.
+  bool get hasMeetingsLeft => remainingMeetings > 0;
 
   @override
   bool operator ==(Object other) =>

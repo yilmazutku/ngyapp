@@ -520,7 +520,29 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             ),
 
           const SizedBox(height: 8),
+          Row(children: [
+            const Text('Paket Tipi: ', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(s.packageType?.label ?? 'Belirtilmemiş'),
+          ]),
+          const SizedBox(height: 8),
           Text('Başlangıç: ${_df.format(s.startDate)}', style: const TextStyle(fontSize: 14)),
+
+          // Freeze date shown for frozen packages.
+          if (s.status == SubActiveStatus.frozen) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.ac_unit, size: 16, color: Colors.blue.shade800),
+              const SizedBox(width: 4),
+              Text(
+                'Dondurulma Tarihi: ${s.freezeDate != null ? _df.format(s.freezeDate!) : 'Belirtilmemiş'}',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue.shade800,
+                ),
+              ),
+            ]),
+          ],
           const SizedBox(height: 8),
 
           Row(children: [
@@ -540,8 +562,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
 
           const SizedBox(height: 8),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Kalan: ${s.totalMeetings > 0 ? (s.totalMeetings - s.meetingsCompleted - s.meetingsBurned)
-              .clamp(0, s.totalMeetings) : 0}/${s.totalMeetings} görüşme',style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text('Kalan: ${s.remainingMeetings}/${s.totalMeetings} görüşme',style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             Text(
               'Erteleme: ${s.postponementsUsed}/${s.allowedPostponements}',
               style: noPostponeLeft && s.allowedPostponements > 0
@@ -722,7 +743,9 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       final confirmed = await DialogUtils.openConfirm(
         context,
         title: 'Paket Silme Onayı',
-        message: 'Bu paketi silmek istediğinizden emin misiniz?\n\n${s.packageName}\n\nBu işlem geri alınamaz.',
+        message: 'Bu paketi silmek istediğinizden emin misiniz?\n\n${s.packageName}\n\n'
+            'Bu paket silindiğinde, pakete bağlı TÜM randevular ve ödemeler de silinecektir.\n\n'
+            'Bu işlem geri alınamaz.',
         confirmText: 'Sil',
         cancelText: 'İptal',
       );

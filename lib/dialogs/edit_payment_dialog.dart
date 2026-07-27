@@ -673,6 +673,12 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
         }
       }
 
+      // The subscription's amountPaid may have changed in the adjustment block
+      // above (written directly to Firestore). updatePayment() already notified
+      // SubProvider, but that fired BEFORE these writes, so notify again now to
+      // guarantee the subscriptions tab refetches and shows the updated amount.
+      paymentProvider.subProvider.markChanged();
+
       logger.info('Payment update completed successfully:');
       logger.info('- Final Amount: $newAmount');
       logger.info('- Final Status: ${_paymentStatus.label}');

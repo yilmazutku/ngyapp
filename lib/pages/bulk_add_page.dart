@@ -344,7 +344,9 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
                         DropdownMenuItem<SubscriptionModel?>(
                           value: widget.subscription,
                           child: Text(
-                            widget.subscription.packageName,
+                            widget.subscription.packageType != null
+                                ? '${widget.subscription.packageName} (${widget.subscription.packageType!.label})'
+                                : widget.subscription.packageName,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),

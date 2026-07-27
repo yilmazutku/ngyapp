@@ -15,6 +15,7 @@ import '../dialogs/add_sub_dialog.dart';
 import '../dialogs/add_diet_dialog.dart';
 import '../models/user_model.dart';
 import '../models/logger.dart';
+import '../tabs/basetab.dart';
 import '../tabs/sub_tab.dart';
 
 final Logger logger = Logger.forClass(CustomerSummaryPage);
@@ -39,8 +40,10 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
   // Mark tabs we’ve already shown so they can stay alive without refetching.
   late final List<bool> _tabVisited;
 
-  // Hoisted tabs (built once when first visited); keys preserve state/scroll.
-  final _keys = List.generate(8, (i) => PageStorageKey('cust_tab_$i'));
+  // Hoisted tabs (built once when first visited). GlobalKeys keep each tab's
+  // State reachable so BaseTab tabs can be auto-refreshed on re-entry, while
+  // AutomaticKeepAliveClientMixin preserves their state/scroll.
+  final List<GlobalKey> _keys = List.generate(8, (i) => GlobalKey());
 
   @override
   void initState() {
@@ -50,14 +53,31 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
 
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
-      if (_tabController.index != _previousTabIndex) {
-        logger.info('Tab changed: index={}', [_tabController.index]);
-        _previousTabIndex = _tabController.index;
-        if (!_tabVisited[_tabController.index]) {
-          setState(() => _tabVisited[_tabController.index] = true);
-        }
+      final newIndex = _tabController.index;
+      if (newIndex == _previousTabIndex) return;
+      logger.info('Tab changed: index={}', [newIndex]);
+      _previousTabIndex = newIndex;
+      if (!_tabVisited[newIndex]) {
+        // First visit: build the tab; it fetches its own data on init.
+        setState(() => _tabVisited[newIndex] = true);
+      } else {
+        // Re-entry: the tab was kept alive, so refresh it to reflect any
+        // changes made in other tabs while it was in the background.
+        _autoRefreshTab(newIndex);
       }
     });
+  }
+
+  /// Auto-refreshes a re-entered tab when it is a [BaseTab] (detected via its
+  /// [BaseTabState]). This applies uniformly to every BaseTab-derived tab
+  /// (Randevu, Ödeme, Veriler, Ölçüm, Diyet, Paket). Non-BaseTab tabs (Detay,
+  /// Dokümanlar) manage their own lifecycle and are intentionally left as-is.
+  void _autoRefreshTab(int index) {
+    final state = _keys[index].currentState;
+    if (state is BaseTabState) {
+      logger.info('Auto-refreshing tab on re-entry: index={}', [index]);
+      state.refreshData();
+    }
   }
 
   @override

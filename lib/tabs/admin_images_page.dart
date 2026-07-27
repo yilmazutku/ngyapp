@@ -7,6 +7,7 @@ import '../models/user_model.dart';
 import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../pages/customer_sum.dart';
+import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
 final Logger logger = Logger.forClass(AdminUsersPage);
@@ -133,7 +134,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         _filteredUsers = _allUsers.where((user) {
           final nameMatch = user.name.toLowerCase().contains(_searchQuery);
           final emailMatch = user.email.toLowerCase().contains(_searchQuery);
-          final surnameMatch = user.surname.toLowerCase().contains(_searchQuery) ?? false;
+          final surnameMatch = user.surname.toLowerCase().contains(_searchQuery);
 
           return nameMatch || emailMatch || surnameMatch;
         }).toList();
@@ -142,6 +143,88 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
           [_filteredUsers.length, _allUsers.length]);
       }
     });
+  }
+
+  /// Confirms and permanently deletes [user] together with everything that
+  /// belongs to them (all Firestore data, every Storage file and their Firebase
+  /// Authentication account) via [UserProvider.deleteUserAccount].
+  ///
+  /// Shows a strong, itemized confirmation first, a blocking loading dialog
+  /// while the server-side deletion runs, and finally an info/error dialog. On
+  /// success the user is removed from the in-memory lists so the UI updates
+  /// without a full reload.
+  Future<void> _confirmAndDeleteUser(UserModel user) async {
+    final fullName = '${user.name} ${user.surname}'.trim();
+    logger.info('Delete requested. userId={} name="{}"', [user.userId, fullName]);
+
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Kullanıcıyı Sil',
+      message: '"$fullName" kullanıcısı ve bu kullanıcıya ait TÜM veriler '
+          'kalıcı olarak silinecek:\n\n'
+          '• Randevular\n'
+          '• Ödemeler ve dekontlar\n'
+          '• Paketler\n'
+          '• Ölçümler ve Tanita PDF\'leri\n'
+          '• Dokümanlar\n'
+          '• Diyet listeleri\n'
+          '• Öğün fotoğrafları ve günlük veriler\n'
+          '• Sohbet ve yüklenen tüm fotoğraflar\n'
+          '• Giriş (hesap) bilgileri\n\n'
+          'Bu işlem geri alınamaz. Devam etmek istiyor musunuz?',
+      confirmText: 'Evet, sil',
+      cancelText: 'Vazgeç',
+    );
+
+    if (!confirmed || !mounted) return;
+
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+
+    bool loadingOpen = false;
+    try {
+      if (mounted) {
+        DialogUtils.openLoading(context, message: 'Kullanıcı siliniyor...');
+        loadingOpen = true;
+      }
+
+      await userProvider.deleteUserAccount(userId: user.userId);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _allUsers.removeWhere((u) => u.userId == user.userId);
+        _filteredUsers.removeWhere((u) => u.userId == user.userId);
+      });
+
+      logger.info('User deleted and removed from list. userId={}', [user.userId]);
+
+      await DialogUtils.openInfo(
+        context,
+        title: 'Silindi',
+        message: '"$fullName" kullanıcısı ve tüm verileri kalıcı olarak silindi.',
+      );
+    } catch (e) {
+      logger.err('Failed to delete user. userId={}, error={}', [user.userId, e]);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: e is Exception
+              ? e.toString().replaceFirst('Exception: ', '')
+              : 'Kullanıcı silinirken bir hata oluştu.',
+        );
+      }
+    }
   }
 
   @override
@@ -262,10 +345,13 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
       itemCount: _filteredUsers.length,
       itemBuilder: (context, index) {
         final user = _filteredUsers[index];
-        final fullName = '${user.name} ${user.surname ?? ""}'.trim();
+        final fullName = '${user.name} ${user.surname}'.trim();
         final initial = user.name.isNotEmpty 
             ? user.name.substring(0, 1).toUpperCase() 
             : '?';
+        // Admin accounts cannot be deleted (mirrors the server-side guard), so
+        // the delete action is only offered for regular users.
+        final isAdmin = ChatManager.isAdminUid(user.userId);
         
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
@@ -292,18 +378,58 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isAdmin)
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    tooltip: 'Kullanıcı işlemleri',
+                    onSelected: (value) {
+                      if (value == 'delete') {
+                        _confirmAndDeleteUser(user);
+                      }
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.delete_outline,
+                              color: Colors.red),
+                          title: Text(
+                            'Kullanıcıyı Sil',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                const Icon(Icons.chevron_right),
+              ],
+            ),
+            onTap: () async {
               logger.info('User tapped. userId={} name="{}"', [user.userId, fullName]);
-              
-              // Navigate to user summary page
-              // The CustomerSummaryPage contains tabs including ImagesTab
-              // ImagesTab uses MealManager to fetch meal images
-              Navigator.of(context).push(
+
+              // Navigate to user summary page.
+              // The CustomerSummaryPage contains tabs including the Detay tab,
+              // which can delete the user and pops back with the deleted userId
+              // so we can drop the row here without a full reload.
+              final deletedUserId = await Navigator.of(context).push<Object?>(
                 MaterialPageRoute(
                   builder: (context) => CustomerSummaryPage(user: user),
                 ),
               );
+
+              if (!mounted) return;
+              if (deletedUserId is String && deletedUserId.isNotEmpty) {
+                setState(() {
+                  _allUsers.removeWhere((u) => u.userId == deletedUserId);
+                  _filteredUsers.removeWhere((u) => u.userId == deletedUserId);
+                });
+                logger.info(
+                    'Removed deleted user from list. userId={}', [deletedUserId]);
+              }
             },
           ),
         );

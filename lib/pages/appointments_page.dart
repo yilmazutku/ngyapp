@@ -6,9 +6,11 @@ import 'package:ngy_app/providers/timeslot_manager.dart';
 
 import '../models/appointment_model.dart';
 import '../models/logger.dart';
+import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/appointment_durations_provider.dart';
 import '../providers/appointment_manager.dart';
+import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -42,12 +44,27 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
   /// (e.g. "16.07.2026 Perşembe").
   static const String _dateWithDayFormat = 'dd.MM.yyyy EEEE';
 
+  // ---- Passive info-banner strings/formats (user-facing, Turkish) ----
+  static const String _lastApptTitle = 'Son Randevu Bilgisi';
+  static const String _lastApptWillBeText =
+      'Bu, paketinizdeki son randevunuz olacaktır.';
+  static const String _plannedPaymentTitle = 'Bekleyen Ödeme';
+  static const String _plannedPaymentText =
+      'Bekleyen/planlanan bir ödemeniz bulunmaktadır.';
+  static const String _bannerDateTimeFormat = 'dd.MM.yyyy HH:mm';
+  static const String _bannerDateFormat = 'dd.MM.yyyy';
+
   late DateTime _selectedDate;
   MeetingType _selectedMeetingType = MeetingType.f2f;
   AppointmentType _selectedAppointmentType = AppointmentType.diger;
   TimeOfDay? _selectedTime;
   late Future<List<TimeOfDay>> _availableTimesFuture;
   late Future<List<AppointmentModel>> _userAppointmentsFuture;
+
+  /// Loads the passive info banners shown at the top of the page (last
+  /// appointment of the package / pending planned payment). Refreshed after
+  /// booking or canceling so the notices stay in sync.
+  late Future<_BookingNotices> _noticesFuture;
 
   /// The earliest date a user is allowed to book, normalized to midnight.
   DateTime get _earliestSelectableDate {
@@ -63,6 +80,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     // Default to the earliest bookable date (today + minimum lead time).
     _selectedDate = _earliestSelectableDate;
     _fetchAvailableTimes();
+    _noticesFuture = _loadBookingNotices();
     // Load admin-configured default durations so the duration derived at
     // booking time reflects the values set in the Testing page.
     _preloadDurations();
@@ -180,6 +198,17 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         return;
       }
 
+      // The active package must still have at least one remaining meeting
+      // right before a new appointment can be booked.
+      if (!activeSubscription.hasMeetingsLeft) {
+        await DialogUtils.openError(
+          context,
+          title: 'Randevu Oluşturulamadı',
+          message: 'Paketinizde kalan görüşme hakkınız bulunmamaktadır. Randevu alabilmeniz için lütfen ofis ile iletişime geçiniz.',
+        );
+        return;
+      }
+
       DateTime appointmentDateTime = DateTime(
         _selectedDate.year,
         _selectedDate.month,
@@ -234,8 +263,10 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         title: 'Başarılı',
         message: 'Randevunuz başarıyla oluşturuldu.',
       );
+      if (!mounted) return;
       setState(() {
         _fetchAvailableTimes();
+        _refreshBookingNotices();
       });
       //bu onceki sfya götürüyor
       //Navigator.of(context).pop();
@@ -264,8 +295,10 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           message: 'Randevu başarıyla iptal edildi.',
         );
       }
+      if (!mounted) return;
       setState(() {
         _fetchAvailableTimes();
+        _refreshBookingNotices();
       });
     } catch (e, stackTrace) {
       logger.err('Error canceling appointment: {}, stack trace: {}', [e,stackTrace]);
@@ -288,6 +321,113 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     );
   }
 
+  /// Re-runs the notice load so the top-of-page banners reflect the latest
+  /// appointment/payment state. Call inside setState.
+  void _refreshBookingNotices() {
+    _noticesFuture = _loadBookingNotices();
+  }
+
+  /// Loads the data needed for the passive top-of-page banners: the active
+  /// subscription (if any), its appointments, and the user's planned payments.
+  /// All Firebase access goes through the existing providers.
+  Future<_BookingNotices> _loadBookingNotices() async {
+    // Capture providers before awaiting so context isn't used across gaps.
+    final subProvider = Provider.of<SubProvider>(context, listen: false);
+    final appointmentManager =
+        Provider.of<AppointmentManager>(context, listen: false);
+    final paymentProvider =
+        Provider.of<PaymentProvider>(context, listen: false);
+
+    // The pending-payment notice is independent of the active package, so it is
+    // resolved regardless of whether an active subscription exists.
+    final plannedPayment = await _findPlannedPayment(paymentProvider);
+
+    // Active subscription, using the same selection rule as _bookAppointment.
+    final subscriptions = await subProvider.fetchSubscriptions(
+      userId: widget.userId,
+      showAllSubscriptions: true,
+    );
+    final activeSub = subscriptions.cast<SubscriptionModel?>().firstWhere(
+          (sub) => sub!.status.isActive,
+          orElse: () => null,
+        );
+
+    if (activeSub == null) {
+      return _BookingNotices(plannedPayment: plannedPayment);
+    }
+
+    final appointments = await appointmentManager.fetchAppointments(
+      activeSub.subscriptionId,
+      showAllAppointments: false,
+      userId: widget.userId,
+    );
+
+    return _BookingNotices(
+      lastAppointment: _computeLastAppointmentNotice(activeSub, appointments),
+      plannedPayment: plannedPayment,
+    );
+  }
+
+  /// Computes the "last appointment of the package" notice for [activeSub].
+  ///
+  /// A scheduled upcoming appointment does not reduce
+  /// [SubscriptionModel.remainingMeetings] until it becomes completed/burned, so
+  /// the number of slots still bookable is
+  /// `remainingMeetings - upcomingScheduled.length`:
+  ///  * if every remaining slot is already booked, the latest upcoming
+  ///    scheduled appointment is the package's final one (date variant);
+  ///  * if exactly one slot is still bookable, the next booking will be the last.
+  /// Otherwise no last-appointment banner applies.
+  _LastAppointmentNotice? _computeLastAppointmentNotice(
+    SubscriptionModel activeSub,
+    List<AppointmentModel> appointments,
+  ) {
+    final now = DateTime.now();
+    final upcomingScheduled = appointments
+        .where((a) =>
+            a.status == AppointmentStatus.scheduled &&
+            a.appointmentDateTime.isAfter(now))
+        .toList()
+      ..sort((a, b) => a.appointmentDateTime.compareTo(b.appointmentDateTime));
+
+    final bookableLeft = activeSub.remainingMeetings - upcomingScheduled.length;
+
+    if (upcomingScheduled.isNotEmpty && bookableLeft <= 0) {
+      // All remaining slots are booked → the latest one is the package's last.
+      return _LastAppointmentNotice.scheduled(
+          upcomingScheduled.last.appointmentDateTime);
+    }
+    if (bookableLeft == 1) {
+      // Exactly one slot remains → the appointment about to be booked is last.
+      return const _LastAppointmentNotice.willBeLast();
+    }
+    return null;
+  }
+
+  /// Returns the most urgent planned (pending) payment for the user, or null
+  /// when there is none. Uses [PaymentProvider.fetchPayments] and filters by
+  /// [PaymentStatus.planned]; the earliest [PaymentModel.dueDate] wins (payments
+  /// without a due date are treated as least urgent).
+  Future<PaymentModel?> _findPlannedPayment(
+      PaymentProvider paymentProvider) async {
+    final payments = await paymentProvider.fetchPayments(
+      null,
+      userId: widget.userId,
+      showAllPayments: true,
+    );
+    final planned =
+        payments.where((p) => p.status == PaymentStatus.planned).toList()
+          ..sort((a, b) {
+            final aDate = a.dueDate;
+            final bDate = b.dueDate;
+            if (aDate == null && bDate == null) return 0;
+            if (aDate == null) return 1;
+            if (bDate == null) return -1;
+            return aDate.compareTo(bDate);
+          });
+    return planned.isEmpty ? null : planned.first;
+  }
+
   @override
   Widget build(BuildContext context) {
     logger.info('Building AppointmentsPage');
@@ -302,6 +442,21 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Passive info banners (last appointment of package / pending
+            // payment). Rendered only once their data is ready.
+            FutureBuilder<_BookingNotices>(
+              future: _noticesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done ||
+                    !snapshot.hasData ||
+                    !snapshot.data!.hasAny) {
+                  // Nothing while loading, on error, or when no notice applies
+                  // (avoids layout jank before the data is available).
+                  return const SizedBox.shrink();
+                }
+                return _buildNoticesSection(snapshot.data!);
+              },
+            ),
             // Meeting Type Selector
             Card(
               elevation: 4,
@@ -579,6 +734,145 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       },
     );
   }
+
+  // ---- Passive info-banner builders --------------------------------------
+
+  /// Builds the stacked info-banner section shown at the top of the page.
+  Widget _buildNoticesSection(_BookingNotices notices) {
+    final banners = <Widget>[
+      if (notices.lastAppointment != null)
+        _buildLastAppointmentBanner(notices.lastAppointment!),
+      if (notices.plannedPayment != null)
+        _buildPlannedPaymentBanner(notices.plannedPayment!),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < banners.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          banners[i],
+        ],
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  /// Amber notice telling the user this is (or will be) the package's last
+  /// appointment. Shows the scheduled date when the last slot is already booked.
+  Widget _buildLastAppointmentBanner(_LastAppointmentNotice notice) {
+    final message = notice.isAlreadyScheduled
+        ? 'Paketinizdeki son randevunuz '
+            '${DateFormat(_bannerDateTimeFormat, 'tr_TR').format(notice.scheduledDate!)} '
+            'tarihinde planlanmıştır.'
+        : _lastApptWillBeText;
+    return _buildNoticeCard(
+      icon: Icons.event_note,
+      color: Colors.orange.shade800,
+      title: _lastApptTitle,
+      message: message,
+    );
+  }
+
+  /// Red notice about a pending (planned) payment, including its amount and,
+  /// when available, its due date.
+  Widget _buildPlannedPaymentBanner(PaymentModel payment) {
+    final buffer = StringBuffer(_plannedPaymentText)
+      ..write('\nTutar: ${payment.amount.toStringAsFixed(2)} ₺');
+    if (payment.dueDate != null) {
+      buffer.write(' • Son Tarih: '
+          '${DateFormat(_bannerDateFormat, 'tr_TR').format(payment.dueDate!)}');
+    }
+    return _buildNoticeCard(
+      icon: Icons.payments_outlined,
+      color: Colors.red.shade700,
+      title: _plannedPaymentTitle,
+      message: buffer.toString(),
+    );
+  }
+
+  /// Shared Material 3 styled info card used by the passive banners.
+  Widget _buildNoticeCard({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String message,
+  }) {
+    return Card(
+      elevation: 2,
+      color: color.withValues(alpha: 0.10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message,
+                    style: const TextStyle(fontSize: 14, height: 1.3),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Immutable view-model for the passive info banners shown at the top of the
+/// booking page (see [_AppointmentsPageState]). Built once from the active
+/// subscription, its appointments, and the user's planned payments.
+class _BookingNotices {
+  const _BookingNotices({this.lastAppointment, this.plannedPayment});
+
+  /// Notice about the active package's last appointment, or null when it does
+  /// not currently apply.
+  final _LastAppointmentNotice? lastAppointment;
+
+  /// The most urgent planned (pending) payment, or null when the user has none.
+  final PaymentModel? plannedPayment;
+
+  /// Whether at least one banner should be shown.
+  bool get hasAny => lastAppointment != null || plannedPayment != null;
+}
+
+/// Describes the "last appointment of the package" notice: either the package's
+/// final slot is already booked ([_LastAppointmentNotice.scheduled], carrying
+/// its [scheduledDate]) or the next booking will become the last one
+/// ([_LastAppointmentNotice.willBeLast]).
+class _LastAppointmentNotice {
+  const _LastAppointmentNotice.scheduled(DateTime this.scheduledDate)
+      : isAlreadyScheduled = true;
+
+  const _LastAppointmentNotice.willBeLast()
+      : isAlreadyScheduled = false,
+        scheduledDate = null;
+
+  /// Whether the package's last appointment is already booked/scheduled.
+  final bool isAlreadyScheduled;
+
+  /// Date of the already-scheduled last appointment; non-null only when
+  /// [isAlreadyScheduled] is true.
+  final DateTime? scheduledDate;
 }
 
 /// Page showing past appointments with pagination

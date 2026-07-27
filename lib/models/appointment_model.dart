@@ -366,6 +366,12 @@ enum AppointmentType {
     );
   }
 
+  /// Whether an appointment of this type may be created without an active
+  /// package. Only "Ön Görüşme" and "Program Başlangıcı" appointments are
+  /// allowed without a package (e.g. when the user has no active package yet).
+  bool get allowedWithoutPackage =>
+      this == AppointmentType.og || this == AppointmentType.pb;
+
   /// Returns the default duration (minutes) for this appointment type based on
   /// meeting type. The values come from [AppointmentDurationsRegistry], which
   /// layers admin-configured overrides (see the Testing page /

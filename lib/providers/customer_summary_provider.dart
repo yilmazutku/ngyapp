@@ -79,9 +79,27 @@ class CustomerSummaryProvider extends ChangeNotifier {
         ? SummaryCell(activeSub.packageName.trim())
         : const SummaryCell.error();
 
+    // Package duration type (1 Aylık / 3 Aylık). Empty for legacy packages
+    // that predate the field.
+    final packageTypeCell = activeSub.packageType != null
+        ? SummaryCell(activeSub.packageType!.label)
+        : const SummaryCell.empty();
+
     final notes = (activeSub.notes != null && activeSub.notes!.trim().isNotEmpty)
         ? SummaryCell(activeSub.notes!.trim())
         : const SummaryCell.empty();
+
+    // Freeze date is only relevant for frozen packages. When a frozen package
+    // is missing its freeze date (e.g. legacy data), surface it as an error so
+    // the admin knows to set it; other statuses leave the cell empty.
+    final SummaryCell freezeDateCell;
+    if (status == SubActiveStatus.frozen) {
+      freezeDateCell = activeSub.freezeDate != null
+          ? SummaryCell(_dateFormat.format(activeSub.freezeDate!))
+          : const SummaryCell.error();
+    } else {
+      freezeDateCell = const SummaryCell.empty();
+    }
 
     final payment = await _resolveLastPayment(user.userId);
     final appts =
@@ -101,7 +119,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
       paymentAmount: payment.amount,
       paymentType: payment.type,
       packageInfo: packageInfo,
+      packageType: packageTypeCell,
       notes: notes,
+      freezeDate: freezeDateCell,
       seans: appts.seans,
       postponedDates: appts.postponedDates,
       remainingPostponements: remainingCell,

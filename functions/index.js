@@ -695,3 +695,98 @@ exports.updateUserEmail = onCall(async (request) => {
     );
   }
 });
+
+// =============================================================================
+// ADMIN CALLABLE: DELETE USER ACCOUNT
+// Permanently deletes a user and EVERYTHING that belongs to them:
+//   - The Firestore users/{uid} document and every subcollection
+//     (appointments, payments, subscriptions, measurements + Tanita PDFs,
+//     tests/documents, dietLists, meals, dailyData, ...).
+//   - The user's chat document chats/{uid} and its messages subcollection.
+//   - Every Cloud Storage object under users/{uid}/** (dekont, tests, Tanita
+//     PDFs, meal photos, chat photos) and chats/{uid}/** (chat images).
+//   - The user's Firebase Authentication account.
+// Only admins (see ADMIN_UIDS) may call this, and admin accounts can never be
+// deleted through it.
+// =============================================================================
+
+/**
+ * Callable function that permanently deletes a user and all of their data.
+ * Expects data: {uid: string}.
+ * @return {Promise<{success: boolean, uid: string}>} Result payload.
+ */
+exports.deleteUserAccount = onCall(
+    {timeoutSeconds: 300, memory: '512MiB'},
+    async (request) => {
+      // 1) Authorize: caller must be a signed-in admin.
+      const callerUid = request.auth ? request.auth.uid : null;
+      if (!callerUid || !ADMIN_UIDS.has(callerUid)) {
+        throw new HttpsError(
+            'permission-denied',
+            'Bu işlem için yönetici yetkisi gereklidir.',
+        );
+      }
+
+      // 2) Validate input.
+      const data = request.data || {};
+      const targetUid = typeof data.uid === 'string' ? data.uid.trim() : '';
+      if (!targetUid) {
+        throw new HttpsError('invalid-argument', 'Geçersiz kullanıcı.');
+      }
+
+      // 3) Never allow deleting an admin account through this endpoint.
+      if (ADMIN_UIDS.has(targetUid)) {
+        throw new HttpsError(
+            'permission-denied',
+            'Yönetici hesabı silinemez.',
+        );
+      }
+
+      const db = admin.firestore();
+      const bucket = admin.storage().bucket();
+
+      try {
+        // 4) Delete the Auth account first so the user cannot sign in or write
+        // new data while the rest of the cleanup runs. Idempotent: a missing
+        // account (e.g. a retried call) is treated as already done.
+        try {
+          await admin.auth().deleteUser(targetUid);
+          logger.info(`Auth account deleted for user ${targetUid}`);
+        } catch (err) {
+          if (err.code === 'auth/user-not-found') {
+            logger.warn(`Auth account already absent for user ${targetUid}`);
+          } else {
+            throw err;
+          }
+        }
+
+        // 5) Delete every Storage object owned by the user. All uploads live
+        // under these two prefixes. The trailing slash prevents matching other
+        // UIDs that merely share this UID as a prefix (e.g. "abc" vs "abcd").
+        await Promise.all([
+          bucket.deleteFiles({prefix: `users/${targetUid}/`}),
+          bucket.deleteFiles({prefix: `chats/${targetUid}/`}),
+        ]);
+        logger.info(`Storage files deleted for user ${targetUid}`);
+
+        // 6) Recursively delete the Firestore document trees. recursiveDelete
+        // removes each document together with every nested subcollection and
+        // document beneath it.
+        await db.recursiveDelete(db.collection('users').doc(targetUid));
+        await db.recursiveDelete(db.collection('chats').doc(targetUid));
+        logger.info(`Firestore data deleted for user ${targetUid}`);
+
+        return {success: true, uid: targetUid};
+      } catch (err) {
+        logger.error('deleteUserAccount failed', {
+          uid: targetUid,
+          code: err.code,
+          message: err.message,
+        });
+        throw new HttpsError(
+            'internal',
+            'Kullanıcı silinirken bir hata oluştu.',
+        );
+      }
+    },
+);

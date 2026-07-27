@@ -35,8 +35,16 @@ class CustomerSummaryRow {
   final SummaryCell paymentType;
   final SummaryCell packageInfo;
 
+  /// Package duration type (e.g. 1 Aylık / 3 Aylık); empty for legacy packages
+  /// that predate the field.
+  final SummaryCell packageType;
+
   /// Free-text notes attached to the active subscription (may be empty).
   final SummaryCell notes;
+
+  /// Date the package was frozen. Only populated for frozen packages; an empty
+  /// cell for every other status (the column is only shown on the frozen tab).
+  final SummaryCell freezeDate;
 
   /// Always [maxSeans] entries; unused trailing slots are empty cells.
   final List<SummaryCell> seans;
@@ -58,7 +66,9 @@ class CustomerSummaryRow {
     required this.paymentAmount,
     required this.paymentType,
     required this.packageInfo,
+    this.packageType = const SummaryCell.empty(),
     required this.notes,
+    this.freezeDate = const SummaryCell.empty(),
     required this.seans,
     required this.postponedDates,
     required this.remainingPostponements,

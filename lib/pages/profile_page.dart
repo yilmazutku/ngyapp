@@ -1,9 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:ngy_app/pages/reset_password_page.dart';
+import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:ngy_app/services/meal_reminder_service.dart';
+import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
@@ -21,6 +22,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final _surnameController = TextEditingController();
   final _ageController = TextEditingController();
   bool _isLoading = true;
+  bool _isResettingPassword = false;
   bool _mealNotificationsEnabled = true;
   bool _announcementNotificationsEnabled = true; // Default to true
   DateTime? _createDate;
@@ -166,6 +168,69 @@ class _ProfilePageState extends State<ProfilePage> {
           message: 'İşlem sırasında bir hata oluştu. Lütfen tekrar deneyiniz.',
         );
       }
+    }
+  }
+
+  /// Sends a password reset link to the signed-in user's own email address.
+  ///
+  /// The email is never asked for; it is taken from the authenticated account
+  /// inside [UserProvider.sendPasswordResetEmailToCurrentUser].
+  Future<void> _resetPassword() async {
+    if (!mounted) return;
+
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Şifre Sıfırla',
+      message:
+          'Şifre sıfırlama bağlantısı hesabınıza kayıtlı e-posta adresinize gönderilecek. Onaylıyor musunuz?',
+      confirmText: 'Gönder',
+      cancelText: 'Vazgeç',
+    );
+
+    if (!confirmed || !mounted) return;
+
+    setState(() => _isResettingPassword = true);
+
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+
+    bool loadingOpen = false;
+    try {
+      if (mounted) {
+        DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
+        loadingOpen = true;
+      }
+
+      await userProvider.sendPasswordResetEmailToCurrentUser();
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (mounted) {
+        await DialogUtils.openInfo(
+          context,
+          title: 'Başarılı',
+          message:
+              'Şifre sıfırlama bağlantısı e-posta adresinize başarıyla gönderilmiştir.',
+        );
+      }
+    } catch (e) {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: e is Exception
+              ? e.toString().replaceFirst('Exception: ', '')
+              : 'Şifre sıfırlama işlemi başarısız oldu. Lütfen tekrar deneyiniz.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isResettingPassword = false);
     }
   }
 
@@ -329,18 +394,8 @@ class _ProfilePageState extends State<ProfilePage> {
                         child: SizedBox(
                           width: buttonWidth,
                           child: ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ResetPasswordPage(
-                                    email: FirebaseAuth
-                                            .instance.currentUser?.email ??
-                                        '',
-                                  ),
-                                ),
-                              );
-                            },
+                            onPressed:
+                                _isResettingPassword ? null : _resetPassword,
                             icon: const Icon(Icons.lock_reset),
                             label: const Text('Şifre Sıfırla'),
                           ),

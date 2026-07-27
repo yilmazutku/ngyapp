@@ -75,6 +75,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
   DateTime? _debugSelectedDate;
   double _waterIntakeLiters = 0.0; // Water intake in liters
   final TextEditingController _stepsController = TextEditingController();
+  final FocusNode _stepsFocusNode = FocusNode();
   bool _isSavingDailyData = false;
   final NotificationService _notificationService = NotificationService();
   final MealReminderService _mealReminderService = MealReminderService();
@@ -95,12 +96,32 @@ class _MealUploadPageState extends State<MealUploadPage> {
     _mealContentsFuture = _fetchMealStatesAndContents();
     _notificationService.initialize();
     _mealReminderService.initialize();
+
+    // Clear the leading "0" when the steps field is focused so the user can
+    // type directly (e.g. "100" instead of "0100"), and restore "0" on blur
+    // when left empty to preserve the initial display.
+    _stepsFocusNode.addListener(_handleStepsFocusChange);
     
     // Load persisted expanded meal states
     _loadExpandedMeals();
     
     // Schedule meal reminders when page loads (if user has notifications enabled)
     _scheduleMealRemindersIfEnabled();
+  }
+
+  /// Prevents a leading zero from being prepended to the steps input.
+  ///
+  /// On focus gained: if the field only shows the placeholder "0", clear it so
+  /// typing starts fresh. On focus lost: if the field is empty, restore "0" to
+  /// keep the display consistent with the initial/loaded state.
+  void _handleStepsFocusChange() {
+    if (_stepsFocusNode.hasFocus) {
+      if (_stepsController.text == '0') {
+        _stepsController.clear();
+      }
+    } else if (_stepsController.text.isEmpty) {
+      _stepsController.text = '0';
+    }
   }
 
   /// Load persisted expanded meal states from SharedPreferences
@@ -875,6 +896,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
                     height: 36,
                     child: TextField(
                       controller: _stepsController,
+                      focusNode: _stepsFocusNode,
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13),
@@ -1458,6 +1480,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
   @override
   void dispose() {
     _uploadTimeoutTimer?.cancel();
+    _stepsFocusNode.removeListener(_handleStepsFocusChange);
+    _stepsFocusNode.dispose();
     _stepsController.dispose();
     super.dispose();
   }

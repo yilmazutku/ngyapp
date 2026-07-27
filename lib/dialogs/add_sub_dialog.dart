@@ -37,13 +37,19 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   final TextEditingController _allowedPostponementsController = TextEditingController();
   
   DateTime? _startDate=DateTime.now();
+  // Freeze date is only relevant when the package type is "Donduruldu".
+  DateTime? _freezeDate;
   bool _isLoading = false;
   bool _isPaymentReceived = false;
   PaymentType _paymentType = PaymentType.nakit;
   SubsMeetingType _selectedMeetingType = SubsMeetingType.faceToFace;
 
-  // Admin picks the package type (status). Default is Aktif/Haftalık.
+  // Admin picks the package status. Default is Aktif/Haftalık.
   SubActiveStatus _selectedStatus = SubActiveStatus.activeWeekly;
+
+  // Package duration type (1 Aylık / 3 Aylık). Selecting one auto-fills the
+  // suggested meeting count; the admin can still edit it afterwards.
+  SubsPackageType? _selectedPackageType;
 
   // Weight-tracking packages have no payment; payment widgets are hidden and
   // no payment record is created for them.
@@ -85,7 +91,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Package type / status (topmost). Default: Aktif/Haftalık.
+                // Package status (topmost). Default: Aktif/Haftalık.
                 DropdownButtonFormField<SubActiveStatus>(
                   value: _selectedStatus,
                   items: SubActiveStatus.values.map((SubActiveStatus status) {
@@ -97,11 +103,70 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   onChanged: (newValue) =>
                       setState(() => _selectedStatus = newValue!),
                   decoration: const InputDecoration(
-                    labelText: 'Paket Tipi',
+                    labelText: 'Paket Durumu',
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
+
+                // Package duration type. Selecting one auto-fills the suggested
+                // meeting count (still editable by the admin below).
+                DropdownButtonFormField<SubsPackageType>(
+                  value: _selectedPackageType,
+                  isExpanded: true,
+                  items: SubsPackageType.values.map((SubsPackageType type) {
+                    return DropdownMenuItem<SubsPackageType>(
+                      value: type,
+                      child: Text(
+                        '${type.label} (${type.defaultMeetings} görüşme)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (newValue) {
+                    setState(() {
+                      _selectedPackageType = newValue;
+                      // Auto-fill the suggested meeting count; the listener on
+                      // the field keeps allowed postponements in sync too.
+                      if (newValue != null) {
+                        _totalMeetingsController.text =
+                            newValue.defaultMeetings.toString();
+                      }
+                    });
+                  },
+                  decoration: const InputDecoration(
+                    labelText: 'Paket Tipi',
+                    hintText: 'Paket süresini seçin',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Freeze date (shown only when the package is frozen).
+                if (_selectedStatus == SubActiveStatus.frozen) ...[
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Dondurulma Tarihi'),
+                    subtitle: Text(
+                        _freezeDate != null
+                            ? DateFormatter.formatNumericDate(_freezeDate!)
+                            : 'Bir tarih seçin',
+                        style: _freezeDate != null
+                            ? const TextStyle(fontWeight: FontWeight.bold)
+                            : null),
+                    trailing: const Icon(Icons.ac_unit),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _freezeDate ?? DateTime.now(),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2050),
+                      );
+                      if (picked != null) setState(() => _freezeDate = picked);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
 
                 // Package Name
                 TextFormField(
@@ -345,6 +410,16 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       return;
     }
 
+    if (_selectedStatus == SubActiveStatus.frozen && _freezeDate == null) {
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Paket donduruldu olarak işaretlendi. Lütfen dondurulma tarihini seçin.',
+      );
+      logger.warn('Dondurulma tarihi seçilmedi.');
+      return;
+    }
+
     if (_selectedMeetingType == SubsMeetingType.hybrid) {
       int online = int.tryParse(_onlineMeetingsController.text) ?? 0;
       int faceToFace = int.tryParse(_faceToFaceMeetingsController.text) ?? 0;
@@ -382,6 +457,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       // Prepare subscription data
       final subscriptionData = {
         'packageName': _packageNameController.text,
+        if (_selectedPackageType != null)
+          'packageType': _selectedPackageType!.label,
         if (notes.isNotEmpty) 'notes': notes,
         'startDate': _startDate!,
         'totalMeetings': totalMeetings,
@@ -394,6 +471,9 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
         'amountPaid': paymentReceived ? totalAmount : 0.0,
         'status': _selectedStatus.label,
         'meetingType': _selectedMeetingType.label,
+        // Persist the freeze date only for frozen packages.
+        if (_selectedStatus == SubActiveStatus.frozen && _freezeDate != null)
+          'freezeDate': _freezeDate,
         'createDate': DateTime.now(),
         'createUser': null, // TODO: Add current user ID if available
       };

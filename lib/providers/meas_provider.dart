@@ -288,14 +288,67 @@ class MeasProvider extends ChangeNotifier {
         'pdfUrl': downloadUrl,
         'fileName': fileName,
         'uploadTime': FieldValue.serverTimestamp(),
+        'storagePath': storagePath,
       });
 
       logger.info('Tanita PDF uploaded: $docId');
+      notifyListeners();
     } catch (e) {
       logger.err('Error uploading Tanita PDF: {}', [e.toString()]);
       rethrow;
     }
   }
 
+  /// Deletes a Tanita PDF file: removes both the Firestore metadata document
+  /// and the underlying Storage blob.
+  ///
+  /// [storagePath] is used when available (persisted on newer uploads). For
+  /// legacy documents that predate the stored path, it is reconstructed from
+  /// the [docId], which always matches the storage file name
+  /// (`users/{userId}/measurements/{docId}.pdf`).
+  ///
+  /// @param userId The ID of the user to whom the PDF belongs
+  /// @param docId The Firestore document ID of the Tanita PDF metadata
+  /// @param storagePath The Storage path of the PDF blob (may be empty/legacy)
+  Future<void> deleteTanitaPdfFile({
+    required String userId,
+    required String docId,
+    String? storagePath,
+  }) async {
+    try {
+      final resolvedPath = (storagePath != null && storagePath.isNotEmpty)
+          ? storagePath
+          : 'users/$userId/measurements/$docId.pdf';
 
+      // Best-effort Storage removal: if the blob is already gone (e.g. legacy
+      // path mismatch or a prior partial delete), still remove the Firestore
+      // metadata so no orphaned entry remains in the list.
+      try {
+        await FirebaseStorage.instance.ref().child(resolvedPath).delete();
+      } on FirebaseException catch (e) {
+        if (e.code == 'object-not-found') {
+          logger.warn('Tanita PDF blob not found, deleting metadata only: {}',
+              [resolvedPath]);
+        } else {
+          rethrow;
+        }
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('measurements')
+          .doc('tanita')
+          .collection('pdfFiles')
+          .doc(docId)
+          .delete();
+
+      logger.info('Tanita PDF deleted: userId={}, docId={}', [userId, docId]);
+      notifyListeners();
+    } catch (e) {
+      logger.err('Error deleting Tanita PDF: userId={}, docId={}, e={}',
+          [userId, docId, e.toString()]);
+      rethrow;
+    }
+  }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/user_model.dart';
+import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 
@@ -180,6 +181,80 @@ class _DetailsTabState extends State<DetailsTab>
     }
   }
 
+  /// Confirms and permanently deletes [user] together with everything that
+  /// belongs to them (all Firestore data, every Storage file and their Firebase
+  /// Authentication account) via [UserProvider.deleteUserAccount].
+  ///
+  /// On success the (now-invalid) summary page is popped, returning the deleted
+  /// user's id so the user list can drop the row without a full reload.
+  Future<void> _confirmAndDeleteUser(UserModel user) async {
+    final fullName = '${user.name} ${user.surname}'.trim();
+
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Kullanıcıyı Sil',
+      message: '"$fullName" kullanıcısı ve bu kullanıcıya ait TÜM veriler '
+          'kalıcı olarak silinecek:\n\n'
+          '• Randevular\n'
+          '• Ödemeler ve dekontlar\n'
+          '• Paketler\n'
+          '• Ölçümler ve Tanita PDF\'leri\n'
+          '• Dokümanlar\n'
+          '• Diyet listeleri\n'
+          '• Öğün fotoğrafları ve günlük veriler\n'
+          '• Sohbet ve yüklenen tüm fotoğraflar\n'
+          '• Giriş (hesap) bilgileri\n\n'
+          'Bu işlem geri alınamaz. Devam etmek istiyor musunuz?',
+      confirmText: 'Evet, sil',
+      cancelText: 'Vazgeç',
+    );
+
+    if (!confirmed || !mounted) return;
+
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+
+    bool loadingOpen = false;
+    try {
+      if (mounted) {
+        DialogUtils.openLoading(context, message: 'Kullanıcı siliniyor...');
+        loadingOpen = true;
+      }
+
+      await userProvider.deleteUserAccount(userId: user.userId);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Silindi',
+        message:
+            '"$fullName" kullanıcısı ve tüm verileri kalıcı olarak silindi.',
+      );
+
+      // Leave the now-invalid summary page and tell the caller which user was
+      // removed so the list can drop the row.
+      if (mounted) Navigator.of(context).pop(user.userId);
+    } catch (e) {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: e is Exception
+              ? e.toString().replaceFirst('Exception: ', '')
+              : 'Kullanıcı silinirken bir hata oluştu.',
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context); // keep-alive
@@ -269,6 +344,25 @@ class _DetailsTabState extends State<DetailsTab>
                       ),
                     ),
                   ),
+                  if (!ChatManager.isAdminUid(user.userId)) ...[
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _confirmAndDeleteUser(user),
+                        icon: const Icon(Icons.delete_forever),
+                        label: const Text('Kullanıcıyı Sil'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          side: const BorderSide(color: Colors.red),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ] else ...[
                   Row(
                     children: [

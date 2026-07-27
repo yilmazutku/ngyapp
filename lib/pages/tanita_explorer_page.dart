@@ -53,6 +53,7 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         pdfUrl: data['pdfUrl'] ?? '',
         fileName: data['fileName'] ?? '',
         uploadTime: (data['uploadTime'] as Timestamp?)?.toDate(),
+        storagePath: data['storagePath'] ?? '',
       );
     }).toList();
   }
@@ -166,6 +167,61 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
     throw Exception('Dosya okunamadı.');
   }
 
+  /// Confirms and deletes a Tanita PDF (both its Storage blob and Firestore
+  /// metadata), then refreshes the list.
+  Future<void> _deletePdf(TanitaPdfModel pdf) async {
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Dosyayı Sil',
+      message: '"${pdf.fileName}" dosyasını silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz.',
+      confirmText: 'Sil',
+      cancelText: 'İptal',
+    );
+    if (confirmed != true || !mounted) return;
+
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: 'Dosya siliniyor...');
+      loadingOpen = true;
+    }
+
+    try {
+      final provider = Provider.of<MeasProvider>(context, listen: false);
+      await provider.deleteTanitaPdfFile(
+        userId: widget.userId,
+        docId: pdf.docId,
+        storagePath: pdf.storagePath,
+      );
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (mounted) {
+        setState(() { _pdfListFuture = _fetchTanitaPdfs(); });
+        await DialogUtils.openInfo(
+          context,
+          title: 'Başarılı',
+          message: 'Dosya silindi.',
+        );
+      }
+    } catch (e) {
+      log.err('Error deleting Tanita PDF {}: {}', [pdf.docId, e]);
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Dosya silinemedi: $e',
+        );
+      }
+    }
+  }
+
   Widget _buildHeader(BuildContext context) {
     final size = MediaQuery.of(context).size;
     return Padding(
@@ -243,6 +299,11 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
                         leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
                         title: Text(pdf.fileName),
                         subtitle: Text(pdf.uploadTime?.toLocal().toString() ?? ''),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          tooltip: 'Sil',
+                          onPressed: _busy ? null : () => _deletePdf(pdf),
+                        ),
                         onTap: () async {
                           final uri = Uri.parse(pdf.pdfUrl);
                           if (await canLaunchUrl(uri)) {
@@ -276,11 +337,13 @@ class TanitaPdfModel {
   final String pdfUrl;
   final String fileName;
   final DateTime? uploadTime;
+  final String storagePath;
 
   TanitaPdfModel({
     required this.docId,
     required this.pdfUrl,
     required this.fileName,
     required this.uploadTime,
+    required this.storagePath,
   });
 }

@@ -35,8 +35,13 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   late TextEditingController _postponementsUsedController;
   late TextEditingController _allowedPostponementsController;
   DateTime? _startDate;
+  // Freeze date is only relevant when the package type is "Donduruldu".
+  DateTime? _freezeDate;
   bool _isLoading = false;
   late SubActiveStatus _status;
+  // Package duration type (1 Aylık / 3 Aylık). Changing it auto-fills the
+  // suggested meeting count; the admin can still edit it afterwards.
+  SubsPackageType? _packageType;
   late SubsMeetingType _meetingType;
   bool _isPaymentIncomplete = false;
 
@@ -88,7 +93,9 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     _allowedPostponementsController = TextEditingController(
         text: widget.subscription.allowedPostponements.toString());
     _startDate = widget.subscription.startDate;
+    _freezeDate = widget.subscription.freezeDate;
     _status = widget.subscription.status;
+    _packageType = widget.subscription.packageType;
     _meetingType = widget.subscription.meetingType;
     
     // Check if payment is incomplete
@@ -178,8 +185,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
           child: ListBody(
             children: [
               const SizedBox(height: 16),
-              // Package type / status (topmost). Selecting Aktif/Kilo Takip
-              // hides the payment widgets.
+              // Package status (topmost). Selecting Aktif/Kilo Takip hides the
+              // payment widgets.
               DropdownButtonFormField<SubActiveStatus>(
                 value: _status,
                 items: SubActiveStatus.values.map((SubActiveStatus status) {
@@ -194,11 +201,71 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   });
                 },
                 decoration: const InputDecoration(
-                  labelText: 'Paket Tipi',
+                  labelText: 'Paket Durumu',
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 16),
+
+              // Package duration type. Changing it auto-fills the suggested
+              // meeting count (still editable by the admin below).
+              DropdownButtonFormField<SubsPackageType>(
+                value: _packageType,
+                isExpanded: true,
+                items: SubsPackageType.values.map((SubsPackageType type) {
+                  return DropdownMenuItem<SubsPackageType>(
+                    value: type,
+                    child: Text(
+                      '${type.label} (${type.defaultMeetings} görüşme)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }).toList(),
+                onChanged: (newValue) {
+                  setState(() {
+                    _packageType = newValue;
+                    if (newValue != null) {
+                      _totalMeetingsController.text =
+                          newValue.defaultMeetings.toString();
+                    }
+                  });
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Paket Tipi',
+                  hintText: 'Paket süresini seçin',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Freeze date (shown/editable only when the package is frozen).
+              if (_status == SubActiveStatus.frozen) ...[
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    _freezeDate == null
+                        ? 'Dondurulma Tarihi Seçimi'
+                        : 'Dondurulma Tarihi: ${DateFormatter.formatNumericDate(_freezeDate!)}',
+                    style: _freezeDate != null
+                        ? const TextStyle(fontWeight: FontWeight.bold)
+                        : null,
+                  ),
+                  trailing: const Icon(Icons.ac_unit),
+                  onTap: () async {
+                    final DateTime? pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: _freezeDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2050),
+                    );
+                    if (pickedDate != null) {
+                      setState(() => _freezeDate = pickedDate);
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+
               TextFormField(
                 controller: _packageNameController,
                 decoration: const InputDecoration(
@@ -295,29 +362,35 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 ),
                 const SizedBox(height: 8),
 
-                // Whether a payment has been received. Unchecking it and saving
-                // deletes the linked payment record and clears the paid amount;
-                // checking it (when none exists) creates a payment record.
+                // Whether a payment has been received. Checking it (when none
+                // exists) creates a payment record on save. Unchecking is
+                // disabled so a linked payment can never be deleted from here.
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Ödeme Alındı mı?'),
+                  // Unchecking is intentionally disabled: it would silently
+                  // delete the linked payment record. To remove/adjust a
+                  // payment, use the Ödeme (payments) tab instead.
+                  subtitle: _isPaymentReceived
+                      ? Text(
+                          'Ödeme kaydını kaldırmak/düzenlemek için Ödeme sekmesini kullanın.',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600),
+                        )
+                      : null,
                   value: _isPaymentReceived,
                   onChanged: (val) {
-                    final received = val ?? false;
-                    if (received) {
-                      // Default the amount to the package total and pick a real
-                      // payment type when turning payment on.
-                      final paid =
-                          double.tryParse(_amountPaidController.text) ?? 0.0;
-                      if (paid <= 0) {
-                        _amountPaidController.text = _totalAmountController.text;
-                      }
-                      _paymentType ??= PaymentType.nakit;
-                    } else {
-                      // Keep the visible amount consistent with "not received".
-                      _amountPaidController.text = '0';
+                    // Only allow turning payment ON; ignore attempts to uncheck.
+                    if (val != true) return;
+                    // Default the amount to the package total and pick a real
+                    // payment type when turning payment on.
+                    final paid =
+                        double.tryParse(_amountPaidController.text) ?? 0.0;
+                    if (paid <= 0) {
+                      _amountPaidController.text = _totalAmountController.text;
                     }
-                    setState(() => _isPaymentReceived = received);
+                    _paymentType ??= PaymentType.nakit;
+                    setState(() => _isPaymentReceived = true);
                   },
                   controlAffinity: ListTileControlAffinity.leading,
                 ),
@@ -544,6 +617,15 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
 
   Future<void> _updateSubscription() async {
     if (_formKey.currentState!.validate()) {
+      if (_status == SubActiveStatus.frozen && _freezeDate == null) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Paket donduruldu olarak işaretlendi. Lütfen dondurulma tarihini seçin.',
+        );
+        return;
+      }
+
       if (_meetingType == SubsMeetingType.hybrid) {
         int online = int.tryParse(_onlineMeetingsController.text) ?? 0;
         int faceToFace = int.tryParse(_faceToFaceMeetingsController.text) ?? 0;
@@ -584,6 +666,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         // Create an update map with raw data - no subscription model objects
         final Map<String, dynamic> updateData = {
           'packageName': _packageNameController.text,
+          'packageType': _packageType?.label,
           'notes': notes.isNotEmpty ? notes : null,
           'startDate': _startDate!,
           'totalMeetings': totalMeetings,
@@ -593,6 +676,9 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
           'amountPaid': amountPaid,
           'status': _status.label,
           'meetingType': _meetingType.label,
+          // Store the freeze date for frozen packages; clear it otherwise so a
+          // package that gets unfrozen doesn't keep a stale freeze date.
+          'freezeDate': _status == SubActiveStatus.frozen ? _freezeDate : null,
           'updateDate': DateTime.now(),
           'updateUser': null, // TODO: Add current user ID if available
         };
