@@ -795,7 +795,10 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   onDateSelected: _onDateSelected,
                   label: 'Tarih Seçin',
                   selectedLabel: 'Tarih',
-                  firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                  // Allow selecting past dates (e.g. logging a missed/late
+                  // appointment). Lower bound kept wide; default selected date
+                  // is today, which stays within [firstDate, lastDate].
+                  firstDate: DateTime(2020),
                   lastDate: DateTime.now().add(const Duration(days: 365)),
                 ),
               ] else ...[
