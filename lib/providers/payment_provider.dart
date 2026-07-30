@@ -31,6 +31,19 @@ class PaymentProvider extends ChangeNotifier {
     _paymentChanged = false;
   }
 
+  /// Emits whether [userId] currently has at least one planned (pending)
+  /// payment. Used to surface a live attention indicator on the home page
+  /// "Ödemelerim" tile without polling.
+  Stream<bool> hasPlannedPaymentStream(String userId) {
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('payments')
+        .where('status', isEqualTo: PaymentStatus.planned.label)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.isNotEmpty);
+  }
+
   /// Fetches all payments across all users with optional filtering
   /// Used by admin pages to get a global view of payments
   Future<List<PaymentModel>> fetchAllPayments({

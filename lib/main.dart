@@ -413,7 +413,12 @@ class _HomePageState extends State<HomePage> {
   /// Cached stream for unread chat count (only for admins)
   /// This prevents the stream from being recreated on every rebuild
   Stream<int>? _unreadChatsStream;
-  
+
+  /// Cached stream that reports whether the current user has any planned
+  /// (pending) payment. Drives the red attention indicator on the
+  /// "Ödemelerim" tile. Cached so it isn't recreated on every rebuild.
+  Stream<bool>? _plannedPaymentAlertStream;
+
   /// Whether the stream has been initialized
   bool _streamInitialized = false;
 
@@ -455,7 +460,13 @@ class _HomePageState extends State<HomePage> {
       _unreadChatsStream = chatManager.userUnreadCountStream();
       logger.info('_initUnreadStream: user unread count stream initialized');
     }
-    
+
+    // Pending-payment indicator for the user-side "Ödemelerim" tile. Applies
+    // to the current user's own payments (shown on both the user side and an
+    // admin's user-side tab).
+    _plannedPaymentAlertStream =
+        context.read<PaymentProvider>().hasPlannedPaymentStream(userId);
+
     _streamInitialized = true;
   }
 
@@ -659,6 +670,8 @@ class _HomePageState extends State<HomePage> {
             'icon': Icons.payments,
             'label': 'Ödemelerim',
             'onTap': () => _navigateToPayments(context, userId),
+            // Red attention indicator when a pending/planned payment exists.
+            'alertStream': _plannedPaymentAlertStream,
           },
           {
             'icon': Icons.calendar_today,
@@ -957,21 +970,52 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Builds the icon for an item, wrapping it in a [Badge] when the item has
-  /// an unread-count stream.
+  /// Builds the icon for an item, wrapping it in a count [Badge] when the item
+  /// has an unread-count stream and/or a red attention indicator when it has an
+  /// [alertStream] (e.g. a pending payment).
   Widget _buildIcon(
     Map<String, dynamic> item,
     Stream<int>? badgeStream, {
     required double size,
   }) {
-    final icon = Icon(
+    final Widget baseIcon = Icon(
       item['icon'],
       size: size,
       color: const Color(0xFFA16AEC),
     );
 
+    Widget iconWidget = baseIcon;
+
+    // Red attention indicator (e.g. a pending/planned payment). Rendered as a
+    // prominent "!" badge so it clearly stands out on the tile.
+    final alertStream = item['alertStream'] as Stream<bool>?;
+    if (alertStream != null) {
+      iconWidget = StreamBuilder<bool>(
+        stream: alertStream,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            logger.warn('Alert stream error: ${snapshot.error}');
+          }
+          final showAlert = snapshot.data ?? false;
+          return Badge(
+            isLabelVisible: showAlert,
+            backgroundColor: Colors.red,
+            label: const Text(
+              '!',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            child: baseIcon,
+          );
+        },
+      );
+    }
+
     if (badgeStream == null) {
-      return icon;
+      return iconWidget;
     }
 
     return StreamBuilder<int>(
@@ -993,7 +1037,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           backgroundColor: Colors.red,
-          child: icon,
+          child: iconWidget,
         );
       },
     );

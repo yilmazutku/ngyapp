@@ -10,12 +10,41 @@ class DietProvider extends ChangeNotifier {
   final Logger logger = Logger.forClass(DietProvider);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// Fetches the latest diet list subtitles for a user
-  /// Returns null if no diet list is found
-  /// 
-  /// @param userId The ID of the user whose diet subtitles to fetch
-  /// @return A map containing the subtitles from the most recent diet list, or null if none exists
-  Future<Map<String, dynamic>?> fetchLatestDietSubtitles(String userId) async {
+  /// Returns true when any meal key or content line in [subtitles] contains
+  /// the already-lower-cased [query]. Safe to call with a null map.
+  bool _subtitlesContainQuery(Map<String, dynamic>? subtitles, String query) =>
+      _countSubtitleMatches(subtitles, query) > 0;
+
+  /// Counts how many meal keys / content lines in [subtitles] contain the
+  /// already-lower-cased [query]. Used to rank search results. Safe to call
+  /// with a null map (weekday-only diets have no weekend subtitles).
+  int _countSubtitleMatches(Map<String, dynamic>? subtitles, String query) {
+    if (subtitles == null) return 0;
+    int matchCount = 0;
+    for (final entry in subtitles.entries) {
+      if (entry.key.toLowerCase().contains(query)) matchCount++;
+      final value = entry.value;
+      final mealItems = value is Map ? value['content'] : null;
+      if (mealItems is List) {
+        for (final item in mealItems) {
+          final content = item is Map
+              ? (item['content']?.toString().toLowerCase() ?? '')
+              : '';
+          if (content.contains(query)) matchCount++;
+        }
+      }
+    }
+    return matchCount;
+  }
+
+  /// Fetches the most recent diet document for a user.
+  ///
+  /// Returns the full [DietDocument] (weekday `subtitles` + optional
+  /// `weekendSubtitles`) so callers can decide how to present weekday vs
+  /// weekend menus. Returns null if the user has no diet lists.
+  ///
+  /// @param userId The ID of the user whose latest diet to fetch
+  Future<DietDocument?> fetchLatestDietDocument(String userId) async {
     try {
       final querySnapshot = await _firestore
           .collection('users')
@@ -31,17 +60,15 @@ class DietProvider extends ChangeNotifier {
       }
 
       final latestDoc = querySnapshot.docs.first;
-      final data = latestDoc.data();
-      
-      if (data['subtitles'] != null) {
-        logger.info('Found diet list with subtitles for user {}', [userId]);
-        return data['subtitles'] as Map<String, dynamic>;
+      if (latestDoc.data()['subtitles'] == null) {
+        logger.warn('Latest diet list has no subtitles for user {}', [userId]);
+        return null;
       }
 
-      logger.warn('Latest diet list has no subtitles for user {}', [userId]);
-      return null;
+      logger.info('Found latest diet document for user {}', [userId]);
+      return DietDocument.fromSnapshot(latestDoc);
     } catch (e) {
-      logger.err('Error fetching latest diet subtitles: {}', [e]);
+      logger.err('Error fetching latest diet document: {}', [e]);
       rethrow;
     }
   }
@@ -102,23 +129,13 @@ class DietProvider extends ChangeNotifier {
         diets = diets.where((diet) {
           // Search in display name
           if (diet.displayName.toLowerCase().contains(q)) return true;
-          
-          // Search in meal content
+
+          // Search in both weekday and weekend meal content
           try {
-            for (final entry in diet.subtitles.entries) {
-              final mealKey = entry.key.toLowerCase();
-              if (mealKey.contains(q)) return true;
-              
-              final mealItems = entry.value['content'];
-              if (mealItems is List) {
-                for (final item in mealItems) {
-                  final text = item is Map ? (item['content']?.toString().toLowerCase() ?? '') : '';
-                  if (text.contains(q)) return true;
-                }
-              }
-            }
+            if (_subtitlesContainQuery(diet.subtitles, q)) return true;
+            if (_subtitlesContainQuery(diet.weekendSubtitles, q)) return true;
           } catch (_) {}
-          
+
           return false;
         }).toList();
       }
@@ -200,34 +217,14 @@ class DietProvider extends ChangeNotifier {
             matchCounts[diet.docId] = (matchCounts[diet.docId] ?? 0) + 1;
             return true;
           }
-          
-          // Search in meal content
-          bool foundInContent = false;
-          int matchCount = 0;
-          
-          try {
-            for (var mealEntry in diet.subtitles.entries) {
-              final mealName = mealEntry.key.toLowerCase();
-              if (mealName.contains(lowerQuery)) {
-                foundInContent = true;
-                matchCount++;
-              }
 
-              // Search in meal items
-              final mealItems = diet.subtitles[mealName]?['content'];//diet.getMealItems(mealEntry.key);//diet.getMealItems(mealEntry.key);
-              if (mealItems != null) {
-                for (var item in mealItems) {
-                  final content = item is Map
-                      ? item['content']?.toString().toLowerCase() ?? ''
-                      : '';
-                  if (content.contains(lowerQuery)) {
-                    foundInContent = true;
-                    matchCount++;
-                  }
-                }
-              }
-            }
-            
+          // Search in both weekday and weekend meal content
+          int matchCount = 0;
+
+          try {
+            matchCount += _countSubtitleMatches(diet.subtitles, lowerQuery);
+            matchCount += _countSubtitleMatches(diet.weekendSubtitles, lowerQuery);
+
             // Store match count for this diet
             if (matchCount > 0) {
               matchCounts[diet.docId] = matchCount;
@@ -235,10 +232,10 @@ class DietProvider extends ChangeNotifier {
           } catch (e, s) {
             logger.err('Error searching diet content: $e', [s]);
             // On error, include the diet in results to avoid hiding data due to errors
-            foundInContent = true;
+            return true;
           }
-          
-          return foundInContent;
+
+          return matchCount > 0;
         }).toList();
         
         // Sort by match count (descending) if search query provided
@@ -335,6 +332,10 @@ class DietProvider extends ChangeNotifier {
   /// @param userId The ID of the user who owns the diet
   /// @param docId The ID of the diet document to update
   /// @param subtitles The updated subtitles data
+  /// @param weekendSubtitles Optional weekend (Hafta Sonu) menu. When provided
+  ///   and non-empty it is saved; when provided and empty the weekend menu is
+  ///   removed from the document; when null the existing weekend menu is left
+  ///   untouched.
   /// @param displayName Optional updated name for the diet
   /// @param subscriptionId Optional subscription ID to associate with the diet
   /// @param updateUser Optional ID of the user making the update
@@ -344,6 +345,7 @@ class DietProvider extends ChangeNotifier {
     required String userId,
     required String docId,
     required Map<String, dynamic> subtitles,
+    Map<String, dynamic>? weekendSubtitles,
     String? displayName,
     String? subscriptionId,
     String? updateUser,
@@ -354,7 +356,14 @@ class DietProvider extends ChangeNotifier {
         'uploadTime': Timestamp.now(), // Update timestamp
         'subtitles': subtitles,
       };
-      
+
+      // Persist/replace/remove the weekend menu based on what was passed in.
+      if (weekendSubtitles != null) {
+        updatedData['weekendSubtitles'] = weekendSubtitles.isEmpty
+            ? FieldValue.delete()
+            : weekendSubtitles;
+      }
+
       // Add display name if provided
       if (displayName != null) {
         updatedData['displayName'] = displayName;
@@ -391,7 +400,9 @@ class DietProvider extends ChangeNotifier {
   /// Uploads a new diet document with subscription information
   /// 
   /// @param userId The ID of the user for whom to upload the diet
-  /// @param subtitles The meal data to store
+  /// @param subtitles The weekday meal data to store
+  /// @param weekendSubtitles Optional weekend (Hafta Sonu) menu; stored only
+  ///   when non-null and non-empty
   /// @param subscriptionId The ID of the subscription associated with this diet
   /// 
   /// @return The ID of the newly created diet document
@@ -399,6 +410,7 @@ class DietProvider extends ChangeNotifier {
     required String userId,
     required Map<String, dynamic> subtitles,
     required String subscriptionId,
+    Map<String, dynamic>? weekendSubtitles,
     String? displayName //optional TODO ileride dialogtan belki girilir
   }) async {
     try {
@@ -407,6 +419,8 @@ class DietProvider extends ChangeNotifier {
         'uploadTime': FieldValue.serverTimestamp(),
         'subscriptionId': subscriptionId,
         'subtitles': subtitles,
+        if (weekendSubtitles != null && weekendSubtitles.isNotEmpty)
+          'weekendSubtitles': weekendSubtitles,
         'userId': userId,
         'displayName': displayName?? 'liste_${now.day.toString().padLeft(2, '0')}_${now.month.toString().padLeft(2, '0')}_${now.year.toString().substring(2)}_${now.hour.toString().padLeft(2, '0')}_${now.minute.toString().padLeft(2, '0')}',
         'createDate': Timestamp.now(),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 // Replace with your actual imports
+import '../models/diet_section.dart'; // Hafta İçi / Hafta Sonu split
 import '../models/logger.dart';
 import '../models/meal_model.dart'; // For Meals enum
 import '../models/special_line_model.dart'; // SpecialLinesRegistry / detect
@@ -35,8 +36,15 @@ class AddDietDialog extends StatefulWidget {
 }
 
 class _AddDietDialogState extends State<AddDietDialog> {
-  // Subtitles structure, same as FileHandlerPage
-  List<Map<String, dynamic>> subtitles = [];
+  // Weekday (Hafta İçi) meal list. Always present.
+  List<Map<String, dynamic>> weekdaySubtitles = [];
+
+  // Weekend (Hafta Sonu) meal list. Only populated when the docx contained a
+  // standalone "HAFTASONU" line; [_hasWeekend] tracks whether that happened.
+  List<Map<String, dynamic>> weekendSubtitles = [];
+
+  // Set true once a "HAFTASONU" marker splits the document into two menus.
+  bool _hasWeekend = false;
 
   // Local file path where docx is saved
   String? _localFilePath;
@@ -57,14 +65,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
   @override
   void initState() {
     super.initState();
-    // Initialize subtitles with Meals enum
-    for (var meal in Meals.dietValues) {
-      subtitles.add({
-        'name': meal.label,
-        'time': meal.defaultTime,
-        'content': [],
-      });
-    }
+    // Initialize both menus with the full set of meal types.
+    weekdaySubtitles = _freshMealList();
+    weekendSubtitles = _freshMealList();
     
     // Initialize scroll controller
     _scrollController = ScrollController();
@@ -85,6 +88,38 @@ class _AddDietDialogState extends State<AddDietDialog> {
     _scrollController.dispose();
     super.dispose();
   }
+
+  /// Builds a fresh, empty meal list containing every diet meal type.
+  List<Map<String, dynamic>> _freshMealList() => [
+        for (var meal in Meals.dietValues)
+          {
+            'name': meal.label,
+            'time': meal.defaultTime,
+            'content': <Map<String, dynamic>>[],
+          },
+      ];
+
+  /// Maps the lower-case meal keys used during parsing to the corresponding
+  /// entry inside [list], so content can be routed to the right meal of the
+  /// right menu (weekday or weekend).
+  Map<String, Map<String, dynamic>> _buildMealMatchers(
+          List<Map<String, dynamic>> list) =>
+      {
+        'sabah': list.firstWhere((s) => s['name'] == 'Sabah', orElse: () => {}),
+        'ara öğün 1':
+            list.firstWhere((s) => s['name'] == 'Ara Öğün 1', orElse: () => {}),
+        'öğle': list.firstWhere((s) => s['name'] == 'Öğle', orElse: () => {}),
+        'ara öğün 2':
+            list.firstWhere((s) => s['name'] == 'Ara Öğün 2', orElse: () => {}),
+        'akşam': list.firstWhere((s) => s['name'] == 'Akşam', orElse: () => {}),
+        'ara öğün 3':
+            list.firstWhere((s) => s['name'] == 'Ara Öğün 3', orElse: () => {}),
+      };
+
+  /// Whether the parsed weekend menu actually has any content (as opposed to a
+  /// stray "HAFTASONU" marker with nothing usable after it).
+  bool get _weekendHasContent =>
+      weekendSubtitles.any((s) => (s['content'] as List).isNotEmpty);
 
   Future<void> _fetchSubscriptions() async {
     setState(() {
@@ -268,50 +303,85 @@ class _AddDietDialogState extends State<AddDietDialog> {
               scrollbars: false,
               overscroll: false,
             ),
-            child: ListView.builder(
+            child: ListView(
               controller: _scrollController,
-              itemCount: subtitles.length,
-              itemBuilder: (context, index) {
-                final subtitle = subtitles[index];
-                return Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${subtitle['name']} \t ${subtitle['time']}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      const SizedBox(height: 8.0),
-                      if (subtitle['content'].isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
-                          child: Text(
-                            'İçerik bulunmamaktadır',
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        )
-                      else
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: MealFormatter.formatMealContentWithOptions(subtitle['content']),
-                          ),
-                        ),
-                      const SizedBox(height: 16.0),
-                    ],
-                  ),
-                );
-              },
+              children: [
+                // Only label the sections when there are actually two menus.
+                if (_weekendHasContent)
+                  _buildPreviewSectionHeader(DietSection.weekday.label),
+                ...weekdaySubtitles.map(_buildMealPreviewTile),
+                if (_weekendHasContent) ...[
+                  _buildPreviewSectionHeader(DietSection.weekend.label),
+                  ...weekendSubtitles.map(_buildMealPreviewTile),
+                ],
+              ],
             ),
           ),
         ),
       ],
+    );
+  }
+
+  /// Section divider used in the preview to separate the weekday and weekend
+  /// menus (shown only when a weekend menu was detected).
+  Widget _buildPreviewSectionHeader(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+      child: Row(
+        children: [
+          const Expanded(child: Divider()),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.blue.shade700,
+              ),
+            ),
+          ),
+          const Expanded(child: Divider()),
+        ],
+      ),
+    );
+  }
+
+  /// Renders a single meal (name + time + content) in the parse preview.
+  Widget _buildMealPreviewTile(Map<String, dynamic> subtitle) {
+    final content = subtitle['content'] as List;
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${subtitle['name']} \t ${subtitle['time']}',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const SizedBox(height: 8.0),
+          if (content.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: Text(
+                'İçerik bulunmamaktadır',
+                style: TextStyle(
+                  color: Colors.grey[500],
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children:
+                    MealFormatter.formatMealContentWithOptions(content),
+              ),
+            ),
+          const SizedBox(height: 16.0),
+        ],
+      ),
     );
   }
 
@@ -348,11 +418,13 @@ class _AddDietDialogState extends State<AddDietDialog> {
           [e]);
     }
 
-    // Clear any old parse data
-    for (var subtitle in subtitles) {
-      subtitle['content'].clear();
+    // Clear any old parse data (rebuild both menus from scratch).
+    weekdaySubtitles = _freshMealList();
+    weekendSubtitles = _freshMealList();
+    for (final subtitle in [...weekdaySubtitles, ...weekendSubtitles]) {
       subtitle['time'] = '';
     }
+    _hasWeekend = false;
     _localFilePath = null;
     _hasParsedPreview = false;
 
@@ -522,23 +594,41 @@ class _AddDietDialogState extends State<AddDietDialog> {
     }
     // -------------------------- END TEMP DIAGNOSTIC --------------------------
 
+    // Two parallel meal lists — one for the weekday (Hafta İçi) menu and one
+    // for the weekend (Hafta Sonu) menu. Everything parsed before a standalone
+    // "HAFTASONU" line belongs to the weekday menu; everything after belongs to
+    // the weekend menu (see [detectDietSectionMarker]).
+    final weekdayMatchers = _buildMealMatchers(weekdaySubtitles);
+    final weekendMatchers = _buildMealMatchers(weekendSubtitles);
+
     Map<String, dynamic>? currentSubtitle;
-    
-    // Create a map of meal types for better matching
-    final mealMatchers = {
-      'sabah': subtitles.firstWhere((s) => s['name'] == 'Sabah', orElse: () => {}),
-      'ara öğün 1': subtitles.firstWhere((s) => s['name'] == 'Ara Öğün 1', orElse: () => {}),
-      'öğle': subtitles.firstWhere((s) => s['name'] == 'Öğle', orElse: () => {}),
-      'ara öğün 2': subtitles.firstWhere((s) => s['name'] == 'Ara Öğün 2', orElse: () => {}),
-      'akşam': subtitles.firstWhere((s) => s['name'] == 'Akşam', orElse: () => {}),
-      'ara öğün 3': subtitles.firstWhere((s) => s['name'] == 'Ara Öğün 3', orElse: () => {}),
-    };
+
+    // Active matcher set for the section we're currently reading.
+    var mealMatchers = weekdayMatchers;
 
     // Track which meal we're on in sequence to help determine which "ARA" it is
     int mealSequence = 0;
     
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
+
+      // A standalone "HAFTASONU" / "HAFTAİÇİ" line switches which menu the
+      // following meals are written into and resets the meal cursor/sequence.
+      final sectionMarker = detectDietSectionMarker(line);
+      if (sectionMarker != null) {
+        if (sectionMarker == DietSection.weekend) {
+          mealMatchers = weekendMatchers;
+          _hasWeekend = true;
+          log.info('Switched to WEEKEND (Hafta Sonu) menu at line {}', [i]);
+        } else {
+          mealMatchers = weekdayMatchers;
+          log.info('Switched to WEEKDAY (Hafta İçi) menu at line {}', [i]);
+        }
+        currentSubtitle = null;
+        mealSequence = 0;
+        continue;
+      }
+
       final lowerLine = line.toLowerCase();
       
       Map<String, dynamic> foundSubtitle = {};
@@ -651,9 +741,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
       }
     }
 
-    // Check if we found any content
+    // Check if we found any content across either menu
     bool foundAnyContent = false;
-    for (var subtitle in subtitles) {
+    for (var subtitle in [...weekdaySubtitles, ...weekendSubtitles]) {
       if ((subtitle['content'] as List).isNotEmpty) {
         foundAnyContent = true;
         break;
@@ -663,6 +753,8 @@ class _AddDietDialogState extends State<AddDietDialog> {
     if (!foundAnyContent) {
       log.warn('No content found in parsed document');
     }
+    log.info('Parsed weekday+weekend menus. hasWeekend={}, weekendHasContent={}',
+        [_hasWeekend, _weekendHasContent]);
   }
 
   /// Adds a single food line to [currentSubtitle]'s content.
@@ -687,6 +779,73 @@ class _AddDietDialogState extends State<AddDietDialog> {
     }
   }
 
+  /// Converts a parsed meal [list] (entries of `{name, time, content}`) into
+  /// the enum-keyed map (`{br: {time, content}, ...}`) the diet document stores.
+  /// Entries whose meal name cannot be resolved to a [Meals] enum are skipped.
+  Map<String, dynamic> _buildSubtitlesMap(List<Map<String, dynamic>> list) {
+    final Map<String, dynamic> subtitlesMap = {};
+
+    for (var subtitle in list) {
+      final mealName = subtitle['name']; // Display name
+
+      // Find the corresponding Meals enum for this name
+      String enumKey = '';
+      try {
+        // Try to find the enum by matching label
+        for (var meal in Meals.dietValues) {
+          if (meal.label == mealName) {
+            enumKey = meal.name;
+            break;
+          }
+        }
+
+        // If not found by label, use a fallback matching approach
+        if (enumKey.isEmpty) {
+          final lowerName = mealName.toLowerCase();
+          if (lowerName.contains('sabah')) {
+            enumKey = Meals.br.name;
+          } else if (lowerName.contains('öğle')) {
+            enumKey = Meals.lunch.name;
+          } else if (lowerName.contains('akşam')) {
+            enumKey = Meals.dinner.name;
+          } else if (lowerName.contains('ara') && lowerName.contains('1')) {
+            enumKey = Meals.firstmid.name;
+          } else if (lowerName.contains('ara') && lowerName.contains('2')) {
+            enumKey = Meals.secondmid.name;
+          } else if (lowerName.contains('ara') && lowerName.contains('3')) {
+            enumKey = Meals.thirdmid.name;
+          }
+        }
+      } catch (e) {
+        log.warn('Error finding enum for meal: {} - {}', [mealName, e]);
+      }
+
+      // If we still don't have an enum key, skip this entry
+      if (enumKey.isEmpty) {
+        log.warn('Could not find enum key for meal: {}', [mealName]);
+        continue;
+      }
+
+      // Format content items correctly
+      List<Map<String, dynamic>> formattedContent = [];
+      for (var item in subtitle['content']) {
+        if (item is Map) {
+          formattedContent.add(Map<String, dynamic>.from(item));
+        } else {
+          formattedContent.add({'content': item.toString()});
+        }
+      }
+
+      // Add the properly structured entry
+      subtitlesMap[enumKey] = {
+        'time': subtitle['time'],
+        'content': formattedContent,
+      };
+    }
+
+    return subtitlesMap;
+  }
+
   /// Modified to use DietProvider instead of direct Firestore operations
   Future<void> _uploadContentToFirestore() async {
     if (_selectedSubscription == null) {
@@ -703,73 +862,18 @@ class _AddDietDialogState extends State<AddDietDialog> {
     });
     
     try {
-      // Convert subtitles list to map format expected by the provider
-      final Map<String, dynamic> subtitlesMap = {};
-      
-      // Loop through each subtitle and build the correct structure
-      for (var subtitle in subtitles) {
-        final mealName = subtitle['name']; // Display name
-        
-        // Find the corresponding Meals enum for this name
-        String enumKey = '';
-        try {
-          // Try to find the enum by matching label
-          for (var meal in Meals.dietValues) {
-            if (meal.label == mealName) {
-              enumKey = meal.name;
-              break;
-            }
-          }
-          
-          // If not found by label, use a fallback matching approach
-          if (enumKey.isEmpty) {
-            final lowerName = mealName.toLowerCase();
-            if (lowerName.contains('sabah')) {
-              enumKey = Meals.br.name;
-            } else if (lowerName.contains('öğle')) {
-              enumKey = Meals.lunch.name;
-            } else if (lowerName.contains('akşam')) {
-              enumKey = Meals.dinner.name;
-            } else if (lowerName.contains('ara') && lowerName.contains('1')) {
-              enumKey = Meals.firstmid.name;
-            } else if (lowerName.contains('ara') && lowerName.contains('2')) {
-              enumKey = Meals.secondmid.name;
-            } else if (lowerName.contains('ara') && lowerName.contains('3')) {
-              enumKey = Meals.thirdmid.name;
-            }
-          }
-        } catch (e) {
-          log.warn('Error finding enum for meal: {} - {}', [mealName, e]);
-        }
-        
-        // If we still don't have an enum key, skip this entry
-        if (enumKey.isEmpty) {
-          log.warn('Could not find enum key for meal: {}', [mealName]);
-          continue;
-        }
-        
-        // Format content items correctly
-        List<Map<String, dynamic>> formattedContent = [];
-        for (var item in subtitle['content']) {
-          if (item is Map) {
-            formattedContent.add(Map<String, dynamic>.from(item));
-          } else {
-            formattedContent.add({'content': item.toString()});
-          }
-        }
-        
-        // Add the properly structured entry
-        subtitlesMap[enumKey] = {
-          'time': subtitle['time'],
-          'content': formattedContent,
-        };
-      }
+      // Convert both menus into the enum-keyed map format the provider expects.
+      final Map<String, dynamic> subtitlesMap =
+          _buildSubtitlesMap(weekdaySubtitles);
+      final Map<String, dynamic>? weekendMap =
+          _weekendHasContent ? _buildSubtitlesMap(weekendSubtitles) : null;
 
       // Use DietProvider to upload the diet
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
       final String? docId = await dietProvider.uploadDiet(
         userId: widget.userId,
         subtitles: subtitlesMap,
+        weekendSubtitles: weekendMap,
         subscriptionId: _selectedSubscription!.subscriptionId,
       );
 

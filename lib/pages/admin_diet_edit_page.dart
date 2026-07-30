@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/diet_model.dart';
+import '../models/diet_section.dart';
 import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/special_line_model.dart';
@@ -30,17 +31,28 @@ class DietEditPage extends StatefulWidget {
 
 class _DietEditPageState extends State<DietEditPage> {
   final Logger logger = Logger.forClass(DietEditPage);
+
+  /// Weekday (Hafta İçi) meals — always present.
   late Map<String, dynamic> _editableData;
+
+  /// Weekend (Hafta Sonu) meals — empty when the diet is weekday-only.
+  late Map<String, dynamic> _weekendData;
+
   bool _isLoading = false;
   bool _hasChanges = false;
   late final ScrollController _scrollController;
   late String _dietName; // Add a field for the editable diet name
+
+  /// True when this diet defines a separate weekend menu, in which case the
+  /// page is split into "Hafta İçi" and "Hafta Sonu" sections.
+  bool get _hasWeekend => _weekendData.isNotEmpty;
 
   @override
   void initState() {
     super.initState();
     // Create a deep copy of the subtitles data to edit
     _editableData = _deepCopy(widget.dietDoc.subtitles);
+    _weekendData = _deepCopy(widget.dietDoc.weekendSubtitles ?? {});
     // Initialize scroll controller
     _scrollController = ScrollController();
     // Initialize diet name
@@ -114,32 +126,6 @@ class _DietEditPageState extends State<DietEditPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Sort meals by enum order instead of time
-    List<MapEntry<String, dynamic>> sortedMeals =
-        _editableData.entries.toList();
-    sortedMeals.sort((a, b) {
-      try {
-        // Try to get the enum indices for proper sorting
-        final aMeal = Meals.values.indexWhere((meal) => meal.name == a.key);
-        final bMeal = Meals.values.indexWhere((meal) => meal.name == b.key);
-        
-        // If both are valid enum values, sort by enum order
-        if (aMeal >= 0 && bMeal >= 0) {
-          return aMeal.compareTo(bMeal);
-        }
-        
-        // If only one is a valid enum value, prioritize it
-        if (aMeal >= 0) return -1;
-        if (bMeal >= 0) return 1;
-        
-        // Fallback to comparing keys if neither is a valid enum
-        return a.key.compareTo(b.key);
-      } catch (e) {
-        // Fallback to comparing keys in case of any error
-        return a.key.compareTo(b.key);
-      }
-    });
-
     // Determine the appropriate title
     String pageTitle;
     if (widget.isNewDiet) {
@@ -156,12 +142,14 @@ class _DietEditPageState extends State<DietEditPage> {
         actions: [
           // Only show edit controls if not in view-only mode
           if (!widget.viewOnly) ...[
-            // Add meal button
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: _showAddMealDialog,
-              tooltip: 'Öğün Ekle',
-            ),
+            // Add meal button (single-list diets only; when split into weekday
+            // and weekend sections, each section has its own add button).
+            if (!_hasWeekend)
+              IconButton(
+                icon: const Icon(Icons.add),
+                onPressed: () => _showAddMealDialog(_editableData),
+                tooltip: 'Öğün Ekle',
+              ),
             // Save button
             _isLoading
                 ? const Padding(
@@ -252,14 +240,18 @@ class _DietEditPageState extends State<DietEditPage> {
                         ),
                       ),
                     
-                    // Meals list
-                    ...List.generate(sortedMeals.length, (index) {
-                      final mealEntry = sortedMeals[index];
-                      final mealName = mealEntry.key;
-                      final mealData = mealEntry.value as Map<String, dynamic>;
-                      
-                      return _buildMealCard(mealName, mealData);
-                    }),
+                    // Meals list — split into weekday/weekend sections when a
+                    // weekend menu exists, otherwise a single flat list.
+                    if (_hasWeekend) ...[
+                      _buildSectionHeader(DietSection.weekday.label,
+                          Icons.calendar_view_week, _editableData),
+                      ..._buildMealCards(_editableData),
+                      const SizedBox(height: 8),
+                      _buildSectionHeader(
+                          DietSection.weekend.label, Icons.weekend, _weekendData),
+                      ..._buildMealCards(_weekendData),
+                    ] else
+                      ..._buildMealCards(_editableData),
                   ],
                 ),
               ),
@@ -276,16 +268,74 @@ class _DietEditPageState extends State<DietEditPage> {
     );
   }
 
-  Widget _buildMealCard(String mealName, Map<String, dynamic> mealData) {
+  /// Returns [data]'s meal entries sorted by [Meals] enum order (falling back
+  /// to key order for anything unrecognized).
+  List<MapEntry<String, dynamic>> _sortedMealEntries(
+      Map<String, dynamic> data) {
+    final sortedMeals = data.entries.toList();
+    sortedMeals.sort((a, b) {
+      try {
+        final aMeal = Meals.values.indexWhere((meal) => meal.name == a.key);
+        final bMeal = Meals.values.indexWhere((meal) => meal.name == b.key);
+        if (aMeal >= 0 && bMeal >= 0) return aMeal.compareTo(bMeal);
+        if (aMeal >= 0) return -1;
+        if (bMeal >= 0) return 1;
+        return a.key.compareTo(b.key);
+      } catch (e) {
+        return a.key.compareTo(b.key);
+      }
+    });
+    return sortedMeals;
+  }
+
+  /// Builds the ordered meal cards for a single menu [data] (weekday or
+  /// weekend).
+  List<Widget> _buildMealCards(Map<String, dynamic> data) {
+    return _sortedMealEntries(data)
+        .map((entry) =>
+            _buildMealCard(data, entry.key, entry.value as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Section title shown above a menu when the diet is split into weekday and
+  /// weekend parts. In edit mode it also hosts that section's "Öğün Ekle"
+  /// button so meals are added to the correct menu.
+  Widget _buildSectionHeader(
+      String label, IconData icon, Map<String, dynamic> data) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.blue.shade700),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.blue.shade900,
+            ),
+          ),
+          const Spacer(),
+          if (!widget.viewOnly)
+            TextButton.icon(
+              onPressed: () => _showAddMealDialog(data),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Öğün Ekle'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMealCard(Map<String, dynamic> data, String mealName,
+      Map<String, dynamic> mealData) {
     // Extract meal time and content
     final time = mealData['time'] as String? ?? '';
     final contentList = mealData['content'] as List<dynamic>? ?? [];
     
     // Get display name for the meal
     final displayName = getMealDisplayName(mealName);
-
-    // Controllers for time editing
-    final timeController = TextEditingController(text: time);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -326,7 +376,7 @@ class _DietEditPageState extends State<DietEditPage> {
                       ],
                     )
                   : InkWell(
-                    onTap: () => _editMealName(mealName),
+                    onTap: () => _editMealName(data, mealName),
                     child: Row(
                       children: [
                         CircleAvatar(
@@ -369,7 +419,7 @@ class _DietEditPageState extends State<DietEditPage> {
                     ),
                   )
                 : InkWell(
-                  onTap: () => _editMealTime(mealName, time),
+                  onTap: () => _editMealTime(data, mealName, time),
                   child: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -391,7 +441,7 @@ class _DietEditPageState extends State<DietEditPage> {
                 if (!widget.viewOnly)
                   IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () => _confirmDeleteMeal(mealName),
+                    onPressed: () => _confirmDeleteMeal(data, mealName),
                     tooltip: 'Öğünü Sil',
                   ),
               ],
@@ -423,7 +473,8 @@ class _DietEditPageState extends State<DietEditPage> {
                   )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: _buildEditableContentItems(mealName, contentList),
+                    children:
+                        _buildEditableContentItems(data, mealName, contentList),
                   ),
 
             // Add content item button (only in edit mode)
@@ -436,7 +487,7 @@ class _DietEditPageState extends State<DietEditPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         ElevatedButton.icon(
-                          onPressed: () => _addContentItem(mealName),
+                          onPressed: () => _addContentItem(data, mealName),
                           icon: const Icon(Icons.add),
                           label: const Text('İçerik Ekle'),
                           style: ElevatedButton.styleFrom(
@@ -446,7 +497,7 @@ class _DietEditPageState extends State<DietEditPage> {
                         ),
                         const SizedBox(width: 12),
                         ElevatedButton.icon(
-                          onPressed: () => _addVeyaContentItem(mealName),
+                          onPressed: () => _addVeyaContentItem(data, mealName),
                           icon: const Icon(Icons.sync_alt),
                           label: const Text('Veya Satırı Ekle'),
                           style: ElevatedButton.styleFrom(
@@ -458,7 +509,7 @@ class _DietEditPageState extends State<DietEditPage> {
                     ),
                     const SizedBox(height: 8),
                     ElevatedButton.icon(
-                      onPressed: () => _addHaftadaContentItem(mealName),
+                      onPressed: () => _addHaftadaContentItem(data, mealName),
                       icon: const Icon(Icons.calendar_today),
                       label: const Text('Haftada X Ekle'),
                       style: ElevatedButton.styleFrom(
@@ -477,12 +528,9 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   // Edit meal name
-  void _editMealName(String mealName) {
-    // Get current display name
-    final displayName = getMealDisplayName(mealName);
-    
-    // Get all meal enums not already in use
-    final existingMealNames = _editableData.keys.toList();
+  void _editMealName(Map<String, dynamic> data, String mealName) {
+    // Get all meal enums not already in use (within this menu)
+    final existingMealNames = data.keys.toList();
     final availableMeals = Meals.dietValues.where((meal) => 
       !existingMealNames.contains(meal.name) || meal.name == mealName).toList();
     
@@ -534,11 +582,11 @@ class _DietEditPageState extends State<DietEditPage> {
                   if (selectedMeal != null && selectedMeal!.name != mealName) {
                     setState(() {
                       // Create a copy with the new name
-                      final mealData = <String, dynamic>{..._editableData[mealName]!};
+                      final mealData = <String, dynamic>{...data[mealName]!};
                       // Remove the old entry
-                      _editableData.remove(mealName);
+                      data.remove(mealName);
                       // Add with the new key (using enum name)
-                      _editableData[selectedMeal!.name] = mealData;
+                      data[selectedMeal!.name] = mealData;
                       _hasChanges = true;
                     });
                     Navigator.pop(context);
@@ -557,7 +605,8 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   // Edit meal time
-  void _editMealTime(String mealName, String currentTime) {
+  void _editMealTime(
+      Map<String, dynamic> data, String mealName, String currentTime) {
     final TextEditingController controller =
         TextEditingController(text: currentTime);
 
@@ -592,7 +641,7 @@ class _DietEditPageState extends State<DietEditPage> {
 
                   if (newTime != currentTime) {
                     setState(() {
-                      _editableData[mealName]['time'] = newTime;
+                      data[mealName]['time'] = newTime;
                       _hasChanges = true;
                     });
                   }
@@ -607,7 +656,8 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   // Edit content item
-  void _editContentItem(String mealName, int index, String currentContent) {
+  void _editContentItem(Map<String, dynamic> data, String mealName, int index,
+      String currentContent) {
     final TextEditingController controller =
         TextEditingController(text: currentContent);
 
@@ -643,7 +693,7 @@ class _DietEditPageState extends State<DietEditPage> {
                   if (newContent != currentContent) {
                     setState(() {
                       final contentList =
-                          _editableData[mealName]['content'] as List;
+                          data[mealName]['content'] as List;
 
                       if (newContent.contains('\n')) {
                         contentList.removeAt(index);
@@ -670,7 +720,8 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   // Delete content item
-  void _deleteContentItem(String mealName, int index) {
+  void _deleteContentItem(
+      Map<String, dynamic> data, String mealName, int index) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -686,7 +737,7 @@ class _DietEditPageState extends State<DietEditPage> {
             onPressed: () {
               Navigator.pop(context);
               setState(() {
-                final contentList = _editableData[mealName]['content'] as List;
+                final contentList = data[mealName]['content'] as List;
                 contentList.removeAt(index);
                 _hasChanges = true;
               });
@@ -699,7 +750,7 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   // Add new content item
-  void _addContentItem(String mealName) {
+  void _addContentItem(Map<String, dynamic> data, String mealName) {
     final TextEditingController controller = TextEditingController();
 
     showDialog(
@@ -741,7 +792,7 @@ class _DietEditPageState extends State<DietEditPage> {
                   Navigator.pop(context);
                   setState(() {
                     final contentList =
-                        _editableData[mealName]['content'] as List;
+                        data[mealName]['content'] as List;
                     contentList.addAll(_expandLinesIntoEntries(content));
                     _hasChanges = true;
                   });
@@ -755,13 +806,12 @@ class _DietEditPageState extends State<DietEditPage> {
     );
   }
 
-  // Show add meal dialog
-  void _showAddMealDialog() {
-    final TextEditingController nameController = TextEditingController();
+  // Show add meal dialog (adds to the passed-in menu: weekday or weekend)
+  void _showAddMealDialog(Map<String, dynamic> data) {
     final TextEditingController timeController = TextEditingController(text: '12:00');
     
-    // Get enum names that aren't already in the diet
-    final existingMealNames = _editableData.keys.toList();
+    // Get enum names that aren't already in this menu
+    final existingMealNames = data.keys.toList();
     final availableMeals = Meals.dietValues.where((meal) => 
       !existingMealNames.contains(meal.name)).toList();
     
@@ -829,8 +879,8 @@ class _DietEditPageState extends State<DietEditPage> {
                 onPressed: () {
                   if (selectedMeal != null) {
                     setState(() {
-                      // Create a new meal in the data structure using the enum name as the key
-                      _editableData[selectedMeal!.name] = {
+                      // Create a new meal in this menu using the enum name as the key
+                      data[selectedMeal!.name] = {
                         'time': timeController.text,
                         'content': [],
                       };
@@ -849,12 +899,13 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   // Confirm delete meal
-  void _confirmDeleteMeal(String mealName) {
+  void _confirmDeleteMeal(Map<String, dynamic> data, String mealName) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Öğünü Sil'),
-        content: Text('$mealName öğününü silmek istediğinizden emin misiniz?'),
+        content: Text(
+            '${getMealDisplayName(mealName)} öğününü silmek istediğinizden emin misiniz?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -864,7 +915,7 @@ class _DietEditPageState extends State<DietEditPage> {
             onPressed: () {
               Navigator.pop(context);
               setState(() {
-                _editableData.remove(mealName);
+                data.remove(mealName);
                 _hasChanges = true;
               });
             },
@@ -894,17 +945,20 @@ class _DietEditPageState extends State<DietEditPage> {
           userId: widget.userId, 
           dietData: {
             'subtitles': _editableData,
+            if (_hasWeekend) 'weekendSubtitles': _weekendData,
             'displayName': _dietName, // Include the diet name
             'subscriptionId': widget.dietDoc.subscriptionId, // Include the subscription ID
           }
         );
         success = docId.isNotEmpty;
       } else {
-        // Update an existing diet
+        // Update an existing diet. Always pass the weekend menu so that emptying
+        // it (deleting all its meals) also clears it on the document.
         success = await dietProvider.updateDiet(
           userId: widget.userId,
           docId: widget.dietDoc.docId,
           subtitles: _editableData,
+          weekendSubtitles: _weekendData,
           displayName: _dietName, // Include the diet name
           subscriptionId: widget.dietDoc.subscriptionId, // Include the subscription ID if present
         );
@@ -1107,7 +1161,7 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   List<Widget> _buildEditableContentItems(
-      String mealName, List<dynamic> contentList) {
+      Map<String, dynamic> data, String mealName, List<dynamic> contentList) {
     final List<Widget> widgets = [];
 
     for (int i = 0; i < contentList.length; i++) {
@@ -1121,6 +1175,7 @@ class _DietEditPageState extends State<DietEditPage> {
         // original branch that handled "Veya foo" / "Haftada 2 foo".
         final cfg = SpecialLinesRegistry.matching(content);
         widgets.add(_buildMarkerRow(
+          data: data,
           mealName: mealName,
           index: i,
           markerLabel: cfg?.extractMarkerLabel(content) ?? content.trim(),
@@ -1129,22 +1184,23 @@ class _DietEditPageState extends State<DietEditPage> {
 
         final after = extractContentAfterMarker(content);
         if (after.isNotEmpty) {
-          widgets.add(
-              _buildContentRow(mealName: mealName, index: i, content: after));
+          widgets.add(_buildContentRow(
+              data: data, mealName: mealName, index: i, content: after));
         }
       } else if (isExactStandaloneMarker(content)) {
         // Strict standalone marker — original used `SPECIAL_MARKERS.contains`
         // here, i.e. trimmed content equals a configured prefix exactly.
         final cfg = SpecialLinesRegistry.matching(content);
         widgets.add(_buildMarkerRow(
+          data: data,
           mealName: mealName,
           index: i,
           markerLabel: cfg?.extractMarkerLabel(content) ?? content.trim(),
           config: cfg,
         ));
       } else {
-        widgets.add(
-            _buildContentRow(mealName: mealName, index: i, content: content));
+        widgets.add(_buildContentRow(
+            data: data, mealName: mealName, index: i, content: content));
       }
     }
 
@@ -1154,6 +1210,7 @@ class _DietEditPageState extends State<DietEditPage> {
   /// Pill-styled marker row used for both standalone markers and the leading
   /// part of a "marker + content" row.
   Widget _buildMarkerRow({
+    required Map<String, dynamic> data,
     required String mealName,
     required int index,
     required String markerLabel,
@@ -1197,7 +1254,7 @@ class _DietEditPageState extends State<DietEditPage> {
           IconButton(
             icon:
                 const Icon(Icons.remove_circle, color: Colors.red, size: 20),
-            onPressed: () => _deleteContentItem(mealName, index),
+            onPressed: () => _deleteContentItem(data, mealName, index),
             tooltip: 'Satırı Sil',
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(8),
@@ -1210,6 +1267,7 @@ class _DietEditPageState extends State<DietEditPage> {
   /// Standard editable row for a regular meal-content line (or for the
   /// trailing content part of a "marker + content" row).
   Widget _buildContentRow({
+    required Map<String, dynamic> data,
     required String mealName,
     required int index,
     required String content,
@@ -1237,14 +1295,14 @@ class _DietEditPageState extends State<DietEditPage> {
           const SizedBox(width: 12),
           Expanded(
             child: InkWell(
-              onTap: () => _editContentItem(mealName, index, content),
+              onTap: () => _editContentItem(data, mealName, index, content),
               child: Text(content, style: const TextStyle(fontSize: 16)),
             ),
           ),
           IconButton(
             icon:
                 const Icon(Icons.remove_circle, color: Colors.red, size: 20),
-            onPressed: () => _deleteContentItem(mealName, index),
+            onPressed: () => _deleteContentItem(data, mealName, index),
             tooltip: 'Öğeyi Sil',
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(8),
@@ -1272,9 +1330,9 @@ class _DietEditPageState extends State<DietEditPage> {
   }
 
   // Add "Veya" content item - use the constant from meal_formatter.dart
-  void _addVeyaContentItem(String mealName) {
+  void _addVeyaContentItem(Map<String, dynamic> data, String mealName) {
     setState(() {
-      final contentList = _editableData[mealName]['content'] as List;
+      final contentList = data[mealName]['content'] as List;
       // Add just a "Veya" line to indicate this is an alternative option
       contentList.add({'content': VEYA_MARKER});
       _hasChanges = true;
@@ -1282,7 +1340,7 @@ class _DietEditPageState extends State<DietEditPage> {
   }
   
   // Add "Haftada X" content item
-  void _addHaftadaContentItem(String mealName) {
+  void _addHaftadaContentItem(Map<String, dynamic> data, String mealName) {
     // Show dialog to get the number X for "Haftada X"
     final TextEditingController controller = TextEditingController(text: "1");
     
@@ -1340,7 +1398,7 @@ class _DietEditPageState extends State<DietEditPage> {
                   
                   Navigator.pop(context);
                   setState(() {
-                    final contentList = _editableData[mealName]['content'] as List;
+                    final contentList = data[mealName]['content'] as List;
                     // Add "Haftada X" line
                     contentList.add({'content': '$HAFTADA_MARKER_PREFIX $number'});
                     _hasChanges = true;

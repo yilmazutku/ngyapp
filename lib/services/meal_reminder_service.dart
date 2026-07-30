@@ -8,6 +8,7 @@ import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../constants/app_constants.dart';
+import '../models/diet_section.dart';
 import '../models/logger.dart';
 import '../models/meal_model.dart';
 
@@ -214,12 +215,22 @@ class MealReminderService {
       }
 
       final data = querySnapshot.docs.first.data();
-      final subtitles = data['subtitles'] as Map<String, dynamic>?;
+      final weekdaySubtitles = data['subtitles'] as Map<String, dynamic>?;
+      final weekendSubtitles = data['weekendSubtitles'] as Map<String, dynamic>?;
+
+      // On Saturday/Sunday use the weekend menu's times when the diet defines
+      // one, so reminders match what the user should actually be eating today.
+      final useWeekend = isWeekendDate(DateTime.now()) &&
+          weekendSubtitles != null &&
+          weekendSubtitles.isNotEmpty;
+      final subtitles = useWeekend ? weekendSubtitles : weekdaySubtitles;
 
       if (subtitles == null) {
         _logger.warn('Diet list has no subtitles');
         return mealTimes;
       }
+      _logger.info('Using {} menu for meal reminders',
+          [useWeekend ? 'weekend' : 'weekday']);
 
       for (final entry in subtitles.entries) {
         final mealName = entry.key;

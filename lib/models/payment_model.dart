@@ -127,11 +127,21 @@ extension PaymentModelUIUser on PaymentModel {
     final isOverdue = status == PaymentStatus.planned &&
         dueDate != null &&
         dueDate!.isBefore(now);
+    // Pending (planned) payments are emphasized so the user notices them: a
+    // warning icon plus bold text. Overdue ones get a stronger red accent.
+    final isPlanned = status == PaymentStatus.planned;
+    final Color accentColor =
+        isOverdue ? Colors.red.shade700 : Colors.orange.shade800;
+    final TextStyle? infoStyle =
+        isPlanned ? const TextStyle(fontWeight: FontWeight.bold) : null;
 
     return Card(
       color: isOverdue ? Colors.red.shade100 : null,
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
+        leading: isPlanned
+            ? Icon(Icons.warning_amber_rounded, color: accentColor, size: 32)
+            : null,
         // A row for userDisplayName and amount
         title: Row(
           children: [
@@ -162,13 +172,22 @@ extension PaymentModelUIUser on PaymentModel {
             if (dueDate != null)
               Text(
                 'Planlanan Tarih: ${DateFormat('dd/MM/yyyy').format(dueDate!)}',
+                style: infoStyle,
               ),
             if (status == PaymentStatus.completed && paymentDate != null)
               Text(
                 'Ödendiği Tarih: ${DateFormat('dd/MM/yyyy').format(paymentDate!)}',
+                style: infoStyle,
               ),
-            Text('Durum: ${status.label}'),
-            if (isOverdue) const Text('Ödeme tarihiniz gecikmiştir.'),
+            Text('Durum: ${status.label}', style: infoStyle),
+            if (isOverdue)
+              Text(
+                'Ödeme tarihiniz gecikmiştir.',
+                style: TextStyle(
+                  color: Colors.red.shade700,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             // if (notes != null && notes!.isNotEmpty) Text('Not: $notes'),
           ],
         ),

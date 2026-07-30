@@ -119,11 +119,21 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
     if (q.isEmpty) return 0;
     int count = 0;
     if (diet.displayName.toLowerCase().contains(q)) count++;
+    // Search both the weekday and (when present) weekend menus.
+    count += _countInSubtitles(diet.subtitles, q);
+    count += _countInSubtitles(diet.weekendSubtitles, q);
+    return count;
+  }
+
+  int _countInSubtitles(Map<String, dynamic>? subtitles, String q) {
+    if (subtitles == null) return 0;
+    int count = 0;
     try {
-      for (final entry in diet.subtitles.entries) {
+      for (final entry in subtitles.entries) {
         final mealKey = entry.key.toLowerCase();
         if (mealKey.contains(q)) count++;
-        final mealItems = entry.value['content'];
+        final value = entry.value;
+        final mealItems = value is Map ? value['content'] : null;
         if (mealItems is List) {
           for (final item in mealItems) {
             final text = item is Map ? (item['content']?.toString().toLowerCase() ?? '') : '';
@@ -214,7 +224,6 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
     }
   }
 
-  @override
   Widget _buildDietCard(BuildContext context, DietDocument dietDoc, {Key? key, int? matchCount}) {
     return DietCard(
       key: key,
@@ -454,6 +463,29 @@ class DietCard extends StatelessWidget {
                             color: Colors.green.shade800,
                             fontSize: 12)),
                   ),
+                  if (dietDoc.hasWeekend) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                          color: Colors.purple.shade100,
+                          borderRadius: BorderRadius.circular(16)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.weekend,
+                              size: 14, color: Colors.purple.shade800),
+                          const SizedBox(width: 4),
+                          Text('Hafta Sonu',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.purple.shade800,
+                                  fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (matchCount != null && matchCount! > 0) ...[
                     const SizedBox(width: 8),
                     Container(

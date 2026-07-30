@@ -45,11 +45,80 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   /// Flag to ignore the first purely-cached snapshot to avoid showing stale data
   bool _serverSeen = false;
 
+  /// Whether the list is currently in multi-select (bulk) mode.
+  bool _selectionMode = false;
+
+  /// Chat IDs selected while in bulk-select mode.
+  final Set<String> _selectedChatIds = <String>{};
+
+  /// Chat IDs currently rendered by the stream (used for "select all").
+  List<String> _visibleChatIds = <String>[];
+
+  /// Stable chat stream kept in a field so toggling selection (setState) does
+  /// not resubscribe the Firestore stream and flash the list to a spinner.
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _chatStream;
+
   @override
   void initState() {
     super.initState();
     final adminUid = FirebaseAuth.instance.currentUser?.uid;
     logger.info('AdminChatListPage initialized. adminUid={}', [adminUid ?? 'null']);
+    _chatStream = _buildChatStream();
+  }
+
+  /// Builds the Firestore stream of chats where this admin is a participant.
+  ///
+  /// IMPORTANT: This requires a composite index in Firestore:
+  ///   Collection: chats
+  ///   Fields: participants (Array-contains), lastMessageAt (Descending)
+  Stream<QuerySnapshot<Map<String, dynamic>>> _buildChatStream() {
+    final adminUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final q = FirebaseFirestore.instance
+        .collection('chats')
+        .where('participants', arrayContains: adminUid)
+        .orderBy('lastMessageAt', descending: true)
+        .limit(200);
+    return q.snapshots(includeMetadataChanges: true);
+  }
+
+  // ===== Bulk selection =====
+
+  /// Enter multi-select mode, optionally selecting an initial chat.
+  void _enterSelectionMode([String? initialChatId]) {
+    setState(() {
+      _selectionMode = true;
+      if (initialChatId != null) _selectedChatIds.add(initialChatId);
+    });
+  }
+
+  /// Leave multi-select mode and clear the current selection.
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedChatIds.clear();
+    });
+  }
+
+  /// Toggle a single chat's selection. Automatically leaves selection mode when
+  /// the last selected item is removed.
+  void _toggleSelected(String chatId) {
+    setState(() {
+      if (!_selectedChatIds.remove(chatId)) {
+        _selectedChatIds.add(chatId);
+      }
+      if (_selectedChatIds.isEmpty) {
+        _selectionMode = false;
+      }
+    });
+  }
+
+  /// Select every chat currently visible in the list.
+  void _selectAllVisible() {
+    setState(() {
+      _selectedChatIds
+        ..clear()
+        ..addAll(_visibleChatIds);
+    });
   }
 
   @override
@@ -146,46 +215,175 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     }
   }
 
+  /// Confirm and permanently delete all currently selected chats (with their
+  /// messages and photos). Shows the same style of confirmation used for a
+  /// single deletion, then a live progress loader while deleting one by one.
+  Future<void> _handleDeleteSelectedChats() async {
+    final ids = _selectedChatIds.toList();
+    if (ids.isEmpty) return;
+
+    logger.info('Bulk delete requested. count={}', [ids.length]);
+
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Seçili Sohbetleri Sil',
+      message: 'Seçili ${ids.length} sohbet, tüm mesajlar ve yüklenen fotoğraflar '
+          'kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\nDevam etmek istiyor musunuz?',
+      confirmText: 'Sil',
+      cancelText: 'İptal',
+    );
+
+    if (!confirmed) {
+      logger.debug('Bulk deletion cancelled. count={}', [ids.length]);
+      return;
+    }
+
+    if (!mounted) return;
+    final chatManager = Provider.of<ChatManager>(context, listen: false);
+
+    final progress = ValueNotifier<String>('Sohbetler siliniyor... (0/${ids.length})');
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoadingProgress(context, messageListenable: progress);
+      loadingOpen = true;
+    }
+
+    int deleted = 0;
+    final List<String> failed = [];
+
+    try {
+      for (var i = 0; i < ids.length; i++) {
+        final chatId = ids[i];
+        try {
+          await chatManager.deleteChat(chatId);
+          deleted++;
+        } catch (e) {
+          logger.err('Bulk delete: chat deletion failed. chatId={} error={}', [chatId, e]);
+          failed.add(chatId);
+        }
+        progress.value = 'Sohbetler siliniyor... (${i + 1}/${ids.length})';
+      }
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (mounted) {
+        if (failed.isEmpty) {
+          await DialogUtils.openInfo(
+            context,
+            title: 'Başarılı',
+            message: '$deleted sohbet silindi.',
+          );
+        } else {
+          await DialogUtils.openError(
+            context,
+            title: 'Kısmen Tamamlandı',
+            message: '$deleted sohbet silindi, ${failed.length} sohbet silinemedi. '
+                'Lütfen tekrar deneyin.',
+          );
+        }
+      }
+    } catch (e) {
+      logger.err('Bulk delete failed unexpectedly. error={}', [e]);
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Sohbetler silinemedi. Lütfen tekrar deneyin.',
+        );
+      }
+    } finally {
+      progress.dispose();
+      if (mounted) {
+        _exitSelectionMode();
+      }
+    }
+  }
+
+  /// Default (non-selection) app bar.
+  PreferredSizeWidget _buildDefaultAppBar() {
+    return AppBar(
+      title: const Text('Tüm Sohbetler'),
+      actions: [
+        IconButton(
+          tooltip: 'Toplu Seç',
+          icon: const Icon(Icons.checklist),
+          onPressed: () {
+            logger.info('Bulk-select mode entered');
+            _enterSelectionMode();
+          },
+        ),
+        IconButton(
+          tooltip: 'Yenile',
+          icon: const Icon(Icons.refresh),
+          onPressed: () {
+            logger.info('Manual refresh button tapped');
+            setState(() {
+              _chatStream = _buildChatStream();
+            });
+          },
+        ),
+      ],
+    );
+  }
+
+  /// App bar shown while in bulk-select mode: shows the selected count and the
+  /// "select all" / "delete selected" actions.
+  PreferredSizeWidget _buildSelectionAppBar() {
+    final count = _selectedChatIds.length;
+    final canSelectAll = _visibleChatIds.isNotEmpty &&
+        !_visibleChatIds.every(_selectedChatIds.contains);
+    return AppBar(
+      leading: IconButton(
+        tooltip: 'Vazgeç',
+        icon: const Icon(Icons.close),
+        onPressed: _exitSelectionMode,
+      ),
+      title: Text('$count seçildi'),
+      actions: [
+        IconButton(
+          tooltip: 'Tümünü Seç',
+          icon: const Icon(Icons.select_all),
+          onPressed: canSelectAll ? _selectAllVisible : null,
+        ),
+        IconButton(
+          tooltip: 'Seçilenleri Sil',
+          icon: const Icon(Icons.delete),
+          color: count == 0 ? null : Colors.red,
+          onPressed: count == 0 ? null : _handleDeleteSelectedChats,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final adminUid = FirebaseAuth.instance.currentUser!.uid;
-    logger.debug('Building AdminChatListPage. adminUid={}', [adminUid]);
-
-    // Firestore query: Get all chats where this admin is a participant
-    // IMPORTANT: This requires a composite index in Firestore:
-    //   Collection: chats
-    //   Fields: participants (Array-contains), lastMessageAt (Descending)
-    final q = FirebaseFirestore.instance
-        .collection('chats')
-        .where('participants', arrayContains: adminUid)
-        .orderBy('lastMessageAt', descending: true)
-        .limit(200);
+    logger.debug('Building AdminChatListPage. adminUid={} selectionMode={}', [adminUid, _selectionMode]);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tüm Sohbetler'),
-        actions: [
-          IconButton(
-            tooltip: 'Yenile',
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              logger.info('Manual refresh button tapped');
-              setState(() {}); // Force rebuild; stream continues
-            },
-          )
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showNewChatDialog,
-        icon: const Icon(Icons.add_comment),
-        label: const Text('Yeni Sohbet'),
-        tooltip: 'Yeni sohbet başlat',
-      ),
+      appBar: _selectionMode ? _buildSelectionAppBar() : _buildDefaultAppBar(),
+      floatingActionButton: _selectionMode
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _showNewChatDialog,
+              icon: const Icon(Icons.add_comment),
+              label: const Text('Yeni Sohbet'),
+              tooltip: 'Yeni sohbet başlat',
+            ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: q.snapshots(includeMetadataChanges: true),
+        stream: _chatStream,
         builder: (context, snap) {
-          // Loading state
-          if (snap.connectionState == ConnectionState.waiting) {
+          // Loading state (keep showing existing data across resubscribes)
+          if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
             logger.debug('Chats stream: waiting for initial connection');
             return const Center(child: CircularProgressIndicator());
           }
@@ -244,6 +442,9 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
 
           logger.debug('Rendering {} chats', [docs.length]);
 
+          // Track visible chat IDs so "select all" knows what to select.
+          _visibleChatIds = docs.map((e) => e.id).toList();
+
           // Render chat list
           return ListView.separated(
             itemCount: docs.length,
@@ -286,6 +487,10 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
                 unreadCount: unreadCount,
                 logger: logger,
                 onDelete: _handleDeleteChat,
+                selectionMode: _selectionMode,
+                selected: _selectedChatIds.contains(chatId),
+                onToggleSelected: _toggleSelected,
+                onLongPressSelect: _enterSelectionMode,
               );
             },
           );
@@ -312,6 +517,18 @@ class _ChatListItem extends StatelessWidget {
   /// Receives the chatId and the resolved display name for the confirmation.
   final void Function(String chatId, String displayName) onDelete;
 
+  /// Whether the list is in bulk-select mode.
+  final bool selectionMode;
+
+  /// Whether this chat is currently selected.
+  final bool selected;
+
+  /// Toggles this chat's selection (used while in bulk-select mode).
+  final void Function(String chatId) onToggleSelected;
+
+  /// Enters bulk-select mode and selects this chat (long-press).
+  final void Function(String chatId) onLongPressSelect;
+
   const _ChatListItem({
     required this.chatId,
     required this.lastMsg,
@@ -321,6 +538,10 @@ class _ChatListItem extends StatelessWidget {
     required this.unreadCount,
     required this.logger,
     required this.onDelete,
+    required this.selectionMode,
+    required this.selected,
+    required this.onToggleSelected,
+    required this.onLongPressSelect,
   });
 
   @override
@@ -347,7 +568,15 @@ class _ChatListItem extends StatelessWidget {
           children: [
             // Main chat list tile
             ListTile(
-              leading: const Icon(Icons.person),
+              selected: selectionMode && selected,
+              selectedTileColor:
+                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+              leading: selectionMode
+                  ? Checkbox(
+                      value: selected,
+                      onChanged: (_) => onToggleSelected(chatId),
+                    )
+                  : const Icon(Icons.person),
               title: Text(
                 displayName,
                 maxLines: 1,
@@ -416,30 +645,36 @@ class _ChatListItem extends StatelessWidget {
                       ],
                     ],
                   ),
-                  // Delete chat (and all its photos) — admin only
-                  IconButton(
-                    tooltip: 'Sohbeti Sil',
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    onPressed: () {
-                      logger.debug('Chat delete icon tapped. chatId={}', [chatId]);
-                      onDelete(chatId, displayName);
-                    },
-                  ),
+                  // Delete chat (and all its photos) — admin only.
+                  // Hidden in bulk-select mode (bulk delete lives in the app bar).
+                  if (!selectionMode)
+                    IconButton(
+                      tooltip: 'Sohbeti Sil',
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () {
+                        logger.debug('Chat delete icon tapped. chatId={}', [chatId]);
+                        onDelete(chatId, displayName);
+                      },
+                    ),
                 ],
               ),
-              onTap: () async {
-                logger.info('Opening chat for user. chatId={} userName="{}"', [chatId, displayName]);
-                // Mark chat as read when admin opens it
-                final chatManager = Provider.of<ChatManager>(context, listen: false);
-                await chatManager.markChatAsRead(chatId);
-                if (!context.mounted) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ChatPage(overrideChatId: chatId),
-                  ),
-                );
-              },
+              onLongPress:
+                  selectionMode ? null : () => onLongPressSelect(chatId),
+              onTap: selectionMode
+                  ? () => onToggleSelected(chatId)
+                  : () async {
+                      logger.info('Opening chat for user. chatId={} userName="{}"', [chatId, displayName]);
+                      // Mark chat as read when admin opens it
+                      final chatManager = Provider.of<ChatManager>(context, listen: false);
+                      await chatManager.markChatAsRead(chatId);
+                      if (!context.mounted) return;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChatPage(overrideChatId: chatId),
+                        ),
+                      );
+                    },
             ),
             
             // Show image preview below the list tile if available
@@ -457,15 +692,17 @@ class _ChatListItem extends StatelessWidget {
                       height: 60,
                       usePlaceholder: false,
                       borderRadius: 8.0,
-                      onTap: () {
-                        logger.info('Image preview tapped, opening chat. chatId={} userName="{}"', [chatId, displayName]);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ChatPage(overrideChatId: chatId),
-                          ),
-                        );
-                      },
+                      onTap: selectionMode
+                          ? () => onToggleSelected(chatId)
+                          : () {
+                              logger.info('Image preview tapped, opening chat. chatId={} userName="{}"', [chatId, displayName]);
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ChatPage(overrideChatId: chatId),
+                                ),
+                              );
+                            },
                     ),
                   ),
                 ),

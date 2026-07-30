@@ -78,9 +78,10 @@ class _CreateUserPageState extends State<CreateUserPage> {
       return;
     }
 
+    // E-posta opsiyoneldir: boş bırakılırsa kişinin adına göre
+    // her seferinde benzersiz, geçici bir e-posta üretilir.
     if (email.isEmpty) {
-      _showMessageDialog('Hata', 'Lütfen e-posta alanını doldurunuz.');
-      return;
+      email = _generateTempEmail(name);
     }
 
     password ??= CreateUserPage.tempPw;
@@ -162,6 +163,46 @@ class _CreateUserPageState extends State<CreateUserPage> {
     }
   }
 
+  /// Geçici (opsiyonel) bir e-posta üretir. Aynı kişi için bile her çağrıda
+  /// farklı olması için epoch (saniye) eklenir.
+  /// Örn: "Meral" -> "meral_1712345678@gecicimail.com"
+  String _generateTempEmail(String name) {
+    final slug = _slugifyName(name);
+    final safeSlug = slug.isNotEmpty ? slug : 'kullanici';
+    final epochSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return '${safeSlug}_$epochSeconds@gecicimail.com';
+  }
+
+  /// İsmi Türkçe karakterlerden arındırıp küçük harfe çevirir, harf ve rakam
+  /// dışındaki karakterleri (boşluk vb.) temizler.
+  String _slugifyName(String name) {
+    const turkishReplacements = {
+      'ç': 'c',
+      'Ç': 'c',
+      'ğ': 'g',
+      'Ğ': 'g',
+      'ı': 'i',
+      'İ': 'i',
+      'I': 'i',
+      'ö': 'o',
+      'Ö': 'o',
+      'ş': 's',
+      'Ş': 's',
+      'ü': 'u',
+      'Ü': 'u',
+    };
+
+    final buffer = StringBuffer();
+    for (final char in name.split('')) {
+      buffer.write(turkishReplacements[char] ?? char);
+    }
+
+    return buffer
+        .toString()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
   void _showMessageDialog(String title, String message) {
     showDialog(
       context: context,
@@ -234,7 +275,10 @@ class _CreateUserPageState extends State<CreateUserPage> {
               TextField(
                 controller: _emailController,
                 decoration: const InputDecoration(
-                  labelText: 'E-posta Giriniz',
+                  labelText: 'E-posta (Opsiyonel)',
+                  helperText:
+                      'Girilmezse sistem otomatik bir mail girer, değiştirilebilir.',
+                  helperMaxLines: 2,
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.emailAddress,

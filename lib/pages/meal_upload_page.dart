@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/diet_section.dart';
 import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../providers/daily_data_provider.dart';
@@ -59,10 +60,19 @@ class _MealUploadPageState extends State<MealUploadPage> {
     for (var meal in Meals.dietValues) meal: false,
   };
 
+  // Weekday (Hafta İçi) menu.
   Map<Meals, List<String>> mealContents = {};
   Map<Meals, TimeOfDay> mealTimes = {
     for (var meal in Meals.dietValues) meal: const TimeOfDay(hour: 0, minute: 0),
   };
+
+  // Weekend (Hafta Sonu) menu. Only populated when the active diet defines one.
+  Map<Meals, List<String>> _weekendMealContents = {};
+  Map<Meals, TimeOfDay> _weekendMealTimes = {};
+
+  /// True when the active diet has a distinct weekend menu, in which case the
+  /// plan is split into "Hafta İçi" and "Hafta Sonu" sections.
+  bool _hasWeekendMenu = false;
 
   /// Today's uploaded images per meal type.
   Map<Meals, List<String>> _mealImages = {};
@@ -80,10 +90,10 @@ class _MealUploadPageState extends State<MealUploadPage> {
   final NotificationService _notificationService = NotificationService();
   final MealReminderService _mealReminderService = MealReminderService();
   
-  // Track which meals are expanded (all collapsed by default)
-  final Map<Meals, bool> _expandedMeals = {
-    for (var meal in Meals.dietValues) meal: false,
-  };
+  // Track which meal tiles are expanded (all collapsed by default). Keyed by a
+  // string so weekday and weekend tiles for the same meal don't share state
+  // (see [_expansionKey]).
+  final Map<String, bool> _expandedMeals = {};
   
   // Font size adjustments for testing
   double _titleFontSize = 14.0;
@@ -132,11 +142,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
       
       if (mounted) {
         setState(() {
-          for (final mealName in expandedList) {
-            final meal = Meals.fromName(mealName);
-            if (meal != null) {
-              _expandedMeals[meal] = true;
-            }
+          for (final key in expandedList) {
+            _expandedMeals[key] = true;
           }
         });
       }
@@ -152,7 +159,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
       final prefs = await SharedPreferences.getInstance();
       final expandedList = _expandedMeals.entries
           .where((entry) => entry.value)
-          .map((entry) => entry.key.name)
+          .map((entry) => entry.key)
           .toList();
       await prefs.setStringList(_expandedMealsKey, expandedList);
       logger.debug('Saved expanded meals: {}', [expandedList]);
@@ -183,76 +190,25 @@ class _MealUploadPageState extends State<MealUploadPage> {
             [e.toString()]);
       }
 
-      // Fetch meal contents (subtitles) using DietProvider
+      // Fetch the latest diet document (weekday + optional weekend menus).
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
-      final subtitles = await dietProvider.fetchLatestDietSubtitles(widget.userId);
+      final diet = await dietProvider.fetchLatestDietDocument(widget.userId);
 
-      Map<Meals, List<String>> mealContentsTemp = {};
-      Map<Meals, TimeOfDay> mealTimesTemp = {};
-
-      if (subtitles != null) {
-        //logger.info('user diet document has non-null subtitles.');
-        
-        // Debug: Print raw subtitles data
-        //logger.info('Raw subtitles data: $subtitles');
-
-        for (var entry in subtitles.entries) {
-          final mealName = entry.key;
-          final mealData = entry.value as Map<String, dynamic>;
-          final meal = Meals.fromName(mealName);
-
-          // logger.info('Processing meal: $mealName');
-          // logger.info('Meal data: $mealData');
-
-          if (meal != null) {
-            // Get content list
-            final contentList = List<String>.from(
-              (mealData['content'] as List<dynamic>)
-                  .map((item) => item['content'].toString()),
-            );
-            mealContentsTemp[meal] = contentList;
-
-            // Get time
-            String? timeString = mealData['time'] as String?;
-            logger.info('Time string for $mealName: $timeString');
-
-            TimeOfDay timeOfDay = const TimeOfDay(hour: 0, minute: 0);
-            if (timeString != null && timeString.isNotEmpty) {
-              try {
-                // Handle different time formats
-                if (timeString.contains(':')) {
-                  final parts = timeString.split(':');
-                  if (parts.length == 2) {
-                    final hour = int.tryParse(parts[0]);
-                    final minute = int.tryParse(parts[1]);
-                    if (hour != null && minute != null) {
-                      timeOfDay = TimeOfDay(hour: hour, minute: minute);
-                      logger.info(
-                          'Parsed time for $mealName: ${timeOfDay.hour}:${timeOfDay.minute}');
-                    }
-                  }
-                } else {
-                  final parsedTime = DateFormat('HH:mm').parse(timeString);
-                  timeOfDay = TimeOfDay.fromDateTime(parsedTime);
-                  logger.info(
-                      'Parsed time for $mealName: ${timeOfDay.hour}:${timeOfDay.minute}');
-                }
-              } catch (e) {
-                logger.err('Error when parsing the time of dietlist:{}',
-                    [e.toString()]);
-              }
-            }
-            mealTimesTemp[meal] = timeOfDay;
-          } else {
-            logger.warn('Skipping unmatched meal: {}', [mealName]);
-          }
-        }
-      } else {
+      if (diet == null) {
         logger.warn('No diet lists found for the user.');
       }
+
+      final weekday = _parseMenu(diet?.subtitles);
+      final weekend = _parseMenu(diet?.weekendSubtitles);
+
       setState(() {
-        mealContents = mealContentsTemp;
-        mealTimes = mealTimesTemp;
+        mealContents = weekday.contents;
+        mealTimes = weekday.times;
+        _weekendMealContents = weekend.contents;
+        _weekendMealTimes = weekend.times;
+        // Only treat as split when the weekend menu actually has content.
+        _hasWeekendMenu =
+            weekend.contents.values.any((c) => c.isNotEmpty);
       });
 
       // Fetch meal states using provider
@@ -280,6 +236,58 @@ class _MealUploadPageState extends State<MealUploadPage> {
         } catch (e) {
       logger.err('Error fetching meal states or contents: {}', [e.toString()]);
     }
+  }
+
+  /// Parses a raw diet menu map (keyed by [Meals] enum name) into per-meal
+  /// content lists and times. Returns empty maps when [subtitles] is null.
+  ({Map<Meals, List<String>> contents, Map<Meals, TimeOfDay> times}) _parseMenu(
+      Map<String, dynamic>? subtitles) {
+    final Map<Meals, List<String>> contents = {};
+    final Map<Meals, TimeOfDay> times = {};
+
+    if (subtitles == null) return (contents: contents, times: times);
+
+    for (final entry in subtitles.entries) {
+      final meal = Meals.fromName(entry.key);
+      if (meal == null) {
+        logger.warn('Skipping unmatched meal: {}', [entry.key]);
+        continue;
+      }
+      final mealData = entry.value as Map<String, dynamic>;
+
+      contents[meal] = List<String>.from(
+        (mealData['content'] as List<dynamic>)
+            .map((item) => item['content'].toString()),
+      );
+      times[meal] = _parseTime(mealData['time'] as String?);
+    }
+
+    return (contents: contents, times: times);
+  }
+
+  /// Converts a stored time string ("HH:mm" or "HH.mm") to a [TimeOfDay],
+  /// defaulting to midnight when missing or unparseable.
+  TimeOfDay _parseTime(String? timeString) {
+    if (timeString == null || timeString.isEmpty) {
+      return const TimeOfDay(hour: 0, minute: 0);
+    }
+    try {
+      if (timeString.contains(':')) {
+        final parts = timeString.split(':');
+        if (parts.length == 2) {
+          final hour = int.tryParse(parts[0]);
+          final minute = int.tryParse(parts[1]);
+          if (hour != null && minute != null) {
+            return TimeOfDay(hour: hour, minute: minute);
+          }
+        }
+      } else {
+        return TimeOfDay.fromDateTime(DateFormat('HH:mm').parse(timeString));
+      }
+    } catch (e) {
+      logger.err('Error when parsing the time of dietlist:{}', [e.toString()]);
+    }
+    return const TimeOfDay(hour: 0, minute: 0);
   }
 
   /// Fetches today's meal images from MealManager and updates [_mealImages].
@@ -639,7 +647,11 @@ class _MealUploadPageState extends State<MealUploadPage> {
                       children: [
                         // Font size adjustment controls (for testing)
                         if (IS_TESTING) _buildFontSizeControls(),
-                        
+
+                        // Debug-only date picker: lets us preview weekday vs
+                        // weekend menus and uploads on a chosen date.
+                        _buildDebugDateSelector(context),
+
                         // Combined Daily Tracking Card (Water + Steps)
                         _buildDailyTrackingCard(),
                         
@@ -649,8 +661,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
                         const SizedBox(height: 8),
                         
-                        // Meals Section with collapsible tiles
-                        _buildCollapsibleMealsList(defaultMealTime),
+                        // Meals Section with collapsible tiles (split into
+                        // weekday/weekend sections when the diet has both).
+                        _buildMealsArea(defaultMealTime),
                       ],
                     ),
                   ),
@@ -983,15 +996,69 @@ class _MealUploadPageState extends State<MealUploadPage> {
     );
   }
 
-  /// Build collapsible meals list
-  Widget _buildCollapsibleMealsList(TimeOfDay defaultMealTime) {
-    // Filter meals with content
-    final mealsWithContent = Meals.dietValues.where((meal) {
-      final contents = mealContents[meal] ?? [];
-      return contents.isNotEmpty;
-    }).toList();
+  /// Composite key so weekday and weekend tiles for the same meal keep
+  /// independent expanded/collapsed state.
+  String _expansionKey(Meals meal, {DietSection? section}) =>
+      section == null ? meal.name : '${section.key}_${meal.name}';
 
-    if (mealsWithContent.isEmpty) {
+  /// Builds the meals area: a single interactive list for weekday-only diets,
+  /// or two labelled sections (Hafta İçi + Hafta Sonu) when the diet defines a
+  /// weekend menu. Only the section matching today is interactive (check-off +
+  /// photo upload); the other is shown read-only for reference.
+  Widget _buildMealsArea(TimeOfDay defaultMealTime) {
+    if (!_hasWeekendMenu) {
+      return _buildMealsSection(
+        contents: mealContents,
+        times: mealTimes,
+        interactive: true,
+        defaultMealTime: defaultMealTime,
+      );
+    }
+
+    final effectiveDate = kDebugMode ? _debugSelectedDate ?? now : now;
+    final weekendToday = isWeekendDate(effectiveDate);
+
+    return Column(
+      children: [
+        _buildMealsSection(
+          section: DietSection.weekday,
+          sectionIcon: Icons.calendar_view_week,
+          contents: mealContents,
+          times: mealTimes,
+          interactive: !weekendToday,
+          isToday: !weekendToday,
+          defaultMealTime: defaultMealTime,
+        ),
+        const SizedBox(height: 12),
+        _buildMealsSection(
+          section: DietSection.weekend,
+          sectionIcon: Icons.weekend,
+          contents: _weekendMealContents,
+          times: _weekendMealTimes,
+          interactive: weekendToday,
+          isToday: weekendToday,
+          defaultMealTime: defaultMealTime,
+        ),
+      ],
+    );
+  }
+
+  /// Builds one menu's meal tiles (optionally under a section header).
+  Widget _buildMealsSection({
+    required Map<Meals, List<String>> contents,
+    required Map<Meals, TimeOfDay> times,
+    required bool interactive,
+    required TimeOfDay defaultMealTime,
+    DietSection? section,
+    IconData? sectionIcon,
+    bool isToday = false,
+  }) {
+    final mealsWithContent = Meals.dietValues
+        .where((meal) => (contents[meal] ?? []).isNotEmpty)
+        .toList();
+
+    // Weekday-only diets keep the original full-page empty state.
+    if (mealsWithContent.isEmpty && section == null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -1001,10 +1068,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
               const SizedBox(height: 12),
               Text(
                 'Henüz öğün planı oluşturulmamış',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                ),
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               ),
             ],
           ),
@@ -1013,123 +1077,216 @@ class _MealUploadPageState extends State<MealUploadPage> {
     }
 
     return Column(
-      children: mealsWithContent.map((mealCategory) {
-        final contents = mealContents[mealCategory] ?? [];
-        final isExpanded = _expandedMeals[mealCategory] ?? false;
-        final isChecked = checkedStates[mealCategory] ?? false;
-        final mealTime = mealTimes[mealCategory] ?? defaultMealTime;
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (section != null)
+          _buildSectionHeader(section, sectionIcon, isToday),
+        if (mealsWithContent.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            child: Text(
+              'Bu bölüm için öğün planı bulunmuyor.',
+              style: TextStyle(
+                color: Colors.grey.shade500,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          )
+        else
+          ...mealsWithContent.map((meal) => _buildMealTile(
+                mealCategory: meal,
+                contents: contents[meal] ?? [],
+                mealTime: times[meal] ?? defaultMealTime,
+                interactive: interactive,
+                expansionKey: _expansionKey(meal, section: section),
+              )),
+      ],
+    );
+  }
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 6),
-          elevation: 1,
+  /// Header shown above a weekday/weekend section, with a "Bugün" / "Referans"
+  /// chip so the user knows which menu is the active (trackable) one today.
+  Widget _buildSectionHeader(
+      DietSection section, IconData? icon, bool isToday) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8, left: 2),
+      child: Row(
+        children: [
+          Icon(icon ?? Icons.restaurant_menu,
+              size: 20, color: Colors.deepOrange.shade700),
+          const SizedBox(width: 8),
+          Text(
+            section.label,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.deepOrange.shade800,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: isToday ? Colors.green.shade50 : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isToday ? Colors.green.shade200 : Colors.grey.shade300,
+              ),
+            ),
+            child: Text(
+              isToday ? 'Bugün' : 'Referans',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: isToday ? Colors.green.shade700 : Colors.grey.shade600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A single collapsible meal tile. When [interactive] is true it shows the
+  /// check-off and camera controls (today's menu); otherwise it is a read-only
+  /// reference tile (the other day-type's menu).
+  Widget _buildMealTile({
+    required Meals mealCategory,
+    required List<String> contents,
+    required TimeOfDay mealTime,
+    required bool interactive,
+    required String expansionKey,
+  }) {
+    final isExpanded = _expandedMeals[expansionKey] ?? false;
+    final isChecked = interactive && (checkedStates[mealCategory] ?? false);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 6),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: PageStorageKey(expansionKey),
+          initiallyExpanded: isExpanded,
+          onExpansionChanged: (expanded) {
+            setState(() {
+              _expandedMeals[expansionKey] = expanded;
+            });
+            _saveExpandedMeals();
+          },
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          child: Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              key: PageStorageKey(mealCategory.name),
-              initiallyExpanded: isExpanded,
-              onExpansionChanged: (expanded) {
-                setState(() {
-                  _expandedMeals[mealCategory] = expanded;
-                });
-                _saveExpandedMeals();
-              },
-              tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-              childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              leading: Container(
-                width: 36,
-                height: 36,
+          collapsedShape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          leading: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: !interactive
+                  ? Colors.blueGrey.shade50
+                  : (isChecked ? Colors.green.shade50 : Colors.deepOrange.shade50),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              !interactive
+                  ? Icons.restaurant_menu
+                  : (isChecked ? Icons.check_circle : Icons.restaurant),
+              size: 18,
+              color: !interactive
+                  ? Colors.blueGrey.shade400
+                  : (isChecked
+                      ? Colors.green.shade600
+                      : Colors.deepOrange.shade600),
+            ),
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  mealCategory.displayLabel,
+                  style: TextStyle(
+                    fontSize: _titleFontSize,
+                    fontWeight: FontWeight.w600,
+                    color: !interactive
+                        ? Colors.blueGrey.shade700
+                        : (isChecked
+                            ? Colors.green.shade700
+                            : Colors.deepOrange.shade700),
+                  ),
+                ),
+              ),
+              // Time badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isChecked ? Colors.green.shade50 : Colors.deepOrange.shade50,
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(4),
                 ),
-                child: Icon(
-                  isChecked ? Icons.check_circle : Icons.restaurant,
-                  size: 18,
-                  color: isChecked ? Colors.green.shade600 : Colors.deepOrange.shade600,
+                child: Text(
+                  MealUploadPage.formatTimeOfDay24(mealTime),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey.shade700,
+                  ),
                 ),
               ),
-              title: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      mealCategory.displayLabel,
-                      style: TextStyle(
-                        fontSize: _titleFontSize,
-                        fontWeight: FontWeight.w600,
-                        color: isChecked ? Colors.green.shade700 : Colors.deepOrange.shade700,
-                      ),
+              // Tracking controls only for the active (today's) menu.
+              if (interactive) ...[
+                const SizedBox(width: 6),
+                // Camera button
+                InkWell(
+                  onTap: () => _uploadMealImage(mealCategory),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.camera_alt_outlined,
+                      size: 18,
+                      color: Colors.blue.shade600,
                     ),
                   ),
-                  // Time badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      MealUploadPage.formatTimeOfDay24(mealTime),
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  // Camera button
-                  InkWell(
-                    onTap: () => _uploadMealImage(mealCategory),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.camera_alt_outlined,
-                        size: 18,
-                        color: Colors.blue.shade600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  // Checkbox
-                  SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: Checkbox(
-                      value: isChecked,
-                      onChanged: (bool? newValue) async {
-                        setState(() {
-                          checkedStates[mealCategory] = newValue ?? false;
-                        });
-                        await Provider.of<MealManager>(context, listen: false)
-                            .updateMealState(widget.userId, now, mealCategory, newValue ?? false);
-                        if (newValue == true) {
-                          await _mealReminderService.cancelMealReminder(mealCategory);
-                        }
-                      },
-                      activeColor: Colors.green.shade600,
-                      visualDensity: VisualDensity.compact,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                ],
-              ),
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: MealFormatter.formatMealContentWithOptions(
-                    contents.map((content) => {'content': content}).toList(),
-                    fontSize: _contentFontSize,
+                ),
+                const SizedBox(width: 2),
+                // Checkbox
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: Checkbox(
+                    value: isChecked,
+                    onChanged: (bool? newValue) async {
+                      setState(() {
+                        checkedStates[mealCategory] = newValue ?? false;
+                      });
+                      await Provider.of<MealManager>(context, listen: false)
+                          .updateMealState(
+                              widget.userId, now, mealCategory, newValue ?? false);
+                      if (newValue == true) {
+                        await _mealReminderService
+                            .cancelMealReminder(mealCategory);
+                      }
+                    },
+                    activeColor: Colors.green.shade600,
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                 ),
               ],
-            ),
+            ],
           ),
-        );
-      }).toList(),
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: MealFormatter.formatMealContentWithOptions(
+                contents.map((content) => {'content': content}).toList(),
+                fontSize: _contentFontSize,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

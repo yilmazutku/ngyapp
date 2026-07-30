@@ -5,7 +5,17 @@ class DietDocument {
   final String userId;
   final String displayName;
   final DateTime? uploadTime;
+
+  /// Weekday (Hafta İçi) meal plan, keyed by [Meals] enum name.
   final Map<String, dynamic> subtitles;
+
+  /// Optional weekend (Hafta Sonu) meal plan, keyed by [Meals] enum name.
+  ///
+  /// Present only when the diet was imported/created with a separate weekend
+  /// menu (docx contained a standalone `HAFTASONU` line). Null or empty means
+  /// this is a weekday-only diet, which keeps older documents fully compatible.
+  final Map<String, dynamic>? weekendSubtitles;
+
   final DateTime createDate;
   final String? createUser;
   DateTime? updateDate;
@@ -18,6 +28,7 @@ class DietDocument {
     required this.displayName,
     required this.uploadTime,
     required this.subtitles,
+    this.weekendSubtitles,
     DateTime? createDate,
     this.createUser,
     this.updateDate,
@@ -25,12 +36,17 @@ class DietDocument {
     this.subscriptionId,
   }) : createDate = createDate ?? DateTime.now();
 
+  /// Whether this diet defines a distinct weekend (Hafta Sonu) menu.
+  bool get hasWeekend =>
+      weekendSubtitles != null && weekendSubtitles!.isNotEmpty;
+
   factory DietDocument.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>?;
     return DietDocument(
       docId: doc.id,
       uploadTime: (data?['uploadTime'] as Timestamp?)?.toDate(),
       subtitles: data?['subtitles'] as Map<String, dynamic>,
+      weekendSubtitles: data?['weekendSubtitles'] as Map<String, dynamic>?,
       userId:data?['userId'],
       displayName: data?['displayName'],
       createDate: data?['createDate'] != null ? (data?['createDate'] as Timestamp).toDate() : DateTime.now(),
@@ -45,6 +61,7 @@ class DietDocument {
     return {
       'uploadTime': uploadTime != null ? Timestamp.fromDate(uploadTime!) : null,
       'subtitles': subtitles,
+      if (hasWeekend) 'weekendSubtitles': weekendSubtitles,
       'createDate': Timestamp.fromDate(createDate),
       'userId':userId,
       'displayName':displayName,
