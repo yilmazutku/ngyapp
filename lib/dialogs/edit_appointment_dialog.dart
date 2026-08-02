@@ -9,6 +9,7 @@ import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/time_picker_utils.dart';
 import '../widgets/loading_overlay.dart';
 
 class EditAppointmentDialog extends StatefulWidget {
@@ -611,17 +612,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                     lastDate: DateTime.now().add(const Duration(days: 365)),
                   );
                   if (pickedDate != null && mounted) {
-                    final TimeOfDay? pickedTime = await showTimePicker(
-                      context: context,
-                      initialTime: _postponedDate != null 
+                    final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
+                      context,
+                      initialTime: _postponedDate != null
                           ? TimeOfDay.fromDateTime(_postponedDate!)
                           : const TimeOfDay(hour: 9, minute: 0),
-                      builder: (context, child) {
-                        return MediaQuery(
-                          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-                          child: child!,
-                        );
-                      },
                     );
                     if (pickedTime != null && mounted) {
                       setState(() {
@@ -699,8 +694,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 );
                 if (pickedDate != null) {
                   if (!context.mounted) return;
-                  final TimeOfDay? pickedTime = await showTimePicker(
-                    context: context,
+                  final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
+                    context,
                     initialTime: TimeOfDay.fromDateTime(_appointmentDateTime),
                   );
                   if (pickedTime != null) {

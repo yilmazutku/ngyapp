@@ -9,6 +9,7 @@ import '../models/appointment_model.dart';
 import '../models/event_model.dart';
 import '../providers/timeslot_manager.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/time_picker_utils.dart';
 import '../models/time_range_config.dart';
 import '../widgets/app_bar_with_back.dart';
 
@@ -203,8 +204,10 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                 children: [
                   TextButton.icon(
                     onPressed: () async {
-                      final TimeOfDay? picked =
-                      await showTimePicker(context: context, initialTime: initialTime);
+                      final TimeOfDay? picked = await TimePickerUtils.pickTime(
+                        context,
+                        initialTime: initialTime,
+                      );
                       if (picked != null) {
                         controller.text = _formatTimeSlot(picked);
                       }

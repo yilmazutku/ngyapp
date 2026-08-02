@@ -6,6 +6,7 @@ import '../models/event_model.dart';
 import '../models/logger.dart';
 import '../providers/event_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/time_picker_utils.dart';
 import '../widgets/loading_overlay.dart';
 
 class EditEventDialog extends StatefulWidget {
@@ -77,13 +78,9 @@ class _EditEventDialogState extends State<EditEventDialog>
   }
 
   Future<void> _pickStartTime() async {
-    final picked = await showTimePicker(
-      context: context,
+    final picked = await TimePickerUtils.pickTime(
+      context,
       initialTime: TimeOfDay.fromDateTime(_startDateTime),
-      builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-        child: child!,
-      ),
     );
     if (picked == null) return;
     setState(() {
@@ -98,13 +95,9 @@ class _EditEventDialogState extends State<EditEventDialog>
   }
 
   Future<void> _pickEndTime() async {
-    final picked = await showTimePicker(
-      context: context,
+    final picked = await TimePickerUtils.pickTime(
+      context,
       initialTime: TimeOfDay.fromDateTime(_endDateTime),
-      builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-        child: child!,
-      ),
     );
     if (picked == null) return;
     setState(() {

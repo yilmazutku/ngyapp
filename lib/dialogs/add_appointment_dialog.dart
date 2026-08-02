@@ -13,6 +13,7 @@ import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/time_picker_utils.dart';
 import '../dialogs/dialog_widgets.dart'; // Import dialog widgets
 import '../widgets/loading_overlay.dart';
 
@@ -295,15 +296,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   }
 
   Future<void> _selectTime() async {
-    final TimeOfDay? picked = await showTimePicker(
-      context: context,
+    final TimeOfDay? picked = await TimePickerUtils.pickTime(
+      context,
       initialTime: _selectedTime,
-      builder: (context, child) {
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-          child: child!,
-        );
-      },
     );
     if (picked != null && picked != _selectedTime) {
       setState(() {
@@ -760,17 +755,11 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                       lastDate: DateTime.now().add(const Duration(days: 365)),
                     );
                     if (pickedDate != null && mounted) {
-                      final TimeOfDay? pickedTime = await showTimePicker(
-                        context: context,
+                      final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
+                        context,
                         initialTime: _postponedDate != null
                             ? TimeOfDay.fromDateTime(_postponedDate!)
                             : const TimeOfDay(hour: 9, minute: 0),
-                        builder: (context, child) {
-                          return MediaQuery(
-                            data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-                            child: child!,
-                          );
-                        },
                       );
                       if (pickedTime != null && mounted) {
                         setState(() {
