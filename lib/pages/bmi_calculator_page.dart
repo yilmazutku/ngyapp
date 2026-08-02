@@ -19,6 +19,9 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
   static const String _calculateText = 'Hesapla';
   static const String _requiredText = 'Bu alan zorunludur';
   static const String _invalidNumberText = 'Geçerli bir sayı girin';
+  static const String _idealBmiRangeLabel = 'İdeal BKİ Aralığı';
+  static const String _idealBmiLabel = 'İdeal BKİ';
+  static const String _idealWeightRangeLabel = 'İdeal Kilo Aralığı';
   static const String _underAgeNote =
       'Not: 18 yaş altı için BKİ, yaşa ve cinsiyete göre persentil eğrileriyle '
       'değerlendirilir; bu sonuç yetişkinler için geçerlidir.';
@@ -35,6 +38,9 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
 
   double? _bmi;
   int? _age;
+  double? _idealBmiMin;
+  double? _idealBmiMax;
+  double? _idealBmiAvg;
   double? _idealWeightMin;
   double? _idealWeightMax;
 
@@ -65,6 +71,17 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
     return null;
   }
 
+  /// Ideal BMI range (min, max) and average for the given age, per the
+  /// age-based ideal BMI chart. Ages below 19 use the youngest (19-24) row.
+  (double, double, double) _idealBmiFor(int age) {
+    if (age >= 65) return (24, 29, 26);
+    if (age >= 55) return (23, 28, 25);
+    if (age >= 45) return (22, 27, 24);
+    if (age >= 35) return (21, 26, 23);
+    if (age >= 25) return (20, 25, 22);
+    return (19, 24, 21);
+  }
+
   void _calculate() {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
@@ -72,13 +89,18 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
     final age = _parseDecimal(_ageController.text)!.round();
     final weight = _parseDecimal(_weightController.text)!;
     final heightMeters = _parseDecimal(_heightController.text)! / 100;
+    final (idealBmiMin, idealBmiMax, idealBmiAvg) = _idealBmiFor(age);
 
     setState(() {
       _age = age;
       _bmi = weight / (heightMeters * heightMeters);
-      _idealWeightMin = _underweightLimit * heightMeters * heightMeters;
-      _idealWeightMax =
-          (_normalLimit - 0.1) * heightMeters * heightMeters;
+      _idealBmiMin = idealBmiMin;
+      _idealBmiMax = idealBmiMax;
+      _idealBmiAvg = idealBmiAvg;
+      // Ideal weight range derives from the person's height and the
+      // age-based ideal BMI range.
+      _idealWeightMin = idealBmiMin * heightMeters * heightMeters;
+      _idealWeightMax = idealBmiMax * heightMeters * heightMeters;
     });
   }
 
@@ -183,6 +205,25 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
     );
   }
 
+  Widget _buildResultRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: 15, color: Colors.grey[700]),
+          ),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildResultCard() {
     final bmi = _bmi!;
     final (categoryText, categoryColor) = _categoryFor(bmi);
@@ -227,12 +268,19 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
             const SizedBox(height: 16),
             const Divider(),
             const SizedBox(height: 8),
-            Text(
-              'Boyunuza göre ideal kilo aralığı: '
+            _buildResultRow(
+              _idealBmiRangeLabel,
+              '${_idealBmiMin!.toStringAsFixed(0)} - '
+              '${_idealBmiMax!.toStringAsFixed(0)}',
+            ),
+            _buildResultRow(
+              _idealBmiLabel,
+              _idealBmiAvg!.toStringAsFixed(0),
+            ),
+            _buildResultRow(
+              _idealWeightRangeLabel,
               '${_idealWeightMin!.toStringAsFixed(1)} - '
               '${_idealWeightMax!.toStringAsFixed(1)} kg',
-              style: const TextStyle(fontSize: 15),
-              textAlign: TextAlign.center,
             ),
             if (_age != null && _age! < 18) ...[
               const SizedBox(height: 12),
