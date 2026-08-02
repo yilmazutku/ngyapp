@@ -21,6 +21,7 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
   static const String _invalidNumberText = 'Geçerli bir sayı girin';
   static const String _idealBmiRangeLabel = 'İdeal BKİ Aralığı';
   static const String _idealBmiLabel = 'İdeal BKİ';
+  static const String _idealWeightLabel = 'İdeal Kilo';
   static const String _idealWeightRangeLabel = 'İdeal Kilo Aralığı';
   static const String _underAgeNote =
       'Not: 18 yaş altı için BKİ, yaşa ve cinsiyete göre persentil eğrileriyle '
@@ -41,6 +42,7 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
   double? _idealBmiMin;
   double? _idealBmiMax;
   double? _idealBmiAvg;
+  double? _idealWeight;
   double? _idealWeightMin;
   double? _idealWeightMax;
 
@@ -97,8 +99,9 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
       _idealBmiMin = idealBmiMin;
       _idealBmiMax = idealBmiMax;
       _idealBmiAvg = idealBmiAvg;
-      // Ideal weight range derives from the person's height and the
-      // age-based ideal BMI range.
+      // Ideal weight and range derive from the person's height and the
+      // age-based ideal BMI values.
+      _idealWeight = idealBmiAvg * heightMeters * heightMeters;
       _idealWeightMin = idealBmiMin * heightMeters * heightMeters;
       _idealWeightMax = idealBmiMax * heightMeters * heightMeters;
     });
@@ -276,6 +279,10 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
             _buildResultRow(
               _idealBmiLabel,
               _idealBmiAvg!.toStringAsFixed(0),
+            ),
+            _buildResultRow(
+              _idealWeightLabel,
+              '${_idealWeight!.toStringAsFixed(1)} kg',
             ),
             _buildResultRow(
               _idealWeightRangeLabel,
