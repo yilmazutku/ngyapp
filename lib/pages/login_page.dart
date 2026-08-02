@@ -4,8 +4,10 @@ import 'package:provider/provider.dart';
 import 'package:ngy_app/pages/reset_password_page.dart';
 
 import '../main.dart';
+import '../news/blog_page.dart';
 import '../providers/login_manager.dart';
 import '../providers/user_provider.dart';
+import 'bmi_calculator_page.dart';
 import 'kvkk_consent_page.dart';
 
 class LoginPage extends StatelessWidget {
@@ -201,6 +203,65 @@ class LoginPage extends StatelessWidget {
               'Şifremi Unuttum',
               style: TextStyle(fontSize: 16),
             ),
+          ),
+          const SizedBox(height: 24),
+          // Public pages accessible without logging in
+          const Row(
+            children: [
+              Expanded(child: Divider()),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'Giriş yapmadan göz atın',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+              ),
+              Expanded(child: Divider()),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const BlogPage()),
+                    );
+                  },
+                  icon: const Icon(Icons.article),
+                  label: const Text('Blog'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const BmiCalculatorPage(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.monitor_weight),
+                  label: const Text('BKİ Hesaplama'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

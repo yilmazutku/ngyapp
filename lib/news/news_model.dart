@@ -13,6 +13,11 @@ class NewsModel {
   final bool isPublished;
   final int orderIndex; // For manual ordering if needed
 
+  // Visibility flags. Nullable so that legacy documents (created before the
+  // blog feature) are not affected: null means "announcements page only".
+  final bool? showInAnnouncements;
+  final bool? showInBlog;
+
   NewsModel({
     required this.newsId,
     required this.title,
@@ -24,7 +29,15 @@ class NewsModel {
     this.createdBy,
     this.isPublished = true,
     this.orderIndex = 0,
+    this.showInAnnouncements,
+    this.showInBlog,
   });
+
+  /// Whether this item is visible on the (logged-in) announcements page.
+  bool get isVisibleInAnnouncements => showInAnnouncements ?? true;
+
+  /// Whether this item is visible on the public blog page.
+  bool get isVisibleInBlog => showInBlog ?? false;
 
   factory NewsModel.fromDocument(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -43,6 +56,8 @@ class NewsModel {
       createdBy: data['createdBy'],
       isPublished: data['isPublished'] ?? true,
       orderIndex: data['orderIndex'] ?? 0,
+      showInAnnouncements: data['showInAnnouncements'] as bool?,
+      showInBlog: data['showInBlog'] as bool?,
     );
   }
 
@@ -57,6 +72,8 @@ class NewsModel {
       'createdBy': createdBy,
       'isPublished': isPublished,
       'orderIndex': orderIndex,
+      'showInAnnouncements': showInAnnouncements,
+      'showInBlog': showInBlog,
     };
   }
 
@@ -71,6 +88,8 @@ class NewsModel {
     String? createdBy,
     bool? isPublished,
     int? orderIndex,
+    bool? showInAnnouncements,
+    bool? showInBlog,
   }) {
     return NewsModel(
       newsId: newsId ?? this.newsId,
@@ -83,6 +102,8 @@ class NewsModel {
       createdBy: createdBy ?? this.createdBy,
       isPublished: isPublished ?? this.isPublished,
       orderIndex: orderIndex ?? this.orderIndex,
+      showInAnnouncements: showInAnnouncements ?? this.showInAnnouncements,
+      showInBlog: showInBlog ?? this.showInBlog,
     );
   }
 

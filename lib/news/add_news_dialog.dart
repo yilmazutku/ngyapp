@@ -32,6 +32,8 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
 
   final List<String> _links = [];
   bool _isPublished = false; // Default to draft, publish explicitly later
+  bool _showInAnnouncements = true; // Legacy default: announcements page only
+  bool _showInBlog = false;
   bool _isSaving = false;
 
   // Image handling
@@ -50,6 +52,8 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
       _bodyController.text = widget.news!.bodyText;
       _links.addAll(widget.news!.links);
       _isPublished = widget.news!.isPublished;
+      _showInAnnouncements = widget.news!.isVisibleInAnnouncements;
+      _showInBlog = widget.news!.isVisibleInBlog;
       _existingImageUrl = widget.news!.imageUrl;
     }
   }
@@ -145,6 +149,8 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
           existingImageUrl: _existingImageUrl,
           links: _links,
           isPublished: _isPublished,
+          showInAnnouncements: _showInAnnouncements,
+          showInBlog: _showInBlog,
         );
       } else {
         await provider.addNews(
@@ -155,6 +161,8 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
           imageName: _selectedImageName,
           links: _links,
           isPublished: _isPublished,
+          showInAnnouncements: _showInAnnouncements,
+          showInBlog: _showInBlog,
         );
       }
 
@@ -313,6 +321,52 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
                         secondary: Icon(
                           _isPublished ? Icons.visibility : Icons.visibility_off,
                           color: _isPublished ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                      const Divider(),
+
+                      // Visibility targets
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        child: Text(
+                          'Nerede Gösterilsin?',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Duyurular Sayfası'),
+                        subtitle: const Text(
+                          'Giriş yapan kullanıcıların gördüğü Duyurular sayfasında göster',
+                        ),
+                        value: _showInAnnouncements,
+                        onChanged: (value) {
+                          setState(() {
+                            _showInAnnouncements = value;
+                          });
+                        },
+                        secondary: Icon(
+                          Icons.campaign,
+                          color: _showInAnnouncements
+                              ? Theme.of(context).primaryColor
+                              : Colors.grey,
+                        ),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Blog Sayfası'),
+                        subtitle: const Text(
+                          'Giriş gerektirmeyen herkese açık Blog sayfasında göster',
+                        ),
+                        value: _showInBlog,
+                        onChanged: (value) {
+                          setState(() {
+                            _showInBlog = value;
+                          });
+                        },
+                        secondary: Icon(
+                          Icons.public,
+                          color: _showInBlog
+                              ? Theme.of(context).primaryColor
+                              : Colors.grey,
                         ),
                       ),
                     ],

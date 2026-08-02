@@ -6,16 +6,22 @@ import 'news_detail_page.dart';
 import 'news_model.dart';
 import 'news_provider.dart';
 
-/// User-facing page that displays a list of published news/announcements
-class NewsListPage extends StatefulWidget {
-  const NewsListPage({super.key});
+/// Public blog page listing published news items marked with showInBlog.
+/// Accessible without login (reachable from the login page).
+class BlogPage extends StatefulWidget {
+  const BlogPage({super.key});
 
   @override
-  State<NewsListPage> createState() => _NewsListPageState();
+  State<BlogPage> createState() => _BlogPageState();
 }
 
-class _NewsListPageState extends State<NewsListPage> {
-  List<NewsModel> _newsList = [];
+class _BlogPageState extends State<BlogPage> {
+  static const String _pageTitle = 'Blog';
+  static const String _errorText = 'Blog yazıları yüklenirken bir hata oluştu.';
+  static const String _emptyText = 'Henüz blog yazısı bulunmuyor.';
+  static const String _retryText = 'Tekrar Dene';
+
+  List<NewsModel> _blogList = [];
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -24,11 +30,11 @@ class _NewsListPageState extends State<NewsListPage> {
     super.initState();
     // Defer loading until after the build phase to avoid "setState during build" error
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadNews();
+      _loadBlogNews();
     });
   }
 
-  Future<void> _loadNews() async {
+  Future<void> _loadBlogNews() async {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
@@ -37,16 +43,16 @@ class _NewsListPageState extends State<NewsListPage> {
 
     try {
       final provider = Provider.of<NewsProvider>(context, listen: false);
-      final news = await provider.fetchPublishedNews();
+      final news = await provider.fetchBlogNews();
       if (!mounted) return;
       setState(() {
-        _newsList = news;
+        _blogList = news;
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = 'Haberler yüklenirken bir hata oluştu.';
+        _errorMessage = _errorText;
         _isLoading = false;
       });
     }
@@ -65,11 +71,11 @@ class _NewsListPageState extends State<NewsListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Duyurular'),
+        title: const Text(_pageTitle),
         centerTitle: true,
       ),
       body: RefreshIndicator(
-        onRefresh: _loadNews,
+        onRefresh: _loadBlogNews,
         child: _buildBody(),
       ),
     );
@@ -94,23 +100,23 @@ class _NewsListPageState extends State<NewsListPage> {
             ),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: _loadNews,
-              child: const Text('Tekrar Dene'),
+              onPressed: _loadBlogNews,
+              child: const Text(_retryText),
             ),
           ],
         ),
       );
     }
 
-    if (_newsList.isEmpty) {
+    if (_blogList.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.newspaper, size: 64, color: Colors.grey[400]),
+            Icon(Icons.article, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              'Henüz duyuru bulunmuyor.',
+              _emptyText,
               style: TextStyle(color: Colors.grey[600], fontSize: 16),
             ),
           ],
@@ -120,14 +126,13 @@ class _NewsListPageState extends State<NewsListPage> {
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: _newsList.length,
+      itemCount: _blogList.length,
       itemBuilder: (context, index) {
         return NewsCard(
-          news: _newsList[index],
-          onTap: () => _openNewsDetail(_newsList[index]),
+          news: _blogList[index],
+          onTap: () => _openNewsDetail(_blogList[index]),
         );
       },
     );
   }
 }
-

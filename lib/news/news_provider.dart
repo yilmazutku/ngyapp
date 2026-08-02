@@ -17,12 +17,16 @@ class NewsProvider extends ChangeNotifier {
   static const String _collectionPath = 'news';
 
   List<NewsModel> _newsList = [];
+  List<NewsModel> _blogList = [];
   bool _isLoading = false;
 
   List<NewsModel> get newsList => _newsList;
+  List<NewsModel> get blogList => _blogList;
   bool get isLoading => _isLoading;
 
-  /// Fetches all published news for user view (sorted by createdAt desc)
+  /// Fetches published news for the announcements page (sorted by createdAt
+  /// desc). Items marked as blog-only (showInAnnouncements == false) are
+  /// filtered out; legacy items without the flag are treated as visible here.
   Future<List<NewsModel>> fetchPublishedNews() async {
     try {
       _isLoading = true;
@@ -34,12 +38,43 @@ class NewsProvider extends ChangeNotifier {
           .orderBy('createdAt', descending: true)
           .get();
 
-      _newsList = snapshot.docs.map((doc) => NewsModel.fromDocument(doc)).toList();
+      _newsList = snapshot.docs
+          .map((doc) => NewsModel.fromDocument(doc))
+          .where((news) => news.isVisibleInAnnouncements)
+          .toList();
       _logger.info('Fetched {} published news items', [_newsList.length]);
 
       return _newsList;
     } catch (e) {
       _logger.err('Error fetching published news: $e');
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Fetches published news marked for the public blog page (showInBlog ==
+  /// true). Uses equality-only filters and sorts client-side so no composite
+  /// Firestore index is required; legacy items (null flag) never match.
+  Future<List<NewsModel>> fetchBlogNews() async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+
+      final snapshot = await _firestore
+          .collection(_collectionPath)
+          .where('isPublished', isEqualTo: true)
+          .where('showInBlog', isEqualTo: true)
+          .get();
+
+      _blogList = snapshot.docs.map((doc) => NewsModel.fromDocument(doc)).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      _logger.info('Fetched {} blog news items', [_blogList.length]);
+
+      return _blogList;
+    } catch (e) {
+      _logger.err('Error fetching blog news: $e');
       rethrow;
     } finally {
       _isLoading = false;
@@ -81,6 +116,8 @@ class NewsProvider extends ChangeNotifier {
     List<String> links = const [],
     bool isPublished = true,
     String? createdBy,
+    bool showInAnnouncements = true,
+    bool showInBlog = false,
   }) async {
     try {
       String? imageUrl;
@@ -103,6 +140,8 @@ class NewsProvider extends ChangeNotifier {
         createdAt: DateTime.now(),
         createdBy: createdBy,
         isPublished: isPublished,
+        showInAnnouncements: showInAnnouncements,
+        showInBlog: showInBlog,
       );
 
       await docRef.set(news.toMap());
@@ -127,6 +166,8 @@ class NewsProvider extends ChangeNotifier {
     String? existingImageUrl,
     List<String> links = const [],
     bool isPublished = true,
+    bool showInAnnouncements = true,
+    bool showInBlog = false,
   }) async {
     try {
       String? imageUrl = existingImageUrl;
@@ -144,6 +185,8 @@ class NewsProvider extends ChangeNotifier {
         'imageUrl': imageUrl,
         'links': links,
         'isPublished': isPublished,
+        'showInAnnouncements': showInAnnouncements,
+        'showInBlog': showInBlog,
         'updatedAt': Timestamp.fromDate(DateTime.now()),
       });
 
