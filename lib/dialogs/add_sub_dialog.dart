@@ -8,6 +8,7 @@ import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/date_input_utils.dart';
 
 final Logger logger = Logger.forClass(AddSubscriptionDialog);
 
@@ -41,6 +42,13 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   DateTime? _freezeDate;
   bool _isLoading = false;
   bool _isPaymentReceived = false;
+  // "Ödeme Alınacak": creates a planned payment with the date below.
+  // Mutually exclusive with "Ödeme Alındı".
+  bool _isPaymentPlanned = false;
+  // Planned payment date entry (dd.MM.yyyy). Defaults to today; past dates
+  // are also allowed.
+  final TextEditingController _plannedDateController = TextEditingController(
+      text: DateFormatter.formatNumericDate(DateTime.now()));
   PaymentType _paymentType = PaymentType.nakit;
   SubsMeetingType _selectedMeetingType = SubsMeetingType.faceToFace;
 
@@ -347,7 +355,11 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Ödeme Alındı mı?'),
                     value: _isPaymentReceived,
-                    onChanged: (val) => setState(() => _isPaymentReceived = val ?? false),
+                    onChanged: (val) => setState(() {
+                      _isPaymentReceived = val ?? false;
+                      // Mutually exclusive with "Ödeme Alınacak".
+                      if (_isPaymentReceived) _isPaymentPlanned = false;
+                    }),
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
 
@@ -367,6 +379,43 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                         labelText: 'Ödeme Türü',
                         border: OutlineInputBorder(),
                       ),
+                    ),
+                  ],
+
+                  // Payment Planned Checkbox: creates a "Planlandı" payment
+                  // with the date entered below.
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Ödeme Alınacak mı?'),
+                    value: _isPaymentPlanned,
+                    onChanged: (val) => setState(() {
+                      _isPaymentPlanned = val ?? false;
+                      // Mutually exclusive with "Ödeme Alındı".
+                      if (_isPaymentPlanned) _isPaymentReceived = false;
+                    }),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+
+                  // Planned payment date (only when payment is planned).
+                  if (_isPaymentPlanned) ...[
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _plannedDateController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [MaskedDateInputFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: 'Ödemenin Alınacağı Tarih',
+                        helperText: 'gg.aa.yyyy — geçmiş tarih de girilebilir.',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.event),
+                      ),
+                      validator: (v) {
+                        if (!_isPaymentPlanned) return null;
+                        if (v == null || parseDayMonthYear(v) == null) {
+                          return 'Geçerli bir tarih girin (gg.aa.yyyy).';
+                        }
+                        return null;
+                      },
                     ),
                   ],
                 ],
@@ -449,6 +498,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       // Weight-tracking packages are free and never take a payment, regardless
       // of the (hidden) fields' state.
       final bool paymentReceived = !_isWeightTracking && _isPaymentReceived;
+      final bool paymentPlanned =
+          !_isWeightTracking && !paymentReceived && _isPaymentPlanned;
       final double totalAmount =
           _isWeightTracking ? 0.0 : double.parse(_totalAmountController.text);
 
@@ -532,13 +583,56 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
         }
       }
 
+      // If a payment is planned, create a "Planlandı" payment record with the
+      // dialog's amount and the entered due date.
+      if (paymentPlanned && subscriptionId != null) {
+        try {
+          final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
+          final DateTime plannedDate =
+              parseDayMonthYear(_plannedDateController.text)!;
+
+          await paymentProvider.addPayment(
+            userId: widget.userId,
+            subscription: SubscriptionModel(
+              subscriptionId: subscriptionId,
+              userId: widget.userId,
+              packageName: _packageNameController.text,
+              startDate: _startDate!,
+              totalMeetings: totalMeetings,
+              allowedPostponements: allowedPostponements,
+              totalAmount: totalAmount,
+              meetingType: _selectedMeetingType,
+            ),
+            amount: totalAmount,
+            dueDate: plannedDate,
+            status: PaymentStatus.planned,
+            // The real type is chosen when the payment is actually completed.
+            paymentType: PaymentType.na,
+            notes: 'Paket ödemesi: ${_packageNameController.text}',
+          );
+
+          logger.info('Planlanan abonelik ödemesi eklendi');
+        } catch (e) {
+          logger.err('Error adding planned payment: {}', [e]);
+          if (mounted) {
+            await DialogUtils.openError(
+              context,
+              title: 'Uyarı',
+              message: 'Paket eklendi fakat planlanan ödeme kaydı oluşturulurken bir hata oluştu: $e',
+            );
+          }
+        }
+      }
+
       if (!mounted) return;
       await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
-        message: paymentReceived 
+        message: paymentReceived
             ? 'Paket ve ödeme kaydı başarıyla eklendi.'
-            : 'Paket başarıyla eklendi.',
+            : paymentPlanned
+                ? 'Paket ve planlanan ödeme kaydı başarıyla eklendi.'
+                : 'Paket başarıyla eklendi.',
       );
       widget.onSubscriptionAdded();
       Navigator.of(context).pop();
@@ -569,6 +663,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
     _onlineMeetingsController.dispose();
     _faceToFaceMeetingsController.dispose();
     _allowedPostponementsController.dispose();
+    _plannedDateController.dispose();
     super.dispose();
   }
 }

@@ -8,6 +8,7 @@ import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/date_input_utils.dart';
 
 class EditSubscriptionDialog extends StatefulWidget {
   final SubscriptionModel subscription;
@@ -67,9 +68,19 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   // record is created, kept in sync, or deleted.
   bool _isPaymentReceived = false;
 
-  // Payment records currently linked to this subscription (loaded once). Used
-  // to decide between creating, syncing, or deleting the payment on save.
-  List<PaymentModel> _linkedPayments = [];
+  // Completed payment records currently linked to this subscription (loaded
+  // once). Used to decide between creating, syncing, or deleting the payment
+  // on save.
+  List<PaymentModel> _completedPayments = [];
+
+  // Planned ("Ödeme Alınacak") payment records linked to this subscription.
+  // When one exists, only its planned date is editable here; the record itself
+  // is managed from the payments tab. While a planned payment exists, the
+  // package cannot be switched to "Ödeme Alındı" (Tamamlandı) from this dialog.
+  bool _isPaymentPlanned = false;
+  List<PaymentModel> _plannedPayments = [];
+  final TextEditingController _plannedDateController =
+      TextEditingController(text: MaskedDateInputFormatter.emptyMask);
 
   @override
   void initState() {
@@ -127,19 +138,33 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         showAllPayments: false,
       );
 
+      final completed = payments
+          .where((p) => p.status == PaymentStatus.completed)
+          .toList();
+      final planned =
+          payments.where((p) => p.status == PaymentStatus.planned).toList();
+
       PaymentType? type;
-      if (payments.isNotEmpty && payments.first.paymentType != PaymentType.na) {
-        type = payments.first.paymentType;
+      if (completed.isNotEmpty &&
+          completed.first.paymentType != PaymentType.na) {
+        type = completed.first.paymentType;
       }
 
       if (mounted) {
         setState(() {
-          _linkedPayments = payments;
+          _completedPayments = completed;
+          _plannedPayments = planned;
           _paymentType = type;
           _originalPaymentType = type;
-          // Payment is "received" when a record exists or an amount was paid.
+          // Payment is "received" when a completed record exists or an amount
+          // was paid. Planned payments do NOT count as received.
           _isPaymentReceived =
-              payments.isNotEmpty || widget.subscription.amountPaid > 0;
+              completed.isNotEmpty || widget.subscription.amountPaid > 0;
+          _isPaymentPlanned = planned.isNotEmpty;
+          if (planned.isNotEmpty && planned.first.dueDate != null) {
+            _plannedDateController.text =
+                DateFormatter.formatNumericDate(planned.first.dueDate!);
+          }
           _loadingPaymentType = false;
         });
       }
@@ -370,18 +395,28 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   title: const Text('Ödeme Alındı mı?'),
                   // Unchecking is intentionally disabled: it would silently
                   // delete the linked payment record. To remove/adjust a
-                  // payment, use the Ödeme (payments) tab instead.
-                  subtitle: _isPaymentReceived
+                  // payment, use the Ödeme (payments) tab instead. Likewise a
+                  // planned (Planlandı) payment cannot be switched to
+                  // Tamamlandı from here.
+                  subtitle: _isPaymentPlanned
                       ? Text(
-                          'Ödeme kaydını kaldırmak/düzenlemek için Ödeme sekmesini kullanın.',
+                          'Planlanmış ödeme varken Tamamlandı olarak işaretlenemez. Ödeme sekmesini kullanın.',
                           style: TextStyle(
                               fontSize: 12, color: Colors.grey.shade600),
                         )
-                      : null,
+                      : _isPaymentReceived
+                          ? Text(
+                              'Ödeme kaydını kaldırmak/düzenlemek için Ödeme sekmesini kullanın.',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade600),
+                            )
+                          : null,
                   value: _isPaymentReceived,
                   onChanged: (val) {
                     // Only allow turning payment ON; ignore attempts to uncheck.
                     if (val != true) return;
+                    // A planned payment cannot be marked as completed here.
+                    if (_isPaymentPlanned) return;
                     // Default the amount to the package total and pick a real
                     // payment type when turning payment on.
                     final paid =
@@ -421,6 +456,51 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                         helperText: 'Bağlı ödeme kaydına uygulanır',
                       ),
                     ),
+                ],
+
+                // Planned payment ("Ödeme Alınacak"): reflects the linked
+                // planned payment record. The checkbox itself is read-only
+                // here (the record is managed from the payments tab); only the
+                // planned date can be changed, which is applied to the linked
+                // payment record on save.
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Ödeme Alınacak mı?'),
+                  subtitle: _isPaymentPlanned
+                      ? Text(
+                          'Planlanan ödeme kaydını kaldırmak için Ödeme sekmesini kullanın.',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600),
+                        )
+                      : null,
+                  value: _isPaymentPlanned,
+                  onChanged: null,
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+
+                // Planned payment date (editable; applied to the linked
+                // payment record on save).
+                if (_isPaymentPlanned) ...[
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _plannedDateController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [MaskedDateInputFormatter()],
+                    decoration: const InputDecoration(
+                      labelText: 'Ödemenin Alınacağı Tarih',
+                      helperText:
+                          'gg.aa.yyyy — değişiklik bağlı ödeme kaydına uygulanır.',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.event),
+                    ),
+                    validator: (v) {
+                      if (!_isPaymentPlanned) return null;
+                      if (v == null || parseDayMonthYear(v) == null) {
+                        return 'Geçerli bir tarih girin (gg.aa.yyyy).';
+                      }
+                      return null;
+                    },
+                  ),
                 ],
               ],
               const SizedBox(height: 16),
@@ -714,7 +794,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         // no longer received. Weight-tracking packages never carry a payment.
         if (!_isWeightTracking) {
           if (_isPaymentReceived) {
-            if (_linkedPayments.isEmpty) {
+            if (_completedPayments.isEmpty) {
               await paymentProvider.addPayment(
                 userId: userId,
                 subscription: SubscriptionModel(
@@ -748,9 +828,41 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
               );
             }
           } else {
-            // Payment no longer received: remove the linked record(s).
-            for (final payment in _linkedPayments) {
+            // Payment no longer received: remove the linked completed
+            // record(s). Planned payments are never deleted from here; they
+            // are managed from the payments tab.
+            for (final payment in _completedPayments) {
               await paymentProvider.deletePayment(payment.paymentId, userId);
+            }
+          }
+
+          // Apply a changed planned date to the linked planned payment
+          // record(s) so the payment stays in sync with this dialog.
+          if (_isPaymentPlanned && _plannedPayments.isNotEmpty) {
+            final DateTime? newPlannedDate =
+                parseDayMonthYear(_plannedDateController.text);
+            if (newPlannedDate != null) {
+              for (final payment in _plannedPayments) {
+                final DateTime? currentDueDate = payment.dueDate;
+                if (currentDueDate == null ||
+                    !DateUtils.isSameDay(currentDueDate, newPlannedDate)) {
+                  await paymentProvider.updatePaymentDueDate(
+                    userId: userId,
+                    paymentId: payment.paymentId,
+                    dueDate: newPlannedDate,
+                  );
+                }
+              }
+            }
+            // Keep the planned payment's amount mirroring the package total
+            // when it changed (no-op if the amounts already match).
+            if (!_isPaymentReceived) {
+              await paymentProvider.syncSubscriptionLinkedPayments(
+                userId: userId,
+                subscriptionId: subscriptionId,
+                oldAmount: oldTotalAmount,
+                newAmount: newTotalAmount,
+              );
             }
           }
         }
@@ -801,6 +913,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     _faceToFaceMeetingsController.dispose();
     _postponementsUsedController.dispose();
     _allowedPostponementsController.dispose();
+    _plannedDateController.dispose();
     super.dispose();
   }
 }

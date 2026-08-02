@@ -323,6 +323,37 @@ class PaymentProvider extends ChangeNotifier {
     }
   }
 
+  /// Updates only the due date of a payment. Used when the planned date of a
+  /// subscription-linked planned payment is changed from the edit-sub dialog.
+  Future<void> updatePaymentDueDate({
+    required String userId,
+    required String paymentId,
+    required DateTime dueDate,
+  }) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('payments')
+          .doc(paymentId)
+          .update({
+        'dueDate': Timestamp.fromDate(dueDate),
+        'updateDate': Timestamp.fromDate(DateTime.now()),
+      });
+
+      logger.info('Payment $paymentId due date updated for user $userId');
+
+      _paymentChanged = true;
+      notifyListeners();
+
+      // Notify SubProvider so sub_tab refreshes
+      subProvider.markChanged();
+    } catch (e) {
+      logger.err('Error updating payment due date: $e');
+      rethrow;
+    }
+  }
+
   /// Propagates subscription-level changes to the payment record(s) linked to
   /// [subscriptionId]. Used when a subscription is edited so its "corresponding"
   /// payment stays in sync with the subscription.
