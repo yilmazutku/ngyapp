@@ -14,6 +14,7 @@ import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/logger.dart';
 import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
+import 'package:ngy_app/pages/user_media_gallery_page.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 
@@ -600,10 +601,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     return Scaffold(
       appBar: AppBar(
-        // If admin is viewing a user's chat, show user's name as title
-        // Otherwise show the default chat title
+        // If admin is viewing a user's chat, show the user's name as a tappable
+        // title that opens their uploaded-photos gallery.
+        // Otherwise show the default (non-tappable) chat title.
         title: widget.overrideChatId != null && _isAdminUser
-            ? _buildUserNameTitle(_chatId)
+            ? _buildTappableUserTitle(_chatId)
             : Text(PushNotificationReference.chatAdminToUserTitle),
         actions: [
           // Admins can permanently delete the chat (and its uploaded photos)
@@ -685,8 +687,42 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
+  /// Admin-only tappable app bar title: the user's name plus a small photo
+  /// icon hinting that it opens the user's uploaded-photos gallery.
+  Widget _buildTappableUserTitle(String userId) {
+    return Tooltip(
+      message: 'Yüklenen fotoğrafları gör',
+      child: InkWell(
+        onTap: () => _openUserMediaGallery(userId),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(child: _buildUserNameTitle(userId)),
+              const SizedBox(width: 6),
+              const Icon(Icons.photo_library_outlined, size: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Open the gallery listing every photo uploaded by [userId].
+  void _openUserMediaGallery(String userId) {
+    logger.info('Opening user media gallery from chat title. userId={}', [userId]);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UserMediaGalleryPage(userId: userId),
+      ),
+    );
+  }
+
   /// Build a title widget displaying the user's full name.
-  /// 
+  ///
   /// Fetches user details from Firestore and displays name + surname.
   /// Shows loading text while fetching, and falls back to "Sohbet" on error.
   Widget _buildUserNameTitle(String userId) {

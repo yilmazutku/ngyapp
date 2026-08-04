@@ -478,10 +478,14 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
               ]),
             ),
             Row(children: [
-              IconButton(
-                icon: const Icon(Icons.playlist_add, color: Colors.green),
-                tooltip: 'Toplu Ödeme/Randevu Ekle',
-                onPressed: () => _openBulkAdd(context, s),
+              Tooltip(
+                message: 'Toplu Ödeme/Randevu Ekle',
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(foregroundColor: Colors.green),
+                  icon: const Icon(Icons.playlist_add),
+                  label: const Text('Toplu Ekle'),
+                  onPressed: () => _openBulkAdd(context, s),
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.edit, color: Colors.blue),

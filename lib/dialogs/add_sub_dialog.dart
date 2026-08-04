@@ -45,8 +45,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   // "Ödeme Alınacak": creates a planned payment with the date below.
   // Mutually exclusive with "Ödeme Alındı".
   bool _isPaymentPlanned = false;
-  // Planned payment date entry (dd.MM.yyyy). Defaults to today; past dates
-  // are also allowed.
+  // Planned payment date entry (dd.MM.yyyy). Pre-filled with the package start
+  // date when "Ödeme Alınacak" is enabled; past dates are also allowed.
   final TextEditingController _plannedDateController = TextEditingController(
       text: DateFormatter.formatNumericDate(DateTime.now()));
   PaymentType _paymentType = PaymentType.nakit;
@@ -89,9 +89,11 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      // Slimmer insets give the form more usable width, especially on phones.
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       title: const Text('Yeni Paket Ekle'),
       content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520), // <-- give the dialog content a width cap
+        constraints: const BoxConstraints(maxWidth: 560), // width cap for the scrollable form
         child: SingleChildScrollView(
           child: Form(
             key: _formKey,
@@ -102,6 +104,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                 // Package status (topmost). Default: Aktif/Haftalık.
                 DropdownButtonFormField<SubActiveStatus>(
                   value: _selectedStatus,
+                  isExpanded: true,
                   items: SubActiveStatus.values.map((SubActiveStatus status) {
                     return DropdownMenuItem<SubActiveStatus>(
                       value: status,
@@ -368,6 +371,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     const SizedBox(height: 8),
                     DropdownButtonFormField<PaymentType>(
                       value: _paymentType,
+                      isExpanded: true,
                       items: PaymentType.selectableValues.map((PaymentType type) {
                         return DropdownMenuItem<PaymentType>(
                           value: type,
@@ -390,8 +394,14 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     value: _isPaymentPlanned,
                     onChanged: (val) => setState(() {
                       _isPaymentPlanned = val ?? false;
-                      // Mutually exclusive with "Ödeme Alındı".
-                      if (_isPaymentPlanned) _isPaymentReceived = false;
+                      if (_isPaymentPlanned) {
+                        // Mutually exclusive with "Ödeme Alındı".
+                        _isPaymentReceived = false;
+                        // Default the planned payment date to the package start
+                        // date (not today) when this option is enabled.
+                        _plannedDateController.text = DateFormatter
+                            .formatNumericDate(_startDate ?? DateTime.now());
+                      }
                     }),
                     controlAffinity: ListTileControlAffinity.leading,
                   ),

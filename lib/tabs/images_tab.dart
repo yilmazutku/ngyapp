@@ -9,7 +9,7 @@ import '../models/filter_params.dart';
 import '../providers/meal_state_and_upload_manager.dart';
 import '../providers/daily_data_provider.dart';
 
-import '../widgets/chat_image_preview.dart';
+import '../widgets/meal_image_card.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
 
@@ -66,9 +66,6 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
 
   // Meal card text and icon sizes (30% smaller)
   static const double kMealCardIconSize = 14.0 * kSizeReductionMultiplier;
-  static const double kMealCardTimeIconSize = 12.0 * kSizeReductionMultiplier;
-  static const double kMealCardLabelFontSize = 12.0 * kSizeReductionMultiplier;
-  static const double kMealCardTimeFontSize = 11.0 * kSizeReductionMultiplier;
   static const double kMealCardPadding = 6.0 * kSizeReductionMultiplier;
   static const double kMealCardTopPadding = 8.0 * kSizeReductionMultiplier;
   static const double kMealCardSpacing = 4.0 * kSizeReductionMultiplier;
@@ -861,11 +858,10 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                         );
                       } else {
                         final meal = item as MealModel;
-                        return _buildMealCard(
-                          context,
-                          meal,
-                          thumbSize,
-                          dialogImageHeight,
+                        return MealImageCard(
+                          meal: meal,
+                          thumbSize: thumbSize,
+                          dialogImageHeight: dialogImageHeight,
                         );
                       }
                     },
@@ -999,30 +995,13 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
     }
   }
 
-  Color _getMealTypeColor(Meals type) {
-    switch (type) {
-      case Meals.br:
-        return Colors.orange;
-      case Meals.lunch:
-        return Colors.green;
-      case Meals.dinner:
-        return Colors.indigo;
-      case Meals.firstmid:
-      case Meals.secondmid:
-      case Meals.thirdmid:
-        return Colors.purple;
-      case Meals.none:
-        return Colors.grey;
-    }
-  }
-
   // Small square thumbnail, downsampled, Hero to dialog
   Widget _buildMealPlaceholder(
       BuildContext context,
       Meals mealType,
       double thumbSize,
       ) {
-    final Color typeColor = _getMealTypeColor(mealType);
+    final Color typeColor = mealTypeColor(mealType);
 
     return Card(
       elevation: 2,
@@ -1076,7 +1055,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  _getMealTypeIcon(mealType),
+                  mealTypeIcon(mealType),
                   size: kMealCardIconSize,
                   color: typeColor,
                 ),
@@ -1098,174 +1077,6 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
         ],
       ),
     );
-  }
-
-  Widget _buildMealCard(
-      BuildContext context,
-      MealModel meal,
-      double thumbSize,
-      double dialogImageHeight,
-      ) {
-
-    final Color typeColor = _getMealTypeColor(meal.mealType);
-    final String timeStr = DateFormat('HH:mm').format(meal.timestamp);
-    final String heroTag =
-        '${meal.imageUrl}_${meal.timestamp.millisecondsSinceEpoch}';
-    final int imageCount = meal.imageUrls.length;
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final dpr = MediaQuery.of(context).devicePixelRatio;
-        final int cache = (thumbSize * dpr).round();
-
-        return Card(
-          elevation: 2,
-          margin: EdgeInsets.all(kMealCardMargin),
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: typeColor.withOpacity(0.5),
-              width: 1,
-            ),
-          ),
-          child: InkWell(
-            onTap: () =>
-                _showMealDetails(context, meal, dialogImageHeight, heroTag),
-            child: Column(
-              mainAxisSize: MainAxisSize.max,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.all(kMealCardPadding),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Hero(
-                          tag: heroTag,
-                          child: ChatImagePreview(
-                            imageUrl: meal.imageUrl,
-                            borderRadius: 8,
-                            cacheWidth: cache,
-                            cacheHeight: cache,
-                            fit: BoxFit.cover,
-                            onTap: () => _showMealDetails(
-                              context,
-                              meal,
-                              dialogImageHeight,
-                              heroTag,
-                            ),
-                          ),
-                        ),
-                        if (imageCount > 1)
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.photo_library,
-                                      size: 12, color: Colors.white),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '$imageCount',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                Padding(
-                  padding: EdgeInsets.all(kMealCardPadding),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _getMealTypeIcon(meal.mealType),
-                              size: kMealCardIconSize,
-                              color: typeColor,
-                            ),
-                            SizedBox(width: kMealCardSpacing),
-                            Flexible(
-                              child: Text(
-                                meal.mealType.label,
-                                style: TextStyle(
-                                  fontSize: kMealCardLabelFontSize,
-                                  fontWeight: FontWeight.bold,
-                                  color: typeColor,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.access_time,
-                            size: kMealCardTimeIconSize,
-                            color: Colors.grey[600],
-                          ),
-                          SizedBox(width: 2 * kSizeReductionMultiplier),
-                          Text(
-                            timeStr,
-                            style: TextStyle(
-                              fontSize: kMealCardTimeFontSize,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  IconData _getMealTypeIcon(Meals type) {
-    switch (type) {
-      case Meals.br:
-        return Icons.breakfast_dining;
-      case Meals.lunch:
-        return Icons.lunch_dining;
-      case Meals.dinner:
-        return Icons.dinner_dining;
-      case Meals.firstmid:
-      case Meals.secondmid:
-      case Meals.thirdmid:
-        return Icons.restaurant;
-      case Meals.none:
-        return Icons.image;
-    }
   }
 
   DateTime _parseDateKey(String dateStr) {
@@ -1302,106 +1113,6 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       'Aralık': 12
     };
     return months[monthName] ?? 1;
-  }
-
-  void _showMealDetails(
-      BuildContext context,
-      MealModel meal,
-      double dialogImageHeight,
-      String heroTag,
-      ) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        const double kDialogMaxWidth = 520;
-        final screen = MediaQuery.of(dialogContext).size;
-        final double approxBodyWidth =
-            (screen.width - 64).clamp(280.0, kDialogMaxWidth);
-        final images = meal.imageUrls;
-
-        return AlertDialog(
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-          title: Text(
-            '${meal.mealType.label} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: kDialogMaxWidth),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (images.length == 1)
-                    Hero(
-                      tag: heroTag,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: SizedBox(
-                          width: approxBodyWidth,
-                          height: dialogImageHeight,
-                          child: InteractiveViewer(
-                            minScale: 1.0,
-                            maxScale: 4.0,
-                            child: ChatImagePreview(
-                              imageUrl: images.first,
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
-                      ),
-                    )
-                  else
-                    ...images.asMap().entries.map((entry) {
-                      final idx = entry.key;
-                      final url = entry.value;
-                      return Padding(
-                        padding: EdgeInsets.only(
-                            bottom: idx < images.length - 1 ? 8.0 : 0),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: SizedBox(
-                            width: approxBodyWidth,
-                            height: dialogImageHeight,
-                            child: InteractiveViewer(
-                              minScale: 1.0,
-                              maxScale: 4.0,
-                              child: ChatImagePreview(
-                                imageUrl: url,
-                                fit: BoxFit.contain,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-                  const SizedBox(height: 16),
-
-                  if (meal.description != null &&
-                      meal.description!.isNotEmpty) ...[
-                    const Text(
-                      'Açıklama:',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(meal.description!),
-                    const SizedBox(height: 16),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Kapat'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
 }

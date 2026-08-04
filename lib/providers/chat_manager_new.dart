@@ -169,13 +169,50 @@ class ChatManager extends ChangeNotifier {
 
   /// Returns a stream of messages for a specific chat.
   /// Messages are ordered newest-first and limited to 50.
-  /// 
+  ///
   /// Usage: Used by UI to reactively display messages.
   Stream<List<MessageData>> messagesStreamFor(String chatId) {
     logger.debug('Subscribing to messages stream. chatId={}', [chatId]);
     return _messagesQuery(chatId)
         .snapshots()
         .map((snap) => snap.docs.map((d) => MessageData.fromSnapshot(d)).toList());
+  }
+
+  /// Returns a live stream of every photo the *user* (chatId == userId) has
+  /// uploaded to their chat, newest first.
+  ///
+  /// Includes both direct chat images and meal photos, since both are stored as
+  /// messages with `senderId == userId` and a non-empty `imageUrl`. The admin's
+  /// own uploaded images are intentionally excluded.
+  ///
+  /// Implementation note: this filters by `senderId` only — a single-field
+  /// equality that Firestore indexes automatically — and sorts client-side, so
+  /// it needs NO composite index (unlike the ordered [_messagesQuery]).
+  Stream<List<MessageData>> userUploadedImagesStream(String userId) {
+    logger.debug('Subscribing to user uploaded images stream. userId={}', [userId]);
+    return _chatDoc(userId)
+        .collection('messages')
+        .where('senderId', isEqualTo: userId)
+        .snapshots()
+        .map((snap) {
+      final images = snap.docs
+          .map((d) => MessageData.fromSnapshot(d))
+          .where((m) => (m.imageUrl ?? '').isNotEmpty)
+          .toList();
+
+      // Newest first; messages still awaiting a server timestamp sink to the end.
+      images.sort((a, b) {
+        final at = a.createdAt ?? a.clientCreatedAt;
+        final bt = b.createdAt ?? b.clientCreatedAt;
+        if (at == null && bt == null) return 0;
+        if (at == null) return 1;
+        if (bt == null) return -1;
+        return bt.compareTo(at);
+      });
+
+      logger.debug('User uploaded images stream update. userId={} count={}', [userId, images.length]);
+      return images;
+    });
   }
 
   /// Ensures the chat document exists with up-to-date metadata.

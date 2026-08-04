@@ -313,9 +313,11 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     return AppBar(
       title: const Text('Tüm Sohbetler'),
       actions: [
-        IconButton(
-          tooltip: 'Toplu Seç',
+        // Bulk-select entry point with a visible label (left of refresh).
+        TextButton.icon(
+          style: TextButton.styleFrom(foregroundColor: Colors.white),
           icon: const Icon(Icons.checklist),
+          label: const Text('Toplu Seç'),
           onPressed: () {
             logger.info('Bulk-select mode entered');
             _enterSelectionMode();
