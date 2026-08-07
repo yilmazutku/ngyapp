@@ -8,7 +8,6 @@ import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
-import '../utils/date_input_utils.dart';
 
 final Logger logger = Logger.forClass(AddSubscriptionDialog);
 
@@ -45,10 +44,10 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   // "Ödeme Alınacak": creates a planned payment with the date below.
   // Mutually exclusive with "Ödeme Alındı".
   bool _isPaymentPlanned = false;
-  // Planned payment date entry (dd.MM.yyyy). Pre-filled with the package start
-  // date when "Ödeme Alınacak" is enabled; past dates are also allowed.
-  final TextEditingController _plannedDateController = TextEditingController(
-      text: DateFormatter.formatNumericDate(DateTime.now()));
+  // Planned payment date. Chosen with a date-picker widget (like the start
+  // date) and defaulted to the package start date when "Ödeme Alınacak" is
+  // enabled; past dates are also allowed.
+  DateTime? _plannedDate;
   PaymentType _paymentType = PaymentType.nakit;
   SubsMeetingType _selectedMeetingType = SubsMeetingType.faceToFace;
 
@@ -399,32 +398,38 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                         _isPaymentReceived = false;
                         // Default the planned payment date to the package start
                         // date (not today) when this option is enabled.
-                        _plannedDateController.text = DateFormatter
-                            .formatNumericDate(_startDate ?? DateTime.now());
+                        _plannedDate = _startDate ?? DateTime.now();
                       }
                     }),
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
 
                   // Planned payment date (only when payment is planned).
+                  // Chosen with a date-picker widget, same as "Başlangıç Tarihi".
                   if (_isPaymentPlanned) ...[
                     const SizedBox(height: 8),
-                    TextFormField(
-                      controller: _plannedDateController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [MaskedDateInputFormatter()],
-                      decoration: const InputDecoration(
-                        labelText: 'Ödemenin Alınacağı Tarih',
-                        helperText: 'gg.aa.yyyy — geçmiş tarih de girilebilir.',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.event),
-                      ),
-                      validator: (v) {
-                        if (!_isPaymentPlanned) return null;
-                        if (v == null || parseDayMonthYear(v) == null) {
-                          return 'Geçerli bir tarih girin (gg.aa.yyyy).';
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Ödemenin Alınacağı Tarih'),
+                      subtitle: Text(
+                          _plannedDate != null
+                              ? DateFormatter.formatNumericDate(_plannedDate!)
+                              : 'Bir tarih seçin',
+                          style: _plannedDate != null
+                              ? const TextStyle(fontWeight: FontWeight.bold)
+                              : null),
+                      trailing: const Icon(Icons.event),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate:
+                              _plannedDate ?? _startDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2050),
+                        );
+                        if (picked != null) {
+                          setState(() => _plannedDate = picked);
                         }
-                        return null;
                       },
                     ),
                   ],
@@ -598,8 +603,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       if (paymentPlanned && subscriptionId != null) {
         try {
           final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
-          final DateTime plannedDate =
-              parseDayMonthYear(_plannedDateController.text)!;
+          final DateTime plannedDate = _plannedDate ?? _startDate!;
 
           await paymentProvider.addPayment(
             userId: widget.userId,
@@ -673,7 +677,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
     _onlineMeetingsController.dispose();
     _faceToFaceMeetingsController.dispose();
     _allowedPostponementsController.dispose();
-    _plannedDateController.dispose();
     super.dispose();
   }
 }
