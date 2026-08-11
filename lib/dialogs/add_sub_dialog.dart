@@ -178,14 +178,13 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   const SizedBox(height: 16),
                 ],
 
-                // Package Name
+                // Package Name (optional)
                 TextFormField(
                   controller: _packageNameController,
                   decoration: const InputDecoration(
-                    labelText: 'Paket Adı',
+                    labelText: 'Paket Adı (ZORUNLU DEĞİL)',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (v) => (v == null || v.isEmpty) ? 'Lütfen bir paket adı girin.' : null,
                 ),
                 const SizedBox(height: 16),
 
