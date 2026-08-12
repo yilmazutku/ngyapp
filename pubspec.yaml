@@ -73,6 +73,16 @@ flutter_launcher_icons:
   # Android adaptive icon (optional - uses same image)
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/ngy.png"
+  # Desktop: use the SAME source image as mobile so the desktop app (and its
+  # installer shortcut, which inherits the exe icon) matches the mobile icon.
+  # Regenerate with: dart run flutter_launcher_icons
+  windows:
+    generate: true
+    image_path: "assets/ngy.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/ngy.png"
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

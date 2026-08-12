@@ -2,6 +2,8 @@
 
 ; Application details
 !define APP_NAME "IlkApp"
+; Visible name of the desktop shortcut the user sees after installation.
+!define SHORTCUT_NAME "NGY App"
 !define APP_VERSION "1.0.1"
 ; APP_EXE is the ACTUAL Flutter application executable produced by the Windows
 ; build. The on-disk name comes from windows/CMakeLists.txt (BINARY_NAME
@@ -85,8 +87,9 @@ Section "Install"
     CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
     CreateShortCut "$SMPROGRAMS\${APP_NAME}\Uninstall ${APP_NAME}.lnk" "$INSTDIR\uninstall.exe"
 
-    ; Create shortcut on desktop pointing at the real application exe
-    CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
+    ; Create shortcut on desktop pointing at the real application exe.
+    ; Named "NGY App" (SHORTCUT_NAME) regardless of the internal APP_NAME.
+    CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
 
     ; Create uninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -111,7 +114,7 @@ Section "Uninstall"
     RMDir /r "$SMPROGRAMS\${APP_NAME}"
 
     ; Remove Desktop shortcut
-    Delete "$DESKTOP\${APP_NAME}.lnk"
+    Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
 
     ; Remove registry entries
     DeleteRegKey HKLM "${UNINST_KEY}"

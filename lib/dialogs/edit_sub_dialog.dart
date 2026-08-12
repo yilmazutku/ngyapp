@@ -456,6 +456,25 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                         helperText: 'Bağlı ödeme kaydına uygulanır',
                       ),
                     ),
+                  // Received payment date — shown read-only (not editable here;
+                  // the date is managed from the payments tab). Only visible
+                  // while "Ödeme Alındı" is checked.
+                  if (!_loadingPaymentType) ...[
+                    const SizedBox(height: 8),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Ödeme Alınan Tarih'),
+                      subtitle: Text(
+                        _completedPayments.isNotEmpty &&
+                                _completedPayments.first.paymentDate != null
+                            ? DateFormatter.formatNumericDate(
+                                _completedPayments.first.paymentDate!)
+                            : 'Belirtilmemiş',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      trailing: const Icon(Icons.lock_outline, size: 18),
+                    ),
+                  ],
                 ],
 
                 // Planned payment ("Ödeme Alınacak"): reflects the linked

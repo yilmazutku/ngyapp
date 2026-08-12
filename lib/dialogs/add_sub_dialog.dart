@@ -48,6 +48,9 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   // date) and defaulted to the package start date when "Ödeme Alınacak" is
   // enabled; past dates are also allowed.
   DateTime? _plannedDate;
+  // Received payment date. Chosen with a date-picker widget and defaulted to
+  // the package start date when "Ödeme Alındı" is enabled.
+  DateTime? _receivedDate;
   PaymentType _paymentType = PaymentType.nakit;
   SubsMeetingType _selectedMeetingType = SubsMeetingType.faceToFace;
 
@@ -358,8 +361,13 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     value: _isPaymentReceived,
                     onChanged: (val) => setState(() {
                       _isPaymentReceived = val ?? false;
-                      // Mutually exclusive with "Ödeme Alınacak".
-                      if (_isPaymentReceived) _isPaymentPlanned = false;
+                      if (_isPaymentReceived) {
+                        // Mutually exclusive with "Ödeme Alınacak".
+                        _isPaymentPlanned = false;
+                        // Default the received payment date to the package start
+                        // date when this option is enabled.
+                        _receivedDate = _startDate ?? DateTime.now();
+                      }
                     }),
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
@@ -381,6 +389,33 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                         labelText: 'Ödeme Türü',
                         border: OutlineInputBorder(),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Received payment date (date-picker widget, same style as
+                    // "Başlangıç Tarihi"). Defaults to the package start date.
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Ödeme Alınan Tarih'),
+                      subtitle: Text(
+                          _receivedDate != null
+                              ? DateFormatter.formatNumericDate(_receivedDate!)
+                              : 'Bir tarih seçin',
+                          style: _receivedDate != null
+                              ? const TextStyle(fontWeight: FontWeight.bold)
+                              : null),
+                      trailing: const Icon(Icons.event),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate:
+                              _receivedDate ?? _startDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2050),
+                        );
+                        if (picked != null) {
+                          setState(() => _receivedDate = picked);
+                        }
+                      },
                     ),
                   ],
 
@@ -578,7 +613,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
               meetingType: _selectedMeetingType,
             ),
             amount: paymentAmount,
-            paymentDate: _startDate, // Use subscription start date as payment date
+            paymentDate: _receivedDate ?? _startDate, // "Ödeme Alınan Tarih"
             status: PaymentStatus.completed,
             paymentType: _paymentType,
             notes: 'Paket ödemesi: ${_packageNameController.text}',
