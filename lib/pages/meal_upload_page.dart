@@ -22,6 +22,7 @@ import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/chat_image_preview.dart';
 import '../widgets/loading_overlay.dart';
+import 'daily_uploads_page.dart';
 import 'dart:async';
 
 final Logger logger = Logger.forClass(MealUploadPage);
@@ -657,10 +658,14 @@ class _MealUploadPageState extends State<MealUploadPage> {
                         
                         const SizedBox(height: 8),
 
+                        _buildDailyUploadsPageButton(),
+
+                        const SizedBox(height: 8),
+
                         _buildViewUploadsButton(),
 
                         const SizedBox(height: 8),
-                        
+
                         // Meals Section with collapsible tiles (split into
                         // weekday/weekend sections when the diet has both).
                         _buildMealsArea(defaultMealTime),
@@ -1159,6 +1164,10 @@ class _MealUploadPageState extends State<MealUploadPage> {
   }) {
     final isExpanded = _expandedMeals[expansionKey] ?? false;
     final isChecked = interactive && (checkedStates[mealCategory] ?? false);
+    // Whether a photo has actually been uploaded for this meal today. Drives
+    // the "Yüklendi / Yüklü Değil" status, independently of the checkbox.
+    final hasPhoto =
+        interactive && (_mealImages[mealCategory]?.isNotEmpty ?? false);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 6),
@@ -1236,16 +1245,30 @@ class _MealUploadPageState extends State<MealUploadPage> {
               // Tracking controls only for the active (today's) menu.
               if (interactive) ...[
                 const SizedBox(width: 6),
-                // Camera button
+                // Upload button: "Yükle" label to the LEFT of the camera icon.
                 InkWell(
                   onTap: () => _uploadMealImage(mealCategory),
                   borderRadius: BorderRadius.circular(6),
-                  child: Container(
+                  child: Padding(
                     padding: const EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.camera_alt_outlined,
-                      size: 18,
-                      color: Colors.blue.shade600,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Yükle',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blue.shade600,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Icon(
+                          Icons.camera_alt_outlined,
+                          size: 18,
+                          color: Colors.blue.shade600,
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1276,6 +1299,32 @@ class _MealUploadPageState extends State<MealUploadPage> {
               ],
             ],
           ),
+          // Upload status for today's menu: green "Yüklendi" + tick when a
+          // photo exists, otherwise red "Yüklü Değil" + cross.
+          subtitle: interactive
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      hasPhoto ? 'Yüklendi' : 'Yüklü Değil',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: hasPhoto
+                            ? Colors.green.shade700
+                            : Colors.red.shade700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      hasPhoto ? Icons.check_circle : Icons.cancel,
+                      size: 14,
+                      color:
+                          hasPhoto ? Colors.green.shade600 : Colors.red.shade600,
+                    ),
+                  ],
+                )
+              : null,
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1285,6 +1334,37 @@ class _MealUploadPageState extends State<MealUploadPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Full-width button that opens the day's uploaded photos (grouped by meal)
+  /// on a dedicated page. Always visible; the page shows an empty state when
+  /// nothing has been uploaded yet.
+  Widget _buildDailyUploadsPageButton() {
+    final effectiveDate = kDebugMode ? _debugSelectedDate ?? now : now;
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DailyUploadsPage(
+                userId: widget.userId,
+                date: effectiveDate,
+              ),
+            ),
+          );
+        },
+        icon: const Icon(Icons.photo_library, size: 18),
+        label: const Text('Bugün Yüklediğim Fotoğraflar'),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       ),
     );
