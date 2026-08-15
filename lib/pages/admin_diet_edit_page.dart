@@ -9,6 +9,7 @@ import '../providers/diet_provider.dart';
 import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
+import '../utils/pdf_launcher.dart';
 import '../widgets/app_bar_with_back.dart';
 
 class DietEditPage extends StatefulWidget {
@@ -192,6 +193,10 @@ class _DietEditPageState extends State<DietEditPage> {
                   controller: _scrollController,
                   padding: const EdgeInsets.all(16),
                   children: [
+                    // Attached recipe PDF banner (shown in both view and edit
+                    // modes when the diet has a recipe).
+                    if (widget.dietDoc.hasRecipe) _buildRecipeBanner(),
+
                     // Diet name editor card (only in edit mode)
                     if (!widget.viewOnly)
                       Card(
@@ -265,6 +270,55 @@ class _DietEditPageState extends State<DietEditPage> {
               backgroundColor: _hasChanges ? Colors.blue : Colors.grey,
             )
           : null,
+    );
+  }
+
+  /// Banner shown at the top of the page when the diet has an attached recipe
+  /// PDF, letting the admin open it directly.
+  Widget _buildRecipeBanner() {
+    final name = widget.dietDoc.recipePdfName?.trim();
+    final label =
+        (name != null && name.isNotEmpty) ? name : 'Görüntülemek için dokunun';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => openPdfUrl(context, widget.dietDoc.recipePdfUrl),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              Icon(Icons.picture_as_pdf, color: Colors.red.shade600),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Ekli Tarif',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.open_in_new, color: Colors.red.shade400, size: 20),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -469,7 +523,12 @@ class _DietEditPageState extends State<DietEditPage> {
               widget.viewOnly
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: MealFormatter.formatMealContentWithOptions(contentList),
+                    children: MealFormatter.formatMealContentWithOptions(
+                      contentList,
+                      onRecipeTap: widget.dietDoc.hasRecipe
+                          ? () => openPdfUrl(context, widget.dietDoc.recipePdfUrl)
+                          : null,
+                    ),
                   )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

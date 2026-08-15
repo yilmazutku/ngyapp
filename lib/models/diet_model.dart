@@ -22,6 +22,19 @@ class DietDocument {
   String? updateUser;
   final String? subscriptionId;
 
+  /// Download URL of the recipe PDF attached to this diet, if any.
+  ///
+  /// Set when the imported diet contained the "*tarifi ektedir" reference and
+  /// the admin attached a recipe PDF. The user opens it by tapping the recipe
+  /// link shown on their plan.
+  final String? recipePdfUrl;
+
+  /// Cloud Storage path of the attached recipe PDF (used for cleanup).
+  final String? recipePdfPath;
+
+  /// Original file name of the attached recipe PDF (for display).
+  final String? recipePdfName;
+
   DietDocument({
     required this.docId,
     required this.userId,
@@ -34,11 +47,17 @@ class DietDocument {
     this.updateDate,
     this.updateUser,
     this.subscriptionId,
+    this.recipePdfUrl,
+    this.recipePdfPath,
+    this.recipePdfName,
   }) : createDate = createDate ?? DateTime.now();
 
   /// Whether this diet defines a distinct weekend (Hafta Sonu) menu.
   bool get hasWeekend =>
       weekendSubtitles != null && weekendSubtitles!.isNotEmpty;
+
+  /// Whether this diet has an attached recipe PDF.
+  bool get hasRecipe => (recipePdfUrl ?? '').isNotEmpty;
 
   factory DietDocument.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>?;
@@ -54,6 +73,9 @@ class DietDocument {
       updateDate: data?['updateDate'] != null ? (data?['updateDate'] as Timestamp).toDate() : null,
       updateUser: data?['updateUser'],
       subscriptionId: data?['subscriptionId'],
+      recipePdfUrl: data?['recipePdfUrl'] as String?,
+      recipePdfPath: data?['recipePdfPath'] as String?,
+      recipePdfName: data?['recipePdfName'] as String?,
     );
   }
 
@@ -69,6 +91,9 @@ class DietDocument {
       if (updateDate != null) 'updateDate': Timestamp.fromDate(updateDate!),
       if (updateUser != null) 'updateUser': updateUser,
       if (subscriptionId != null) 'subscriptionId': subscriptionId,
+      if (recipePdfUrl != null) 'recipePdfUrl': recipePdfUrl,
+      if (recipePdfPath != null) 'recipePdfPath': recipePdfPath,
+      if (recipePdfName != null) 'recipePdfName': recipePdfName,
     };
   }
 
