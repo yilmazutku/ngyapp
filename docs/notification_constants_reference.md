@@ -116,10 +116,17 @@ They notify users/admins about new chat messages.
 | `CHAT_ADMIN_TO_USER_TITLE` | `'Destek'` | Title when admin sends message to user |
 | `CHAT_DEFAULT_BODY` | `'Yeni mesaj'` | Body when message text is empty |
 | `CHAT_IMAGE_BODY` | `'Fotoğraf'` | Body when message is an image |
+| `CHAT_REACTION_BODY_TEMPLATE` | `'bir mesajınıza {emoji} ifadesi bıraktı'` | Body when an admin reacts to the user's message. `{emoji}` is replaced with the reaction (e.g. `👍`). Title is `CHAT_ADMIN_TO_USER_TITLE`. |
 | `CHAT_USER_TO_ADMIN_DEFAULT_TITLE` | `'Kullanıcı mesajı'` | Title when user sends to admin (fallback if name not found) |
 | `CHAT_ANDROID_ICON` | `'ic_notification'` | Android notification icon |
 | `CHAT_ANDROID_COLOR` | `'#075E54'` | Notification color (WhatsApp green) |
 | `CHAT_CHANNEL_ID` | `'chat_messages_v2'` | Android notification channel ID |
+
+**Reaction notifications** are sent by the `notifyUserOnAdminReaction` Cloud
+Function (triggered on message *updates*). When an admin leaves or changes a
+reaction (`reactions.<adminUid> = emoji`) on a message the user sent, the user
+is notified: title `Nilay Göktepe Yılmaz`, body e.g. `bir mesajınıza 👍 ifadesi
+bıraktı`. Removing a reaction does not notify.
 
 ### Notification Channel (Android)
 **File:** `android/app/src/main/res/values/string.xml`

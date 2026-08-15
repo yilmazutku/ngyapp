@@ -9,6 +9,7 @@ class MessageModel {
   final String? storagePath;       // Storage path for future cleanup
   final Timestamp? createdAt;      // serverTimestamp()
   final Timestamp? clientCreatedAt;// local fallback for immediate display
+  final Map<String, String> reactions; // reactorUid -> emoji (e.g. {adminUid: '👍'})
 
   MessageModel({
     required this.id,
@@ -19,6 +20,7 @@ class MessageModel {
     this.storagePath,
     this.createdAt,
     this.clientCreatedAt,
+    this.reactions = const {},
   });
 
   Map<String, dynamic> toJson() => {
@@ -29,6 +31,7 @@ class MessageModel {
     if (storagePath != null) 'storagePath': storagePath,
     'createdAt': createdAt,           // may be null in memory; on write use serverTimestamp
     if (clientCreatedAt != null) 'clientCreatedAt': clientCreatedAt,
+    if (reactions.isNotEmpty) 'reactions': reactions,
   };
 
   factory MessageModel.fromSnapshot(DocumentSnapshot<Map<String, dynamic>> snap) {
@@ -42,6 +45,20 @@ class MessageModel {
       storagePath: data['storagePath'] as String?,
       createdAt: data['createdAt'] as Timestamp?,
       clientCreatedAt: data['clientCreatedAt'] as Timestamp?,
+      reactions: _parseReactions(data['reactions']),
     );
+  }
+
+  /// Defensively convert the raw Firestore `reactions` field into a
+  /// `Map<String, String>` (reactorUid -> emoji).
+  static Map<String, String> _parseReactions(dynamic raw) {
+    if (raw is! Map) return const {};
+    final out = <String, String>{};
+    raw.forEach((key, value) {
+      if (key is String && value is String && value.isNotEmpty) {
+        out[key] = value;
+      }
+    });
+    return out;
   }
 }
