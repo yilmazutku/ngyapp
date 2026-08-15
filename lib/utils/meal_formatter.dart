@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../models/special_line_model.dart';
@@ -15,8 +16,12 @@ import '../models/special_line_model.dart';
 /// content line. Tolerant of an optional leading asterisk, flexible spacing
 /// between the two words and upper/lower case — including the Turkish dotted
 /// and dotless i variants (i / ı / I / İ).
+///
+/// The match starts at the asterisk when one is present (so only the "*…"
+/// phrase, not the text before it, is turned into the link), and at the word
+/// "tarifi" otherwise.
 final RegExp kRecipeMarkerRegex = RegExp(
-  r'\*?\s*[tT][aA][rR][iıIİ][fF][iıIİ]\s+[eE][kK][tT][eE][dD][iıIİ][rR]',
+  r'(?:\*\s*)?[tT][aA][rR][iıIİ][fF][iıIİ]\s+[eE][kK][tT][eE][dD][iıIİ][rR]',
 );
 
 /// True when [line] references an attached recipe ("*tarifi ektedir").
@@ -210,8 +215,9 @@ class MealFormatter {
   }
 
   /// Builds a single content-line widget. When [onRecipeTap] is non-null and
-  /// [text] contains the recipe phrase, the phrase is rendered as a tappable,
-  /// underlined link (with a small PDF icon); otherwise a plain [Text].
+  /// [text] contains the recipe phrase, ONLY that phrase ("*…tarifi ektedir")
+  /// is rendered as a tappable, underlined link — the rest of the line stays
+  /// plain, non-tappable text. Otherwise a plain [Text].
   static Widget _contentLineWidget(
     String text,
     double fontSize,
@@ -226,41 +232,10 @@ class MealFormatter {
       );
     }
 
-    final linkColor = Colors.blue.shade700;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: InkWell(
-        onTap: onRecipeTap,
-        borderRadius: BorderRadius.circular(4),
-        child: Text.rich(
-          TextSpan(
-            style: TextStyle(fontSize: fontSize),
-            children: [
-              if (parts.before.isNotEmpty) TextSpan(text: parts.before),
-              WidgetSpan(
-                alignment: PlaceholderAlignment.middle,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 2),
-                  child: Icon(
-                    Icons.picture_as_pdf,
-                    size: fontSize + 2,
-                    color: linkColor,
-                  ),
-                ),
-              ),
-              TextSpan(
-                text: parts.marker.trim(),
-                style: TextStyle(
-                  color: linkColor,
-                  fontWeight: FontWeight.w600,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-              if (parts.after.isNotEmpty) TextSpan(text: parts.after),
-            ],
-          ),
-        ),
-      ),
+    return _RecipeContentLine(
+      parts: parts,
+      fontSize: fontSize,
+      onTap: onRecipeTap!,
     );
   }
 
@@ -381,5 +356,73 @@ class MealFormatter {
       }
     }
     return starts;
+  }
+}
+
+/// Renders a diet content line that contains the recipe reference so that ONLY
+/// the "*…tarifi ektedir" phrase is a tappable link; the surrounding text stays
+/// plain. Owns the [TapGestureRecognizer] applied to the marker span so it is
+/// disposed correctly (a recognizer created inline in a build would leak).
+class _RecipeContentLine extends StatefulWidget {
+  final RecipeMarkerParts parts;
+  final double fontSize;
+  final VoidCallback onTap;
+
+  const _RecipeContentLine({
+    required this.parts,
+    required this.fontSize,
+    required this.onTap,
+  });
+
+  @override
+  State<_RecipeContentLine> createState() => _RecipeContentLineState();
+}
+
+class _RecipeContentLineState extends State<_RecipeContentLine> {
+  late final TapGestureRecognizer _recognizer;
+
+  @override
+  void initState() {
+    super.initState();
+    _recognizer = TapGestureRecognizer()..onTap = widget.onTap;
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecipeContentLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Keep the recognizer pointed at the latest callback across rebuilds.
+    _recognizer.onTap = widget.onTap;
+  }
+
+  @override
+  void dispose() {
+    _recognizer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = widget.parts;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Text.rich(
+        TextSpan(
+          style: TextStyle(fontSize: widget.fontSize),
+          children: [
+            if (parts.before.isNotEmpty) TextSpan(text: parts.before),
+            TextSpan(
+              text: parts.marker,
+              style: TextStyle(
+                color: Colors.blue.shade700,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline,
+              ),
+              recognizer: _recognizer,
+            ),
+            if (parts.after.isNotEmpty) TextSpan(text: parts.after),
+          ],
+        ),
+      ),
+    );
   }
 }
