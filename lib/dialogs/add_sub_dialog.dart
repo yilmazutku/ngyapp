@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/logger.dart';
@@ -74,6 +75,28 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   void initState() {
     super.initState();
     _totalMeetingsController.addListener(_syncAllowedPostponements);
+    // Seed the auto-generated package name from the initial start date.
+    _updatePackageName();
+  }
+
+  /// Builds the read-only package name from the selected package duration and
+  /// the start date, e.g. "3 Aylık" + 5 Haziran -> "3Aylık_5HaziranBaşlangıç".
+  /// The admin cannot edit it; it refreshes whenever the start date or the
+  /// package type changes.
+  void _updatePackageName() {
+    final start = _startDate;
+    if (start == null) {
+      _packageNameController.text = '';
+      return;
+    }
+    // Turkish month name (e.g. "Haziran"), no space before it: "5Haziran".
+    final monthName = DateFormat('MMMM', 'tr_TR').format(start);
+    final datePart = '${start.day}$monthName';
+    // "3 Aylık" -> "3Aylık"; empty when no package type is chosen yet.
+    final durationPart = _selectedPackageType?.label.replaceAll(' ', '') ?? '';
+    _packageNameController.text = durationPart.isEmpty
+        ? '${datePart}Başlangıç'
+        : '${durationPart}_${datePart}Başlangıç';
   }
 
   /// Keeps the allowed-postponements field in sync with the auto-calculated
@@ -145,6 +168,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                         _totalMeetingsController.text =
                             newValue.defaultMeetings.toString();
                       }
+                      // "X Aylık" prefix of the package name comes from the type.
+                      _updatePackageName();
                     });
                   },
                   decoration: const InputDecoration(
@@ -180,16 +205,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   ),
                   const SizedBox(height: 16),
                 ],
-
-                // Package Name (optional)
-                TextFormField(
-                  controller: _packageNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Paket Adı (ZORUNLU DEĞİL)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
 
                 // Notes (optional)
                 TextFormField(
@@ -278,8 +293,30 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                       firstDate: DateTime(2020),
                       lastDate: DateTime(2050),
                     );
-                    if (picked != null) setState(() => _startDate = picked);
+                    if (picked != null) {
+                      setState(() {
+                        _startDate = picked;
+                        // Keep the auto-generated name in sync with the date.
+                        _updatePackageName();
+                      });
+                    }
                   },
+                ),
+                const SizedBox(height: 16),
+
+                // Package Name: auto-generated from the package duration and the
+                // start date; read-only (the admin cannot change it). Placed
+                // right below the start date and refreshes when it changes.
+                TextFormField(
+                  controller: _packageNameController,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Paket Adı (otomatik oluşturulur)',
+                    border: OutlineInputBorder(),
+                    helperText:
+                        'Paket tipi ve başlangıç tarihine göre otomatik oluşur.',
+                    helperStyle: TextStyle(fontStyle: FontStyle.italic),
+                  ),
                 ),
                 const SizedBox(height: 16),
 

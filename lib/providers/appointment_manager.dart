@@ -739,4 +739,38 @@ class AppointmentManager extends ChangeNotifier {
       rethrow;
     }
   }
+
+  /// Returns the non-canceled appointments on the same day whose time interval
+  /// overlaps `[start, start + durationMinutes)`. Used to warn the admin
+  /// (without blocking) when a new appointment or event clashes with an
+  /// existing meeting. Each returned appointment has its [AppointmentModel.user]
+  /// populated and the list is sorted by start time.
+  Future<List<AppointmentModel>> findOverlappingAppointments({
+    required DateTime start,
+    required int durationMinutes,
+  }) async {
+    final DateTime dayStart = DateTime(start.year, start.month, start.day);
+    final DateTime newEnd = start.add(Duration(minutes: durationMinutes));
+
+    DateTime effectiveStart(AppointmentModel a) =>
+        (a.status == AppointmentStatus.postponed && a.postponedDate != null)
+            ? a.postponedDate!
+            : a.appointmentDateTime;
+
+    final dayAppointments = await fetchAppointmentsWithUsers(
+      startDate: dayStart,
+      endDate: dayStart,
+    );
+
+    final overlapping = dayAppointments.where((a) {
+      if (a.status == AppointmentStatus.canceled) return false;
+      final effStart = effectiveStart(a);
+      final effEnd = effStart.add(Duration(minutes: a.durationMinutes));
+      // Half-open interval overlap test.
+      return start.isBefore(effEnd) && effStart.isBefore(newEnd);
+    }).toList()
+      ..sort((a, b) => effectiveStart(a).compareTo(effectiveStart(b)));
+
+    return overlapping;
+  }
 }

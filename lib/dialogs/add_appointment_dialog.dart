@@ -15,6 +15,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
 import '../utils/time_picker_utils.dart';
 import '../dialogs/dialog_widgets.dart'; // Import dialog widgets
+import '../dialogs/overlap_warning_dialog.dart';
 import '../widgets/loading_overlay.dart';
 
 final Logger logger = Logger.forClass(AddAppointmentDialog);
@@ -411,23 +412,39 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   logger.info('shouldSave={}',[shouldSave]);
     if (shouldSave != true) return;
 
+    final appointmentManager =
+        Provider.of<AppointmentManager>(context, listen: false);
+    final durationMinutes = int.tryParse(_durationController.text) ??
+        _selectedAppointmentType.getDurationForMeetingType(_selectedMeetingType);
+    final newStart = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      _selectedTime.hour,
+      _selectedTime.minute,
+    );
+
+    // Non-blocking overlap warning: if this time clashes with existing
+    // meeting(s), inform the admin and let them decide whether to proceed.
+    final conflicts = await appointmentManager.findOverlappingAppointments(
+      start: newStart,
+      durationMinutes: durationMinutes,
+    );
+    if (conflicts.isNotEmpty) {
+      if (!mounted) return;
+      final proceed =
+          await showOverlapWarningDialog(context, conflicts: conflicts);
+      if (!proceed) return;
+    }
+
     startLoading();
 
     try {
-      final appointmentManager =
-          Provider.of<AppointmentManager>(context, listen: false);
-      final durationMinutes = int.tryParse(_durationController.text) ?? _selectedAppointmentType.getDurationForMeetingType(_selectedMeetingType);
       final appointment = AppointmentModel(
         appointmentId: DateTime.now().millisecondsSinceEpoch.toString(),
         userId: widget.userId ?? _selectedUser!.userId,
         subscriptionId: _selectedSubscription?.subscriptionId,
-        appointmentDateTime: DateTime(
-          _selectedDate.year,
-          _selectedDate.month,
-          _selectedDate.day,
-          _selectedTime.hour,
-          _selectedTime.minute,
-        ),
+        appointmentDateTime: newStart,
         meetingType: _selectedMeetingType,
         appointmentType: _selectedAppointmentType,
         status: _selectedStatus,

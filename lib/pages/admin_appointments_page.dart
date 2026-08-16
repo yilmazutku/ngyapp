@@ -12,6 +12,7 @@ import '../providers/appointment_manager.dart';
 import '../providers/event_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/edit_event_dialog.dart';
+import '../dialogs/overlap_warning_dialog.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
@@ -24,8 +25,14 @@ const double kDayTitleFontSize = 14.0; // Font size for the day header
 const int kDaysToShow = 7; // Monday to Sunday (7 days)
 
 // Time grid constants
-const int kStartHour = 9; // 09:00
-const int kEndHour = 20; // 19:00
+const int kStartHour = 8; // grid starts at 08:30 (see kStartMinute)
+const int kStartMinute = 30; // minute-of-hour the grid starts at
+const int kEndHour = 20; // grid ends at 20:00
+// Grid boundaries expressed in minutes-from-midnight.
+const int kGridStartMinutes = kStartHour * 60 + kStartMinute; // 510 (08:30)
+const int kGridEndMinutes = kEndHour * 60; // 1200 (20:00)
+// First full-hour label/line at or after the grid start (09:00 when 08:30).
+const int kFirstFullHour = kStartMinute == 0 ? kStartHour : kStartHour + 1;
 const double kTotalGridHeight = 900; // Total height for the time grid (adjust to fit more/less on screen)
 /*1320:big
 660 → 1 px/min, fits twice as much, smaller cards
@@ -41,7 +48,8 @@ const double kCanceledDividerHeight = 8.0;
 
 // Calculated: pixels per minute based on total height and hours
 // 11 hours (9-20) = 660 minutes, so kTotalGridHeight / 660 = pixels per minute
-const double kPixelsPerMinute = kTotalGridHeight / ((kEndHour - kStartHour) * 60);
+const double kPixelsPerMinute =
+    kTotalGridHeight / (kGridEndMinutes - kGridStartMinutes);
 
 // Hoisted formatters (avoid re-creating in every build)
 final DateFormat _dayTitleFmt = DateFormat('d MMMM EEEE', 'tr_TR');
@@ -264,6 +272,21 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                       message:
                           'Bitiş saati başlangıçtan sonra olmalıdır.');
                   return;
+                }
+                // Non-blocking overlap warning: if this event clashes with an
+                // existing meeting, inform the admin and let them decide.
+                final appointmentManager =
+                    Provider.of<AppointmentManager>(context, listen: false);
+                final conflicts =
+                    await appointmentManager.findOverlappingAppointments(
+                  start: startDt,
+                  durationMinutes: endDt.difference(startDt).inMinutes,
+                );
+                if (conflicts.isNotEmpty) {
+                  if (!mounted) return;
+                  final proceed = await showOverlapWarningDialog(context,
+                      conflicts: conflicts);
+                  if (!proceed) return;
                 }
                 Navigator.pop(dialogContext);
                 try {
@@ -681,8 +704,76 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   /// Calculate the top position for an appointment based on its time
   double _getTopPositionForTime(DateTime dateTime) {
-    final minutes = (dateTime.hour - kStartHour) * 60 + dateTime.minute;
+    final minutes = (dateTime.hour * 60 + dateTime.minute) - kGridStartMinutes;
     return minutes * kPixelsPerMinute;
+  }
+
+  /// Effective start time of an appointment (postponed date wins when set).
+  DateTime _effectiveTime(AppointmentModel appt) =>
+      (appt.status == AppointmentStatus.postponed && appt.postponedDate != null)
+          ? appt.postponedDate!
+          : appt.appointmentDateTime;
+
+  /// Whether the given time falls within the visible grid window.
+  bool _isWithinGrid(DateTime t) {
+    final minutes = t.hour * 60 + t.minute;
+    return minutes >= kGridStartMinutes && minutes < kGridEndMinutes;
+  }
+
+  /// Builds the positioned appointment cards for a day. Appointments that START
+  /// at the exact same time are split into equal side-by-side columns so they
+  /// don't cover each other (e.g. two 09:30 meetings). Appointments that merely
+  /// overlap — a long meeting spanning shorter ones with different start times —
+  /// are intentionally left full-width; each start-time group is laid out on its
+  /// own, so those cases are not disturbed.
+  List<Widget> _buildPositionedAppointments(
+      List<AppointmentModel> dayAppointments, double columnWidth) {
+    // Visible (in-grid, non-canceled) appointments only.
+    final visible = dayAppointments
+        .where((appt) =>
+            appt.status != AppointmentStatus.canceled &&
+            _isWithinGrid(_effectiveTime(appt)))
+        .toList();
+
+    // Group appointments by identical start time (hour:minute).
+    final Map<int, List<AppointmentModel>> sameStart = {};
+    for (final appt in visible) {
+      final eff = _effectiveTime(appt);
+      final key = eff.hour * 60 + eff.minute;
+      (sameStart[key] ??= <AppointmentModel>[]).add(appt);
+    }
+
+    final List<Widget> widgets = [];
+    for (final group in sameStart.values) {
+      final int n = group.length;
+      for (int i = 0; i < n; i++) {
+        final appt = group[i];
+        final eff = _effectiveTime(appt);
+        final top = _getTopPositionForTime(eff);
+        final height = _getHeightForDuration(appt.durationMinutes);
+        if (n == 1) {
+          // Lone meeting: full column width.
+          widgets.add(Positioned(
+            top: top,
+            left: 0,
+            right: 0,
+            height: height,
+            child: _buildAppointmentCard(appt),
+          ));
+        } else {
+          // Same-start group: equal side-by-side columns.
+          final double w = columnWidth / n;
+          widgets.add(Positioned(
+            top: top,
+            left: i * w,
+            width: w,
+            height: height,
+            child: _buildAppointmentCard(appt),
+          ));
+        }
+      }
+    }
+    return widgets;
   }
 
   /// Calculate the height for an appointment based on its duration
@@ -702,12 +793,14 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final DateTime endTime = effectiveTime.add(Duration(minutes: appt.durationMinutes));
     final String timeRange = '${_timeFmt.format(effectiveTime)}-${_timeFmt.format(endTime)}';
 
-    // Build display text: "9:30-11:30 Utku Yılmaz Pb" or "9:30-11:30 Utku Yılmaz" for haftalik
+    // Box text: "{saat} {DosyaNo}-{Ad Soyad}". The meeting type is intentionally
+    // NOT shown, and the file number + dash is omitted when the client has none.
     final String nameSurname = '${appt.user!.name} ${appt.user!.surname}';
-    final String typeLabel = appt.appointmentType != AppointmentType.haftalik 
-        ? ' ${appt.appointmentType.shortLabel}'
-        : '';
-    final String displayText = '$timeRange $nameSurname$typeLabel';
+    final String? dosyaNo = appt.user!.dosyaNo?.trim();
+    final String namePart = (dosyaNo != null && dosyaNo.isNotEmpty)
+        ? '$dosyaNo-$nameSurname'
+        : nameSurname;
+    final String displayText = '$timeRange $namePart';
 
     final Color cardColor = appt.appointmentType.getBgColor(appt.meetingType);
     final Color borderColor = appt.appointmentType.getBorderColor(appt.meetingType);
@@ -822,31 +915,49 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// Build the time column on the left side
   /// [headerHeight] allows adjusting the top spacer to align with different header sizes
   Widget _buildTimeColumn({double? headerHeight}) {
-    final hours = List.generate(kEndHour - kStartHour + 1, (i) => kStartHour + i);
     final effectiveHeaderHeight = headerHeight ?? kDayHeaderHeight;
-    
+    // Full-hour labels from the first full hour (09:00 when the grid starts at
+    // 08:30) up to and including kEndHour.
+    final hours =
+        List.generate(kEndHour - kFirstFullHour + 1, (i) => kFirstFullHour + i);
+
+    Widget label(String text, double height) {
+      return SizedBox(
+        height: height,
+        child: Align(
+          alignment: Alignment.topRight,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 8, top: 0),
+            child: Text(
+              text,
+              style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500),
+            ),
+          ),
+        ),
+      );
+    }
+
     return SizedBox(
       width: kTimeColumnWidth,
       child: Column(
         children: [
           // Header spacer to align with day headers
           SizedBox(height: effectiveHeaderHeight),
-          // Time labels
-          ...hours.map((hour) {
-            return SizedBox(
-              height: hour < kEndHour ? 60 * kPixelsPerMinute : 0, // Last hour has no height
-              child: Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 8, top: 0),
-                  child: Text(
-                    '${hour.toString().padLeft(2, '0')}:00',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ),
-            );
-          }),
+          // Partial first slot label (e.g. 08:30) when the grid doesn't start
+          // on a full hour.
+          if (kStartMinute != 0)
+            label(
+              '${kStartHour.toString().padLeft(2, '0')}:${kStartMinute.toString().padLeft(2, '0')}',
+              (60 - kStartMinute) * kPixelsPerMinute,
+            ),
+          // Full-hour labels.
+          ...hours.map((hour) => label(
+                '${hour.toString().padLeft(2, '0')}:00',
+                hour < kEndHour ? 60 * kPixelsPerMinute : 0,
+              )),
         ],
       ),
     );
@@ -920,10 +1031,13 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             height: _timeGridHeight,
             child: Stack(
               children: [
-                // Hour grid lines
-                ...List.generate(kEndHour - kStartHour, (i) {
+                // Hour grid lines (aligned to full hours; grid starts at 08:30)
+                ...List.generate(kEndHour - kFirstFullHour, (i) {
+                  final hour = kFirstFullHour + i;
+                  final top =
+                      (hour * 60 - kGridStartMinutes) * kPixelsPerMinute;
                   return Positioned(
-                    top: i * 60 * kPixelsPerMinute,
+                    top: top,
                     left: 0,
                     right: 0,
                     child: Container(
@@ -932,37 +1046,12 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                     ),
                   );
                 }),
-                // Appointments
-                ...dayAppointments.map((appt) {
-                  // Skip canceled appointments
-                  if (appt.status == AppointmentStatus.canceled) {
-                    return const SizedBox.shrink();
-                  }
-                  
-                  final effectiveTime = (appt.status == AppointmentStatus.postponed && appt.postponedDate != null)
-                      ? appt.postponedDate!
-                      : appt.appointmentDateTime;
-                  
-                  // Skip appointments outside working hours
-                  if (effectiveTime.hour < kStartHour || effectiveTime.hour >= kEndHour) {
-                    return const SizedBox.shrink();
-                  }
-                  
-                  final top = _getTopPositionForTime(effectiveTime);
-                  final height = _getHeightForDuration(appt.durationMinutes);
-                  
-                  return Positioned(
-                    top: top,
-                    left: 0,
-                    right: 0,
-                    height: height,
-                    child: _buildAppointmentCard(appt),
-                  );
-                }),
+                // Appointments — meetings that START at the same time are placed
+                // side by side so they don't cover each other.
+                ..._buildPositionedAppointments(dayAppointments, columnWidth),
                 // Events
                 ..._eventsForDay(day).map((event) {
-                  if (event.startDateTime.hour < kStartHour ||
-                      event.startDateTime.hour >= kEndHour) {
+                  if (!_isWithinGrid(event.startDateTime)) {
                     return const SizedBox.shrink();
                   }
                   final top = _getTopPositionForTime(event.startDateTime);
@@ -1259,63 +1348,47 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         // Time grid with appointments + events (full width)
         SizedBox(
           height: _timeGridHeight,
-          child: Stack(
-            children: [
-              // Hour grid lines
-              ...List.generate(kEndHour - kStartHour, (i) {
-                return Positioned(
-                  top: i * 60 * kPixelsPerMinute,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    height: 1,
-                    color: Colors.grey[300],
-                  ),
-                );
-              }),
-              // Appointments (full width cards)
-              ...dayAppointments.map((appt) {
-                if (appt.status == AppointmentStatus.canceled) {
-                  return const SizedBox.shrink();
-                }
-                
-                final effectiveTime = (appt.status == AppointmentStatus.postponed && appt.postponedDate != null)
-                    ? appt.postponedDate!
-                    : appt.appointmentDateTime;
-                
-                if (effectiveTime.hour < kStartHour || effectiveTime.hour >= kEndHour) {
-                  return const SizedBox.shrink();
-                }
-                
-                final top = _getTopPositionForTime(effectiveTime);
-                final height = _getHeightForDuration(appt.durationMinutes);
-                
-                return Positioned(
-                  top: top,
-                  left: 0,
-                  right: 0,
-                  height: height,
-                  child: _buildAppointmentCard(appt),
-                );
-              }),
-              // Events
-              ..._eventsForDay(day).map((event) {
-                if (event.startDateTime.hour < kStartHour ||
-                    event.startDateTime.hour >= kEndHour) {
-                  return const SizedBox.shrink();
-                }
-                final top = _getTopPositionForTime(event.startDateTime);
-                final height =
-                    _getHeightForDuration(event.durationMinutes);
-                return Positioned(
-                  top: top,
-                  left: 0,
-                  right: 0,
-                  height: height,
-                  child: _buildEventCard(event),
-                );
-              }),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Stack(
+                children: [
+                  // Hour grid lines (aligned to full hours; grid starts at 08:30)
+                  ...List.generate(kEndHour - kFirstFullHour, (i) {
+                    final hour = kFirstFullHour + i;
+                    final top =
+                        (hour * 60 - kGridStartMinutes) * kPixelsPerMinute;
+                    return Positioned(
+                      top: top,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        height: 1,
+                        color: Colors.grey[300],
+                      ),
+                    );
+                  }),
+                  // Appointments — same-start meetings shown side by side.
+                  ..._buildPositionedAppointments(
+                      dayAppointments, constraints.maxWidth),
+                  // Events
+                  ..._eventsForDay(day).map((event) {
+                    if (!_isWithinGrid(event.startDateTime)) {
+                      return const SizedBox.shrink();
+                    }
+                    final top = _getTopPositionForTime(event.startDateTime);
+                    final height =
+                        _getHeightForDuration(event.durationMinutes);
+                    return Positioned(
+                      top: top,
+                      left: 0,
+                      right: 0,
+                      height: height,
+                      child: _buildEventCard(event),
+                    );
+                  }),
+                ],
+              );
+            },
           ),
         ),
         _buildCanceledSection(_canceledOf(dayAppointments)),

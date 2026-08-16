@@ -8,3 +8,6 @@ phone=+90 555 123 45 67
 whatsapp=+90 555 123 45 67
 email=info@nilaygoktepe.com
 website=https://www.nilaygoktepe.com
+# Politikalar - asagidaki dummy URL'leri kendi gercek adreslerinizle degistirin
+privacy_policy=https://ornek.com/gizlilik-politikasi
+data_processing=https://ornek.com/veri-isleme-politikasi
