@@ -17,6 +17,7 @@ import '../providers/meal_state_and_upload_manager.dart';
 import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
+import '../utils/pdf_launcher.dart';
 import '../services/notification_service.dart';
 import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -74,6 +75,10 @@ class _MealUploadPageState extends State<MealUploadPage> {
   /// True when the active diet has a distinct weekend menu, in which case the
   /// plan is split into "Hafta İçi" and "Hafta Sonu" sections.
   bool _hasWeekendMenu = false;
+
+  /// Download URL of the active diet's attached recipe PDF, if any. Drives the
+  /// tappable "*tarifi ektedir" link inside the meal content.
+  String? _recipePdfUrl;
 
   /// Today's uploaded images per meal type.
   Map<Meals, List<String>> _mealImages = {};
@@ -210,6 +215,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
         // Only treat as split when the weekend menu actually has content.
         _hasWeekendMenu =
             weekend.contents.values.any((c) => c.isNotEmpty);
+        _recipePdfUrl = diet?.recipePdfUrl;
       });
 
       // Fetch meal states using provider
@@ -1331,6 +1337,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
               children: MealFormatter.formatMealContentWithOptions(
                 contents.map((content) => {'content': content}).toList(),
                 fontSize: _contentFontSize,
+                onRecipeTap: (_recipePdfUrl == null || _recipePdfUrl!.isEmpty)
+                    ? null
+                    : () => openPdfUrl(context, _recipePdfUrl),
               ),
             ),
           ],

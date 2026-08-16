@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import '../models/diet_model.dart';
 import '../models/logger.dart';
@@ -266,8 +269,44 @@ class DietProvider extends ChangeNotifier {
     }
   }
 
+  /// Uploads a recipe PDF for a diet to Cloud Storage.
+  ///
+  /// Stored at `users/{userId}/dietRecipes/recipe_<ts>.pdf`. Returns a map with
+  /// the download `url`, storage `path` (for later cleanup) and original
+  /// `name`, or null when the upload fails.
+  ///
+  /// Called from the diet import flow when the imported diet contains the
+  /// "*tarifi ektedir" reference and the admin attaches a recipe PDF.
+  Future<Map<String, String>?> uploadRecipePdf({
+    required String userId,
+    required String fileName,
+    required List<int> fileBytes,
+  }) async {
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final storagePath = 'users/$userId/dietRecipes/recipe_$ts.pdf';
+
+      final ref = FirebaseStorage.instance.ref().child(storagePath);
+      final upload = await ref.putData(
+        Uint8List.fromList(fileBytes),
+        SettableMetadata(contentType: 'application/pdf'),
+      );
+      final downloadUrl = await upload.ref.getDownloadURL();
+
+      logger.info('Recipe PDF uploaded. userId=$userId path=$storagePath');
+      return {
+        'url': downloadUrl,
+        'path': storagePath,
+        'name': fileName,
+      };
+    } catch (e, s) {
+      logger.err('Error uploading recipe PDF: $e', [s]);
+      return null;
+    }
+  }
+
   /// Deletes a diet document
-  /// 
+  ///
   /// @param userId The ID of the user who owns the diet document
   /// @param docId The ID of the diet document to delete
   Future<void> deleteDiet({
@@ -275,12 +314,27 @@ class DietProvider extends ChangeNotifier {
     required String docId,
   }) async {
     try {
-      await _firestore
+      final docRef = _firestore
           .collection('users')
           .doc(userId)
           .collection('dietLists')
-          .doc(docId)
-          .delete();
+          .doc(docId);
+
+      // Best-effort: remove the attached recipe PDF from Storage first so it
+      // doesn't get orphaned. A missing/failed delete never blocks removing
+      // the diet document itself.
+      try {
+        final snap = await docRef.get();
+        final recipePath = (snap.data()?['recipePdfPath'] as String?)?.trim();
+        if (recipePath != null && recipePath.isNotEmpty) {
+          await FirebaseStorage.instance.ref().child(recipePath).delete();
+          logger.info('Deleted recipe PDF for diet $docId at $recipePath');
+        }
+      } catch (e) {
+        logger.warn('Could not delete recipe PDF for diet $docId: $e');
+      }
+
+      await docRef.delete();
       logger.info('Deleted diet document: $docId');
       notifyListeners();
     } catch (e, s) {
@@ -411,7 +465,10 @@ class DietProvider extends ChangeNotifier {
     required Map<String, dynamic> subtitles,
     required String subscriptionId,
     Map<String, dynamic>? weekendSubtitles,
-    String? displayName //optional TODO ileride dialogtan belki girilir
+    String? displayName, //optional TODO ileride dialogtan belki girilir
+    String? recipePdfUrl,
+    String? recipePdfPath,
+    String? recipePdfName,
   }) async {
     try {
       final now=DateTime.now();
@@ -424,6 +481,12 @@ class DietProvider extends ChangeNotifier {
         'userId': userId,
         'displayName': displayName?? 'liste_${now.day.toString().padLeft(2, '0')}_${now.month.toString().padLeft(2, '0')}_${now.year.toString().substring(2)}_${now.hour.toString().padLeft(2, '0')}_${now.minute.toString().padLeft(2, '0')}',
         'createDate': Timestamp.now(),
+        if (recipePdfUrl != null && recipePdfUrl.isNotEmpty)
+          'recipePdfUrl': recipePdfUrl,
+        if (recipePdfPath != null && recipePdfPath.isNotEmpty)
+          'recipePdfPath': recipePdfPath,
+        if (recipePdfName != null && recipePdfName.isNotEmpty)
+          'recipePdfName': recipePdfName,
       };
 
       final docRef = await _firestore

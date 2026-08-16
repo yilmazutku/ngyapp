@@ -239,6 +239,9 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
               child: DataTable(
+                // Tighter spacing so no column is unnecessarily wide.
+                columnSpacing: 18,
+                horizontalMargin: 12,
                 headingRowColor: WidgetStateProperty.all(Colors.blue.shade50),
                 headingTextStyle: const TextStyle(
                   fontWeight: FontWeight.bold,
@@ -260,13 +263,11 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       const DataColumn(label: Text('Dosya No')),
       const DataColumn(label: Text('Ad-Soyad')),
       if (widget.showPayment) ...[
-        const DataColumn(label: Text('Ödeme Alınan Tarih')),
+        const DataColumn(label: Text('Ödeme Tarihi')),
         const DataColumn(label: Text('Ödeme Tutarı'), numeric: true),
         const DataColumn(label: Text('Ödeme Şekli')),
       ],
-      const DataColumn(label: Text('Paket Adı')),
       const DataColumn(label: Text('Paket Tipi')),
-      const DataColumn(label: Text('Notlar (Paket Bilgisi)')),
       if (widget.status == SubActiveStatus.frozen)
         const DataColumn(label: Text('Dondurulma Tarihi')),
       for (int i = 1; i <= CustomerSummaryRow.maxSeans; i++)
@@ -292,9 +293,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
           _cell(row.paymentAmount),
           _cell(row.paymentType),
         ],
-        _cell(row.packageInfo),
         _cell(row.packageType),
-        _cell(row.notes),
         if (widget.status == SubActiveStatus.frozen) _cell(row.freezeDate),
         for (final seans in row.seans) _cell(seans),
         for (int i = 0; i < postponedColumns; i++)

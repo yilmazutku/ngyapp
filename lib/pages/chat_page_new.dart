@@ -594,6 +594,34 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return _messagesStream!;
   }
 
+  /// Toggle the current (admin) user's reaction on [message].
+  ///
+  /// Tapping the same reaction the user already left removes it; otherwise the
+  /// reaction is set/replaced. The Cloud Function then notifies the user that a
+  /// reaction was left on their message.
+  Future<void> _handleToggleReaction(MessageData message, String emoji) async {
+    final chat = context.read<ChatManager>();
+    final current = message.reactions[_currentUid];
+    logger.info(
+      'Toggling reaction. chatId={} messageId={} emoji={} current={}',
+      [_chatId, message.id, emoji, current ?? 'none'],
+    );
+
+    try {
+      await chat.toggleReaction(_chatId, message.id, emoji, currentEmoji: current);
+    } catch (e, st) {
+      logger.err('Toggle reaction failed. messageId={} error={}', [message.id, e]);
+      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
+
+      if (!mounted) return;
+      DialogUtils.openError(
+        context,
+        title: 'Tepki Eklenemedi',
+        message: 'Tepki kaydedilemedi. Lütfen tekrar deneyin.',
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Use read() instead of watch() - we'll use Selector for specific rebuilds
@@ -665,11 +693,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   controller: chat.scrollController,
                   reverse: true, // Newest messages at bottom
                   itemCount: items.length,
-                  itemBuilder: (context, i) => _MessageBubble(
-                    message: items[i],
-                    isMe: items[i].senderId == _currentUid,
-                    onImageTap: (url) => _showImageDialog(context, url),
-                  ),
+                  itemBuilder: (context, i) {
+                    final msg = items[i];
+                    // Admins can react (WhatsApp-style) to messages the *user*
+                    // sent. `_chatId` equals the chat owner's (user's) UID, so
+                    // `senderId == _chatId` means the message came from the user.
+                    final canReact = _isAdminUser && msg.senderId == _chatId;
+                    return _MessageBubble(
+                      message: msg,
+                      isMe: msg.senderId == _currentUid,
+                      myUid: _currentUid,
+                      canReact: canReact,
+                      onImageTap: (url) => _showImageDialog(context, url),
+                      onToggleReaction: _handleToggleReaction,
+                    );
+                  },
                 );
               },
             ),
@@ -841,7 +879,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 class _MessageBubble extends StatelessWidget {
   final MessageData message;
   final bool isMe;
+
+  /// UID of the person viewing the chat (used to find their own reaction).
+  final String myUid;
+
+  /// Whether a long-press on this bubble should open the reaction picker.
+  final bool canReact;
+
   final void Function(String url) onImageTap;
+
+  /// Called with the tapped emoji when the viewer picks a reaction.
+  final void Function(MessageData message, String emoji) onToggleReaction;
 
   static const _months = [
     '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -851,7 +899,10 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     required this.isMe,
+    required this.myUid,
+    required this.canReact,
     required this.onImageTap,
+    required this.onToggleReaction,
   });
 
   String _formatTime(DateTime dt) {
@@ -884,53 +935,298 @@ class _MessageBubble extends StatelessWidget {
     final bubbleColor = isMe ? Colors.blue.shade100 : Colors.grey.shade300;
     final align = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
 
+    // The message body itself (text bubble and/or image + timestamp).
+    final content = Column(
+      crossAxisAlignment: align,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Text message bubble
+        if ((message.text ?? '').isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
+            ),
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: align,
+              children: [
+                Text(message.text!, style: const TextStyle(fontSize: 15)),
+                const SizedBox(height: 4),
+                Text(
+                  timeStr,
+                  style: const TextStyle(fontSize: 11, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+
+        // Image preview
+        if (message.imageUrl != null)
+          ChatImagePreview(
+            imageUrl: message.imageUrl,
+            onTap: () => onImageTap(message.imageUrl!),
+            usePlaceholder: message.createdAt == null,
+          ),
+
+        // Timestamp below image
+        if (message.imageUrl != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              timeStr,
+              style: const TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+          ),
+      ],
+    );
+
+    // Long-press to react (admins, on the user's messages). HitTestBehavior
+    // .deferToChild keeps taps on the image working (opens the full-screen
+    // viewer) while still recognizing a long-press on the bubble.
+    final body = canReact
+        ? GestureDetector(
+            behavior: HitTestBehavior.deferToChild,
+            onLongPressStart: (details) =>
+                _handleLongPress(context, details.globalPosition),
+            child: content,
+          )
+        : content;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Column(
         crossAxisAlignment: align,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Text message bubble
-          if ((message.text ?? '').isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: align,
-                children: [
-                  Text(message.text!, style: const TextStyle(fontSize: 15)),
-                  const SizedBox(height: 4),
-                  Text(
-                    timeStr,
-                    style: const TextStyle(fontSize: 11, color: Colors.black54),
-                  ),
-                ],
-              ),
-            ),
-          
-          // Image preview
-          if (message.imageUrl != null)
-            ChatImagePreview(
-              imageUrl: message.imageUrl,
-              onTap: () => onImageTap(message.imageUrl!),
-              usePlaceholder: message.createdAt == null,
-            ),
-          
-          // Timestamp below image
-          if (message.imageUrl != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                timeStr,
-                style: const TextStyle(fontSize: 11, color: Colors.black54),
-              ),
-            ),
+          body,
+          // Reactions left on this message (shown to everyone in the chat).
+          if (message.reactions.isNotEmpty)
+            _ReactionBadge(reactions: message.reactions),
         ],
+      ),
+    );
+  }
+
+  /// Open the reaction picker for this message and forward the chosen emoji.
+  Future<void> _handleLongPress(BuildContext context, Offset globalPosition) async {
+    final current = message.reactions[myUid];
+    final selected = await showReactionPicker(
+      context,
+      globalPosition: globalPosition,
+      currentEmoji: current,
+    );
+    if (selected != null) {
+      onToggleReaction(message, selected);
+    }
+  }
+}
+
+/// Small pill shown under a message with the reactions left on it.
+///
+/// Identical emojis are aggregated, with a count shown when more than one
+/// person left the same reaction. The badge overlaps slightly onto the
+/// bubble's bottom edge, WhatsApp-style.
+class _ReactionBadge extends StatelessWidget {
+  final Map<String, String> reactions;
+
+  const _ReactionBadge({required this.reactions});
+
+  @override
+  Widget build(BuildContext context) {
+    // Collapse duplicate emojis into "emoji xN".
+    final counts = <String, int>{};
+    for (final emoji in reactions.values) {
+      counts[emoji] = (counts[emoji] ?? 0) + 1;
+    }
+    if (counts.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+
+    return Transform.translate(
+      offset: const Offset(0, -6), // overlap onto the bubble's bottom edge
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: theme.dividerColor.withOpacity(0.4)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final entry in counts.entries) ...[
+              Text(entry.key, style: const TextStyle(fontSize: 14)),
+              if (entry.value > 1)
+                Padding(
+                  padding: const EdgeInsets.only(left: 2, right: 4),
+                  child: Text(
+                    '${entry.value}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface.withOpacity(0.7),
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The reaction emojis offered in the long-press picker (WhatsApp-style).
+/// Currently thumbs-up and heart, as requested. Add entries here to offer more.
+const List<String> kChatReactionEmojis = ['👍', '❤️'];
+
+/// Show a small WhatsApp-style reaction picker anchored near [globalPosition].
+///
+/// Returns the tapped emoji, or null if dismissed without a choice.
+/// [currentEmoji] (if any) is highlighted so the reactor can see — and tap
+/// again to remove — their existing reaction.
+Future<String?> showReactionPicker(
+  BuildContext context, {
+  required Offset globalPosition,
+  String? currentEmoji,
+}) {
+  final media = MediaQuery.of(context);
+  final size = media.size;
+
+  // Approximate pill size so it can be kept fully on-screen.
+  final pillWidth = kChatReactionEmojis.length * 52.0 + 16.0;
+  const pillHeight = 56.0;
+  const margin = 12.0;
+
+  double left = globalPosition.dx - pillWidth / 2;
+  left = left.clamp(margin, size.width - pillWidth - margin);
+
+  // Prefer showing the pill just above the finger; drop below if no room.
+  double top = globalPosition.dy - pillHeight - 16;
+  if (top < media.padding.top + margin) {
+    top = globalPosition.dy + 16;
+  }
+  top = top.clamp(media.padding.top + margin, size.height - pillHeight - margin);
+
+  return showGeneralDialog<String>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: Colors.black.withOpacity(0.15),
+    transitionDuration: const Duration(milliseconds: 160),
+    pageBuilder: (ctx, _, __) => const SizedBox.shrink(),
+    transitionBuilder: (ctx, animation, _, __) {
+      final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutBack);
+      return Stack(
+        children: [
+          Positioned(
+            left: left,
+            top: top,
+            child: ScaleTransition(
+              scale: curved,
+              alignment: Alignment.bottomCenter,
+              child: FadeTransition(
+                opacity: animation,
+                child: _ReactionPickerBar(
+                  emojis: kChatReactionEmojis,
+                  currentEmoji: currentEmoji,
+                  onSelected: (emoji) => Navigator.of(ctx).pop(emoji),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// The horizontal pill of emoji buttons shown by [showReactionPicker].
+class _ReactionPickerBar extends StatelessWidget {
+  final List<String> emojis;
+  final String? currentEmoji;
+  final ValueChanged<String> onSelected;
+
+  const _ReactionPickerBar({
+    required this.emojis,
+    required this.currentEmoji,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final barColor = isDark ? const Color(0xFF2A2A2E) : Colors.white;
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: barColor,
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final emoji in emojis)
+              _ReactionPickerButton(
+                emoji: emoji,
+                selected: emoji == currentEmoji,
+                onTap: () => onSelected(emoji),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A single tappable emoji inside the reaction picker. Highlights a circular
+/// background when it is the viewer's current reaction.
+class _ReactionPickerButton extends StatelessWidget {
+  final String emoji;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ReactionPickerButton({
+    required this.emoji,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final highlight = Theme.of(context).colorScheme.primary.withOpacity(0.16);
+    return InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: selected ? highlight : Colors.transparent,
+          shape: BoxShape.circle,
+        ),
+        child: Text(emoji, style: const TextStyle(fontSize: 28)),
       ),
     );
   }

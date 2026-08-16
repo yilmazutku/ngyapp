@@ -1,0 +1,10 @@
+# NGY App - İletişim bilgileri
+# Format: anahtar=deger  (satır basi # ile yorumdur)
+# Bu degerleri kendi gercek bilgilerinizle degistirin.
+linkedin=https://www.linkedin.com/in/nilay-goktepe-yilmaz
+instagram=https://www.instagram.com/dyt.nilaygoktepe
+address=Cubes Plaza B Blok No:208, Çukurambar, Öğretmenler Cd. No:6, 06510 Çankaya/Ankara
+phone=+90 555 123 45 67
+whatsapp=+90 555 123 45 67
+email=info@nilaygoktepe.com
+website=https://www.nilaygoktepe.com

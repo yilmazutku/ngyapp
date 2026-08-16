@@ -34,6 +34,13 @@ const CHAT_DEFAULT_BODY = 'Yeni mesaj';
 /** Body for image messages */
 const CHAT_IMAGE_BODY = 'Fotoğraf';
 
+/**
+ * Body template for admin reaction notifications.
+ * {emoji} is replaced with the reaction that was left (e.g. '👍').
+ * Rendered as e.g. "bir mesajınıza 👍 ifadesi bıraktı".
+ */
+const CHAT_REACTION_BODY_TEMPLATE = 'bir mesajınıza {emoji} ifadesi bıraktı';
+
 /** Default title for user-to-admin notifications (when user name not found) */
 const CHAT_USER_TO_ADMIN_DEFAULT_TITLE = 'Kullanıcı mesajı';
 
@@ -325,6 +332,102 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
               .doc(adminUidsArray[i])
               .update({fcmToken: admin.firestore.FieldValue.delete()});
           logger.info(`Removed invalid token for admin ${adminUidsArray[i]}`);
+        }
+      }
+    },
+);
+
+/**
+ * Sends a push notification to the user when an admin leaves (or changes) a
+ * reaction on one of the user's messages.
+ *
+ * Reactions are stored on the message document as a map keyed by the reactor's
+ * UID: `reactions.<uid> = emoji`. This fires on message UPDATES (message
+ * creation is handled by the functions above) and only notifies when a *new or
+ * changed* reaction authored by an admin appears on a message the user sent.
+ * Removing a reaction does not notify.
+ *
+ * Path: chats/{chatId}/messages/{messageId}. In our model chatId == user UID
+ * (the receiver of the notification).
+ */
+exports.notifyUserOnAdminReaction = onDocumentUpdated(
+    'chats/{chatId}/messages/{messageId}',
+    async (event) => {
+      const before = event.data && event.data.before ?
+          event.data.before.data() || {} : {};
+      const after = event.data && event.data.after ?
+          event.data.after.data() || {} : {};
+      const chatId = event.params.chatId;
+
+      // Never notify an admin-owned chat (chatId is the user's UID).
+      if (ADMIN_UIDS.has(chatId)) return;
+
+      // Only notify for reactions left on the USER's own messages, so the
+      // "bir mesajınıza …" wording is always accurate.
+      if ((after.senderId || '') !== chatId) return;
+
+      const beforeReactions =
+          (before.reactions && typeof before.reactions === 'object') ?
+              before.reactions : {};
+      const afterReactions =
+          (after.reactions && typeof after.reactions === 'object') ?
+              after.reactions : {};
+
+      // Find a newly added or changed reaction authored by an admin.
+      let emoji = null;
+      for (const [uid, value] of Object.entries(afterReactions)) {
+        if (!ADMIN_UIDS.has(uid)) continue; // only admin reactions notify
+        if (beforeReactions[uid] === value) continue; // unchanged
+        emoji = value; // added or changed
+      }
+
+      // Nothing new from an admin (e.g. a removal, or a non-admin reaction).
+      if (!emoji) return;
+
+      const userDoc = await admin.firestore()
+          .collection('users')
+          .doc(chatId)
+          .get();
+
+      const userData = userDoc.exists ? userDoc.data() : null;
+      const token = userData ? userData.fcmToken : null;
+      if (!token) return;
+
+      const title = CHAT_ADMIN_TO_USER_TITLE;
+      const body = CHAT_REACTION_BODY_TEMPLATE.replace('{emoji}', emoji);
+
+      const res = await admin.messaging().sendEachForMulticast({
+        tokens: [token],
+        notification: {
+          title: title,
+          body: body,
+        },
+        data: {
+          type: 'chat',
+          chatId: chatId,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+        android: buildAndroidConfig(title, body),
+        apns: buildApnsConfig(),
+      });
+
+      // Remove the token if FCM reports it is no longer valid.
+      const response = res.responses[0];
+      if (!response.success) {
+        const code = (response.error && response.error.code) ?
+            response.error.code : '';
+        const isInvalid =
+            code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-registration-token';
+
+        logger.warn('FCM reaction send failed', {code: code});
+
+        if (isInvalid) {
+          await admin.firestore()
+              .collection('users')
+              .doc(chatId)
+              .update({fcmToken: admin.firestore.FieldValue.delete()});
+          logger.info(`Removed invalid token for user ${chatId}`);
         }
       }
     },

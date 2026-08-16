@@ -13,6 +13,7 @@ import '../pages/admin_diet_edit_page.dart';
 import '../providers/diet_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/pdf_launcher.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
 
@@ -512,6 +513,12 @@ class DietCard extends StatelessWidget {
                 ],
               ),
             ),
+            // Attached recipe PDF, shown directly under the diet so the link is
+            // clearly associated with this diet.
+            if (dietDoc.hasRecipe) ...[
+              const SizedBox(height: 12),
+              _buildRecipeRow(context),
+            ],
             const SizedBox(height: 16),
             const Divider(height: 1),
             const SizedBox(height: 16),
@@ -557,6 +564,55 @@ class DietCard extends StatelessWidget {
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Tappable row showing the diet's attached recipe PDF. Opens the PDF in the
+  /// device's external viewer. Only rendered when [dietDoc.hasRecipe] is true.
+  Widget _buildRecipeRow(BuildContext context) {
+    final label = (dietDoc.recipePdfName?.trim().isNotEmpty ?? false)
+        ? dietDoc.recipePdfName!.trim()
+        : 'Görüntülemek için dokunun';
+
+    return InkWell(
+      onTap: () => openPdfUrl(context, dietDoc.recipePdfUrl),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.red.shade200),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.picture_as_pdf, color: Colors.red.shade600, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Ekli Tarif',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.open_in_new, color: Colors.red.shade400, size: 18),
           ],
         ),
       ),

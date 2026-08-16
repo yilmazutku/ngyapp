@@ -24,6 +24,8 @@ import 'package:ngy_app/models/logger.dart';
 /// - storagePath: Optional Storage path for cleanup operations
 /// - createdAt: Server-side timestamp (authoritative)
 /// - clientCreatedAt: Client-side timestamp (fallback while server timestamp is pending)
+/// - reactions: Map of reactorUid -> emoji (e.g. {adminUid: '👍'}). Empty when no
+///   one has reacted. Only one reaction per person is kept (WhatsApp-style).
 class MessageData {
   final String id;
   final String chatId; //chatId if provided (admin viewing another user), otherwise current user's UID
@@ -34,6 +36,10 @@ class MessageData {
   final Timestamp? createdAt;
   final Timestamp? clientCreatedAt;
 
+  /// Reactions left on this message, keyed by the reactor's UID.
+  /// The value is the reaction emoji (e.g. '👍' or '❤️').
+  final Map<String, String> reactions;
+
   MessageData({
     required this.id,
     required this.chatId,
@@ -43,6 +49,7 @@ class MessageData {
     this.storagePath,
     this.createdAt,
     this.clientCreatedAt,
+    this.reactions = const {},
   });
 
   /// Factory constructor to create a MessageData instance from a Firestore snapshot.
@@ -57,7 +64,22 @@ class MessageData {
       storagePath: data['storagePath'] as String?,
       createdAt: data['createdAt'] as Timestamp?,
       clientCreatedAt: data['clientCreatedAt'] as Timestamp?,
+      reactions: parseReactions(data['reactions']),
     );
+  }
+
+  /// Safely convert the raw Firestore `reactions` field into a
+  /// `Map<String, String>`. Firestore may hand us a `Map<Object?, Object?>`,
+  /// so we defensively filter to string keys and non-empty string values.
+  static Map<String, String> parseReactions(dynamic raw) {
+    if (raw is! Map) return const {};
+    final out = <String, String>{};
+    raw.forEach((key, value) {
+      if (key is String && value is String && value.isNotEmpty) {
+        out[key] = value;
+      }
+    });
+    return out;
   }
 }
 
@@ -633,8 +655,89 @@ class ChatManager extends ChangeNotifier {
   }
 
 
+  // ===== Reactions =====
+
+  /// Add (or replace) the current user's reaction on a message.
+  ///
+  /// Reactions are stored as a map on the message document keyed by the
+  /// reactor's UID: `reactions.<uid> = emoji`. Only one reaction per user is
+  /// kept, so calling this again with a different emoji overwrites the previous
+  /// one (WhatsApp-style).
+  ///
+  /// Uses update() with a dot-notation field path so only the single nested
+  /// key is written (the rest of the message document is untouched). update()
+  /// — unlike set()+merge — reliably resolves `reactions.<uid>` as a nested
+  /// field path, and creates the `reactions` map if it does not exist yet.
+  ///
+  /// @param chatId    The chat that owns the message (user UID in our model).
+  /// @param messageId The message document id to react to.
+  /// @param emoji     The reaction emoji (e.g. '👍' or '❤️').
+  Future<void> setReaction(String chatId, String messageId, String emoji) async {
+    final uid = auth.currentUser?.uid;
+    if (uid == null) {
+      logger.warn('setReaction skipped: no authenticated user. chatId={} messageId={}', [chatId, messageId]);
+      return;
+    }
+
+    logger.info('Setting reaction. chatId={} messageId={} uid={} emoji={}', [chatId, messageId, uid, emoji]);
+    try {
+      await _chatDoc(chatId).collection('messages').doc(messageId).update({
+        'reactions.$uid': emoji,
+      });
+      logger.debug('Reaction set. chatId={} messageId={}', [chatId, messageId]);
+    } catch (e) {
+      logger.err('setReaction failed. chatId={} messageId={} error={}', [chatId, messageId, e]);
+      rethrow;
+    }
+  }
+
+  /// Remove the current user's reaction from a message (if any).
+  ///
+  /// Deletes the `reactions.<uid>` nested key via update()+FieldValue.delete().
+  /// Safe to call even when the user has no reaction on the message.
+  ///
+  /// @param chatId    The chat that owns the message (user UID in our model).
+  /// @param messageId The message document id to clear the reaction from.
+  Future<void> removeReaction(String chatId, String messageId) async {
+    final uid = auth.currentUser?.uid;
+    if (uid == null) {
+      logger.warn('removeReaction skipped: no authenticated user. chatId={} messageId={}', [chatId, messageId]);
+      return;
+    }
+
+    logger.info('Removing reaction. chatId={} messageId={} uid={}', [chatId, messageId, uid]);
+    try {
+      await _chatDoc(chatId).collection('messages').doc(messageId).update({
+        'reactions.$uid': FieldValue.delete(),
+      });
+      logger.debug('Reaction removed. chatId={} messageId={}', [chatId, messageId]);
+    } catch (e) {
+      logger.err('removeReaction failed. chatId={} messageId={} error={}', [chatId, messageId, e]);
+      rethrow;
+    }
+  }
+
+  /// Toggle the current user's reaction on a message.
+  ///
+  /// If the user's existing reaction already equals [emoji], it is removed
+  /// (tapping the same reaction again clears it). Otherwise the reaction is set
+  /// to [emoji]. [currentEmoji] is the reactor's existing reaction as known by
+  /// the caller (from the streamed message), avoiding an extra read.
+  Future<void> toggleReaction(
+    String chatId,
+    String messageId,
+    String emoji, {
+    String? currentEmoji,
+  }) async {
+    if (currentEmoji == emoji) {
+      await removeReaction(chatId, messageId);
+    } else {
+      await setReaction(chatId, messageId, emoji);
+    }
+  }
+
   /// Cancel the current upload operation.
-  /// 
+  ///
   /// This method attempts to cancel the active Firebase Storage upload task.
   /// Safe to call even if no upload is in progress.
   Future<void> cancelUpload() async {

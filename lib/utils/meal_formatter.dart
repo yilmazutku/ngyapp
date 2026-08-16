@@ -1,6 +1,55 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../models/special_line_model.dart';
+
+// ---------------------------------------------------------------------------
+// Recipe reference marker ("*tarifi ektedir")
+//
+// When a diet content line references an attached recipe (e.g. a line like
+// "Kek (*tarifi ektedir)"), that phrase is rendered as a tappable link that
+// opens the diet's attached recipe PDF. The admin attaches the PDF during the
+// diet import flow whenever this phrase is detected.
+// ---------------------------------------------------------------------------
+
+/// Matches the recipe reference phrase ("*tarifi ektedir") inside a diet
+/// content line. Tolerant of an optional leading asterisk, flexible spacing
+/// between the two words and upper/lower case — including the Turkish dotted
+/// and dotless i variants (i / ı / I / İ).
+///
+/// The match starts at the asterisk when one is present (so only the "*…"
+/// phrase, not the text before it, is turned into the link), and at the word
+/// "tarifi" otherwise.
+final RegExp kRecipeMarkerRegex = RegExp(
+  r'(?:\*\s*)?[tT][aA][rR][iıIİ][fF][iıIİ]\s+[eE][kK][tT][eE][dD][iıIİ][rR]',
+);
+
+/// True when [line] references an attached recipe ("*tarifi ektedir").
+bool lineHasRecipeMarker(String? line) =>
+    line != null && kRecipeMarkerRegex.hasMatch(line);
+
+/// The three parts a recipe-marker line splits into: the text before the
+/// marker, the marker phrase itself, and the text after it. Either side may be
+/// empty (e.g. when the whole line is just the marker).
+class RecipeMarkerParts {
+  final String before;
+  final String marker;
+  final String after;
+
+  const RecipeMarkerParts(this.before, this.marker, this.after);
+}
+
+/// Splits [line] around the recipe marker, or returns null when the line has no
+/// recipe reference.
+RecipeMarkerParts? splitRecipeMarker(String line) {
+  final m = kRecipeMarkerRegex.firstMatch(line);
+  if (m == null) return null;
+  return RecipeMarkerParts(
+    line.substring(0, m.start),
+    line.substring(m.start, m.end),
+    line.substring(m.end),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Legacy constants (kept for backward compatibility with files that already
@@ -99,9 +148,15 @@ String _dividerLabelFor(String markerContent) {
 class MealFormatter {
   /// Formats a list of meal content items into widgets, inserting a styled
   /// divider before each new option introduced by a special marker line.
+  ///
+  /// When [onRecipeTap] is provided, any line containing the recipe reference
+  /// phrase ("*tarifi ektedir") renders that phrase as a tappable link that
+  /// invokes [onRecipeTap] (used to open the diet's attached recipe PDF). When
+  /// it is null the phrase is shown as plain text.
   static List<Widget> formatMealContentWithOptions(
     List<dynamic> contentList, {
     double fontSize = 16,
+    VoidCallback? onRecipeTap,
   }) {
     final List<Widget> formatted = [];
     final List<int> optionStartIndices = _collectOptionStarts(contentList);
@@ -152,17 +207,36 @@ class MealFormatter {
           displayContent = extractContentAfterMarker(displayContent);
         }
 
-        formatted.add(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0),
-          child: Text(
-            displayContent,
-            style: TextStyle(fontSize: fontSize),
-          ),
-        ));
+        formatted.add(_contentLineWidget(displayContent, fontSize, onRecipeTap));
       }
     }
 
     return formatted;
+  }
+
+  /// Builds a single content-line widget. When [onRecipeTap] is non-null and
+  /// [text] contains the recipe phrase, ONLY that phrase ("*…tarifi ektedir")
+  /// is rendered as a tappable, underlined link — the rest of the line stays
+  /// plain, non-tappable text. Otherwise a plain [Text].
+  static Widget _contentLineWidget(
+    String text,
+    double fontSize,
+    VoidCallback? onRecipeTap,
+  ) {
+    final parts = onRecipeTap == null ? null : splitRecipeMarker(text);
+
+    if (parts == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4.0),
+        child: Text(text, style: TextStyle(fontSize: fontSize)),
+      );
+    }
+
+    return _RecipeContentLine(
+      parts: parts,
+      fontSize: fontSize,
+      onTap: onRecipeTap!,
+    );
   }
 
   /// Returns a [RichText] widget that formats meal content with options.
@@ -282,5 +356,73 @@ class MealFormatter {
       }
     }
     return starts;
+  }
+}
+
+/// Renders a diet content line that contains the recipe reference so that ONLY
+/// the "*…tarifi ektedir" phrase is a tappable link; the surrounding text stays
+/// plain. Owns the [TapGestureRecognizer] applied to the marker span so it is
+/// disposed correctly (a recognizer created inline in a build would leak).
+class _RecipeContentLine extends StatefulWidget {
+  final RecipeMarkerParts parts;
+  final double fontSize;
+  final VoidCallback onTap;
+
+  const _RecipeContentLine({
+    required this.parts,
+    required this.fontSize,
+    required this.onTap,
+  });
+
+  @override
+  State<_RecipeContentLine> createState() => _RecipeContentLineState();
+}
+
+class _RecipeContentLineState extends State<_RecipeContentLine> {
+  late final TapGestureRecognizer _recognizer;
+
+  @override
+  void initState() {
+    super.initState();
+    _recognizer = TapGestureRecognizer()..onTap = widget.onTap;
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecipeContentLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Keep the recognizer pointed at the latest callback across rebuilds.
+    _recognizer.onTap = widget.onTap;
+  }
+
+  @override
+  void dispose() {
+    _recognizer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = widget.parts;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Text.rich(
+        TextSpan(
+          style: TextStyle(fontSize: widget.fontSize),
+          children: [
+            if (parts.before.isNotEmpty) TextSpan(text: parts.before),
+            TextSpan(
+              text: parts.marker,
+              style: TextStyle(
+                color: Colors.blue.shade700,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline,
+              ),
+              recognizer: _recognizer,
+            ),
+            if (parts.after.isNotEmpty) TextSpan(text: parts.after),
+          ],
+        ),
+      ),
+    );
   }
 }

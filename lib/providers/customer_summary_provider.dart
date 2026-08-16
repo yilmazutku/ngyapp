@@ -79,11 +79,16 @@ class CustomerSummaryProvider extends ChangeNotifier {
         ? SummaryCell(activeSub.packageName.trim())
         : const SummaryCell.error();
 
-    // Package duration type (1 Aylık / 3 Aylık). Empty for legacy packages
-    // that predate the field.
-    final packageTypeCell = activeSub.packageType != null
-        ? SummaryCell(activeSub.packageType!.label)
-        : const SummaryCell.empty();
+    // Package duration type (1 Aylık / 3 Aylık) followed by a single space and
+    // the meeting type (Online / Yüzyüze / Y+O for hybrid). The duration part is
+    // empty for legacy packages that predate the field.
+    final String meetingSuffix = _meetingTypeLabel(activeSub.meetingType);
+    final String? durationLabel = activeSub.packageType?.label;
+    final String packageTypeText =
+        durationLabel != null ? '$durationLabel $meetingSuffix' : meetingSuffix;
+    final packageTypeCell = packageTypeText.trim().isEmpty
+        ? const SummaryCell.empty()
+        : SummaryCell(packageTypeText);
 
     final notes = (activeSub.notes != null && activeSub.notes!.trim().isNotEmpty)
         ? SummaryCell(activeSub.notes!.trim())
@@ -280,6 +285,19 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// Turns sorted dates (+ a count of broken/null dates) into display cells.
   /// When [cap] is set, keeps the most recent [cap] dates; when [padToCap] is
   /// true the result is padded with empty cells up to [cap].
+  /// Short meeting-type label for the summary's "Paket Tipi" column:
+  /// Online, Yüzyüze, or Y+O (hybrid = Yüzyüze + Online).
+  String _meetingTypeLabel(SubsMeetingType type) {
+    switch (type) {
+      case SubsMeetingType.online:
+        return 'Online';
+      case SubsMeetingType.faceToFace:
+        return 'Yüzyüze';
+      case SubsMeetingType.hybrid:
+        return 'Y+O';
+    }
+  }
+
   List<SummaryCell> _buildDateCells({
     required List<DateTime> dates,
     required int nullCount,

@@ -751,7 +751,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                     final DateTime? pickedDate = await showDatePicker(
                       context: context,
                       initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
-                      firstDate: DateTime.now(),
+                      // Postponed date may also be in the past (no future-only limit).
+                      firstDate: DateTime(2020),
                       lastDate: DateTime.now().add(const Duration(days: 365)),
                     );
                     if (pickedDate != null && mounted) {

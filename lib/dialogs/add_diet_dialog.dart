@@ -59,6 +59,13 @@ class _AddDietDialogState extends State<AddDietDialog> {
   // Track upload state
   bool _isUploading = false;
 
+  // Recipe attachment: set true when the parsed diet contains the
+  // "*tarifi ektedir" reference, in which case the admin is asked to attach a
+  // recipe PDF that the user can open from their plan.
+  bool _hasRecipeMarker = false;
+  Uint8List? _recipePdfBytes;
+  String? _recipePdfName;
+
   // Add ScrollController to manage scrolling
   late final ScrollController _scrollController;
 
@@ -296,6 +303,8 @@ class _AddDietDialogState extends State<AddDietDialog> {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
+        // Recipe attach prompt, shown only when the diet references a recipe.
+        if (_hasRecipeMarker) _buildRecipeAttachSection(),
         Expanded(
           // Use ScrollConfiguration to handle overflow properly
           child: ScrollConfiguration(
@@ -319,6 +328,69 @@ class _AddDietDialogState extends State<AddDietDialog> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Prompt shown in the preview when the diet references a recipe
+  /// ("*tarifi ektedir"), asking the admin to attach the recipe PDF the user
+  /// will open from their plan.
+  Widget _buildRecipeAttachSection() {
+    final hasPdf = _recipePdfBytes != null;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: hasPdf ? Colors.green.shade50 : Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: hasPdf ? Colors.green.shade300 : Colors.orange.shade300,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                hasPdf ? Icons.check_circle : Icons.picture_as_pdf,
+                size: 20,
+                color: hasPdf ? Colors.green.shade700 : Colors.orange.shade800,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  '"tarifi ektedir" ifadesi bulundu',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Kullanıcının bu ifadeye tıkladığında göreceği tarif PDF\'ini ekleyin.',
+            style: TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _pickRecipePdf,
+                icon: const Icon(Icons.attach_file, size: 18),
+                label: Text(hasPdf ? 'PDF Değiştir' : 'PDF Seç'),
+              ),
+              const SizedBox(width: 8),
+              if (_recipePdfName != null)
+                Expanded(
+                  child: Text(
+                    _recipePdfName!,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -427,6 +499,10 @@ class _AddDietDialogState extends State<AddDietDialog> {
     _hasWeekend = false;
     _localFilePath = null;
     _hasParsedPreview = false;
+    // Reset any previously detected/attached recipe.
+    _hasRecipeMarker = false;
+    _recipePdfBytes = null;
+    _recipePdfName = null;
 
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -470,10 +546,65 @@ class _AddDietDialogState extends State<AddDietDialog> {
     });
     // Now parse the text into subtitles
     _extractSubtitles(text);
+    // Detect the "*tarifi ektedir" reference so the admin can attach a recipe.
+    _hasRecipeMarker = _detectRecipeMarker();
+    log.info('Recipe marker detected in parsed diet: {}', [_hasRecipeMarker]);
     // Show the preview
     setState(() {
       _hasParsedPreview = true;
     });
+  }
+
+  /// Scans the parsed weekday + weekend menus for the "*tarifi ektedir"
+  /// reference. Returns true as soon as any content line references a recipe.
+  bool _detectRecipeMarker() {
+    for (final list in [weekdaySubtitles, weekendSubtitles]) {
+      for (final meal in list) {
+        final content = meal['content'];
+        if (content is List) {
+          for (final item in content) {
+            final text = item is Map
+                ? (item['content']?.toString() ?? '')
+                : item.toString();
+            if (lineHasRecipeMarker(text)) return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Lets the admin pick the recipe PDF to attach to this diet.
+  Future<void> _pickRecipePdf() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+      withData: true,
+    );
+    if (result == null) {
+      log.debug('Recipe PDF selection canceled.');
+      return;
+    }
+
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null) {
+      log.warn('Recipe PDF bytes are null.');
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Seçilen PDF okunamadı. Lütfen tekrar deneyin.',
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _recipePdfBytes = bytes;
+      _recipePdfName = file.name;
+    });
+    log.info('Recipe PDF selected: {}', [file.name]);
   }
 
   void _onFileProcessingError(String error) {
@@ -856,11 +987,27 @@ class _AddDietDialogState extends State<AddDietDialog> {
       );
       return;
     }
-    
+
+    // If the diet references a recipe but no PDF was attached, confirm before
+    // continuing so the admin has a chance to add it.
+    if (_hasRecipeMarker && _recipePdfBytes == null) {
+      final proceed = await DialogUtils.openConfirm(
+        context,
+        title: 'Tarif PDF\'i Seçilmedi',
+        message: 'Bu diyette "tarifi ektedir" ifadesi var ancak bir tarif '
+            'PDF\'i seçmediniz. Kullanıcı tarifi göremeyecek. Yine de '
+            'yüklensin mi?',
+        confirmText: 'Yine de Yükle',
+        cancelText: 'Vazgeç',
+      );
+      if (!proceed) return;
+      if (!mounted) return;
+    }
+
     setState(() {
       _isUploading = true;
     });
-    
+
     try {
       // Convert both menus into the enum-keyed map format the provider expects.
       final Map<String, dynamic> subtitlesMap =
@@ -870,11 +1017,35 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
       // Use DietProvider to upload the diet
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
+
+      // Upload the attached recipe PDF (if any) first, so its URL can be saved
+      // together with the diet document.
+      String? recipeUrl;
+      String? recipePath;
+      String? recipeName;
+      if (_hasRecipeMarker && _recipePdfBytes != null) {
+        final info = await dietProvider.uploadRecipePdf(
+          userId: widget.userId,
+          fileName: _recipePdfName ?? 'tarif.pdf',
+          fileBytes: _recipePdfBytes!,
+        );
+        if (info != null) {
+          recipeUrl = info['url'];
+          recipePath = info['path'];
+          recipeName = info['name'];
+        } else {
+          log.warn('Recipe PDF upload failed; diet will be saved without it.');
+        }
+      }
+
       final String? docId = await dietProvider.uploadDiet(
         userId: widget.userId,
         subtitles: subtitlesMap,
         weekendSubtitles: weekendMap,
         subscriptionId: _selectedSubscription!.subscriptionId,
+        recipePdfUrl: recipeUrl,
+        recipePdfPath: recipePath,
+        recipePdfName: recipeName,
       );
 
       // Check if widget is still mounted before updating state
