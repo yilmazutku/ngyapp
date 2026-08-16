@@ -43,13 +43,14 @@ class LoginPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Kullanıcı Girişi'),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            tooltip: 'İletişim',
-            onPressed: () => _showContactInfo(context),
-          ),
-        ],
+      ),
+      // Contact/info button: bottom-right (default FAB location), green.
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showContactInfo(context),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+        tooltip: 'İletişim',
+        child: const Icon(Icons.info_outline),
       ),
       body: SafeArea(
         child: LayoutBuilder(
@@ -410,7 +411,8 @@ class LoginPage extends StatelessWidget {
           contentPadding: EdgeInsets.zero,
           leading: SizedBox(width: 28, child: Center(child: icon)),
           title: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          subtitle: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis),
+          // Show the full value; wrap to as many lines as needed (no ellipsis).
+          subtitle: Text(value, softWrap: true),
           onTap: () => _launchContact(toUri(value)),
         ),
       );
