@@ -437,10 +437,10 @@ class LoginPage extends StatelessWidget {
         'Web Sitesi', (v) => v);
     addRow('privacy_policy',
         const Icon(Icons.privacy_tip, size: 22, color: Colors.blueGrey),
-        'Gizlilik Politikası', (v) => v);
+        'Gizlilik/Veri İşleme Politikası', (v) => v);
     addRow('data_processing',
         const Icon(Icons.shield_outlined, size: 22, color: Colors.blueGrey),
-        'Veri İşleme Politikası', (v) => v);
+        'Kullanım Koşulları', (v) => v);
 
     return SingleChildScrollView(
       child: Column(mainAxisSize: MainAxisSize.min, children: rows),

@@ -1,13 +1,13 @@
 # NGY App - İletişim bilgileri
 # Format: anahtar=deger  (satır basi # ile yorumdur)
 # Bu degerleri kendi gercek bilgilerinizle degistirin.
-linkedin=https://www.linkedin.com/in/nilay-goktepe-yilmaz
-instagram=https://www.instagram.com/dyt.nilaygoktepe
+linkedin=https://www.linkedin.com/in/nilay-göktepe-yılmaz-08b503167
+instagram=https://www.instagram.com/diyetisyennilaygoktepe/
 address=Cubes Plaza B Blok No:208, Çukurambar, Öğretmenler Cd. No:6, 06510 Çankaya/Ankara
-phone=+90 555 123 45 67
-whatsapp=+90 555 123 45 67
-email=info@nilaygoktepe.com
-website=https://www.nilaygoktepe.com
+phone=+90 533 284 43 33
+whatsapp=+90 533 284 43 33
+email=dytnilaygoktepe@gmail.com
+website=https://www.nilaygoktepe.com/
 # Politikalar - asagidaki dummy URL'leri kendi gercek adreslerinizle degistirin
-privacy_policy=https://ornek.com/gizlilik-politikasi
-data_processing=https://ornek.com/veri-isleme-politikasi
+privacy_policy=https://yilmazutku.github.io/ngydiyetisyen.github.io/privacy-policy.html
+data_processing=https://yilmazutku.github.io/ngydiyetisyen.github.io/terms-of-service.html
