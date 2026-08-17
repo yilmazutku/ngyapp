@@ -725,58 +725,106 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     return minutes >= kGridStartMinutes && minutes < kGridEndMinutes;
   }
 
-  /// Builds the positioned appointment cards for a day. Appointments that START
-  /// at the exact same time are split into equal side-by-side columns so they
-  /// don't cover each other (e.g. two 09:30 meetings). Appointments that merely
-  /// overlap — a long meeting spanning shorter ones with different start times —
-  /// are intentionally left full-width; each start-time group is laid out on its
-  /// own, so those cases are not disturbed.
-  List<Widget> _buildPositionedAppointments(
-      List<AppointmentModel> dayAppointments, double columnWidth) {
-    // Visible (in-grid, non-canceled) appointments only.
-    final visible = dayAppointments
-        .where((appt) =>
-            appt.status != AppointmentStatus.canceled &&
-            _isWithinGrid(_effectiveTime(appt)))
-        .toList();
+  /// Lays out a day's meetings AND "Diğer" events with a Google-Calendar–style
+  /// column-packing algorithm so overlapping items never cover each other:
+  ///
+  ///  * Items that overlap in time are split into side-by-side columns.
+  ///  * Same-start items sit next to each other (equal columns).
+  ///  * When one item's time span contains another, the longer/earlier item
+  ///    takes the left column and the shorter one is offset to the right
+  ///    (starting around the middle), so both stay readable.
+  ///
+  /// Items that don't overlap anything take the full column width.
+  List<Widget> _buildPositionedItems(
+      List<AppointmentModel> dayAppointments, DateTime day, double columnWidth) {
+    final List<_PositionedEntry> entries = [];
 
-    // Group appointments by identical start time (hour:minute).
-    final Map<int, List<AppointmentModel>> sameStart = {};
-    for (final appt in visible) {
-      final eff = _effectiveTime(appt);
-      final key = eff.hour * 60 + eff.minute;
-      (sameStart[key] ??= <AppointmentModel>[]).add(appt);
+    // Meetings (appointments).
+    for (final appt in dayAppointments) {
+      if (appt.status == AppointmentStatus.canceled) continue;
+      final start = _effectiveTime(appt);
+      if (!_isWithinGrid(start)) continue;
+      entries.add(_PositionedEntry(
+        start: start,
+        end: start.add(Duration(minutes: appt.durationMinutes)),
+        // "Tartım" visits keep their real (short) duration for overlap packing
+        // but render at a taller minimum height so the label stays readable.
+        displayHeight: _displayHeightForAppointment(appt),
+        card: _buildAppointmentCard(appt),
+      ));
+    }
+    // "Diğer" events.
+    for (final event in _eventsForDay(day)) {
+      if (!_isWithinGrid(event.startDateTime)) continue;
+      entries.add(_PositionedEntry(
+        start: event.startDateTime,
+        end: event.endDateTime,
+        displayHeight: _getHeightForDuration(event.durationMinutes),
+        card: _buildEventCard(event),
+      ));
+    }
+    if (entries.isEmpty) return const <Widget>[];
+
+    // Sort by start (asc); on a tie the longer item comes first so containers
+    // take the left column.
+    entries.sort((a, b) {
+      final c = a.start.compareTo(b.start);
+      return c != 0 ? c : b.end.compareTo(a.end);
+    });
+
+    // Assign every item to a column within its overlap cluster.
+    final List<_PositionedEntry> cluster = [];
+    final List<DateTime> columnEnds = []; // last end time per column
+    DateTime? clusterEnd; // running max end of the current cluster
+
+    void flush() {
+      final n = columnEnds.length;
+      for (final e in cluster) {
+        e.columnCount = n;
+      }
+      cluster.clear();
+      columnEnds.clear();
+      clusterEnd = null;
     }
 
-    final List<Widget> widgets = [];
-    for (final group in sameStart.values) {
-      final int n = group.length;
-      for (int i = 0; i < n; i++) {
-        final appt = group[i];
-        final eff = _effectiveTime(appt);
-        final top = _getTopPositionForTime(eff);
-        final height = _displayHeightForAppointment(appt);
-        if (n == 1) {
-          // Lone meeting: full column width.
-          widgets.add(Positioned(
-            top: top,
-            left: 0,
-            right: 0,
-            height: height,
-            child: _buildAppointmentCard(appt),
-          ));
-        } else {
-          // Same-start group: equal side-by-side columns.
-          final double w = columnWidth / n;
-          widgets.add(Positioned(
-            top: top,
-            left: i * w,
-            width: w,
-            height: height,
-            child: _buildAppointmentCard(appt),
-          ));
+    for (final e in entries) {
+      // A new cluster starts once an item begins at/after everything so far.
+      if (clusterEnd != null && !e.start.isBefore(clusterEnd!)) {
+        flush();
+      }
+      // Reuse the first column whose previous item has already ended.
+      int col = -1;
+      for (int i = 0; i < columnEnds.length; i++) {
+        if (!e.start.isBefore(columnEnds[i])) {
+          col = i;
+          break;
         }
       }
+      if (col == -1) {
+        columnEnds.add(e.end);
+        col = columnEnds.length - 1;
+      } else {
+        columnEnds[col] = e.end;
+      }
+      e.column = col;
+      cluster.add(e);
+      clusterEnd = (clusterEnd == null || e.end.isAfter(clusterEnd!))
+          ? e.end
+          : clusterEnd;
+    }
+    flush();
+
+    // Build the positioned cards.
+    final List<Widget> widgets = [];
+    for (final e in entries) {
+      final double w = columnWidth / e.columnCount;
+      widgets.add(Positioned(
+        top: _getTopPositionForTime(e.start),
+        left: e.column * w,
+        width: w,
+        height: e.displayHeight,
+        child: e.card,
+      ));
     }
     return widgets;
   }
@@ -1062,25 +1110,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                     ),
                   );
                 }),
-                // Appointments — meetings that START at the same time are placed
-                // side by side so they don't cover each other.
-                ..._buildPositionedAppointments(dayAppointments, columnWidth),
-                // Events
-                ..._eventsForDay(day).map((event) {
-                  if (!_isWithinGrid(event.startDateTime)) {
-                    return const SizedBox.shrink();
-                  }
-                  final top = _getTopPositionForTime(event.startDateTime);
-                  final height =
-                      _getHeightForDuration(event.durationMinutes);
-                  return Positioned(
-                    top: top,
-                    left: 0,
-                    right: 0,
-                    height: height,
-                    child: _buildEventCard(event),
-                  );
-                }),
+                // Meetings + events, laid out in side-by-side columns so that
+                // overlapping/containing items never cover each other.
+                ..._buildPositionedItems(dayAppointments, day, columnWidth),
               ],
             ),
           ),
@@ -1383,25 +1415,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                       ),
                     );
                   }),
-                  // Appointments — same-start meetings shown side by side.
-                  ..._buildPositionedAppointments(
-                      dayAppointments, constraints.maxWidth),
-                  // Events
-                  ..._eventsForDay(day).map((event) {
-                    if (!_isWithinGrid(event.startDateTime)) {
-                      return const SizedBox.shrink();
-                    }
-                    final top = _getTopPositionForTime(event.startDateTime);
-                    final height =
-                        _getHeightForDuration(event.durationMinutes);
-                    return Positioned(
-                      top: top,
-                      left: 0,
-                      right: 0,
-                      height: height,
-                      child: _buildEventCard(event),
-                    );
-                  }),
+                  // Meetings + events, laid out in side-by-side columns so that
+                  // overlapping/containing items never cover each other.
+                  ..._buildPositionedItems(
+                      dayAppointments, day, constraints.maxWidth),
                 ],
               );
             },
@@ -1621,4 +1638,25 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       ),
     );
   }
+}
+
+/// One positioned calendar item (a meeting or a "Diğer" event) used by the
+/// column-packing layout in [_AdminAppointmentsPageState._buildPositionedItems].
+/// [column] and [columnCount] are filled in during layout.
+class _PositionedEntry {
+  _PositionedEntry({
+    required this.start,
+    required this.end,
+    required this.displayHeight,
+    required this.card,
+  });
+
+  final DateTime start;
+  final DateTime end;
+  // Pre-computed render height (px). Kept separate from [end] so "Tartım" visits
+  // can pack by their real short duration yet render at a readable min height.
+  final double displayHeight;
+  final Widget card;
+  int column = 0;
+  int columnCount = 1;
 }
