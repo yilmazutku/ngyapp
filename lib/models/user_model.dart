@@ -15,6 +15,8 @@ class UserModel {
   final String? reference;
   final String? notes;
   final String? dosyaNo;
+  final String? tcNo;
+  final DateTime? birthDate;
 
   UserModel({
     required this.userId,
@@ -31,6 +33,8 @@ class UserModel {
     this.reference,
     this.notes,
     this.dosyaNo,
+    this.tcNo,
+    this.birthDate,
   }) : createDate = createDate ?? DateTime.now(); // Use provided or current time
 
   factory UserModel.fromDocument(DocumentSnapshot doc) {
@@ -55,6 +59,10 @@ class UserModel {
       reference: data['reference'],
       notes: data['notes'],
       dosyaNo: data['dosyaNo'],
+      tcNo: data['tcNo'],
+      birthDate: data['birthDate'] != null
+          ? (data['birthDate'] as Timestamp).toDate()
+          : null,
     );
   }
 
@@ -73,11 +81,13 @@ class UserModel {
       if (reference != null) 'reference': reference,
       if (notes != null) 'notes': notes,
       if (dosyaNo != null) 'dosyaNo': dosyaNo,
+      if (tcNo != null) 'tcNo': tcNo,
+      if (birthDate != null) 'birthDate': Timestamp.fromDate(birthDate!),
     };
   }
 
   @override
   String toString() {
-    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo}';
+    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, birthDate: $birthDate}';
   }
 }

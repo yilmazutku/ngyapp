@@ -56,15 +56,17 @@ class AppointmentManager extends ChangeNotifier {
             [appointment.userId, subId],
           );
         } else {
-          // Increment meetingsCompleted if completed
-          if (appointment.status == AppointmentStatus.completed) {
+          // Increment meetingsCompleted if completed (Tartım visits excluded).
+          if (appointment.status == AppointmentStatus.completed &&
+              appointment.countsTowardMeetings) {
             await subRef.update(<String, Object?>{
               'meetingsCompleted': FieldValue.increment(1),
             });
             subUpdated = true;
           }
-          // Increment meetingsBurned if burned
-          if (appointment.status == AppointmentStatus.burned) {
+          // Increment meetingsBurned if burned (Tartım visits excluded).
+          if (appointment.status == AppointmentStatus.burned &&
+              appointment.countsTowardMeetings) {
             await subRef.update(<String, Object?>{
               'meetingsBurned': FieldValue.increment(1),
             });
@@ -105,8 +107,11 @@ class AppointmentManager extends ChangeNotifier {
         // Treat as add edge-case: read new sub if needed and then write
         logger.info('updateAppointment: previous appointment not found, treating as add. apptId={}', [updated.appointmentId]);
 
-        final bool newDone = updated.status == AppointmentStatus.completed;
-        final bool newBurned = updated.status == AppointmentStatus.burned;
+        // Tartım visits are never counted against the package's meetings.
+        final bool newDone = updated.status == AppointmentStatus.completed &&
+            updated.countsTowardMeetings;
+        final bool newBurned = updated.status == AppointmentStatus.burned &&
+            updated.countsTowardMeetings;
         final String? newSubId = updated.subscriptionId;
 
         Map<String, dynamic>? newSubData;
@@ -178,10 +183,20 @@ class AppointmentManager extends ChangeNotifier {
       _statusFromLabelSafe(prev['status'] as String?);
       final String? prevSubId = prev['subscriptionId'] as String?;
 
-      final bool prevDone = prevStatus == AppointmentStatus.completed;
-      final bool prevBurned = prevStatus == AppointmentStatus.burned;
-      final bool newDone = updated.status == AppointmentStatus.completed;
-      final bool newBurned = updated.status == AppointmentStatus.burned;
+      // Tartım visits are never counted against the package's meetings, so the
+      // counters must skip them on both the previous and the new side (the type
+      // can change across an edit, so each side is checked independently).
+      final bool prevCounts = AppointmentType
+          .fromLabel(prev['appointmentType'] as String? ?? '')
+          .countsTowardMeetings;
+      final bool prevDone =
+          prevStatus == AppointmentStatus.completed && prevCounts;
+      final bool prevBurned =
+          prevStatus == AppointmentStatus.burned && prevCounts;
+      final bool newDone = updated.status == AppointmentStatus.completed &&
+          updated.countsTowardMeetings;
+      final bool newBurned = updated.status == AppointmentStatus.burned &&
+          updated.countsTowardMeetings;
       final String? newSubId = updated.subscriptionId;
 
       // Pre-read any sub docs we might touch
@@ -372,10 +387,17 @@ class AppointmentManager extends ChangeNotifier {
       _statusFromLabelSafe(data['status'] as String?);
       final String? subId = data['subscriptionId'] as String?;
 
+      // Tartım visits never incremented the counters, so they must not be
+      // decremented here either.
+      final bool counts = AppointmentType
+          .fromLabel(data['appointmentType'] as String? ?? '')
+          .countsTowardMeetings;
+      final bool wasDone = status == AppointmentStatus.completed && counts;
+      final bool wasBurned = status == AppointmentStatus.burned && counts;
+
       Map<String, dynamic>? subData;
 
-      if ((status == AppointmentStatus.completed || status == AppointmentStatus.burned) &&
-          (subId?.isNotEmpty ?? false)) {
+      if ((wasDone || wasBurned) && (subId?.isNotEmpty ?? false)) {
         final subRef = db
             .collection('users')
             .doc(userId)
@@ -398,7 +420,7 @@ class AppointmentManager extends ChangeNotifier {
             .collection('subscriptions')
             .doc(subId!);
 
-        if (status == AppointmentStatus.completed) {
+        if (wasDone) {
           logger.info(
             'deleteAppointment: decrement meetingsCompleted for user={}, sub={}, delta=-1',
             [userId, subId],
@@ -411,7 +433,7 @@ class AppointmentManager extends ChangeNotifier {
           subChanged = true;
         }
 
-        if (status == AppointmentStatus.burned) {
+        if (wasBurned) {
           logger.info(
             'deleteAppointment: decrement meetingsBurned for user={}, sub={}, delta=-1',
             [userId, subId],
@@ -470,8 +492,13 @@ class AppointmentManager extends ChangeNotifier {
       final String? subId = data['subscriptionId'] as String?;
 
       Map<String, dynamic>? subData;
-      final bool wasDone = prevStatus == AppointmentStatus.completed;
-      final bool wasBurned = prevStatus == AppointmentStatus.burned;
+      // Tartım visits never incremented the counters, so they must not be
+      // decremented here either.
+      final bool counts = AppointmentType
+          .fromLabel(data['appointmentType'] as String? ?? '')
+          .countsTowardMeetings;
+      final bool wasDone = prevStatus == AppointmentStatus.completed && counts;
+      final bool wasBurned = prevStatus == AppointmentStatus.burned && counts;
 
       if ((wasDone || wasBurned) && (subId?.isNotEmpty ?? false)) {
         final subRef = db

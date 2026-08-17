@@ -3,6 +3,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -119,7 +120,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                     String amountInfo = '';
                     if (sub.amountPaid < sub.totalAmount) {
                       final remaining = sub.totalAmount - sub.amountPaid;
-                      amountInfo = ' (Kalan ödeme: ${remaining.toStringAsFixed(2)} TL)';
+                      amountInfo = ' (Kalan ödeme: ${remaining.toStringAsFixed(0)} TL)';
                     }
                     return DropdownMenuItem<SubscriptionModel?>(
                       value: sub,
@@ -144,6 +145,8 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
             TextFormField(
               controller: _amountController,
               keyboardType: TextInputType.number,
+              // Whole numbers only — no decimal point / comma.
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: const InputDecoration(
                 labelText: 'Miktar (TL)',
                 border: OutlineInputBorder(),
@@ -152,8 +155,8 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                 if (value == null || value.isEmpty) {
                   return 'Lütfen ödeme miktarını giriniz.';
                 }
-                if (double.tryParse(value) == null) {
-                  return 'Geçerli bir miktar giriniz.';
+                if (int.tryParse(value) == null) {
+                  return 'Geçerli bir miktar giriniz (tam sayı).';
                 }
                 return null;
               },

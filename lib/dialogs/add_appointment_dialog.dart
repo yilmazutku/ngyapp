@@ -69,6 +69,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   
   // Duration controller
   final _durationController = TextEditingController();
+  // Time is entered via two inline text boxes (SS:DD), not a dial picker.
+  final _hourController = TextEditingController();
+  final _minuteController = TextEditingController();
   // Whether the admin has manually edited the duration field. Once touched we
   // never overwrite it with a recomputed default.
   bool _durationTouched = false;
@@ -79,7 +82,10 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
     if (widget.selectedDate != null) {
       _selectedDate = widget.selectedDate!;
     }
-    
+    // Seed the inline time boxes (SS:DD) from the default selected time.
+    _hourController.text = _selectedTime.hour.toString().padLeft(2, '0');
+    _minuteController.text = _selectedTime.minute.toString().padLeft(2, '0');
+
     // Initialize duration with selected appointment type's default (considering meeting type)
     _durationController.text = _selectedAppointmentType.getDurationForMeetingType(_selectedMeetingType).toString();
     // Ensure admin-configured default durations are loaded, then refresh the
@@ -102,6 +108,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
   void dispose() {
     _notesController.dispose();
     _durationController.dispose();
+    _hourController.dispose();
+    _minuteController.dispose();
     _userSearchController.dispose();
     super.dispose();
   }
@@ -296,20 +304,21 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
     logger.info('Selected date: {}', [date]);
   }
 
-  Future<void> _selectTime() async {
-    final TimeOfDay? picked = await TimePickerUtils.pickTime(
-      context,
-      initialTime: _selectedTime,
-    );
-    if (picked != null && picked != _selectedTime) {
-      setState(() {
-        _selectedTime = picked;
-      });
-    }
-  }
-
   Future<void> _saveAppointment() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Read the inline time boxes (SS:DD) into the selected time.
+    final TimeOfDay? enteredTime =
+        parseHourMinute(_hourController, _minuteController);
+    if (enteredTime == null) {
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Geçerli bir saat giriniz (SS:DD).',
+      );
+      return;
+    }
+    _selectedTime = enteredTime;
 
     // Manual user validation (admin scenario only) — kept out of the Form
     // validator because the user picker is a TextField + custom result list
@@ -677,8 +686,12 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   if (value != null) {
                     setState(() {
                       _selectedAppointmentType = value;
-                      // Update duration if empty or if switching to/from haftalik
-                      if (_durationController.text.isEmpty || value == AppointmentType.haftalik) {
+                      // Update duration if empty, or when switching to a type
+                      // with a fixed default (haftalik depends on meeting type;
+                      // Tartım is always its short 5 min default).
+                      if (_durationController.text.isEmpty ||
+                          value == AppointmentType.haftalik ||
+                          value == AppointmentType.tartim) {
                         _durationController.text = value.getDurationForMeetingType(_selectedMeetingType).toString();
                       }
                     });
@@ -769,8 +782,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                       context: context,
                       initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
                       // Postponed date may also be in the past (no future-only limit).
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
                     );
                     if (pickedDate != null && mounted) {
                       final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
@@ -805,8 +818,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   // Allow selecting past dates (e.g. logging a missed/late
                   // appointment). Lower bound kept wide; default selected date
                   // is today, which stays within [firstDate, lastDate].
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                  firstDate: DateTime(2000),
+                  lastDate: DateTime(2100),
                 ),
               ] else ...[
                 // Show selected date as read-only when date is pre-selected
@@ -819,14 +832,11 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   leading: const Icon(Icons.calendar_today),
                 ),
               ],
-              ListTile(
-                title: const Text('Saat'),
-                subtitle: Text(
-                  '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                trailing: const Icon(Icons.access_time),
-                onTap: _selectTime,
+              const SizedBox(height: 8),
+              // Time is entered directly as two boxes (SS:DD), below the date.
+              HourMinuteField(
+                hourController: _hourController,
+                minuteController: _minuteController,
               ),
               const SizedBox(height: 16),
               TextField(

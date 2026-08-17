@@ -11,6 +11,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
 import '../utils/time_picker_utils.dart';
 import '../widgets/loading_overlay.dart';
+import 'dialog_widgets.dart';
 
 class EditAppointmentDialog extends StatefulWidget {
   final AppointmentModel appointment;
@@ -35,6 +36,9 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
   DateTime? _postponedDate;
   final _notesController = TextEditingController();
   final _durationController = TextEditingController();
+  // Time is entered via two inline boxes (SS:DD), not a dial picker.
+  final _hourController = TextEditingController();
+  final _minuteController = TextEditingController();
   // For subscription selection
   String? _selectedSubscriptionId;
   List<SubscriptionModel> _availableSubscriptions = [];
@@ -67,6 +71,10 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     _appointmentStatus = widget.appointment.status;
     _originalStatus = widget.appointment.status;
     _appointmentDateTime = widget.appointment.appointmentDateTime;
+    _hourController.text =
+        _appointmentDateTime.hour.toString().padLeft(2, '0');
+    _minuteController.text =
+        _appointmentDateTime.minute.toString().padLeft(2, '0');
     _postponedDate = widget.appointment.postponedDate;
     _postponedBy = widget.appointment.postponedBy ?? PostponeSource.user;
     _notesController.text = widget.appointment.notes ?? '';
@@ -89,6 +97,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
   void dispose() {
     _notesController.dispose();
     _durationController.dispose();
+    _hourController.dispose();
+    _minuteController.dispose();
     super.dispose();
   }
 
@@ -196,7 +206,26 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       );
       return;
     }
-    
+
+    // Read the inline time boxes (SS:DD) and apply them to the appointment date.
+    final TimeOfDay? enteredTime =
+        parseHourMinute(_hourController, _minuteController);
+    if (enteredTime == null) {
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Geçerli bir saat giriniz (SS:DD).',
+      );
+      return;
+    }
+    _appointmentDateTime = DateTime(
+      _appointmentDateTime.year,
+      _appointmentDateTime.month,
+      _appointmentDateTime.day,
+      enteredTime.hour,
+      enteredTime.minute,
+    );
+
     // A user-originated postponement that is newly applied (the appointment was
     // not already postponed). Only these consume the customer's postponement
     // rights; admin-originated postponements never do.
@@ -497,8 +526,12 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 onChanged: (AppointmentType? newValue) {
                   setState(() {
                     _appointmentType = newValue!;
-                    // Update duration if empty or if switching to/from haftalik
-                    if (_durationController.text.isEmpty || newValue == AppointmentType.haftalik) {
+                    // Update duration if empty, or when switching to a type with
+                    // a fixed default (haftalik depends on meeting type; Tartım
+                    // is always its short 5 min default).
+                    if (_durationController.text.isEmpty ||
+                        newValue == AppointmentType.haftalik ||
+                        newValue == AppointmentType.tartim) {
                       _durationController.text = newValue.getDurationForMeetingType(_meetingType).toString();
                     }
                   });
@@ -609,8 +642,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                     context: context,
                     initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
                     // Postponed date may also be in the past (no future-only limit).
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
                   );
                   if (pickedDate != null && mounted) {
                     final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
@@ -679,39 +712,30 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                       ],
                     ),
             ),
-            // 4) Date & Time
-            ListTile(
-              title: Text(
-                'Tarih: ${DateFormatter.formatNumericDateTime(_appointmentDateTime)}',
-                style: const TextStyle(fontSize: 18,fontWeight: FontWeight.bold),
-              ),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: () async {
-                final DateTime? pickedDate = await showDatePicker(
-                  context: context,
-                  initialDate: _appointmentDateTime,
-                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                  lastDate: DateTime.now().add(const Duration(days: 365)),
-                );
-                if (pickedDate != null) {
-                  if (!context.mounted) return;
-                  final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
-                    context,
-                    initialTime: TimeOfDay.fromDateTime(_appointmentDateTime),
+            // 4) Date & Time — date via widget, time via two inline boxes,
+            // stacked below the date. No past/future restriction.
+            DatePickerFormField(
+              selectedDate: _appointmentDateTime,
+              onDateSelected: (picked) {
+                setState(() {
+                  _appointmentDateTime = DateTime(
+                    picked.year,
+                    picked.month,
+                    picked.day,
+                    _appointmentDateTime.hour,
+                    _appointmentDateTime.minute,
                   );
-                  if (pickedTime != null) {
-                    setState(() {
-                      _appointmentDateTime = DateTime(
-                        pickedDate.year,
-                        pickedDate.month,
-                        pickedDate.day,
-                        pickedTime.hour,
-                        pickedTime.minute,
-                      );
-                    });
-                  }
-                }
+                });
               },
+              label: 'Tarih Seçin',
+              selectedLabel: 'Tarih',
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+            ),
+            const SizedBox(height: 8),
+            HourMinuteField(
+              hourController: _hourController,
+              minuteController: _minuteController,
             ),
             // 5) Cancel Button
             ElevatedButton(

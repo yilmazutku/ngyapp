@@ -101,7 +101,9 @@ class AppointmentModel {
     );
   }
 
-
+  /// Whether this appointment consumes a subscription meeting right. "Tartım"
+  /// visits never do — see [AppointmentType.countsTowardMeetings].
+  bool get countsTowardMeetings => appointmentType.countsTowardMeetings;
 
   @override
   String toString() {
@@ -293,8 +295,8 @@ enum AppointmentStatus {
 /// rights (see `SubscriptionModel.postponementsUsed`); [PostponeSource.admin]
 /// postponements do not affect the remaining rights.
 enum PostponeSource {
-  user('user', 'Kullanıcı Kaynaklı'),
-  admin('admin', 'Admin Kaynaklı');
+  user('user', 'Danışan Kaynaklı'),
+  admin('admin', 'Ofis Kaynaklı');
 
   const PostponeSource(this.value, this.label);
 
@@ -352,8 +354,11 @@ enum AppointmentType {
   pb('Prog. Başlangıcı','Pb', 60),
   og('Ön Görüşme','Ög', 45),
   kgtakip('Kilo Takip','Kilo Takip',30),
-  diger('Diğer','Diğer', 30);
-  
+  diger('Diğer','Diğer', 30),
+  // "Tartım" (weighing) visit: short by default (5 min) and never counted
+  // against the package's total meetings (see [countsTowardMeetings]).
+  tartim('Tartım','Tartım', 5);
+
   const AppointmentType(this.lbl,this.shortLabel, this.durationMinutes);
 
   final String lbl,shortLabel;
@@ -371,6 +376,11 @@ enum AppointmentType {
   /// allowed without a package (e.g. when the user has no active package yet).
   bool get allowedWithoutPackage =>
       this == AppointmentType.og || this == AppointmentType.pb;
+
+  /// Whether an appointment of this type consumes one of the subscription's
+  /// meeting rights. "Tartım" (weighing) visits appear on the calendar but are
+  /// never counted against the package's total meetings.
+  bool get countsTowardMeetings => this != AppointmentType.tartim;
 
   /// Returns the default duration (minutes) for this appointment type based on
   /// meeting type. The values come from [AppointmentDurationsRegistry], which
@@ -410,6 +420,8 @@ enum AppointmentType {
       case AppointmentType.diger:
       case AppointmentType.kgtakip:
         return Colors.grey.shade200;
+      case AppointmentType.tartim:
+        return Colors.green.shade200;
     }
   }
 }

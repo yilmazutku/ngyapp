@@ -6,6 +6,7 @@ import '../models/user_model.dart';
 import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/date_formatter.dart';
 
 /// DetailsTab doesn't use filtering so it doesn't extend BaseTab
 /// It's a standalone StatefulWidget
@@ -28,6 +29,9 @@ class _DetailsTabState extends State<DetailsTab>
   final _referenceController = TextEditingController();
   final _notesController = TextEditingController();
   final _dosyaNoController = TextEditingController();
+  final _tcNoController = TextEditingController();
+  // Birth date is picked with a date widget (like the appointment dialogs).
+  DateTime? _birthDate;
 
   final _scrollCtrl = ScrollController();
 
@@ -65,6 +69,7 @@ class _DetailsTabState extends State<DetailsTab>
     _referenceController.dispose();
     _notesController.dispose();
     _dosyaNoController.dispose();
+    _tcNoController.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -77,6 +82,8 @@ class _DetailsTabState extends State<DetailsTab>
     _referenceController.text = user.reference ?? '';
     _notesController.text = user.notes ?? '';
     _dosyaNoController.text = user.dosyaNo ?? '';
+    _tcNoController.text = user.tcNo ?? '';
+    _birthDate = user.birthDate;
   }
 
   Future<void> _saveChanges(UserModel user) async {
@@ -126,6 +133,8 @@ class _DetailsTabState extends State<DetailsTab>
       reference: _referenceController.text.isEmpty ? null : _referenceController.text,
       notes: _notesController.text.isEmpty ? null : _notesController.text,
       dosyaNo: _dosyaNoController.text.trim().isEmpty ? null : _dosyaNoController.text.trim(),
+      tcNo: _tcNoController.text.trim().isEmpty ? null : _tcNoController.text.trim(),
+      birthDate: _birthDate,
     );
 
     setState(() => _isLoading = true);
@@ -310,7 +319,14 @@ class _DetailsTabState extends State<DetailsTab>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildReadOnlyField('Dosya NO', user.dosyaNo ?? ''),
+                          _buildReadOnlyField('Dosya No', user.dosyaNo ?? ''),
+                          _buildReadOnlyField('Tc No', user.tcNo ?? ''),
+                          _buildReadOnlyField(
+                              'Doğum Tarihi',
+                              user.birthDate != null
+                                  ? DateFormatter.formatNumericDate(
+                                      user.birthDate!)
+                                  : ''),
                           _buildReadOnlyField('Ad', user.name),
                           _buildReadOnlyField('Soyisim', user.surname),
                           _buildReadOnlyField('E-posta', user.email),
@@ -385,7 +401,10 @@ class _DetailsTabState extends State<DetailsTab>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildEditableField('Dosya NO', _dosyaNoController),
+                          _buildEditableField('Dosya No', _dosyaNoController),
+                          _buildEditableField('Tc No', _tcNoController,
+                              keyboardType: TextInputType.number),
+                          _buildBirthDatePicker(),
                           _buildEditableField('Ad', _nameController, required: true),
                           _buildEditableField('Soyisim', _surnameController),
                           _buildEditableField('E-posta', _emailController,
@@ -549,6 +568,69 @@ class _DetailsTabState extends State<DetailsTab>
         ],
       ),
     );
+  }
+
+  /// Birth-date field for the edit form. Styled like [_buildReadOnlyField]'s box
+  /// but tappable, opening a date picker (like the appointment dialogs) instead
+  /// of accepting free text.
+  Widget _buildBirthDatePicker() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Doğum Tarihi',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Colors.grey[700])),
+          const SizedBox(height: 4),
+          InkWell(
+            onTap: _pickBirthDate,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _birthDate != null
+                          ? DateFormatter.formatNumericDate(_birthDate!)
+                          : 'Tarih seçiniz',
+                      style: TextStyle(
+                          fontSize: 16,
+                          color: _birthDate != null
+                              ? Colors.grey[800]
+                              : Colors.grey[500]),
+                    ),
+                  ),
+                  Icon(Icons.calendar_today, size: 20, color: Colors.grey[600]),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(now.year - 20),
+      firstDate: DateTime(1900),
+      lastDate: now,
+    );
+    if (picked != null && mounted) {
+      setState(() => _birthDate = picked);
+    }
   }
 
   Widget _buildEditableField(

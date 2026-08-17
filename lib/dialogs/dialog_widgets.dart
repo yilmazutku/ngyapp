@@ -1,7 +1,82 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
+
+/// Parses two "HH" / "MM" text controllers into a [TimeOfDay], or returns null
+/// when either value is missing or out of range. Shared by the appointment
+/// dialogs, which enter the time via [HourMinuteField] instead of a dial picker.
+TimeOfDay? parseHourMinute(
+    TextEditingController hourController, TextEditingController minuteController) {
+  final int? hh = int.tryParse(hourController.text);
+  final int? mm = int.tryParse(minuteController.text);
+  if (hh == null || mm == null || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    return null;
+  }
+  return TimeOfDay(hour: hh, minute: mm);
+}
+
+/// Inline time entry as two side-by-side text boxes ("SS : DD"), i.e. hour and
+/// minute typed directly instead of a circular/dial time picker. The parent owns
+/// (and disposes) the two controllers; use [parseHourMinute] to read the value.
+class HourMinuteField extends StatelessWidget {
+  final TextEditingController hourController;
+  final TextEditingController minuteController;
+  final String label;
+
+  const HourMinuteField({
+    super.key,
+    required this.hourController,
+    required this.minuteController,
+    this.label = 'Saat',
+  });
+
+  Widget _box(TextEditingController controller, String hint) {
+    return SizedBox(
+      width: 64,
+      child: TextField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.center,
+        maxLength: 2,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: InputDecoration(
+          counterText: '',
+          hintText: hint,
+          border: const OutlineInputBorder(),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style:
+                const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _box(hourController, 'SS'),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: Text(':',
+                  style:
+                      TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            ),
+            _box(minuteController, 'DD'),
+          ],
+        ),
+      ],
+    );
+  }
+}
 
 /// A widget for selecting a date in dialog forms
 class DatePickerFormField extends StatelessWidget {

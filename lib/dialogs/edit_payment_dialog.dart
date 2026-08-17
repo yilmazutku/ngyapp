@@ -67,7 +67,8 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
   @override
   void initState() {
     super.initState();
-    _amountController.text = widget.payment.amount.toString();
+    // Show the amount as a whole number (e.g. 20000, not 20000.0).
+    _amountController.text = widget.payment.amount.toStringAsFixed(0);
     // If payment date is null (payment was planned), default to today for when user switches to completed
     _selectedPaymentDate = widget.payment.paymentDate ?? DateTime.now();
     _selectedDueDate = widget.payment.dueDate;
@@ -124,11 +125,9 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
             // Amount Field (with numeric guard)
             TextField(
               controller: _amountController,
-              keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true, signed: false),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-              ],
+              keyboardType: TextInputType.number,
+              // Whole numbers only — no decimal point / comma.
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: const InputDecoration(labelText: 'Miktar (TL)'),
             ),
             const SizedBox(height: 16),

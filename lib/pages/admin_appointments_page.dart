@@ -46,6 +46,11 @@ const double kDayDividerWidth = 1; // Width of vertical dividing lines between d
 const double kCanceledCardHeight = 26.0;
 const double kCanceledDividerHeight = 8.0;
 
+// "Tartım" visits are only ~5 min long; on the calendar their card is given at
+// least this many minutes' worth of height so the label stays readable (their
+// stored duration is unchanged).
+const int kTartimMinDisplayMinutes = 20;
+
 // Calculated: pixels per minute based on total height and hours
 // 11 hours (9-20) = 660 minutes, so kTotalGridHeight / 660 = pixels per minute
 const double kPixelsPerMinute =
@@ -750,7 +755,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         final appt = group[i];
         final eff = _effectiveTime(appt);
         final top = _getTopPositionForTime(eff);
-        final height = _getHeightForDuration(appt.durationMinutes);
+        final height = _displayHeightForAppointment(appt);
         if (n == 1) {
           // Lone meeting: full column width.
           widgets.add(Positioned(
@@ -779,6 +784,17 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// Calculate the height for an appointment based on its duration
   double _getHeightForDuration(int durationMinutes) {
     return durationMinutes * kPixelsPerMinute;
+  }
+
+  /// Height of an appointment card. "Tartım" visits are very short (5 min), so
+  /// their card is given a taller minimum height ([kTartimMinDisplayMinutes]) so
+  /// the label stays readable, without changing the stored duration.
+  double _displayHeightForAppointment(AppointmentModel appt) {
+    final int minutes = appt.appointmentType == AppointmentType.tartim &&
+            appt.durationMinutes < kTartimMinDisplayMinutes
+        ? kTartimMinDisplayMinutes
+        : appt.durationMinutes;
+    return _getHeightForDuration(minutes);
   }
 
   /// Total height of the time grid area
@@ -1489,7 +1505,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     return Scaffold(
       appBar: AppBarWithBack(
-        title: 'Admin Randevuları',
+        title: 'Danışan Randevuları',
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: () => setState(() => _fetchAllAppointments())),
           IconButton(icon: const Icon(Icons.date_range), onPressed: _pickDateRange),

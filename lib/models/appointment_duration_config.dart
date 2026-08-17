@@ -38,6 +38,11 @@ enum AppointmentDurationSlot {
     storageKey: 'diger',
     label: 'Diğer',
     defaultMinutes: 30,
+  ),
+  tartim(
+    storageKey: 'tartim',
+    label: 'Tartım',
+    defaultMinutes: 5,
   );
 
   const AppointmentDurationSlot({
@@ -82,6 +87,8 @@ enum AppointmentDurationSlot {
         return AppointmentDurationSlot.kgtakip;
       case AppointmentType.diger:
         return AppointmentDurationSlot.diger;
+      case AppointmentType.tartim:
+        return AppointmentDurationSlot.tartim;
     }
   }
 }

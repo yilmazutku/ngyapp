@@ -137,6 +137,11 @@ enum AppointmentColorSlot {
     storageKey: 'diger',
     label: 'Diğer',
     defaultOptionId: 'red_500',
+  ),
+  tartim(
+    storageKey: 'tartim',
+    label: 'Tartım',
+    defaultOptionId: 'green_100',
   );
 
   const AppointmentColorSlot({
@@ -178,6 +183,8 @@ enum AppointmentColorSlot {
         return AppointmentColorSlot.kgtakip;
       case AppointmentType.diger:
         return AppointmentColorSlot.diger;
+      case AppointmentType.tartim:
+        return AppointmentColorSlot.tartim;
     }
   }
 }
