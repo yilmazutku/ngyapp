@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -68,11 +67,10 @@ class _TestsTabState extends State<TestsTab> {
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic'],
         allowMultiple: true,
-        // On desktop/mobile keep only the file paths (withData:false) so the
-        // picker never loads every selected file into memory at once; bytes are
-        // streamed straight from disk at upload time. On web there is no path,
-        // so we do need the bytes.
-        withData: kIsWeb,
+        // Keep only the file paths (not the bytes) so the picker never loads
+        // every selected file into memory at once; each file is streamed
+        // straight from disk at upload time.
+        withData: false,
       );
       if (result == null || result.files.isEmpty) return;
 
@@ -104,17 +102,24 @@ class _TestsTabState extends State<TestsTab> {
             failed.add('${file.name} (çok büyük, en fazla $kMaxUploadSizeLabel)');
             continue;
           }
+          final path = file.path;
+          if (path == null) {
+            log.warn('No file path for attachment: {}', [file.name]);
+            failed.add('${file.name} (dosya okunamadı)');
+            continue;
+          }
           try {
             await provider.uploadTestAttachmentFile(
               userId: widget.userId,
               fileName: file.name,
-              filePath: file.path,   // streamed from disk on desktop/mobile
-              fileBytes: file.bytes, // fallback (web)
+              filePath: path, // streamed from disk
             );
             success++;
           } catch (e) {
             log.err('Error uploading test attachment {}: {}', [file.name, e]);
-            failed.add(file.name);
+            failed.add(e is UploadTimeoutException
+                ? '${file.name} (${e.userMessage})'
+                : file.name);
           }
         }
 

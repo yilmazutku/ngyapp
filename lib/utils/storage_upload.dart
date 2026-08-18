@@ -3,7 +3,6 @@ import 'dart:io' show File;
 import 'dart:typed_data';
 
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../models/logger.dart';
 
@@ -14,7 +13,7 @@ final Logger _log = Logger('StorageUpload');
 /// Files larger than this are rejected up-front (with a clear message) instead
 /// of being pushed through Storage. On Windows desktop `firebase_storage` runs
 /// on the Firebase C++ SDK and an in-memory upload copies the whole byte buffer
-/// across the Dart↔native boundary; a very large PDF can momentarily occupy
+/// across the Dart<->native boundary; a very large PDF can momentarily occupy
 /// several times its own size in RAM and take the process down. Guarding the
 /// size keeps a single pathological file from hanging or crashing the app.
 const int kMaxUploadBytes = 50 * 1024 * 1024;
@@ -22,13 +21,28 @@ const int kMaxUploadBytes = 50 * 1024 * 1024;
 /// Human-readable form of [kMaxUploadBytes] for user-facing messages.
 const String kMaxUploadSizeLabel = '50 MB';
 
-/// Absolute ceiling for a single upload. A stalled upload (e.g. a flaky
-/// connection that never errors) would otherwise leave the UI spinning
-/// forever; this makes it fail cleanly so the user is told and can retry.
-const Duration kUploadTimeout = Duration(minutes: 15);
+/// Ceiling for a single upload. If an upload does not finish within this window
+/// it is cancelled and an [UploadTimeoutException] is thrown, so the user is
+/// told it did not complete and can retry instead of the UI spinning forever.
+const Duration kUploadTimeout = Duration(minutes: 2);
 
-/// Uploads a local file to [ref], preferring a *streamed* [Reference.putFile]
-/// from [filePath] over an in-memory [Reference.putData] of [bytes].
+/// Thrown when an upload does not finish within [kUploadTimeout]. Carries a
+/// ready, user-facing message asking the user to try again.
+class UploadTimeoutException implements Exception {
+  final Duration timeout;
+  const UploadTimeoutException(this.timeout);
+
+  /// Short, user-facing reason suitable for a dialog / summary line.
+  String get userMessage =>
+      '${timeout.inMinutes} dakika içinde tamamlanamadı, lütfen tekrar deneyin';
+
+  @override
+  String toString() => 'UploadTimeoutException($userMessage)';
+}
+
+/// Uploads a local file to [ref], streaming it from disk with
+/// [Reference.putFile] (low, constant memory) rather than holding the whole
+/// file in memory.
 ///
 /// Why streaming matters: `putFile` streams the file from disk in chunks, so
 /// peak memory stays small and constant regardless of the file size. `putData`
@@ -38,14 +52,14 @@ const Duration kUploadTimeout = Duration(minutes: 15);
 /// slow and the most likely trigger for the app closing itself under memory
 /// pressure.
 ///
-/// Behaviour:
-/// * When a real [filePath] is available and we are not on web, stream it with
-///   `putFile`. If that fails for any reason, fall back to an in-memory
-///   `putData` (reading the bytes lazily only if they were not supplied).
-/// * On web (no filesystem path) upload the provided [bytes] with `putData`.
+/// Provide [filePath] whenever the file exists on disk (the normal case). Only
+/// pass [bytes] when the file is available in memory but not on disk (e.g. a
+/// buffer already read into state). If a `putFile` attempt fails for a
+/// non-timeout reason, the bytes are used as a fallback (read from [filePath]
+/// if needed).
 ///
-/// Throws if neither a usable path nor bytes are available, if the upload
-/// fails, or if it exceeds [timeout].
+/// Throws [UploadTimeoutException] on timeout, the underlying error on other
+/// failures, or a [StateError] if neither a usable path nor bytes are given.
 Future<void> uploadFileToStorage({
   required Reference ref,
   required SettableMetadata metadata,
@@ -59,14 +73,16 @@ Future<void> uploadFileToStorage({
   );
 
   // Preferred path: stream straight from disk (low, constant memory).
-  if (!kIsWeb && filePath != null && filePath.isNotEmpty) {
+  if (filePath != null && filePath.isNotEmpty) {
     try {
       await _awaitUpload(ref.putFile(File(filePath), metadata), timeout);
       return;
+    } on UploadTimeoutException {
+      rethrow; // A timeout is final; surface it so the user can retry.
     } catch (e) {
-      // Streaming failed (unsupported platform, transient error, timeout...).
-      // Fall back to an in-memory upload rather than failing outright, reading
-      // the bytes now only if the caller did not already hand them to us.
+      // Streaming failed for a non-timeout reason. Fall back to an in-memory
+      // upload rather than failing outright, reading the bytes now only if the
+      // caller did not already hand them to us.
       _log.warn('putFile failed, falling back to putData: {}', [e]);
       bytes ??= await File(filePath).readAsBytes();
     }
@@ -79,7 +95,8 @@ Future<void> uploadFileToStorage({
 }
 
 /// Awaits an [UploadTask], enforcing [timeout] and cancelling the task if it
-/// elapses so a stalled upload releases its resources instead of lingering.
+/// elapses so a stalled upload releases its resources. Converts the timeout
+/// into an [UploadTimeoutException] carrying a user-facing message.
 Future<void> _awaitUpload(UploadTask task, Duration timeout) async {
   try {
     await task.timeout(timeout);
@@ -89,6 +106,6 @@ Future<void> _awaitUpload(UploadTask task, Duration timeout) async {
     } catch (_) {
       // Best-effort cancel; the timeout is what we surface to the caller.
     }
-    rethrow;
+    throw UploadTimeoutException(timeout);
   }
 }

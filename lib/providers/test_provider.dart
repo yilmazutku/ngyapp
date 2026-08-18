@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
@@ -13,14 +12,12 @@ final Logger logger = Logger.forClass(TestProvider);
 class TestProvider extends ChangeNotifier {
   /// Upload a test attachment (PDF or image) and write its metadata.
   ///
-  /// Prefers streaming the file from disk via [filePath] (low, constant memory)
-  /// and only uses the in-memory [fileBytes] as a fallback (e.g. on web). See
+  /// Streams the file from disk via [filePath] (low, constant memory). See
   /// [uploadFileToStorage] for why streaming matters on Windows desktop.
   Future<void> uploadTestAttachmentFile({
     required String userId,
     required String fileName,
-    String? filePath,
-    Uint8List? fileBytes,
+    required String filePath,
   }) async {
     try {
       final now = DateTime.now();
@@ -37,7 +34,6 @@ class TestProvider extends ChangeNotifier {
         ref: ref,
         metadata: SettableMetadata(contentType: contentType),
         filePath: filePath,
-        bytes: fileBytes,
       );
       final downloadUrl = await ref.getDownloadURL();
 

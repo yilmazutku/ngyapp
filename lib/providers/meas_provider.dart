@@ -6,7 +6,6 @@ import '../models/logger.dart';
 import '../models/meas_model.dart';
 import '../models/filter_params.dart';
 import '../utils/storage_upload.dart';
-import 'dart:typed_data';
 
 final Logger logger = Logger.forClass(MeasProvider);
 
@@ -255,32 +254,28 @@ class MeasProvider extends ChangeNotifier {
 
   /// Uploads a Tanita PDF file to Firebase Storage and stores its metadata in Firestore
   ///
-  /// Prefers streaming the file from disk via [filePath] (low, constant memory)
-  /// and only uses the in-memory [fileBytes] as a fallback (e.g. on web). See
+  /// Streams the file from disk via [filePath] (low, constant memory). See
   /// [uploadFileToStorage] for why streaming matters on Windows desktop.
   ///
   /// @param userId The ID of the user to whom the PDF belongs
   /// @param fileName The name of the PDF file
-  /// @param filePath Path to the local PDF on disk (preferred; null on web)
-  /// @param fileBytes In-memory bytes of the PDF (fallback when no path)
+  /// @param filePath Path to the local PDF on disk
   Future<void> uploadTanitaPdfFile({
     required String userId,
     required String fileName,
-    String? filePath,
-    Uint8List? fileBytes,
+    required String filePath,
   }) async {
 
     try {
       final now = DateTime.now();
       final storagePath = 'users/$userId/measurements/tanita_${now.millisecondsSinceEpoch}.pdf';
 
-      // 1) Upload to Storage (streamed from disk when a path is available).
+      // 1) Upload to Storage (streamed from disk).
       final storageRef = FirebaseStorage.instance.ref().child(storagePath);
       await uploadFileToStorage(
         ref: storageRef,
         metadata: SettableMetadata(contentType: 'application/pdf'),
         filePath: filePath,
-        bytes: fileBytes,
       );
 
       final downloadUrl = await storageRef.getDownloadURL();
