@@ -1,6 +1,6 @@
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/logger.dart';
 import '../providers/test_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/storage_upload.dart';
 
 final Logger log = Logger.forClass(TestsTab);
 
@@ -67,6 +68,11 @@ class _TestsTabState extends State<TestsTab> {
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic'],
         allowMultiple: true,
+        // On desktop/mobile keep only the file paths (withData:false) so the
+        // picker never loads every selected file into memory at once; bytes are
+        // streamed straight from disk at upload time. On web there is no path,
+        // so we do need the bytes.
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) return;
 
@@ -90,12 +96,20 @@ class _TestsTabState extends State<TestsTab> {
         for (int i = 0; i < total; i++) {
           final file = files[i];
           progress.value = 'Dosyalar yükleniyor (${i + 1}/$total)...';
+          // Guard against pathologically large files that would otherwise make
+          // the upload very slow and risk crashing the app on Windows desktop.
+          if (file.size > kMaxUploadBytes) {
+            log.warn('Attachment too large, skipping: {} ({} bytes)',
+                [file.name, file.size]);
+            failed.add('${file.name} (çok büyük, en fazla $kMaxUploadSizeLabel)');
+            continue;
+          }
           try {
-            final bytes = await _readFileBytes(file);
             await provider.uploadTestAttachmentFile(
               userId: widget.userId,
               fileName: file.name,
-              fileBytes: bytes,
+              filePath: file.path,   // streamed from disk on desktop/mobile
+              fileBytes: file.bytes, // fallback (web)
             );
             success++;
           } catch (e) {
@@ -143,15 +157,6 @@ class _TestsTabState extends State<TestsTab> {
       if (!mounted) return;
       await DialogUtils.openError(context, title: 'Hata', message: 'Dosya seçme hatası: $e');
     }
-  }
-
-  /// Reads a picked file's bytes, preferring the in-memory [PlatformFile.bytes]
-  /// and falling back to reading from [PlatformFile.path] on platforms that
-  /// only expose a file path.
-  Future<List<int>> _readFileBytes(PlatformFile file) async {
-    if (file.bytes != null) return file.bytes!;
-    if (file.path != null) return File(file.path!).readAsBytes();
-    throw Exception('Dosya okunamadı.');
   }
 
   Future<void> _deleteFile(_TestAttachmentModel f) async {

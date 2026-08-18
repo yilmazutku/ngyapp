@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../models/diet_model.dart';
 import '../models/logger.dart';
 import '../models/filter_params.dart';
+import '../utils/storage_upload.dart';
 
 /// Manages diet data for users
 /// Provides functionality for fetching, creating, updating, and deleting diet documents
@@ -280,18 +281,21 @@ class DietProvider extends ChangeNotifier {
   Future<Map<String, String>?> uploadRecipePdf({
     required String userId,
     required String fileName,
-    required List<int> fileBytes,
+    String? filePath,
+    Uint8List? fileBytes,
   }) async {
     try {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final storagePath = 'users/$userId/dietRecipes/recipe_$ts.pdf';
 
       final ref = FirebaseStorage.instance.ref().child(storagePath);
-      final upload = await ref.putData(
-        Uint8List.fromList(fileBytes),
-        SettableMetadata(contentType: 'application/pdf'),
+      await uploadFileToStorage(
+        ref: ref,
+        metadata: SettableMetadata(contentType: 'application/pdf'),
+        filePath: filePath,
+        bytes: fileBytes,
       );
-      final downloadUrl = await upload.ref.getDownloadURL();
+      final downloadUrl = await ref.getDownloadURL();
 
       logger.info('Recipe PDF uploaded. userId=$userId path=$storagePath');
       return {

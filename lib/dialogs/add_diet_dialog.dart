@@ -17,6 +17,7 @@ import '../providers/diet_provider.dart'; // Add diet provider import
 import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
+import '../utils/storage_upload.dart';
 
 /// We'll create a logger for this dialog
 final Logger log = Logger.forClass(AddDietDialog);
@@ -587,6 +588,19 @@ class _AddDietDialogState extends State<AddDietDialog> {
     }
 
     final file = result.files.single;
+    // Reject pathologically large PDFs up-front (slow / risk of crashing the
+    // app on Windows desktop) instead of holding them in memory.
+    if (file.size > kMaxUploadBytes) {
+      log.warn('Recipe PDF too large: {} ({} bytes)', [file.name, file.size]);
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Seçilen PDF çok büyük (en fazla $kMaxUploadSizeLabel).',
+        );
+      }
+      return;
+    }
     final bytes = file.bytes;
     if (bytes == null) {
       log.warn('Recipe PDF bytes are null.');

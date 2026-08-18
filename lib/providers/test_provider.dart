@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import '../models/logger.dart';
+import '../utils/storage_upload.dart';
 
 final Logger logger = Logger.forClass(TestProvider);
 
@@ -10,11 +11,16 @@ final Logger logger = Logger.forClass(TestProvider);
 /// Storage:  users/{userId}/tests/test_<ts>.<ext>
 /// Firestore: users/{userId}/tests/doc('pdfFiles')/collection('pdfFiles')/{test_<ts>}
 class TestProvider extends ChangeNotifier {
-  /// Upload a test attachment (PDF or image) and write its metadata
+  /// Upload a test attachment (PDF or image) and write its metadata.
+  ///
+  /// Prefers streaming the file from disk via [filePath] (low, constant memory)
+  /// and only uses the in-memory [fileBytes] as a fallback (e.g. on web). See
+  /// [uploadFileToStorage] for why streaming matters on Windows desktop.
   Future<void> uploadTestAttachmentFile({
     required String userId,
     required String fileName,
-    required List<int> fileBytes,
+    String? filePath,
+    Uint8List? fileBytes,
   }) async {
     try {
       final now = DateTime.now();
@@ -25,13 +31,15 @@ class TestProvider extends ChangeNotifier {
       final contentType = _inferContentType(ext); // e.g., application/pdf, image/jpeg
       final storagePath = 'users/$userId/tests/$docId.$ext';
 
-      // 1) upload to Storage with correct contentType
+      // 1) upload to Storage (streamed from disk when a path is available).
       final ref = FirebaseStorage.instance.ref().child(storagePath);
-      final upload = await ref.putData(
-        Uint8List.fromList(fileBytes),
-        SettableMetadata(contentType: contentType),
+      await uploadFileToStorage(
+        ref: ref,
+        metadata: SettableMetadata(contentType: contentType),
+        filePath: filePath,
+        bytes: fileBytes,
       );
-      final downloadUrl = await upload.ref.getDownloadURL();
+      final downloadUrl = await ref.getDownloadURL();
 
       // 2) write Firestore metadata (kept "pdfFiles" path for backward parity with Tanita)
       final docRef = FirebaseFirestore.instance

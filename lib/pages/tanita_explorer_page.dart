@@ -1,12 +1,13 @@
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/meas_provider.dart';
 import '../models/logger.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
 
 final Logger log = Logger.forClass(TanitaExplorerPage);
@@ -67,6 +68,11 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         type: FileType.custom,
         allowedExtensions: ['pdf'],
         allowMultiple: true,
+        // On desktop/mobile keep only the file paths (withData:false) so the
+        // picker never loads every selected PDF into memory at once; the bytes
+        // are streamed straight from disk at upload time. On web there is no
+        // path, so we do need the bytes.
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) {
         log.info('No PDF selected.');
@@ -94,12 +100,20 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         for (int i = 0; i < total; i++) {
           final file = files[i];
           progress.value = 'PDF yükleniyor (${i + 1}/$total)...';
+          // Guard against pathologically large files that would otherwise make
+          // the upload very slow and risk crashing the app on Windows desktop.
+          if (file.size > kMaxUploadBytes) {
+            log.warn('Tanita PDF too large, skipping: {} ({} bytes)',
+                [file.name, file.size]);
+            failed.add('${file.name} (çok büyük, en fazla $kMaxUploadSizeLabel)');
+            continue;
+          }
           try {
-            final bytes = await _readFileBytes(file);
             await provider.uploadTanitaPdfFile(
               userId: widget.userId,
               fileName: file.name,
-              fileBytes: bytes,
+              filePath: file.path,   // streamed from disk on desktop/mobile
+              fileBytes: file.bytes, // fallback (web)
             );
             success++;
           } catch (e) {
@@ -156,15 +170,6 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         message: 'Dosya seçme hatası: $e',
       );
     }
-  }
-
-  /// Reads a picked file's bytes, preferring the in-memory [PlatformFile.bytes]
-  /// and falling back to reading from [PlatformFile.path] on platforms that
-  /// only expose a file path.
-  Future<List<int>> _readFileBytes(PlatformFile file) async {
-    if (file.bytes != null) return file.bytes!;
-    if (file.path != null) return File(file.path!).readAsBytes();
-    throw Exception('Dosya okunamadı.');
   }
 
   /// Confirms and deletes a Tanita PDF (both its Storage blob and Firestore

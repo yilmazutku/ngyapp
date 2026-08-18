@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/logger.dart';
 import '../models/meas_model.dart';
 import '../models/filter_params.dart';
+import '../utils/storage_upload.dart';
 import 'dart:typed_data';
 
 final Logger logger = Logger.forClass(MeasProvider);
@@ -253,26 +254,36 @@ class MeasProvider extends ChangeNotifier {
   // }
 
   /// Uploads a Tanita PDF file to Firebase Storage and stores its metadata in Firestore
-  /// 
+  ///
+  /// Prefers streaming the file from disk via [filePath] (low, constant memory)
+  /// and only uses the in-memory [fileBytes] as a fallback (e.g. on web). See
+  /// [uploadFileToStorage] for why streaming matters on Windows desktop.
+  ///
   /// @param userId The ID of the user to whom the PDF belongs
   /// @param fileName The name of the PDF file
-  /// @param fileBytes The binary content of the PDF file
+  /// @param filePath Path to the local PDF on disk (preferred; null on web)
+  /// @param fileBytes In-memory bytes of the PDF (fallback when no path)
   Future<void> uploadTanitaPdfFile({
     required String userId,
     required String fileName,
-    required List<int> fileBytes,
+    String? filePath,
+    Uint8List? fileBytes,
   }) async {
 
     try {
       final now = DateTime.now();
       final storagePath = 'users/$userId/measurements/tanita_${now.millisecondsSinceEpoch}.pdf';
 
-      // 1) Upload to Storage
+      // 1) Upload to Storage (streamed from disk when a path is available).
       final storageRef = FirebaseStorage.instance.ref().child(storagePath);
-      final Uint8List uint8FileBytes = Uint8List.fromList(fileBytes);
-      final uploadTask = await storageRef.putData(uint8FileBytes, SettableMetadata(contentType: 'application/pdf'));
+      await uploadFileToStorage(
+        ref: storageRef,
+        metadata: SettableMetadata(contentType: 'application/pdf'),
+        filePath: filePath,
+        bytes: fileBytes,
+      );
 
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      final downloadUrl = await storageRef.getDownloadURL();
 
       // 2) Save metadata doc in Firestore
       final docId = 'tanita_${now.millisecondsSinceEpoch}';
