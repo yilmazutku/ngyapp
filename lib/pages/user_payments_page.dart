@@ -166,11 +166,8 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
   /// Returns an integer that represents the "priority" of the payment.
   /// 0 = Overdue, 1 = Planned, 2 = Completed
   int _getStatusScore(PaymentModel p) {
-    final now = DateTime.now();
-    final isOverdue = (p.status == PaymentStatus.planned) &&
-        (p.dueDate != null) &&
-        p.dueDate!.isBefore(now);
-    if (isOverdue) return 0; // Overdue first
+    // Day-granularity: a payment due today is not overdue yet (see isOverdue).
+    if (p.isOverdue) return 0; // Overdue first
     if (p.status == PaymentStatus.planned) return 1; // Planned next
     return 2; // Completed last
   }

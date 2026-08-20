@@ -44,7 +44,8 @@ class LoginPage extends StatelessWidget {
         title: const Text('Kullanıcı Girişi'),
         centerTitle: true,
       ),
-      // Contact/info button: bottom-right (default FAB location), green.
+      // Contact/info button: flush into the very bottom-right corner, green.
+      floatingActionButtonLocation: const _BottomRightCornerFabLocation(),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showContactInfo(context),
         backgroundColor: Colors.green,
@@ -486,6 +487,27 @@ class LoginPage extends StatelessWidget {
         MaterialPageRoute(builder: (_) => const KvkkConsentPage()),
       );
     }
+  }
+}
+
+/// Positions the FAB flush into the bottom-right corner instead of the default
+/// floating spot (which leaves a ~16 px gap on both edges). Safe-area / keyboard
+/// insets are still respected so the button is never hidden behind system UI.
+class _BottomRightCornerFabLocation extends FloatingActionButtonLocation {
+  const _BottomRightCornerFabLocation();
+
+  @override
+  Offset getOffset(ScaffoldPrelayoutGeometry g) {
+    final double x = g.scaffoldSize.width -
+        g.floatingActionButtonSize.width -
+        g.minViewPadding.right;
+    final double bottomInset = g.minInsets.bottom > g.minViewPadding.bottom
+        ? g.minInsets.bottom
+        : g.minViewPadding.bottom;
+    final double y = g.scaffoldSize.height -
+        g.floatingActionButtonSize.height -
+        bottomInset;
+    return Offset(x, y);
   }
 }
 

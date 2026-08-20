@@ -205,10 +205,11 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
           }
         }
       } else if (p.status == PaymentStatus.planned && p.dueDate != null) {
-        if (p.dueDate!.isAfter(now)) {
-          upcoming++;
-        } else {
+        // Day-granularity: a payment due today is upcoming, not overdue.
+        if (p.isOverdue) {
           overdue++;
+        } else {
+          upcoming++;
         }
       }
 
@@ -380,17 +381,17 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     double amountDue = 0, amountPaid = 0;
 
     if (_statsDirty) {
-      final now = DateTime.now();
       for (final p in _filteredPayments) {
         if (p.status == PaymentStatus.completed) {
           completed++;
           amountPaid += p.amount;
         } else if (p.status == PaymentStatus.planned) {
           if (p.dueDate != null) {
-            if (p.dueDate!.isAfter(now)) {
-              upcoming++;
-            } else {
+            // Day-granularity: a payment due today is upcoming, not overdue.
+            if (p.isOverdue) {
               overdue++;
+            } else {
+              upcoming++;
             }
             amountDue += p.amount;
           }
@@ -757,11 +758,11 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   }
 
   Widget _buildUpcomingPaymentsTab() {
-    final now = DateTime.now();
+    // Day-granularity: a payment due today belongs here (upcoming), not overdue.
     final upcomingPayments = _filteredPayments.where((payment) {
       return payment.status == PaymentStatus.planned &&
           payment.dueDate != null &&
-          payment.dueDate!.isAfter(now);
+          !payment.isOverdue;
     }).toList();
 
     return _isLoading
@@ -809,11 +810,9 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   }
 
   Widget _buildOverduePaymentsTab() {
-    final now = DateTime.now();
+    // Day-granularity: a payment due today is not overdue yet (see isOverdue).
     final overduePayments = _filteredPayments.where((payment) {
-      return payment.status == PaymentStatus.planned &&
-          payment.dueDate != null &&
-          payment.dueDate!.isBefore(now);
+      return payment.isOverdue;
     }).toList();
 
     return _isLoading

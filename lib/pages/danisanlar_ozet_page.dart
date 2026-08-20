@@ -209,7 +209,49 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       return Center(child: Text(widget.emptyMessage));
     }
 
-    return _buildTable();
+    // Total-count banner (top-left) above the table, showing how many customers
+    // are currently listed in this tab.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildTotalCountHeader(),
+        Expanded(child: _buildTable()),
+      ],
+    );
+  }
+
+  /// A small banner in the top-left showing the number of customers listed in
+  /// this tab (`Toplam Danışan Sayısı`).
+  Widget _buildTotalCountHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.blue.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.shade200),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.people, size: 18, color: Colors.blue.shade800),
+              const SizedBox(width: 6),
+              Text(
+                'Toplam Danışan Sayısı: ${_rows.length}',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue.shade900,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildTable() {

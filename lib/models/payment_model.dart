@@ -39,6 +39,19 @@ class PaymentModel {
     this.updateUser,
   }) : createDate = createDate ?? DateTime.now();
 
+  /// Whether this planned payment is overdue ("Geciken") as of now.
+  ///
+  /// Compared at *day* granularity: a payment counts as overdue only once its
+  /// due date falls before today (00:00). A payment planned for *today* is not
+  /// late yet, so it is treated as upcoming ("Gelecek"), not overdue.
+  bool get isOverdue {
+    final due = dueDate;
+    if (status != PaymentStatus.planned || due == null) return false;
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    return due.isBefore(startOfToday);
+  }
+
   factory PaymentModel.fromDocument(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return PaymentModel(
@@ -123,10 +136,8 @@ extension PaymentModelUIUser on PaymentModel {
     bool showDeleteButton = false,
   }) {
     // You can keep or remove the "overdue" color if needed.
-    final now = DateTime.now();
-    final isOverdue = status == PaymentStatus.planned &&
-        dueDate != null &&
-        dueDate!.isBefore(now);
+    // Day-granularity rule: a payment planned for today is not overdue yet.
+    final isOverdue = this.isOverdue;
     // Pending (planned) payments are emphasized so the user notices them: a
     // warning icon plus bold text. Overdue ones get a stronger red accent.
     final isPlanned = status == PaymentStatus.planned;
@@ -224,10 +235,8 @@ extension PaymentModelUI on PaymentModel {
     bool showEditButton = true,
     bool showDeleteButton = true,
   }) {
-    final now = DateTime.now();
-    bool isOverdue = status == PaymentStatus.planned &&
-        dueDate != null &&
-        dueDate!.isBefore(now);
+    // Day-granularity rule: a payment planned for today is not overdue yet.
+    final bool isOverdue = this.isOverdue;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
