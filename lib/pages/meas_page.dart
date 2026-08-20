@@ -560,10 +560,13 @@ class _MeasurementPageState extends State<MeasurementPage> {
     final points = series.points;
 
     final values = points.map((p) => p.value).toList();
+    // Points are sorted oldest -> newest, so `first` is the starting measurement
+    // and `last` is the most recent one. Total change spans the whole history.
     final last = values.last;
+    final first = values.first;
+    final totalChange = last - first;
     final minV = values.reduce(math.min);
     final maxV = values.reduce(math.max);
-    final double? prev = points.length >= 2 ? values[values.length - 2] : null;
 
     return Card(
       elevation: 2,
@@ -573,7 +576,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Title + latest value + delta
+            // Title + "Son Ölçüm" (latest measurement), shown prominently.
             Row(
               children: [
                 Container(
@@ -596,19 +599,32 @@ class _MeasurementPageState extends State<MeasurementPage> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
+                      'Son Ölçüm',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    Text(
                       '${_formatMetric(last)} ${metric.unit}',
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
                         color: metric.color,
                       ),
                     ),
-                    if (prev != null) _buildDeltaChip(last - prev, metric.unit),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 10),
+            // "Toplam Değişim": change since the very first measurement, shown
+            // as a prominent banner (needs at least two measurements).
+            if (values.length >= 2) ...[
+              _buildTotalChangeBanner(totalChange, metric.unit),
+              const SizedBox(height: 10),
+            ],
             MeasurementLineChart(
               points: points,
               color: metric.color,
@@ -629,29 +645,49 @@ class _MeasurementPageState extends State<MeasurementPage> {
     );
   }
 
-  Widget _buildDeltaChip(double delta, String unit) {
-    final isFlat = delta.abs() < 1e-6;
-    final isUp = delta > 0;
+  /// Prominent banner showing the total change since the first measurement
+  /// ("Toplam Değişim"). Green when the value went down, orange when it went up.
+  Widget _buildTotalChangeBanner(double change, String unit) {
+    final isFlat = change.abs() < 1e-6;
+    final isUp = change > 0;
     final color = isFlat
         ? Colors.grey.shade600
         : (isUp ? const Color(0xFFEA580C) : const Color(0xFF16A34A));
     final icon = isFlat
         ? Icons.remove
         : (isUp ? Icons.arrow_upward : Icons.arrow_downward);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 12, color: color),
-        const SizedBox(width: 2),
-        Text(
-          '${_formatMetric(delta.abs())} $unit',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: color,
+    final sign = isFlat ? '' : (isUp ? '+' : '-');
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(width: 6),
+          Text(
+            'Toplam Değişim',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
           ),
-        ),
-      ],
+          const Spacer(),
+          Text(
+            '$sign${_formatMetric(change.abs())} $unit',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
