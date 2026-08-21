@@ -138,12 +138,21 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   }).toList(),
                   onChanged: (newValue) => setState(() {
                     _selectedStatus = newValue!;
-                    // "6 Aylık" is only valid for Aktif/Kilo Takip. If the
-                    // status moves away while it is selected, clear the
-                    // selection so the dropdown value stays among its items.
-                    if (_selectedPackageType != null &&
+                    // Package-type options depend on the status (Aktif/Kilo
+                    // Takip → only "6 Aylık"; other statuses → 1/3 Aylık). Keep
+                    // the selection valid: drop it when no longer allowed, and
+                    // when a status leaves exactly one option pre-select it (so
+                    // Kilo Takip auto-picks 6 Aylık and fills its meetings).
+                    if (_selectedPackageType == null ||
                         !_selectedPackageType!.isAvailableFor(_selectedStatus)) {
-                      _selectedPackageType = null;
+                      final options =
+                          SubsPackageType.availableFor(_selectedStatus);
+                      _selectedPackageType =
+                          options.length == 1 ? options.first : null;
+                      if (_selectedPackageType != null) {
+                        _totalMeetingsController.text =
+                            _selectedPackageType!.defaultMeetings.toString();
+                      }
                       _updatePackageName();
                     }
                   }),

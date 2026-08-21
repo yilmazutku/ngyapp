@@ -20,7 +20,7 @@ enum SubsMeetingType {
 enum SubsPackageType {
   oneMonth('1 Aylık', 4),
   threeMonth('3 Aylık', 12),
-  // Only offered for "Aktif/Kilo Takip" packages (see the add/edit dialogs).
+  // The exclusive duration for "Aktif/Kilo Takip" packages (see the dialogs).
   sixMonth('6 Aylık', 6);
 
   const SubsPackageType(this.label, this.defaultMeetings);
@@ -42,16 +42,18 @@ enum SubsPackageType {
   }
 
   /// Whether this package duration may be offered for a subscription with the
-  /// given [status]. "6 Aylık" is exclusive to "Aktif/Kilo Takip" packages;
-  /// every other duration is available for all statuses.
+  /// given [status]. "Aktif/Kilo Takip" packages are exclusively "6 Aylık";
+  /// every other status uses the non-weight-tracking durations (1 Aylık /
+  /// 3 Aylık). The relationship is therefore two-way: 6 Aylık ⇔ Kilo Takip.
   bool isAvailableFor(SubActiveStatus status) {
-    if (this == SubsPackageType.sixMonth) {
-      return status == SubActiveStatus.activeWeightTracking;
-    }
-    return true;
+    final isWeightTracking = status == SubActiveStatus.activeWeightTracking;
+    return this == SubsPackageType.sixMonth
+        ? isWeightTracking
+        : !isWeightTracking;
   }
 
-  /// The package durations selectable for a subscription with [status].
+  /// The package durations selectable for a subscription with [status]
+  /// ("Aktif/Kilo Takip" → only 6 Aylık; every other status → 1/3 Aylık).
   static List<SubsPackageType> availableFor(SubActiveStatus status) =>
       values.where((type) => type.isAvailableFor(status)).toList();
 }

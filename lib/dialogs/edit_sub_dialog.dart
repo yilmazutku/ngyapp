@@ -223,6 +223,19 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 onChanged: (newValue) {
                   setState(() {
                     _status = newValue!;
+                    // Keep the package type valid for the new status (Aktif/Kilo
+                    // Takip → only "6 Aylık"; other statuses → 1/3 Aylık). When a
+                    // status leaves exactly one option, pre-select it.
+                    if (_packageType == null ||
+                        !_packageType!.isAvailableFor(_status)) {
+                      final options = SubsPackageType.availableFor(_status);
+                      _packageType =
+                          options.length == 1 ? options.first : null;
+                      if (_packageType != null) {
+                        _totalMeetingsController.text =
+                            _packageType!.defaultMeetings.toString();
+                      }
+                    }
                   });
                 },
                 decoration: const InputDecoration(
@@ -253,19 +266,26 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     ),
                   );
                 }).toList(),
-                onChanged: (newValue) {
-                  setState(() {
-                    _packageType = newValue;
-                    if (newValue != null) {
-                      _totalMeetingsController.text =
-                          newValue.defaultMeetings.toString();
-                    }
-                  });
-                },
-                decoration: const InputDecoration(
-                  labelText: 'Paket Tipi',
+                // A "Kilo Takip" package is fixed to "6 Aylık", so its type is
+                // locked (not editable) here; other statuses stay editable
+                // within their allowed durations.
+                onChanged: _status == SubActiveStatus.activeWeightTracking
+                    ? null
+                    : (newValue) {
+                        setState(() {
+                          _packageType = newValue;
+                          if (newValue != null) {
+                            _totalMeetingsController.text =
+                                newValue.defaultMeetings.toString();
+                          }
+                        });
+                      },
+                decoration: InputDecoration(
+                  labelText: _status == SubActiveStatus.activeWeightTracking
+                      ? 'Paket Tipi (Kilo Takip: değiştirilemez)'
+                      : 'Paket Tipi',
                   hintText: 'Paket süresini seçin',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 16),
