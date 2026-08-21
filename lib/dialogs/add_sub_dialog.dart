@@ -136,8 +136,17 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                       child: Text(status.displayName),
                     );
                   }).toList(),
-                  onChanged: (newValue) =>
-                      setState(() => _selectedStatus = newValue!),
+                  onChanged: (newValue) => setState(() {
+                    _selectedStatus = newValue!;
+                    // "6 Aylık" is only valid for Aktif/Kilo Takip. If the
+                    // status moves away while it is selected, clear the
+                    // selection so the dropdown value stays among its items.
+                    if (_selectedPackageType != null &&
+                        !_selectedPackageType!.isAvailableFor(_selectedStatus)) {
+                      _selectedPackageType = null;
+                      _updatePackageName();
+                    }
+                  }),
                   decoration: const InputDecoration(
                     labelText: 'Paket Durumu',
                     border: OutlineInputBorder(),
@@ -150,7 +159,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                 DropdownButtonFormField<SubsPackageType>(
                   value: _selectedPackageType,
                   isExpanded: true,
-                  items: SubsPackageType.values.map((SubsPackageType type) {
+                  items: SubsPackageType.availableFor(_selectedStatus)
+                      .map((SubsPackageType type) {
                     return DropdownMenuItem<SubsPackageType>(
                       value: type,
                       child: Text(

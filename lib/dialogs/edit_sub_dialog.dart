@@ -237,7 +237,14 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
               DropdownButtonFormField<SubsPackageType>(
                 value: _packageType,
                 isExpanded: true,
-                items: SubsPackageType.values.map((SubsPackageType type) {
+                // Offer the durations valid for the current status, but always
+                // keep the already-saved type in the list so an existing
+                // "6 Aylık" package (whose status may since have changed) still
+                // shows and never breaks the dropdown.
+                items: <SubsPackageType>{
+                  ...SubsPackageType.availableFor(_status),
+                  if (_packageType != null) _packageType!,
+                }.map((SubsPackageType type) {
                   return DropdownMenuItem<SubsPackageType>(
                     value: type,
                     child: Text(
