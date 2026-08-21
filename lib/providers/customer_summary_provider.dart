@@ -212,8 +212,12 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// Resolves both the session (seans) cells and the postponed-appointment
   /// date cells for the active subscription from a single appointment query.
   ///
-  /// - Seans: non-deleted appointments ordered by [appointmentDateTime]; missing
-  ///   dates become "Hata". Always [CustomerSummaryRow.maxSeans] entries.
+  /// - Seans: only appointments that actually took place — status "Yapıldı"
+  ///   (completed) or "Yakıldı" (burned) — ordered by [appointmentDateTime];
+  ///   missing dates become "Hata". Always [CustomerSummaryRow.maxSeans]
+  ///   entries. Postponed ("Ertelendi"), still-scheduled and cancelled
+  ///   appointments are intentionally excluded here; a postponed appointment
+  ///   reappears once it is re-marked "Yapıldı" on its new date.
   /// - Postponed dates: appointments with status "Ertelendi" ordered by
   ///   [postponedDate]; a postponed appointment with no postponedDate becomes
   ///   "Hata". Variable length (only the postponed ones).
@@ -238,16 +242,28 @@ class CustomerSummaryProvider extends ChangeNotifier {
         // Match the app convention: only "live" appointments (isDeleted null).
         if (data['isDeleted'] != null) continue;
 
-        final rawDate = data['appointmentDateTime'];
-        if (rawDate is Timestamp) {
-          seansDates.add(rawDate.toDate());
-        } else {
-          // Field expected but missing/null => surface as an error cell.
-          seansNullCount++;
+        final status = data['status'];
+
+        // Seans column: only appointments that actually took place — "Yapıldı"
+        // (completed) or "Yakıldı" (burned). Postponed ("Ertelendi"),
+        // still-scheduled and cancelled ones are excluded on purpose; a
+        // postponed appointment shows up here once it is re-marked "Yapıldı" on
+        // its new date.
+        final countsAsSeans = status == AppointmentStatus.completed.label ||
+            status == AppointmentStatus.burned.label;
+        if (countsAsSeans) {
+          final rawDate = data['appointmentDateTime'];
+          if (rawDate is Timestamp) {
+            seansDates.add(rawDate.toDate());
+          } else {
+            // Field expected but missing/null => surface as an error cell.
+            seansNullCount++;
+          }
         }
 
-        // Collect postponed ("Ertelendi") appointments separately.
-        if (data['status'] == AppointmentStatus.postponed.label) {
+        // Collect postponed ("Ertelendi") appointments separately (independent
+        // of the seans filter above).
+        if (status == AppointmentStatus.postponed.label) {
           final rawPostponed = data['postponedDate'];
           if (rawPostponed is Timestamp) {
             postponedDates.add(rawPostponed.toDate());
