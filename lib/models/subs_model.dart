@@ -19,7 +19,9 @@ enum SubsMeetingType {
 /// the meeting count afterwards.
 enum SubsPackageType {
   oneMonth('1 Aylık', 4),
-  threeMonth('3 Aylık', 12);
+  threeMonth('3 Aylık', 12),
+  // Only offered for "Aktif/Kilo Takip" packages (see the add/edit dialogs).
+  sixMonth('6 Aylık', 6);
 
   const SubsPackageType(this.label, this.defaultMeetings);
 
@@ -38,6 +40,20 @@ enum SubsPackageType {
     }
     return null;
   }
+
+  /// Whether this package duration may be offered for a subscription with the
+  /// given [status]. "6 Aylık" is exclusive to "Aktif/Kilo Takip" packages;
+  /// every other duration is available for all statuses.
+  bool isAvailableFor(SubActiveStatus status) {
+    if (this == SubsPackageType.sixMonth) {
+      return status == SubActiveStatus.activeWeightTracking;
+    }
+    return true;
+  }
+
+  /// The package durations selectable for a subscription with [status].
+  static List<SubsPackageType> availableFor(SubActiveStatus status) =>
+      values.where((type) => type.isAvailableFor(status)).toList();
 }
 
 class SubscriptionModel {
