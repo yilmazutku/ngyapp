@@ -2,6 +2,14 @@
 
 import 'package:flutter/services.dart';
 
+/// Widest window the payment date pickers offer.
+///
+/// A payment can legitimately be dated in the past or in the future whatever
+/// its status: a receipt entered late, an instalment planned for next year. The
+/// pickers therefore are not clamped around today.
+final DateTime kPaymentDateFirst = DateTime(2000);
+final DateTime kPaymentDateLast = DateTime(2100);
+
 /// Parses a `dd<sep>mm<sep>yyyy` string (dots or slashes accepted) into a
 /// [DateTime]. Returns null when the value is incomplete or is not a real
 /// calendar date (e.g. `31.02.2024`).

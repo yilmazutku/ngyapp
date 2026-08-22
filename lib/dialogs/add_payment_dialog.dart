@@ -13,6 +13,7 @@ import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
+import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/loading_overlay.dart';
 
@@ -225,8 +226,8 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                   DateTime? pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedDueDate ?? DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime(2030),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   if (pickedDate != null) {
                     setState(() {
@@ -253,8 +254,8 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                   DateTime? pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedPaymentDate ?? DateTime.now(),
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   // Keep the previously selected date if the user cancels.
                   if (pickedDate != null) {

@@ -106,12 +106,14 @@ class _AppointmentsTabState
     extends FilterableTabState<AppointmentManager, AppointmentsTab> {
   AppointmentStatus? _selectedStatus;
   MeetingType? _selectedType;
-  AppointmentSortOption _sortOption = AppointmentSortOption.closestToToday;
+  // Newest first by default: the most recent appointment is the one the
+  // admin usually looks for.
+  AppointmentSortOption _sortOption = AppointmentSortOption.dateDescending;
 
   // temp filters (for the modal)
   AppointmentStatus? _tempStatus;
   MeetingType? _tempType;
-  AppointmentSortOption _tempSortOption = AppointmentSortOption.closestToToday;
+  AppointmentSortOption _tempSortOption = AppointmentSortOption.dateDescending;
 
   // final DateFormat _longDateFormat = DateFormat('dd MMMM yyyy, HH:mm');
   // final DateFormat _shortDateFormat = DateFormat('dd.MM.yyyy');
@@ -190,7 +192,7 @@ class _AppointmentsTabState
   void resetAdditionalFilters() {
     _selectedStatus = null;
     _selectedType = null;
-    _sortOption = AppointmentSortOption.closestToToday;
+    _sortOption = AppointmentSortOption.dateDescending;
     resetTempFiltersToDefaults();
   }
 
@@ -198,14 +200,14 @@ class _AppointmentsTabState
   void resetTempFiltersToDefaults() {
     _tempStatus = null;
     _tempType = null;
-    _tempSortOption = AppointmentSortOption.closestToToday;
+    _tempSortOption = AppointmentSortOption.dateDescending;
   }
 
   @override
   bool hasAdditionalActiveFilters() {
     return _selectedStatus != null ||
         _selectedType != null ||
-        _sortOption != AppointmentSortOption.closestToToday;
+        _sortOption != AppointmentSortOption.dateDescending;
   }
 
   @override
