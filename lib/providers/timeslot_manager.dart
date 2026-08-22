@@ -67,29 +67,19 @@ class TimeslotManager extends ChangeNotifier {
 
   Future<List<TimeOfDay>> getAvailableTimeSlotsForDate(DateTime date) async {
     try {
-      final adminTimeSlots = await getAdminTimeSlotsForDate(date);
-
       final startOfDay = DateTime(date.year, date.month, date.day);
       final endOfDay = startOfDay.add(const Duration(days: 1));
 
-      final appointmentSnapshot = await FirebaseFirestore.instance
-          .collectionGroup('appointments')
-          .where('appointmentDateTime', isGreaterThanOrEqualTo: startOfDay)
-          .where('appointmentDateTime', isLessThan: endOfDay)
-          .get();
+      // The three reads do not depend on each other, so they run concurrently
+      // instead of costing three sequential round trips.
+      final adminSlotsFuture = getAdminTimeSlotsForDate(date);
+      final appointmentsFuture =
+          _fetchAppointmentsForDateRange(startOfDay, endOfDay);
+      final eventsFuture = _fetchEventsForDateRange(startOfDay, endOfDay);
 
-      final dayAppointments = appointmentSnapshot.docs
-          .map((doc) => AppointmentModel.fromDocument(doc))
-          .toList();
-
-      // Also fetch events for the day
-      final dayEvents =
-          await EventProvider.eventsCollection
-              .where('startDateTime', isGreaterThanOrEqualTo: startOfDay)
-              .where('startDateTime', isLessThan: endOfDay)
-              .get()
-              .then((snap) =>
-                  snap.docs.map((d) => EventModel.fromDocument(d)).toList());
+      final adminTimeSlots = await adminSlotsFuture;
+      final dayAppointments = await appointmentsFuture;
+      final dayEvents = await eventsFuture;
 
       final availableSlots = adminTimeSlots.where((time) {
         if (!isTimeSlotAvailable(date, time, dayAppointments)) {
@@ -178,19 +168,12 @@ class TimeslotManager extends ChangeNotifier {
           .collection('dates')
           .doc(dateString);
 
-      // Get existing slots to avoid duplicates
-      final docSnapshot = await docRef.get();
-      final List<dynamic> rawSlots =
-      docSnapshot.exists ? (docSnapshot.data()?['slots'] ?? []) : [];
-      final List<String> existingSlots =
-      rawSlots.map((e) => e.toString()).toList();
-
-      // Merge and deduplicate
-      final allSlots = {...existingSlots, ...timeSlots}.toList();
-
+      // arrayUnion appends only the slots that are not stored yet, so the merge
+      // happens server-side: no read-modify-write, and two admins saving at the
+      // same time can no longer overwrite each other's slots.
       await docRef.set(
         {
-          'slots': allSlots,
+          'slots': FieldValue.arrayUnion(timeSlots),
           'updatedAt': FieldValue.serverTimestamp(),
         },
         SetOptions(merge: true),
@@ -198,7 +181,7 @@ class TimeslotManager extends ChangeNotifier {
 
       logger.info(
         'Saved {} time slots for date {}',
-        [allSlots.length, dateString],
+        [timeSlots.length, dateString],
       );
     } catch (e) {
       logger.err('Error saving time slots for date {}: {}', [date, e]);
@@ -256,25 +239,19 @@ class TimeslotManager extends ChangeNotifier {
         final appointments =
         await _fetchAppointmentsForDateRange(startOfDay, endOfDay);
 
-        // Extract booked time slots
-        final bookedTimeSlots = <String>[];
+        // Extract booked time slots. A set: two appointments sharing a start
+        // time must not write the same slot twice.
+        final bookedTimeSlots = <String>{};
         for (var appointment in appointments) {
           if (appointment.status != AppointmentStatus.canceled) {
-            final hour =
-            appointment.appointmentDateTime.hour.toString().padLeft(2, '0');
-            final minute = appointment
-                .appointmentDateTime.minute
-                .toString()
-                .padLeft(2, '0');
-            final timeSlot = '$hour:$minute';
-            bookedTimeSlots.add(timeSlot);
+            bookedTimeSlots.add(_slotKey(appointment.appointmentDateTime));
           }
         }
 
         if (bookedTimeSlots.isNotEmpty) {
           // Keep only booked slots
           await docRef.set({
-            'slots': bookedTimeSlots,
+            'slots': bookedTimeSlots.toList(),
             'updatedAt': FieldValue.serverTimestamp(),
           });
           logger.info(
@@ -308,70 +285,58 @@ class TimeslotManager extends ChangeNotifier {
   Future<Map<String, dynamic>> fetchTimeslotDataForDate(DateTime date) async {
     try {
       final dateString = DateFormat('yyyy-MM-dd').format(date);
-      final docSnapshot = await FirebaseFirestore.instance
+      final startOfDay = DateTime(date.year, date.month, date.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+
+      // Stored slots, appointments and events are independent reads, so they
+      // are issued together rather than one after the other.
+      final slotDocFuture = FirebaseFirestore.instance
           .collection('admininput')
           .doc('timeslots')
           .collection('dates')
           .doc(dateString)
           .get();
+      final appointmentsFuture =
+          _fetchAppointmentsForDateRange(startOfDay, endOfDay);
+      final eventsFuture = _fetchEventsForDateRange(startOfDay, endOfDay);
 
+      final docSnapshot = await slotDocFuture;
       final List<dynamic> rawSlots =
       docSnapshot.exists ? (docSnapshot.data()?['slots'] ?? []) : [];
       final List<String> adminSlots =
       rawSlots.map((e) => e.toString()).toList();
       final List<String> storedTimes = List<String>.from(adminSlots);
+      // Mirrors storedTimes for O(1) membership tests.
+      final storedTimeSet = storedTimes.toSet();
 
-      final startOfDay = DateTime(date.year, date.month, date.day);
-      final endOfDay = startOfDay.add(const Duration(days: 1));
-
-      final appointments =
-      await _fetchAppointmentsForDateRange(startOfDay, endOfDay);
+      final appointments = await appointmentsFuture;
 
       final hasAppointment = <String, bool>{};
-      final bookedTimeSlots = <String>[];
+      final bookedTimeSlots = <String>{};
       final appointmentsBySlot = <String, List<AppointmentModel>>{};
 
       final activeAppointments = appointments
           .where((a) => a.status != AppointmentStatus.canceled)
           .toList();
 
-      // Batch-fetch user data for all active appointments
-      final uniqueUserIds =
-          activeAppointments.map((a) => a.userId).toSet();
-      final usersCollection = FirebaseFirestore.instance.collection('users');
-      final userCache = <String, UserModel>{};
-      for (final uid in uniqueUserIds) {
-        try {
-          final doc = await usersCollection.doc(uid).get();
-          if (doc.exists) {
-            userCache[uid] = UserModel.fromDocument(doc);
-          }
-        } catch (_) {}
-      }
+      // One read per client, in parallel: several appointments of the day
+      // usually belong to the same person.
+      final userCache = await _fetchUsersByIds(
+        activeAppointments.map((a) => a.userId).toSet(),
+      );
       for (final appt in activeAppointments) {
         appt.user = userCache[appt.userId];
       }
 
       // Ensure each appointment's own start-time slot exists in storedTimes
       for (var appointment in activeAppointments) {
-        final hour =
-            appointment.appointmentDateTime.hour.toString().padLeft(2, '0');
-        final minute =
-            appointment.appointmentDateTime.minute.toString().padLeft(2, '0');
-        final timeSlot = '$hour:$minute';
-        if (!storedTimes.contains(timeSlot)) {
+        final timeSlot = _slotKey(appointment.appointmentDateTime);
+        if (storedTimeSet.add(timeSlot)) {
           storedTimes.add(timeSlot);
         }
       }
 
-      // Fetch events for the day
-      final dayEvents = await EventProvider.eventsCollection
-          .where('startDateTime', isGreaterThanOrEqualTo: startOfDay)
-          .where('startDateTime', isLessThan: endOfDay)
-          .get()
-          .then((snap) =>
-              snap.docs.map((d) => EventModel.fromDocument(d)).toList());
-
+      final dayEvents = await eventsFuture;
       final eventsBySlot = <String, List<EventModel>>{};
 
       // Check every stored slot against every active appointment and event
@@ -384,13 +349,12 @@ class TimeslotManager extends ChangeNotifier {
         for (final appointment in activeAppointments) {
           if (isSlotBlockedByAppointment(slotDateTime, appointment)) {
             hasAppointment[slotStr] = true;
-            if (!bookedTimeSlots.contains(slotStr)) {
-              bookedTimeSlots.add(slotStr);
-            }
-            appointmentsBySlot.putIfAbsent(slotStr, () => []);
-            if (!appointmentsBySlot[slotStr]!
+            bookedTimeSlots.add(slotStr);
+            final slotAppointments =
+                appointmentsBySlot.putIfAbsent(slotStr, () => []);
+            if (!slotAppointments
                 .any((a) => a.appointmentId == appointment.appointmentId)) {
-              appointmentsBySlot[slotStr]!.add(appointment);
+              slotAppointments.add(appointment);
             }
           }
         }
@@ -398,13 +362,10 @@ class TimeslotManager extends ChangeNotifier {
         for (final event in dayEvents) {
           if (isSlotBlockedByEvent(slotDateTime, event)) {
             hasAppointment[slotStr] = true;
-            if (!bookedTimeSlots.contains(slotStr)) {
-              bookedTimeSlots.add(slotStr);
-            }
-            eventsBySlot.putIfAbsent(slotStr, () => []);
-            if (!eventsBySlot[slotStr]!
-                .any((e) => e.eventId == event.eventId)) {
-              eventsBySlot[slotStr]!.add(event);
+            bookedTimeSlots.add(slotStr);
+            final slotEvents = eventsBySlot.putIfAbsent(slotStr, () => []);
+            if (!slotEvents.any((e) => e.eventId == event.eventId)) {
+              slotEvents.add(event);
             }
           }
         }
@@ -428,7 +389,7 @@ class TimeslotManager extends ChangeNotifier {
         'storedTimes': storedTimes,
         'adminSlots': adminSlots,
         'hasAppointment': hasAppointment,
-        'bookedTimeSlots': bookedTimeSlots,
+        'bookedTimeSlots': bookedTimeSlots.toList(),
         'appointmentsBySlot': appointmentsBySlot,
         'eventsBySlot': eventsBySlot,
         'events': dayEvents,
@@ -440,6 +401,52 @@ class TimeslotManager extends ChangeNotifier {
   }
 
   // ---------------------- PRIVATE HELPERS ----------------------
+
+  /// "HH:mm" key a date-time falls on; the format slots are stored in.
+  static String _slotKey(DateTime dateTime) {
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  /// Internal helper: fetch the events overlapping a date range.
+  Future<List<EventModel>> _fetchEventsForDateRange(
+      DateTime startDate,
+      DateTime endDate,
+      ) async {
+    final snapshot = await EventProvider.eventsCollection
+        .where('startDateTime', isGreaterThanOrEqualTo: startDate)
+        .where('startDateTime', isLessThan: endDate)
+        .get();
+    return snapshot.docs.map((d) => EventModel.fromDocument(d)).toList();
+  }
+
+  /// Reads the given users once each, in parallel, and returns them by id.
+  /// A user that cannot be read is simply absent from the map.
+  Future<Map<String, UserModel>> _fetchUsersByIds(Set<String> userIds) async {
+    if (userIds.isEmpty) return const {};
+
+    final usersCollection = FirebaseFirestore.instance.collection('users');
+    final ids = userIds.toList();
+    final snapshots = await Future.wait(
+      ids.map((id) => usersCollection.doc(id).get().then<DocumentSnapshot<Map<String, dynamic>>?>(
+            (doc) => doc,
+            onError: (Object e) {
+              logger.warn('Could not read user {}: {}', [id, e]);
+              return null;
+            },
+          )),
+    );
+
+    final result = <String, UserModel>{};
+    for (int i = 0; i < ids.length; i++) {
+      final doc = snapshots[i];
+      if (doc != null && doc.exists) {
+        result[ids[i]] = UserModel.fromDocument(doc);
+      }
+    }
+    return result;
+  }
 
   /// Internal helper: fetch appointments across all users for a date range.
   Future<List<AppointmentModel>> _fetchAppointmentsForDateRange(
