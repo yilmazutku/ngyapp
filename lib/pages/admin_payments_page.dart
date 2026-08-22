@@ -160,11 +160,9 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         _userById = map;
         _allPayments = allPayments;
 
-        // Apply remaining client-side filters (search, sorting)
+        // Apply remaining client-side filters (search, sorting); this also
+        // refreshes the tab counts used as labels.
         _applyClientSideFilters();
-
-        // Refresh tab counts (labels)
-        _recomputeTabCounts(_filteredPayments);
         _isLoading = false;
       });
 

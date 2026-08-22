@@ -254,12 +254,15 @@ Future<String?> uploadMealImg({
       isChecked: true,
     );
 
-    await mealDocRef.set(mergedMealModel.toMap());
-    await updateMealState(userId, referenceDate, meal, true);
-
-    if (alsoPostToChat) {
-      await _postToChat(userId, meal, result.downloadUrl!, chatManager);
-    }
+    // Three different documents (meal entry, the day's checklist, the chat):
+    // independent writes, so they are issued together instead of one after the
+    // other.
+    await Future.wait([
+      mealDocRef.set(mergedMealModel.toMap()),
+      updateMealState(userId, referenceDate, meal, true),
+      if (alsoPostToChat)
+        _postToChat(userId, meal, result.downloadUrl!, chatManager),
+    ]);
 
     notifyListeners();
 
@@ -358,23 +361,22 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       final chatId = userId; // In this app, chatId == userId
       final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
       
-      // Update chat document with image info
+      // Chat summary and the admin unread counters in a single write:
+      // set(merge: true) merges nested maps field by field, so the counters do
+      // not need the dot-notation that would force a separate update().
       await chatDoc.set({
         'participants': [chatId, ...ChatManager.adminIds],
         'lastMessage': 'Öğün Fotoğrafı (${meal.label})',
         'lastImageUrl': imageUrl,
         'lastMessageAt': Timestamp.now(),
         'updatedAt': FieldValue.serverTimestamp(),
+        'adminUnreadCount': {
+          for (final adminUid in ChatManager.adminIds)
+            adminUid: FieldValue.increment(1),
+        },
+        'hasUnreadFor': FieldValue.arrayUnion(ChatManager.adminIds.toList()),
       }, SetOptions(merge: true));
-      
-      // Increment admin unread counts via update() (dot-notation needs update())
-      final unreadData = <String, dynamic>{};
-      for (final adminUid in ChatManager.adminIds) {
-        unreadData['adminUnreadCount.$adminUid'] = FieldValue.increment(1);
-      }
-      unreadData['hasUnreadFor'] = FieldValue.arrayUnion(ChatManager.adminIds.toList());
-      await chatDoc.update(unreadData);
-      
+
       // Add message to chat
       final msgData = <String, dynamic>{
         'chatId': chatId,
