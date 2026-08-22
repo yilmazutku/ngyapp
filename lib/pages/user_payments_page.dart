@@ -44,7 +44,8 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
   DateTimeRange? _selectedDateRange;
 
   /// Ascending or descending sort by date (applied *within* each group).
-  bool _isDateAscending = true;
+  /// Newest first by default: August's payments belong above July's.
+  bool _isDateAscending = false;
 
   @override
   void initState() {
@@ -178,7 +179,7 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
     setState(() {
       _selectedStatus = null;
       _selectedDateRange = null;
-      _isDateAscending = true;
+      _isDateAscending = false;
     });
     _applyFilters();
   }

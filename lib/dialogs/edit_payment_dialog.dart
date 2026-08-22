@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
+import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
@@ -217,8 +218,8 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                   final pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedDueDate ?? now, // <- preserves previous
-                    firstDate: now.subtract(const Duration(days: 365)),
-                    lastDate: now.add(const Duration(days: 365)),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   // Keep the previously selected date if the user cancels.
                   if (pickedDate != null) {
@@ -246,8 +247,8 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                   final pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedPaymentDate ?? DateTime.now(), // <- preserves previous
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   // Keep the previously selected date if the user cancels.
                   if (pickedDate != null) {

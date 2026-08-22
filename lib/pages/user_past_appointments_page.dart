@@ -31,7 +31,8 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
   // Filters
   AppointmentStatus? _selectedStatus;
   DateTimeRange? _selectedDateRange;
-  bool _isDateAscending = true;
+  /// Newest first by default: the most recent appointment belongs at the top.
+  bool _isDateAscending = false;
 
   late final AppointmentManager _appointmentService;
 
@@ -170,7 +171,7 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     setState(() {
       _selectedStatus = null;
       _selectedDateRange = null;
-      _isDateAscending = true;
+      _isDateAscending = false;
     });
     _applyFilters();
   }

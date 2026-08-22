@@ -77,7 +77,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   MeetingType? selectedMeetingType;
   Set<AppointmentStatus> selectedStatuses = Set.from(AppointmentStatus.values);
-  String? sortOption = 'Tarih Artan';
+  // Newest first by default: the most recent appointment is the one the
+  // admin usually looks for.
+  String? sortOption = 'Tarih Azalan';
 
   final List<MeetingType?> meetingTypes = [null, ...MeetingType.values];
   final List<AppointmentStatus?> meetingStatuses = [null, ...AppointmentStatus.values];

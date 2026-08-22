@@ -30,6 +30,7 @@ class _DetailsTabState extends State<DetailsTab>
   final _notesController = TextEditingController();
   final _dosyaNoController = TextEditingController();
   final _tcNoController = TextEditingController();
+  final _phoneController = TextEditingController();
   // Birth date is picked with a date widget (like the appointment dialogs).
   DateTime? _birthDate;
 
@@ -70,6 +71,7 @@ class _DetailsTabState extends State<DetailsTab>
     _notesController.dispose();
     _dosyaNoController.dispose();
     _tcNoController.dispose();
+    _phoneController.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -83,6 +85,7 @@ class _DetailsTabState extends State<DetailsTab>
     _notesController.text = user.notes ?? '';
     _dosyaNoController.text = user.dosyaNo ?? '';
     _tcNoController.text = user.tcNo ?? '';
+    _phoneController.text = user.phone ?? '';
     _birthDate = user.birthDate;
   }
 
@@ -134,6 +137,7 @@ class _DetailsTabState extends State<DetailsTab>
       notes: _notesController.text.isEmpty ? null : _notesController.text,
       dosyaNo: _dosyaNoController.text.trim().isEmpty ? null : _dosyaNoController.text.trim(),
       tcNo: _tcNoController.text.trim().isEmpty ? null : _tcNoController.text.trim(),
+      phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
       birthDate: _birthDate,
     );
 
@@ -330,6 +334,7 @@ class _DetailsTabState extends State<DetailsTab>
                           _buildReadOnlyField('Ad', user.name),
                           _buildReadOnlyField('Soyisim', user.surname),
                           _buildReadOnlyField('E-posta', user.email),
+                          _buildReadOnlyField('Telefon', user.phone ?? ''),
                           _buildReadOnlyField('Yaş', user.age?.toString() ?? ''),
                           _buildReadOnlyField('Referans', user.reference ?? ''),
                           Text('Notlar',
@@ -409,6 +414,8 @@ class _DetailsTabState extends State<DetailsTab>
                           _buildEditableField('Soyisim', _surnameController),
                           _buildEditableField('E-posta', _emailController,
                               keyboardType: TextInputType.emailAddress, required: true),
+                          _buildEditableField('Telefon', _phoneController,
+                              keyboardType: TextInputType.phone),
                           _buildEditableField('Yaş', _ageController, keyboardType: TextInputType.number),
                           _buildEditableField('Referans', _referenceController),
                           _buildEditableField('Notlar', _notesController, maxLines: 5),

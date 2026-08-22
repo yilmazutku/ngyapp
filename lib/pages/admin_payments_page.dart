@@ -15,6 +15,7 @@ import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/amount_input_utils.dart';
+import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/payment_export_util.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -56,7 +57,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   DateTime? _startDate;
   DateTime? _endDate;
   String? _sortBy = 'dueDate';
-  bool _sortAscending = true;
+  // Newest first by default: August's payments belong above July's.
+  bool _sortAscending = false;
 
   /// Whether the per-tab statistics card is expanded.
   bool _showStats = false;
@@ -392,7 +394,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       _endDate = null;
       _searchQuery = null;
       _sortBy = 'dueDate';
-      _sortAscending = true;
+      _sortAscending = false;
     });
     // Reload data with no filters (Firebase-side)
     _loadData();
@@ -1221,8 +1223,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                               onPressed: () async {
                                 final picked = await showDateRangePicker(
                                   context: context,
-                                  firstDate: DateTime(2020),
-                                  lastDate: DateTime(2030),
+                                  firstDate: kPaymentDateFirst,
+                                  lastDate: kPaymentDateLast,
                                   initialDateRange: tempStartDate != null && tempEndDate != null
                                       ? DateTimeRange(start: tempStartDate!, end: tempEndDate!)
                                       : null,
@@ -1814,8 +1816,8 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                         DateTime? pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedDueDate ?? DateTime.now(),
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime(2030),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         if (pickedDate != null) {
                           setState(() => _selectedDueDate = pickedDate);
@@ -1842,8 +1844,8 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                         DateTime? pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedPaymentDate ?? DateTime.now(),
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime.now(),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         // Keep the previously selected date if the user cancels.
                         if (pickedDate != null) {
@@ -2666,8 +2668,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                         final pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedDueDate ?? now,
-                          firstDate: now.subtract(const Duration(days: 365)),
-                          lastDate: now.add(const Duration(days: 365)),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         // Keep the previously selected date if the user cancels.
                         if (pickedDate != null) {
@@ -2694,8 +2696,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                         final pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedPaymentDate ?? DateTime.now(),
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime.now(),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         // Keep the previously selected date if the user cancels.
                         if (pickedDate != null) {

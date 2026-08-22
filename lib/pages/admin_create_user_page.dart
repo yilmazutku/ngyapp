@@ -55,6 +55,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
   final TextEditingController _referenceController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _dosyaNoController = TextEditingController();
 
@@ -67,6 +68,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
     String? reference,
     String? notes,
     String? dosyaNo,
+    String? phone,
   }) async {
     if (name.isEmpty) {
       _showMessageDialog('Hata', 'Lütfen isim alanını doldurunuz.');
@@ -147,6 +149,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
         reference: reference,
         notes: notes,
         dosyaNo: dosyaNo,
+        phone: phone,
       );
 
       // Store user data in Firestore
@@ -285,6 +288,15 @@ class _CreateUserPageState extends State<CreateUserPage> {
               ),
               const SizedBox(height: 10),
               TextField(
+                controller: _phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Telefon Numarası (Opsiyonel)',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 10),
+              TextField(
                 controller: _ageController,
                 decoration: const InputDecoration(
                   labelText: 'Yaş Giriniz (Opsiyonel)',
@@ -317,6 +329,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   final reference = _referenceController.text.trim();
                   final notes = _notesController.text.trim();
                   final email = _emailController.text.trim();
+                  final phone = _phoneController.text.trim();
                   final dosyaNo = _dosyaNoController.text.trim();
                   final password = _passwordController.text.trim().isNotEmpty
                       ? _passwordController.text.trim()
@@ -331,6 +344,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
                     reference: reference.isNotEmpty ? reference : null,
                     notes: notes.isNotEmpty ? notes : null,
                     dosyaNo: dosyaNo.isNotEmpty ? dosyaNo : null,
+                    phone: phone.isNotEmpty ? phone : null,
                   );
                 },
                 child: const Text('Kullanıcı Oluştur'),
@@ -350,6 +364,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
     _referenceController.dispose();
     _notesController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     _dosyaNoController.dispose();
     super.dispose();
