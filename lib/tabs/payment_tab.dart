@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../dialogs/edit_payment_dialog.dart';
 import '../dialogs/add_payment_dialog.dart';
 import '../models/payment_model.dart';
-import '../models/user_model.dart';
 import '../models/filter_params.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
@@ -38,7 +37,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   final NumberFormat _currencyFormat = NumberFormat('#,##0.00 ₺', 'tr_TR');
   final DateFormat _dateFormat = DateFormat('d MMMM y', 'tr_TR');
 
-  final Map<String, UserModel> _userCache = {};
   final Map<String, String> _subscriptionCache = {}; // Cache for subscription names
   late final PaymentProvider _paymentProvider;
   final ScrollController _listCtrl = ScrollController();
@@ -109,16 +107,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
 
   @override
   bool hasAdditionalActiveFilters() => _selectedStatus != null;
-
-  bool _isPaymentAmountMatch(PaymentModel payment, String searchText) {
-    try {
-      double searchAmount = double.parse(searchText.replaceAll(',', '.'));
-      searchAmount = (searchAmount * 100).roundToDouble() / 100;
-      return (payment.amount - searchAmount).abs() < 0.01;
-    } catch (_) {
-      return false;
-    }
-  }
 
   @override
   FilterParams? buildFilterParams() {
@@ -498,55 +486,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
       ),
     );
   }
-
-  void _showPaymentDetails(BuildContext context, PaymentModel payment) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Ödeme Detayı'),
-          content: SingleChildScrollView(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              _detailRow('Tutar:', _currencyFormat.format(payment.amount)),
-              _detailRow('Durum:', payment.status.label),
-              if (payment.paymentDate != null)
-                _detailRow('Ödeme Tarihi:', _dateFormat.format(payment.paymentDate!)),
-              if (payment.dueDate != null)
-                _detailRow('Vade Tarihi:', _dateFormat.format(payment.dueDate!)),
-              if (payment.notes?.isNotEmpty == true) _detailRow('Notlar:', payment.notes!),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Kapat')),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _showEditPaymentDialog(context, payment);
-              },
-              child: const Text('Düzenle'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _showDeletePaymentDialog(context, payment);
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Sil'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _detailRow(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-      const SizedBox(height: 4),
-      Text(value),
-    ]),
-  );
 
   void _showEditPaymentDialog(BuildContext context, PaymentModel payment) {
     showDialog(
