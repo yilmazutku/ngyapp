@@ -811,18 +811,18 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   }
 
   /// Exports the given month's completed payments to an .xlsx file.
+  ///
+  /// The save location is asked for first and the loading indicator only covers
+  /// the encode/write step, so no spinner sits on top of the native dialog while
+  /// the user is picking a folder.
   Future<void> _exportMonthPayments({
     required List<PaymentModel> payments,
     required DateTime monthStart,
   }) async {
+    final titleLabel = 'Ödemeler ${kMonthYearFormat.format(monthStart)}';
     setState(() => _isExporting = true);
 
     bool loadingOpen = false;
-    if (mounted) {
-      DialogUtils.openLoading(context, message: 'Excel dosyası hazırlanıyor...');
-      loadingOpen = true;
-    }
-
     void closeLoading() {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -831,23 +831,30 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     }
 
     try {
-      final savedPath = await PaymentExportUtil.exportPayments(
+      final targetPath =
+          await PaymentExportUtil.promptForTargetPath(titleLabel: titleLabel);
+      if (targetPath == null) {
+        logger.info('Excel export cancelled');
+        return;
+      }
+
+      if (!mounted) return;
+      DialogUtils.openLoading(context, message: 'Excel dosyası hazırlanıyor...');
+      loadingOpen = true;
+
+      await PaymentExportUtil.writePayments(
+        targetPath: targetPath,
         payments: payments,
         userById: _userById,
-        titleLabel: 'Ödemeler ${kMonthYearFormat.format(monthStart)}',
+        titleLabel: titleLabel,
       );
 
       closeLoading();
       if (!mounted) return;
-
-      if (savedPath == null) {
-        logger.info('Excel export cancelled');
-        return;
-      }
       await DialogUtils.openInfo(
         context,
         title: 'Dışa Aktarma Tamamlandı',
-        message: '${payments.length} ödeme dışa aktarıldı.\n\nDosya: $savedPath',
+        message: '${payments.length} ödeme dışa aktarıldı.\n\nDosya: $targetPath',
       );
     } catch (e) {
       logger.err('Excel export failed: {}', [e]);
