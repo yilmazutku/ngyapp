@@ -2,7 +2,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:provider/provider.dart';
@@ -50,7 +49,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
   bool _loadingSubscriptions = true;
 
   // kept for future use
-  final bool _enableNotifications = false;
   final DateFormat df=DateFormat('dd.MM.yyyy', 'tr_TR');
   // Subscription selection
   List<SubscriptionModel> _availableSubscriptions = [];
@@ -549,6 +547,7 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
       );
 
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
+      final subProvider = paymentProvider.subProvider;
       logger.info('Updating payment in database...');
       await paymentProvider.updatePayment(updatedPayment);
       logger.info('Payment ${updatedPayment.paymentId} updated successfully in database');
@@ -563,120 +562,53 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
           // Step 1: Remove amount from old subscription if it was completed
           if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
             logger.info('Removing amount from old subscription $oldSubscriptionId');
-            try {
-              final oldSubDoc = await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(widget.payment.userId)
-                  .collection('subscriptions')
-                  .doc(oldSubscriptionId)
-                  .get();
-
-              if (oldSubDoc.exists) {
-                final oldSubData = oldSubDoc.data() as Map<String, dynamic>;
-                double currentAmountPaid = (oldSubData['amountPaid'] ?? 0).toDouble();
-                double newAmountPaid = (currentAmountPaid - oldAmount).clamp(0, double.infinity);
-                
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.payment.userId)
-                    .collection('subscriptions')
-                    .doc(oldSubscriptionId)
-                    .update({'amountPaid': newAmountPaid});
-                
-                logger.info('Updated old subscription $oldSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (removed $oldAmount)');
-              } else {
-                logger.warn('Old subscription $oldSubscriptionId not found in database');
-              }
-            } catch (e) {
-              logger.err('Error updating old subscription $oldSubscriptionId: {}', [e]);
-            }
+            await subProvider.adjustAmountPaid(
+              userId: widget.payment.userId,
+              subscriptionId: oldSubscriptionId,
+              delta: -oldAmount,
+            );
           }
           
           // Step 2: Add amount to new subscription if it is completed
           if (newSubscriptionId != null && _paymentStatus == PaymentStatus.completed) {
             logger.info('Adding amount to new subscription $newSubscriptionId');
-            try {
-              final newSubDoc = await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(widget.payment.userId)
-                  .collection('subscriptions')
-                  .doc(newSubscriptionId)
-                  .get();
-
-              if (newSubDoc.exists) {
-                final newSubData = newSubDoc.data() as Map<String, dynamic>;
-                double currentAmountPaid = (newSubData['amountPaid'] ?? 0).toDouble();
-                double adjustedAmountPaid = currentAmountPaid + newAmount;
-                
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.payment.userId)
-                    .collection('subscriptions')
-                    .doc(newSubscriptionId)
-                    .update({'amountPaid': adjustedAmountPaid});
-                
-                logger.info('Updated new subscription $newSubscriptionId amountPaid from $currentAmountPaid to $adjustedAmountPaid (added $newAmount)');
-              } else {
-                logger.warn('New subscription $newSubscriptionId not found in database');
-              }
-            } catch (e) {
-              logger.err('Error updating new subscription $newSubscriptionId: {}', [e]);
-            }
+            await subProvider.adjustAmountPaid(
+              userId: widget.payment.userId,
+              subscriptionId: newSubscriptionId,
+              delta: newAmount,
+            );
           }
         } else if (newSubscriptionId != null) {
           // Same subscription, but amount or status changed
           logger.info('Same subscription - adjusting amount for subscription $newSubscriptionId');
-          try {
-            final subDoc = await FirebaseFirestore.instance
-                .collection('users')
-                .doc(widget.payment.userId)
-                .collection('subscriptions')
-                .doc(newSubscriptionId)
-                .get();
 
-            if (subDoc.exists) {
-              final subData = subDoc.data() as Map<String, dynamic>;
-              double currentAmountPaid = (subData['amountPaid'] ?? 0).toDouble();
-              
-              double adjustmentAmount = 0;
-              if (statusChanged) {
-                if (_paymentStatus == PaymentStatus.completed && oldStatus != PaymentStatus.completed) {
-                  adjustmentAmount = newAmount;
-                  logger.info('Status changed to completed - adding full amount $newAmount');
-                } else if (_paymentStatus != PaymentStatus.completed && oldStatus == PaymentStatus.completed) {
-                  adjustmentAmount = -oldAmount;
-                  logger.info('Status changed from completed - subtracting old amount $oldAmount');
-                }
-              } else if (_paymentStatus == PaymentStatus.completed && amountDifference != 0) {
-                adjustmentAmount = amountDifference;
-                logger.info('Amount changed for completed payment - adjusting by $amountDifference');
-              }
-              
-              if (adjustmentAmount != 0) {
-                final newAmountPaid = (currentAmountPaid + adjustmentAmount).clamp(0, double.infinity);
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.payment.userId)
-                    .collection('subscriptions')
-                    .doc(newSubscriptionId)
-                    .update({'amountPaid': newAmountPaid});
-                
-                logger.info('Adjusted subscription $newSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (adjustment: $adjustmentAmount)');
-              }
-            } else {
-              logger.warn('Subscription $newSubscriptionId not found in database');
+          double adjustmentAmount = 0;
+          if (statusChanged) {
+            if (_paymentStatus == PaymentStatus.completed && oldStatus != PaymentStatus.completed) {
+              adjustmentAmount = newAmount;
+              logger.info('Status changed to completed - adding full amount $newAmount');
+            } else if (_paymentStatus != PaymentStatus.completed && oldStatus == PaymentStatus.completed) {
+              adjustmentAmount = -oldAmount;
+              logger.info('Status changed from completed - subtracting old amount $oldAmount');
             }
-          } catch (e) {
-            logger.err('Error adjusting subscription $newSubscriptionId: {}', [e]);
+          } else if (_paymentStatus == PaymentStatus.completed && amountDifference != 0) {
+            adjustmentAmount = amountDifference;
+            logger.info('Amount changed for completed payment - adjusting by $amountDifference');
           }
+
+          await subProvider.adjustAmountPaid(
+            userId: widget.payment.userId,
+            subscriptionId: newSubscriptionId,
+            delta: adjustmentAmount,
+          );
         }
       }
 
       // The subscription's amountPaid may have changed in the adjustment block
-      // above (written directly to Firestore). updatePayment() already notified
-      // SubProvider, but that fired BEFORE these writes, so notify again now to
-      // guarantee the subscriptions tab refetches and shows the updated amount.
-      paymentProvider.subProvider.markChanged();
+      // above. updatePayment() already notified SubProvider, but that fired
+      // BEFORE these writes, so notify again now to guarantee the subscriptions
+      // tab refetches and shows the updated amount.
+      subProvider.markChanged();
 
       logger.info('Payment update completed successfully:');
       logger.info('- Final Amount: $newAmount');

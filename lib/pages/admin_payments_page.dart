@@ -1587,17 +1587,18 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
       // Update subscription's amountPaid if a subscription is selected and payment is completed
       if (_selectedSubscription != null && _paymentStatus == PaymentStatus.completed) {
         final subscriptionId = _selectedSubscription!.subscriptionId;
-        final newAmountPaid = _selectedSubscription!.amountPaid + paymentAmount;
 
+        // The delta is applied against the stored total, so a concurrently
+        // recorded payment is not overwritten by this (possibly stale) model.
         final subProvider = Provider.of<SubProvider>(context, listen: false);
-        await subProvider.updateAmountPaid(
+        await subProvider.adjustAmountPaid(
           userId: _selectedUser!.userId,
           subscriptionId: subscriptionId,
-          amountPaid: newAmountPaid,
+          delta: paymentAmount,
         );
 
-        _selectedSubscription!.amountPaid = newAmountPaid;
-        _logger.info('Updated subscription $subscriptionId amountPaid to $newAmountPaid');
+        _selectedSubscription!.amountPaid += paymentAmount;
+        _logger.info('Added $paymentAmount to subscription $subscriptionId amountPaid');
       }
 
       widget.onPaymentAdded();

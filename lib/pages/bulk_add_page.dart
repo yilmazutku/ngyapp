@@ -238,13 +238,12 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
       // package summary stays accurate (mirrors the single add-payment flow).
       // Skipped for "Paketsiz" payments, which are not tied to any package.
       if (linkedSub != null && addedAmount > 0) {
-        final newAmountPaid = linkedSub.amountPaid + addedAmount;
-        await subProvider.updateAmountPaid(
+        await subProvider.adjustAmountPaid(
           userId: widget.subscription.userId,
           subscriptionId: linkedSub.subscriptionId,
-          amountPaid: newAmountPaid,
+          delta: addedAmount,
         );
-        linkedSub.amountPaid = newAmountPaid;
+        linkedSub.amountPaid += addedAmount;
       }
 
       if (mounted) {

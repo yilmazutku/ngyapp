@@ -59,8 +59,10 @@ class PaymentProvider extends ChangeNotifier {
         query = query.where('status', isEqualTo: statusFilter.label);
       }
 
-      // Note: We can only apply one date range filter in Firebase
-      // We'll filter by paymentDate primarily, handle dueDate client-side
+      // Note: Firestore only supports a range filter on one field, so the range
+      // is applied to paymentDate. Be aware that this also drops documents that
+      // have no paymentDate at all (planned payments): the client-side dueDate
+      // fallback below can only narrow what the query already returned.
       if (startDate != null) {
         query = query.where('paymentDate', isGreaterThanOrEqualTo: startDate);
       }
@@ -441,17 +443,6 @@ class PaymentProvider extends ChangeNotifier {
   /// @param userId The ID of the user who made the payment
   Future<void> deletePayment(String paymentId, String userId) async {
     try {
-      // First fetch the payment to check if it has notifications
-      final paymentDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('payments')
-          .doc(paymentId)
-          .get();
-      
-      final paymentData = paymentDoc.data();
-      
-      // Delete the payment from Firestore
       await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
@@ -459,16 +450,9 @@ class PaymentProvider extends ChangeNotifier {
           .doc(paymentId)
           .delete();
 
-      // If the payment had notification times set, we should cancel those notifications
-      if (paymentData != null && paymentData['notificationTimes'] != null) {
-        // In a real implementation, you would cancel scheduled notifications here
-        // For example, using a unique ID based on the payment ID
-        logger.info('Canceled notifications for payment $paymentId');
-        
-        // If you have a notification service, you could use it like this:
-        // final notificationService = NotificationService();
-        // await notificationService.cancelPaymentNotifications(paymentId);
-      }
+      // TODO: cancel this payment's scheduled notifications. They are keyed by
+      // paymentId, so no read of the document is needed to do it:
+      //   await notificationService.cancelPaymentNotifications(paymentId);
 
       logger.info('Payment $paymentId deleted successfully for user $userId');
       

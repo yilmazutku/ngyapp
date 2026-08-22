@@ -338,15 +338,18 @@ class PaymentImportUtil {
       final now = DateTime.now();
       final todayMidnight = DateTime(now.year, now.month, now.day);
 
-      // Appointments first
-      for (var appt in appointmentsToCreate) {
+      // Imported rows are independent of each other (fresh document ids, no
+      // subscription link), so they are written a few at a time instead of one
+      // round trip after another. The cap keeps a large sheet from opening
+      // hundreds of concurrent writes at once.
+      final appointmentModels = appointmentsToCreate.map((appt) {
         // Mark past appointments as completed ("Yapıldı")
         final apptDateOnly = DateTime(appt.date.year, appt.date.month, appt.date.day);
         final status = apptDateOnly.isBefore(todayMidnight)
             ? AppointmentStatus.completed
             : AppointmentStatus.scheduled;
 
-        final appointmentModel = AppointmentModel(
+        return AppointmentModel(
           appointmentId: FirebaseFirestore.instance
               .collection('users')
               .doc(userId)
@@ -364,14 +367,18 @@ class PaymentImportUtil {
           appointmentType: AppointmentType.haftalik,
           durationMinutes: AppointmentType.haftalik.durationMinutes,
         );
+      }).toList();
 
-        await appointmentManager.addAppointment(appointmentModel);
-        appointmentsCreated++;
-      }
+      // Appointments first
+      appointmentsCreated = await _runInChunks(
+        appointmentModels,
+        (model) => appointmentManager.addAppointment(model),
+      );
 
       // Payments
-      for (var payment in paymentsToCreate) {
-        await paymentProvider.addPayment(
+      paymentsCreated = await _runInChunks(
+        paymentsToCreate,
+        (payment) => paymentProvider.addPayment(
           userId: userId,
           amount: payment.amount,
           paymentDate: payment.date,
@@ -379,9 +386,8 @@ class PaymentImportUtil {
           // Excel imports don't carry a payment type; default to cash.
           paymentType: PaymentType.nakit,
           notes: 'Excel içe aktarım',
-        );
-        paymentsCreated++;
-      }
+        ),
+      );
 
       log.info('Payment import completed. Created {} payments and {} appointments',
           [paymentsCreated, appointmentsCreated]);
@@ -391,6 +397,26 @@ class PaymentImportUtil {
       log.err('Error importing payment data: {}', [e]);
       return 'Hata: $e';
     }
+  }
+
+  /// Maximum writes issued at the same time while importing a sheet.
+  static const int _importConcurrency = 10;
+
+  /// Runs [action] over [items] a few at a time and returns how many finished.
+  /// A failing item aborts the import, exactly as the sequential loop did.
+  static Future<int> _runInChunks<T>(
+    List<T> items,
+    Future<void> Function(T item) action,
+  ) async {
+    int done = 0;
+    for (var start = 0; start < items.length; start += _importConcurrency) {
+      final end = (start + _importConcurrency < items.length)
+          ? start + _importConcurrency
+          : items.length;
+      await Future.wait(items.sublist(start, end).map(action));
+      done = end;
+    }
+    return done;
   }
 
   /// Pure parsing: does NOT touch UI or providers. Great for unit tests.
@@ -474,299 +500,6 @@ class PaymentImportUtil {
       paymentsToCreate: paymentsToCreate,
       appointmentsToCreate: appointmentsToCreate,
     );
-  }
-
-  /// Confirmation dialog UI (kept your original look & feel).
-  static Future<bool> _showConfirmationDialog(
-      BuildContext context,
-      List<_ImportPayment> paymentsToCreate,
-      List<_ImportAppointment> appointmentsToCreate,
-      ) async {
-    final dateFormat = DateFormat('dd.MM.yyyy');
-    final currencyFormat = NumberFormat('#,##0.00 ₺', 'tr_TR');
-
-    final navigator = Navigator.of(context);
-
-    return await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('İçe Aktarılacak Veriler'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Payments section
-                const Text(
-                  'Ödemeler',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                if (paymentsToCreate.isEmpty)
-                  const Text('Ödenecek tutar bulunamadı.',
-                      style: TextStyle(fontStyle: FontStyle.italic))
-                else
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      children: [
-                        // Header
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8, horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(8)),
-                          ),
-                          child: const Row(
-                            children: [
-                              Expanded(
-                                flex: 2,
-                                child: Text('Tarih',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text('Tutar',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // Payment rows
-                        ...paymentsToCreate.map((payment) => Padding(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8, horizontal: 12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                    dateFormat.format(payment.date)),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(currencyFormat
-                                    .format(payment.amount)),
-                              ),
-                            ],
-                          ),
-                        )),
-
-                        // Total
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8, horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: const BorderRadius.vertical(
-                                bottom: Radius.circular(8)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Expanded(
-                                flex: 2,
-                                child: Text('Toplam',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  currencyFormat.format(paymentsToCreate
-                                      .fold<double>(
-                                      0.0,
-                                          (sum, p) =>
-                                      sum + p.amount)),
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                const SizedBox(height: 20),
-
-                // Appointments section
-                const Text(
-                  'Randevular',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                if (appointmentsToCreate.isEmpty)
-                  const Text('Randevu bulunamadı.',
-                      style: TextStyle(fontStyle: FontStyle.italic))
-                else
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      children: [
-                        // Header
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8, horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.green.shade50,
-                            borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(8)),
-                          ),
-                          child: const Row(
-                            children: [
-                              Expanded(
-                                flex: 2,
-                                child: Text('Tarih',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text('Tür',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // Appointment rows (limit to 10 with a "and X more" message)
-                        ...appointmentsToCreate
-                            .take(10)
-                            .map((appointment) => Padding(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8, horizontal: 12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 2,
-                                child: Text(dateFormat
-                                    .format(appointment.date)),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(appointment
-                                    .meetingType ==
-                                    MeetingType.f2f
-                                    ? 'Yüz yüze'
-                                    : 'Online'),
-                              ),
-                            ],
-                          ),
-                        )),
-
-                        // Show "and X more" if there are more than 10 appointments
-                        if (appointmentsToCreate.length > 10)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 8, horizontal: 12),
-                            child: Text(
-                              've ${appointmentsToCreate.length - 10} randevu daha...',
-                              style: TextStyle(
-                                fontStyle: FontStyle.italic,
-                                color: Colors.grey.shade700,
-                              ),
-                            ),
-                          ),
-
-                        // Total
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8, horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: const BorderRadius.vertical(
-                                bottom: Radius.circular(8)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Expanded(
-                                flex: 2,
-                                child: Text('Toplam',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  '${appointmentsToCreate.length} randevu',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                const SizedBox(height: 16),
-
-                // Warning message
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber.shade200),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, color: Colors.amber),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Bu veriler içe aktarıldığında, yukarıdaki ödemeler ve randevular oluşturulacaktır.',
-                          style: TextStyle(fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => navigator.pop(false),
-              child: const Text('İptal'),
-            ),
-            ElevatedButton(
-              onPressed: () => navigator.pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Onayla ve İçe Aktar'),
-            ),
-          ],
-        );
-      },
-    ) ??
-        false;
   }
 
   /// Tries to parse multiple date representations.
