@@ -106,9 +106,13 @@ class CustomerSummaryProvider extends ChangeNotifier {
       freezeDateCell = const SummaryCell.empty();
     }
 
-    final payment = await _resolveLastPayment(user.userId);
-    final appts =
-        await _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
+    // Payments and appointments are unrelated queries, so they are issued
+    // together instead of costing two sequential round trips per customer.
+    final paymentFuture = _resolveLastPayment(user.userId);
+    final apptFuture =
+        _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
+    final payment = await paymentFuture;
+    final appts = await apptFuture;
 
     // Remaining postponement rights for the active subscription. Computed from
     // user-originated postponements only (admin postponements do not reduce the
@@ -171,14 +175,18 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// - Completed payment with no payment date => "Hata" for the date cell.
   Future<_PaymentCells> _resolveLastPayment(String userId) async {
     try {
-      final snap =
-          await _usersRef.doc(userId).collection('payments').get();
+      // Only the completed ones are ever used, so planned payments are dropped
+      // server-side rather than downloaded and filtered here.
+      final snap = await _usersRef
+          .doc(userId)
+          .collection('payments')
+          .where('status', isEqualTo: PaymentStatus.completed.label)
+          .get();
 
       final completed = <PaymentModel>[];
       for (final doc in snap.docs) {
         try {
-          final p = PaymentModel.fromDocument(doc);
-          if (p.status == PaymentStatus.completed) completed.add(p);
+          completed.add(PaymentModel.fromDocument(doc));
         } catch (e) {
           logger.warn('Skipping malformed payment {} for user {}: {}',
               [doc.id, userId, e]);

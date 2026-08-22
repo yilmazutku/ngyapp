@@ -53,20 +53,40 @@ class MeasProvider extends ChangeNotifier {
       rethrow;
     }
   }
+  /// Writes a whole set of measurements (e.g. an Excel import) at once.
+  ///
+  /// Uses write batches instead of one round trip per row: an import of a few
+  /// dozen measurements used to cost a few dozen sequential writes, and a
+  /// failure halfway through left the import partially applied.
   Future<void> addBatchMeasurement(String userId, List<MeasurementModel> listMeasurements) async {
+    if (listMeasurements.isEmpty) return;
     try {
-      logger.info('Adding new measurement for userId={}', [userId]);
-      for (MeasurementModel measurement in listMeasurements) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .collection('measurements')
-            .doc(measurement.measurementId)
-            .set(measurement.toMap());
+      logger.info('Adding {} measurement(s) for userId={}',
+          [listMeasurements.length, userId]);
 
-        logger.info('Successfully added measurement with id={}',
-            [measurement.measurementId]);
+      final db = FirebaseFirestore.instance;
+      final collection =
+          db.collection('users').doc(userId).collection('measurements');
+
+      // Safety margin below Firestore's 500-writes-per-batch cap.
+      const int maxPerBatch = 450;
+      for (var start = 0; start < listMeasurements.length; start += maxPerBatch) {
+        final end = (start + maxPerBatch < listMeasurements.length)
+            ? start + maxPerBatch
+            : listMeasurements.length;
+        final batch = db.batch();
+        for (final measurement in listMeasurements.sublist(start, end)) {
+          batch.set(
+            collection.doc(measurement.measurementId),
+            measurement.toMap(),
+          );
+        }
+        await batch.commit();
       }
+
+      logger.info('Successfully added {} measurement(s) for userId={}',
+          [listMeasurements.length, userId]);
+
       // Set the measurement changed flag
       _measurementChanged = true;
 

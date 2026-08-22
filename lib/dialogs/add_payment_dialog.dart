@@ -92,9 +92,6 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
   final ImagePicker _picker = ImagePicker();
 
   // New variables for notifications
-  final bool _enableNotifications = false;
-  final List<bool> _notificationOptions = [false, false, false, false];
-  final List<int> _notificationTimes = [72, 48, 24, 6]; // Hours before due date
 
   @override
   Widget build(BuildContext context) {
@@ -418,24 +415,21 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
 
       // Update subscription's amountPaid if a subscription is selected and payment is completed
       if (_selectedSubscription != null && _paymentStatus == PaymentStatus.completed) {
-        // Get the current subscription to update
         final subscriptionId = _selectedSubscription!.subscriptionId;
-        
-        // Calculate new amount paid
-        final newAmountPaid = _selectedSubscription!.amountPaid + paymentAmount;
-        
-        // Update the amountPaid field using provider
+
+        // The delta is applied against the stored total, so a concurrently
+        // recorded payment is not overwritten by this (possibly stale) model.
         final subProvider = Provider.of<SubProvider>(context, listen: false);
-        await subProvider.updateAmountPaid(
+        await subProvider.adjustAmountPaid(
           userId: widget.userId,
           subscriptionId: subscriptionId,
-          amountPaid: newAmountPaid,
+          delta: paymentAmount,
         );
-        
-        // Update local model to reflect the changes
-        _selectedSubscription!.amountPaid = newAmountPaid;
-            
-        logger.info('Updated subscription $subscriptionId amountPaid to $newAmountPaid');
+
+        // Keep the local model roughly in step for the rest of this dialog.
+        _selectedSubscription!.amountPaid += paymentAmount;
+
+        logger.info('Added $paymentAmount to subscription $subscriptionId amountPaid');
       }
 
       widget.onPaymentAdded();
