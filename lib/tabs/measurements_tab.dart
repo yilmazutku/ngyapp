@@ -1,10 +1,7 @@
 // measurements_tab.dart
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:excel/excel.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -112,172 +109,6 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
     );
   }
 
-  Future<void> _pickAndParseExcel() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['xlsx', 'xls'],
-      );
-      if (result == null) return;
-
-      setState(() => _isSaving = true);
-      try {
-        final fileBytes = await File(result.files.single.path!).readAsBytes();
-        final excel = Excel.decodeBytes(fileBytes);
-
-        final measurements = <MeasurementModel>[];
-        final sheet = excel.tables.keys.first;
-        var rowIndex = 2;
-        // Generate a base timestamp once, then append row index for unique IDs
-        final baseTimestamp = DateTime.now().millisecondsSinceEpoch;
-
-        while (rowIndex < excel.tables[sheet]!.maxRows) {
-          try {
-            final row = excel.tables[sheet]!.rows[rowIndex];
-            if (row.isEmpty || row[0]?.value == null) {
-              rowIndex++;
-              continue;
-            }
-
-            // date parsing
-            DateTime date;
-            final dateCell = row[0]?.value;
-            if (dateCell is DateTime) {
-              date = dateCell;
-            } else if (dateCell is num) {
-              final excelEpoch = DateTime(1899, 12, 30);
-              date = excelEpoch.add(Duration(days: dateCell.toInt()));
-            } else {
-              try {
-                date = DateFormat('yyyy-MM-dd').parse(dateCell.toString());
-              } catch (_) {
-                rowIndex++;
-                continue;
-              }
-            }
-
-            double? _numCell(int i) =>
-                (row.length > i && row[i] != null) ? double.tryParse(row[i]!.value.toString()) : null;
-            String? _strCell(int i) {
-              if (row.length <= i || row[i] == null) return null;
-              final s = row[i]!.value?.toString().trim();
-              return (s == null || s.isEmpty) ? null : s;
-            }
-
-            // columns mapped
-            final chest = _numCell(1);
-            final back = _numCell(2);
-            final waist = _numCell(3);
-            final hips = _numCell(4);
-            final leg = _numCell(5);
-            final arm = _numCell(6);
-            final weight = _numCell(7);
-
-            // robust fat cell
-            double? fatKg;
-            final fatRaw = row.length > 8 ? row[8]?.value : null;
-            if (fatRaw != null) {
-              final s = fatRaw.toString();
-              fatKg = double.tryParse(s);
-              if (fatKg == null || fatKg > 500) {
-                final dMatch = RegExp(r'(\d{1,2})\.(\d{1,2})').firstMatch(s);
-                if (dMatch != null) {
-                 fatKg = double.tryParse('${dMatch.group(1)}.${int.parse(dMatch.group(2)!)}');
-                } else if (fatRaw is num) {
-                  final excelEpoch = DateTime(1899, 12, 30);
-                  final d = excelEpoch.add(Duration(days: fatRaw.toInt()));
-                  fatKg = double.tryParse('${d.day}.${d.month}');
-                }
-                logger.info('fatRaw={},fatKg={}',[fatRaw,fatKg]);
-              }
-            }
-
-            final hunger = _strCell(9);
-            final constip = _strCell(10);
-            final other = _strCell(11);
-
-            final calorie = () {
-              if (row.length < 13 || row[12] == null) return null;
-              return int.tryParse(row[12]!.value.toString());
-            }();
-
-
-
-            measurements.add(MeasurementModel(
-              measDate: date,
-              measurementId: '${baseTimestamp}_$rowIndex',
-              weight: weight,
-              chest: chest,
-              back: back,
-              waist: waist,
-              hips: hips,
-              leg: leg,
-              arm: arm,
-              fatKg: fatKg,
-              calorie: calorie,
-              hungerStatus: hunger,
-              constipation: constip,
-              other: other,
-            ));
-          } catch (e) {
-            logger.warn('Error parsing row $rowIndex: $e');
-          }
-          rowIndex++;
-        }
-
-        setState(() => _isSaving = false);
-
-        if (measurements.isEmpty) {
-          await DialogUtils.openError(context, title: 'Hata', message: 'Excel dosyasında geçerli ölçüm verisi yok.');
-          return;
-        }
-
-        final dateRange =
-            '${DateFormat('d MMMM y', 'tr_TR').format(measurements.first.measDate)} - ${DateFormat('d MMMM y', 'tr_TR').format(measurements.last.measDate)}';
-
-        int countOf(bool Function(MeasurementModel m) p) => measurements.where(p).length;
-
-        final confirmed = await DialogUtils.openConfirm(
-          context,
-          title: 'Ölçümler Bulundu',
-          message: '${measurements.length} ölçüm bulundu ($dateRange).\n\n'
-              '- Göğüs: ${countOf((m) => m.chest != null)}\n'
-              '- Sırt: ${countOf((m) => m.back != null)}\n'
-              '- Bel: ${countOf((m) => m.waist != null)}\n'
-              '- Kalça: ${countOf((m) => m.hips != null)}\n'
-              '- Bacak: ${countOf((m) => m.leg != null)}\n'
-              '- Kol: ${countOf((m) => m.arm != null)}\n'
-              '- Ağırlık: ${countOf((m) => m.weight != null)}\n'
-              '- Yağ: ${countOf((m) => m.fatKg != null)}\n'
-              '- Kalori: ${countOf((m) => m.calorie != null)}\n\n'
-              'İçe aktarılsın mı?',
-        );
-
-        if (confirmed && mounted) {
-          setState(() => _isSaving = true);
-          try {
-            final provider = Provider.of<MeasProvider>(context, listen: false);
-            await provider.addBatchMeasurement(widget.userId, measurements);
-            await DialogUtils.openInfo(context, title: 'Başarılı', message: '${measurements.length} ölçüm içe aktarıldı.');
-            refreshData();
-          } catch (e) {
-            await DialogUtils.openError(context, title: 'Hata', message: 'Ölçümler kaydedilemedi: $e');
-          } finally {
-            if (mounted) setState(() => _isSaving = false);
-          }
-        }
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => _isSaving = false);
-        await DialogUtils.openError(context, title: 'Hata', message: 'Excel işleme hatası: $e');
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isSaving = false);
-      await DialogUtils.openError(context, title: 'Hata', message: 'Excel içe aktarma hatası: $e');
-    }
-  }
-
   Future<void> _deleteMeasurement(MeasurementModel measurement) async {
     logger.info('Preparing to delete measurement: {}', [measurement]);
     final confirmed = await DialogUtils.openConfirm(
@@ -352,20 +183,6 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _pickAndParseExcel,
-                    icon: _isSaving
-                        ? const SizedBox(
-                        width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.table_chart),
-                    label: const Text('Excel İçe Aktar'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
                     onPressed: _isSaving
                         ? null
                         : () => Navigator.push(
@@ -416,19 +233,6 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _pickAndParseExcel,
-                    icon: _isSaving
-                        ? const SizedBox(
-                        width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.table_chart),
-                    label: const Text('Excel İçe Aktar'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
                     ),
                   ),

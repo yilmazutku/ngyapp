@@ -1,7 +1,4 @@
 // payments_tab.dart
-import 'dart:io';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -14,7 +11,6 @@ import '../models/filter_params.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
-import '../utils/payment_import_util.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
 
@@ -224,18 +220,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
       ),
     );
 
-    final importBtn = ElevatedButton.icon(
-      icon: const Icon(Icons.upload_file),
-      label: const Text('Ödeme Takip Cetveli İçe Aktar'),
-      onPressed: () => _importPaymentTrackingData(context),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.blue.shade100,
-        foregroundColor: Colors.blue.shade800,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        visualDensity: VisualDensity.compact,
-      ),
-    );
-
     return LayoutBuilder(
       builder: (context, constraints) {
         // Tune threshold if you like
@@ -252,7 +236,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
                 children: [
                   filterBtn,
                   addBtn,
-                  importBtn,
                 ],
               ),
               const SizedBox(height: 12),
@@ -267,8 +250,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
               filterBtn,
               const SizedBox(width: 12),
               addBtn,
-              const SizedBox(width: 12),
-              importBtn,
               const SizedBox(width: 12),
               Expanded(child: summary),
             ],
@@ -619,39 +600,4 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
     );
   }
 
-  Future<void> _importPaymentTrackingData(BuildContext context) async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-        withData: true,
-      );
-      if (result == null) return;
-
-      final picked = result.files.single;
-      final bytes = picked.bytes ?? await File(picked.path!).readAsBytes();
-
-      final proceed = await DialogUtils.openConfirm(
-        context,
-        title: 'Ödeme Takip Cetveli İçe Aktarma',
-        message: 'Ödeme takip cetveli içe aktarıldığında ödemelerle birlikte tarihi belli randevular da okunacaktır.',
-        confirmText: 'Devam Et',
-        cancelText: 'İptal',
-      );
-      if (!proceed || !mounted) return;
-
-      final resultText = await PaymentImportUtil.importPaymentTrackingDataFromBytes(
-        context, widget.userId, bytes, showConfirmation: true,
-      );
-
-      if (!mounted) return;
-      await DialogUtils.openInfo(context, title: 'Sonuç', message: resultText);
-      if (!mounted) return;
-      // Provider listener will handle refresh via notifyListeners()
-      // No need to manually call refreshData() to avoid double-refresh
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(context, title: 'Hata', message: 'İçe aktarma hatası: $e');
-    }
-  }
 }
