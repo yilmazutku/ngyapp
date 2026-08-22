@@ -68,7 +68,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   int _countLastMonth = 0;
   int _countHistoryMonth = 0;
   int _countUpcoming = 0;
-  int _countCompleted = 0;
   int _countOverdue = 0;
 
   // "Geçmiş Aylar" selection: starts two months back because the previous month
@@ -81,14 +80,14 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   bool _isExporting = false;
 
   // Tab positions referenced by index-based logic (date pre-fill / active tab).
-  // Full order: Bu Ay(0) · Bu Hafta(1) · Gelecek Hafta(2) · Geçen Ay(3) ·
-  // Geçmiş Aylar(4) · Gelecek(5) · Tamamlanan(6) · Geciken(7).
+  // Full order: Bu Ay(0) · Geçen Ay(1) · Bu Hafta(2) · Gelecek Hafta(3) ·
+  // Geçmiş Aylar(4) · Gelecek(5) · Geciken(6).
   static const int _tabThisMonth = 0;
-  static const int _tabThisWeek = 1;
-  static const int _tabNextWeek = 2;
-  static const int _tabLastMonth = 3;
+  static const int _tabLastMonth = 1;
+  static const int _tabThisWeek = 2;
+  static const int _tabNextWeek = 3;
   static const int _tabHistoryMonth = 4;
-  static const int _tabCount = 8;
+  static const int _tabCount = 7;
 
   /// Explicit controller so the app-bar filter action can read the active tab
   /// (a DefaultTabController is not visible from the app-bar's context).
@@ -101,7 +100,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   late final ScrollController _lastMonthCtrl;
   late final ScrollController _historyCtrl;
   late final ScrollController _upcomingCtrl;
-  late final ScrollController _completedCtrl;
   late final ScrollController _overdueCtrl;
 
   @override
@@ -121,7 +119,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     _lastMonthCtrl = ScrollController();
     _historyCtrl = ScrollController();
     _upcomingCtrl = ScrollController();
-    _completedCtrl = ScrollController();
     _overdueCtrl = ScrollController();
     _loadData();
   }
@@ -135,7 +132,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     _lastMonthCtrl.dispose();
     _historyCtrl.dispose();
     _upcomingCtrl.dispose();
-    _completedCtrl.dispose();
     _overdueCtrl.dispose();
     super.dispose();
   }
@@ -219,11 +215,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
             d.isBefore(e.add(const Duration(seconds: 1)));
 
     int thisWeek = 0, nextWeek = 0, thisMonth = 0, lastMonth = 0, historyMonth = 0,
-        upcoming = 0, completed = 0, overdue = 0;
+        upcoming = 0, overdue = 0;
 
     for (final p in source) {
       if (p.status == PaymentStatus.completed) {
-        completed++;
         // Month tabs only count completed payments by their payment date.
         if (p.paymentDate != null) {
           if (inRange(p.paymentDate!, startOfThisMonth, endOfThisMonth)) {
@@ -261,7 +256,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     _countLastMonth = lastMonth;
     _countHistoryMonth = historyMonth;
     _countUpcoming = upcoming;
-    _countCompleted = completed;
     _countOverdue = overdue;
   }
 
@@ -273,7 +267,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   }
 
   /// The date window a given tab represents, or null for tabs that are not
-  /// bounded by a fixed range (Gelecek / Tamamlanan / Geciken).
+  /// bounded by a fixed range (Gelecek / Geciken).
   /// The end is expressed at day granularity; date filtering widens it to
   /// 23:59:59 where needed.
   DateTimeRange? _tabDateRange(int tabIndex) {
@@ -556,6 +550,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   ///
   /// [header] is rendered above the toolbar and lets a tab add its own controls
   /// (the month/year picker of "Geçmiş Aylar").
+  ///
+  /// [showPlannedSummary] additionally surfaces what is still planned for the
+  /// period next to what has been collected; only "Bu Ay" needs that contrast,
+  /// the closed months do not.
   Widget _buildMonthPaymentsTab({
     required int tabIndex,
     required ScrollController controller,
@@ -563,6 +561,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     required String statsTitle,
     required String emptyMessage,
     Widget? header,
+    bool showPlannedSummary = false,
   }) {
     final range = _tabDateRange(tabIndex)!;
     final start = range.start;
@@ -577,6 +576,18 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
     final totalPaid = payments.fold<double>(0, (sum, p) => sum + p.amount);
     final totalsByType = _totalsByPaymentType(payments);
+
+    // Still-planned payments of the same period, matched by their due date.
+    // Null on the tabs that do not ask for the planned/collected contrast.
+    final plannedPayments = showPlannedSummary
+        ? _filteredPayments.where((payment) {
+            if (payment.status != PaymentStatus.planned) return false;
+            final date = payment.dueDate;
+            return date != null && !date.isBefore(start) && !date.isAfter(end);
+          }).toList()
+        : null;
+    final plannedTotal =
+        plannedPayments?.fold<double>(0, (sum, p) => sum + p.amount);
 
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -629,11 +640,21 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                           avatar:
                               const Icon(Icons.paid, size: 18, color: Colors.green),
                           label: Text(
-                            'Toplam: ${totalPaid.toStringAsFixed(2)} ₺ '
+                            'Tamamlanan: ${totalPaid.toStringAsFixed(2)} ₺ '
                             '(${payments.length} ödeme)',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
+                        if (plannedTotal != null)
+                          Chip(
+                            avatar: const Icon(Icons.event,
+                                size: 18, color: Colors.orange),
+                            label: Text(
+                              'Planlanan: ${plannedTotal.toStringAsFixed(2)} ₺ '
+                              '(${plannedPayments!.length} ödeme)',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -642,6 +663,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                       title: statsTitle,
                       count: payments.length,
                       totalPaid: totalPaid,
+                      plannedTotal: plannedTotal,
                       totalsByType: totalsByType,
                       start: start,
                       end: range.end,
@@ -877,6 +899,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     required Map<PaymentType, double> totalsByType,
     required DateTime start,
     required DateTime end,
+    double? plannedTotal,
   }) {
     final rangeText = '${kDateFormat.format(start)} - ${kDateFormat.format(end)}';
     final average = count > 0 ? totalPaid / count : 0.0;
@@ -897,13 +920,19 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
               ],
             ),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            Wrap(
+              spacing: 24,
+              runSpacing: 16,
+              alignment: WrapAlignment.spaceAround,
               children: [
                 _statItem('Tamamlanan Ödemeler', count.toString(),
                     Icons.check_circle, Colors.green),
-                _statItem('Toplam Ödenen', '${totalPaid.toStringAsFixed(2)} ₺',
-                    Icons.paid, Colors.green),
+                _statItem('Tamamlanan Toplam',
+                    '${totalPaid.toStringAsFixed(2)} ₺', Icons.paid, Colors.green),
+                if (plannedTotal != null)
+                  _statItem('Planlanan Toplam',
+                      '${plannedTotal.toStringAsFixed(2)} ₺', Icons.event,
+                      Colors.orange),
                 _statItem('Ortalama Ödeme', '${average.toStringAsFixed(2)} ₺',
                     Icons.trending_up, Colors.blue),
               ],
@@ -958,30 +987,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         itemCount: upcomingPayments.length,
         itemBuilder: (context, index) {
           return _buildPaymentCard(upcomingPayments[index]);
-        },
-      ),
-    );
-  }
-
-  Widget _buildCompletedPaymentsTab() {
-    final completedPayments =
-    _filteredPayments.where((p) => p.status == PaymentStatus.completed).toList();
-
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : completedPayments.isEmpty
-        ? const Center(child: Text('Tamamlanan ödeme bulunamadı.'))
-        : Scrollbar(
-      thickness: 8.0,
-      radius: const Radius.circular(4.0),
-      controller: _completedCtrl,
-      child: ListView.builder(
-        key: const PageStorageKey('completed'),
-        controller: _completedCtrl,
-        addAutomaticKeepAlives: false,
-        itemCount: completedPayments.length,
-        itemBuilder: (context, index) {
-          return _buildPaymentCard(completedPayments[index]);
         },
       ),
     );
@@ -1078,12 +1083,11 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
               controller: _tabController,
               tabs: [
                 Tab(text: 'Bu Ay (${_countThisMonth})'),
+                Tab(text: 'Geçen Ay (${_countLastMonth})'),
                 Tab(text: 'Bu Hafta (${_countThisWeek})'),
                 Tab(text: 'Gelecek Hafta (${_countNextWeek})'),
-                Tab(text: 'Geçen Ay (${_countLastMonth})'),
                 Tab(text: 'Geçmiş Aylar (${_countHistoryMonth})'),
                 Tab(text: 'Gelecek (${_countUpcoming})'),
-                Tab(text: 'Tamamlanan (${_countCompleted})'),
                 Tab(text: 'Geciken (${_countOverdue})'),
               ],
               isScrollable: true,
@@ -1102,9 +1106,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                   storageKey: 'this_month',
                   statsTitle: 'Bu Ay İstatistikleri',
                   emptyMessage: 'Bu ay için tamamlanan ödeme bulunamadı.',
+                  // Only the current month contrasts what is still expected
+                  // with what has already been collected.
+                  showPlannedSummary: true,
                 ),
-                _buildThisWeekPaymentsTab(),
-                _buildNextWeekPaymentsTab(),
                 _buildMonthPaymentsTab(
                   tabIndex: _tabLastMonth,
                   controller: _lastMonthCtrl,
@@ -1112,6 +1117,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                   statsTitle: 'Geçen Ay İstatistikleri',
                   emptyMessage: 'Geçen ay için tamamlanan ödeme bulunamadı.',
                 ),
+                _buildThisWeekPaymentsTab(),
+                _buildNextWeekPaymentsTab(),
                 _buildMonthPaymentsTab(
                   tabIndex: _tabHistoryMonth,
                   controller: _historyCtrl,
@@ -1123,7 +1130,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                   header: _buildHistoryMonthSelector(),
                 ),
                 _buildUpcomingPaymentsTab(),
-                _buildCompletedPaymentsTab(),
                 _buildOverduePaymentsTab(),
               ],
             ),
@@ -1135,10 +1141,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
   /// Show filter dialog for payments
   void _showFilterDialog(BuildContext context) {
-    // Date-bounded tabs (Bu Ay / Bu Hafta / Gelecek Hafta / Geçen Ay / Geçmiş
+    // Date-bounded tabs (Bu Ay / Geçen Ay / Bu Hafta / Gelecek Hafta / Geçmiş
     // Aylar) open the filter with their own date window pre-selected. Open-ended
-    // tabs (Gelecek / Tamamlanan / Geciken) keep whatever range is currently
-    // applied, so by default they open with no date selection.
+    // tabs (Gelecek / Geciken) keep whatever range is currently applied, so by
+    // default they open with no date selection.
     final tabRange = _tabDateRange(_tabController.index);
 
     // Create temporary filter values
