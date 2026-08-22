@@ -55,29 +55,16 @@ class PaymentExportUtil {
   static bool get isSupported =>
       Platform.isMacOS || Platform.isWindows || Platform.isLinux;
 
-  /// Writes [payments] into a workbook and prompts for a save location.
+  /// Asks the user where to save the report.
   ///
-  /// Returns the path the file was written to, or `null` when the user
-  /// cancels the save dialog. Throws on encoding/write failures so the caller
-  /// can surface an error dialog.
-  static Future<String?> exportPayments({
-    required List<PaymentModel> payments,
-    required Map<String, UserModel> userById,
-    required String titleLabel,
-  }) async {
-    _log.info('Exporting {} payments to Excel ({})', [payments.length, titleLabel]);
-
-    final bytes = _buildWorkbook(
-      payments: payments,
-      userById: userById,
-      titleLabel: titleLabel,
-    );
-
+  /// Returns the target path, or `null` when the save dialog is cancelled.
+  /// Kept separate from [writePayments] so the caller can show its loading
+  /// indicator around the actual work only, never while the user is still
+  /// browsing folders in the native dialog.
+  static Future<String?> promptForTargetPath({required String titleLabel}) async {
     final fileName =
         '${_sanitizeFileName(titleLabel)}_${_fileStampFormat.format(DateTime.now())}.$_fileExtension';
 
-    // Desktop only: the picker just returns the chosen path, the bytes are
-    // written here.
     final savePath = await FilePicker.platform.saveFile(
       dialogTitle: 'Excel dosyasını kaydet',
       fileName: fileName,
@@ -90,13 +77,33 @@ class PaymentExportUtil {
       return null;
     }
 
-    final targetPath = savePath.toLowerCase().endsWith('.$_fileExtension')
+    // The desktop pickers do not always append the extension themselves.
+    return savePath.toLowerCase().endsWith('.$_fileExtension')
         ? savePath
         : '$savePath.$_fileExtension';
+  }
+
+  /// Builds the workbook for [payments] and writes it to [targetPath] (a path
+  /// obtained from [promptForTargetPath]).
+  ///
+  /// Throws on encoding/write failures so the caller can surface an error
+  /// dialog.
+  static Future<void> writePayments({
+    required String targetPath,
+    required List<PaymentModel> payments,
+    required Map<String, UserModel> userById,
+    required String titleLabel,
+  }) async {
+    _log.info('Exporting {} payments to Excel ({})', [payments.length, titleLabel]);
+
+    final bytes = _buildWorkbook(
+      payments: payments,
+      userById: userById,
+      titleLabel: titleLabel,
+    );
     await File(targetPath).writeAsBytes(bytes, flush: true);
 
     _log.info('Excel export written to {}', [targetPath]);
-    return targetPath;
   }
 
   /// Encodes the workbook: a title row, the payment rows, a total row and a
