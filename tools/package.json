@@ -1,0 +1,9 @@
+{
+  "name": "ngyapp-tools",
+  "private": true,
+  "description": "Tek seferlik bakım scriptleri (uygulamanın parçası değildir).",
+  "type": "commonjs",
+  "dependencies": {
+    "firebase-admin": "^13.7.0"
+  }
+}
