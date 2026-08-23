@@ -266,39 +266,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     });
   }
 
-  Future<void> _cancelAppointment(AppointmentModel appointment) async {
-    try {
-      setState(() {
-        _isLoading = true;
-      });
-
-      await _appointmentService.cancelAppointment(
-          appointment.appointmentId, appointment.userId,
-          canceledBy: 'user');
-
-      if (!mounted) return;
-      await DialogUtils.openInfo(
-        context,
-        title: 'Başarılı',
-        message: 'Randevu başarıyla iptal edildi.',
-      );
-      _fetchAllAppointments();
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Randevu iptal edilirken bir hata oluştu: $e',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
