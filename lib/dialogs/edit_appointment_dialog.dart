@@ -184,38 +184,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     });
   }
 
-  /// Whether the *stored* appointment is cancelled. Editing is restricted in
-  /// that case: it may only stay cancelled, go back to "Planlandı", or be
-  /// turned into a postponement.
-  bool get _isCanceled => _originalStatus == AppointmentStatus.canceled;
-
-  /// Whether the cancellation of the *stored* appointment spent one of the
-  /// customer's postponement rights.
-  bool get _canceledWithDeduction =>
-      _isCanceled && widget.appointment.postponementDeducted == true;
-
-  /// Statuses the admin may pick in this dialog.
-  ///
-  /// - A cancelled appointment may stay cancelled, go back to "Planlandı"
-  ///   (which returns the right the cancellation spent), or become "Ertelendi"
-  ///   with a new date (the already-spent right is not charged again).
-  ///   "Yapıldı" / "Yakıldı" stay out: a cancelled visit did not happen.
-  /// - "İptal Edildi" is never picked here: cancelling goes through the
-  ///   "Randevuyu İptal Et" button so the erteleme-hakkı question is asked and
-  ///   the cancellation is recorded on the appointment.
-  List<AppointmentStatus> get _selectableStatuses {
-    if (_isCanceled) {
-      return const [
-        AppointmentStatus.canceled,
-        AppointmentStatus.scheduled,
-        AppointmentStatus.postponed,
-      ];
-    }
-    return AppointmentStatus.values
-        .where((s) => s != AppointmentStatus.canceled)
-        .toList();
-  }
-
   /// Remaining postponement rights for the currently selected subscription,
   /// or null when no (valid) subscription is selected. Only user-originated
   /// postponements count against the right (admin's never do), via
@@ -229,15 +197,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
   }
 
   Future<void> _updateAppointment() async {
-    // Validate postponed date if status is "Ertelendi"
-    if (_appointmentStatus == AppointmentStatus.postponed && _postponedDate == null) {
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Lütfen ertelenen tarih için bir tarih seçiniz.',
-      );
-      return;
-    }
+    // The postponed date is optional: the new date is often not known when the
+    // postponement is recorded, and it can be filled in later.
 
     // Read the inline time boxes (SS:DD) and apply them to the appointment date.
     final TimeOfDay? enteredTime =
@@ -258,21 +219,13 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       enteredTime.minute,
     );
 
-    // Turning a cancellation into a postponement never charges a right, whoever
-    // asked for it. The answer given when the appointment was cancelled is the
-    // one that stands: charging again here would mean two separate decisions
-    // about one visit, which the admin has no way to see or undo later.
-    final bool cancelToPostponement =
-        _isCanceled && _appointmentStatus == AppointmentStatus.postponed;
-
     // A user-originated postponement that is newly applied (the appointment was
     // not already postponed). Only these consume the customer's postponement
     // rights; admin-originated postponements never do.
     final bool isNewUserPostponement =
         _appointmentStatus == AppointmentStatus.postponed &&
         _originalStatus != AppointmentStatus.postponed &&
-        _postponedBy == PostponeSource.user &&
-        !cancelToPostponement;
+        _postponedBy == PostponeSource.user;
 
     // The mirror case: a user-originated postponement is taken back and the
     // appointment returns to "Planlandı", so the right it paid for is given
@@ -280,35 +233,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     // appointment, since that is where the right was taken from — the admin may
     // have changed either field in this very edit.
     final String? originalSubscriptionId = widget.appointment.subscriptionId;
-    // Whether the stored postponement actually cost a right. A postponement
-    // that came out of a cancellation records the cancel-time answer on
-    // postponementDeducted, and that answer wins: an explicit false means the
-    // admin said "hayır, düşülmesin" back then, so there is nothing to give
-    // back. Only an ordinary postponement (flag not set) falls back to its
-    // source.
-    final bool storedPostponementSpentRight =
-        widget.appointment.postponementDeducted ??
-            (widget.appointment.postponedBy == PostponeSource.user);
     final bool isPostponementReverted =
         _originalStatus == AppointmentStatus.postponed &&
-        storedPostponementSpentRight &&
+        widget.appointment.postponedBy == PostponeSource.user &&
         _appointmentStatus == AppointmentStatus.scheduled &&
         (originalSubscriptionId?.isNotEmpty ?? false);
-
-    // The same case for a cancellation: the appointment was cancelled with
-    // "evet, düşülsün" and is now put back to "Planlandı", so the right that
-    // cancellation spent is returned exactly like a taken-back postponement.
-    final bool isCancellationReverted =
-        _originalStatus == AppointmentStatus.canceled &&
-        widget.appointment.postponementDeducted == true &&
-        _appointmentStatus == AppointmentStatus.scheduled &&
-        (originalSubscriptionId?.isNotEmpty ?? false);
-
-    // Leaving "İptal Edildi" clears the cancellation record. The deduction flag
-    // survives exactly one route: straight to "Ertelendi", where the right
-    // stays spent and is from now on carried by the postponement.
-    final bool leavingCanceled = _originalStatus == AppointmentStatus.canceled &&
-        _appointmentStatus != AppointmentStatus.canceled;
 
     // Warn the admin when a user-originated postponement is applied but the
     // customer has no postponement rights left.
@@ -348,17 +277,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         updateDate: DateTime.now(),
         createUser: widget.appointment.createUser,
         updateUser: 'admin', // Assuming admin is updating
-        canceledBy: leavingCanceled ? null : widget.appointment.canceledBy,
-        canceledAt: leavingCanceled ? null : widget.appointment.canceledAt,
-        // Carried over: toMap() writes every field, so dropping this here would
-        // silently clear the record of a deducted postponement right. It is
-        // cleared on purpose only when the appointment stops being cancelled.
-        // A postponement born from a cancellation keeps the cancel-time answer
-        // explicitly (true *or* false), so a later revert knows whether a right
-        // is owed back without having to re-read the deleted cancellation.
-        postponementDeducted: cancelToPostponement
-            ? _canceledWithDeduction
-            : (leavingCanceled ? null : widget.appointment.postponementDeducted),
         postponedDate: _appointmentStatus == AppointmentStatus.postponed ? _postponedDate : null,
         postponedBy: _appointmentStatus == AppointmentStatus.postponed ? _postponedBy : null,
         durationMinutes: durationMinutes,
@@ -381,7 +299,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         );
       }
 
-      if (isPostponementReverted || isCancellationReverted) {
+      if (isPostponementReverted) {
         await subProvider.adjustPostponementsUsed(
           userId: widget.appointment.userId,
           subscriptionId: originalSubscriptionId!,
@@ -401,14 +319,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         title: 'Başarılı',
         message: 'İşlem Başarılı.',
       );
-
-      // Told last, so it is the message the admin leaves the dialog with.
-      if (cancelToPostponement && mounted) {
-        await PostponementNotices.informDeductionNotRepeated(
-          context,
-          deductedAtCancel: _canceledWithDeduction,
-        );
-      }
     } catch (e) {
       if (mounted) {
         await DialogUtils.openError(
@@ -419,79 +329,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       }
     } finally {
       stopLoading();
-    }
-  }
-
-  /// Cancels the appointment: the record stays as "İptal Edildi".
-  ///
-  /// The admin is asked whether the cancellation should spend one of the
-  /// customer's postponement rights; the answer is stored on the appointment so
-  /// a later delete can say what happened to that right.
-  Future<void> _cancelAppointment() async {
-    final confirmed = await DialogUtils.openConfirm(
-      context,
-      title: 'İptal Onayı',
-      message: 'Bu randevuyu iptal etmek istediğinizden emin misiniz?',
-      confirmText: 'Evet, İptal Et',
-      cancelText: 'Hayır',
-    );
-    if (!confirmed || !mounted) return;
-
-    // null => the admin backed out at this second step; nothing is cancelled.
-    final deduct = await PostponementNotices.askDeductOnCancel(
-      context,
-      remainingRights: _remainingPostponements,
-    );
-    if (deduct == null || !mounted) return;
-
-    startLoading();
-    try {
-      final appointmentManager =
-          Provider.of<AppointmentManager>(context, listen: false);
-
-      final success = await appointmentManager.cancelAppointment(
-        widget.appointment.appointmentId,
-        widget.appointment.userId,
-        canceledBy: 'admin',
-        deductPostponement: deduct,
-      );
-
-      if (!mounted) return;
-      if (!success) {
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message: 'Randevu iptal edilemedi.',
-        );
-        return;
-      }
-
-      await DialogUtils.openInfo(
-        context,
-        title: 'Başarılı',
-        message: deduct
-            ? 'Randevu iptal edildi ve danışanın erteleme hakkından bir adet '
-                'düşüldü.'
-            : 'Randevu iptal edildi. Erteleme hakkından düşülmedi.',
-      );
-      if (!mounted) return;
-      // A postponement right the *appointment* had already spent is not given
-      // back by cancelling either.
-      await PostponementNotices.warnRightKept(context, widget.appointment);
-      if (!mounted) return;
-
-      widget.onAppointmentUpdated();
-      if (!mounted) return;
-      Navigator.of(context).pop();
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Randevu iptal edilirken bir hata oluştu: $e',
-      );
-    } finally {
-      if (mounted) stopLoading();
     }
   }
 
@@ -666,7 +503,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                     _handleStatusChange(newValue);
                   }
                 },
-                items: _selectableStatuses
+                items: AppointmentStatus.values
                     .map<DropdownMenuItem<AppointmentStatus>>(
                         (AppointmentStatus status) {
                   return DropdownMenuItem<AppointmentStatus>(
@@ -675,16 +512,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                   );
                 }).toList(),
               ),
-              subtitle: _isCanceled
-                  ? const Text(
-                      'İptal edilmiş randevu yalnızca "Planlandı" veya '
-                      '"Ertelendi" durumuna alınabilir. "Planlandı" seçilirse '
-                      'iptalde düşülen erteleme hakkı iade edilir; '
-                      '"Ertelendi" seçilirse iptal sırasındaki tercih geçerli '
-                      'kalır, erteleme hakkı yeniden hesaplanmaz.',
-                      style: TextStyle(fontSize: 12),
-                    )
-                  : null,
             ),
             
             // 2.4) Postponement source (shown only when status is Postponed).
@@ -719,49 +546,67 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
 
             // 2.5) Postponed Date Picker (shown only when status is Postponed)
             if (_appointmentStatus == AppointmentStatus.postponed)
-              ListTile(
-                title: const Text(
-                  'Ertelenen Tarih',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: _postponedDate != null
-                    ? Text(
-                  DateFormatter.formatNumericDateTime(_postponedDate!),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      )
-                    : const Text('Tarih seçilmedi'),
-                trailing: const Icon(Icons.calendar_today),
-                onTap: () async {
-                  final DateTime? pickedDate = await showDatePicker(
-                    context: context,
-                    initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
-                    // Postponed date may also be in the past (no future-only limit).
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime(2100),
-                  );
-                  if (pickedDate != null && mounted) {
-                    final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
-                      context,
-                      initialTime: _postponedDate != null
-                          ? TimeOfDay.fromDateTime(_postponedDate!)
-                          : const TimeOfDay(hour: 9, minute: 0),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // The postponed date may be filled in later, so it is not
+                  // required to save the appointment.
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: Text(
+                      '(ZORUNLU DEĞİL, belli değilse sonra seçiniz.)',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ListTile(
+                  title: const Text(
+                    'Ertelenen Tarih',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: _postponedDate != null
+                      ? Text(
+                    DateFormatter.formatNumericDateTime(_postponedDate!),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        )
+                      : const Text('Tarih seçilmedi'),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final DateTime? pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
+                      // Postponed date may also be in the past (no future-only limit).
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
                     );
-                    if (pickedTime != null && mounted) {
-                      setState(() {
-                        _postponedDate = DateTime(
-                          pickedDate.year,
-                          pickedDate.month,
-                          pickedDate.day,
-                          pickedTime.hour,
-                          pickedTime.minute,
-                        );
-                      });
+                    if (pickedDate != null && mounted) {
+                      final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
+                        context,
+                        initialTime: _postponedDate != null
+                            ? TimeOfDay.fromDateTime(_postponedDate!)
+                            : const TimeOfDay(hour: 9, minute: 0),
+                      );
+                      if (pickedTime != null && mounted) {
+                        setState(() {
+                          _postponedDate = DateTime(
+                            pickedDate.year,
+                            pickedDate.month,
+                            pickedDate.day,
+                            pickedTime.hour,
+                            pickedTime.minute,
+                          );
+                        });
+                      }
                     }
-                  }
-                },
+                  },
+                ),
+                ],
               ),
             
             // 3) Subscription Dropdown. The dropdown sits *under* the label
@@ -837,32 +682,17 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               hourController: _hourController,
               minuteController: _minuteController,
             ),
-            // 5) Cancel / delete. Cancelling keeps the record ("İptal Edildi"),
-            // deleting removes it for good; both give the package's meeting back
-            // when the appointment had consumed one.
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (!_isCanceled)
-                  ElevatedButton(
-                    onPressed: isLoading ? null : _cancelAppointment,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Randevuyu İptal Et'),
-                  ),
-                OutlinedButton.icon(
-                  onPressed: isLoading ? null : _deleteAppointment,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Randevuyu Sil'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
-                  ),
-                ),
-              ],
+            // 5) Delete. An appointment is no longer cancelled — it is either
+            // kept or removed for good. Deleting gives the package's meeting
+            // back when the appointment had consumed one.
+            ElevatedButton.icon(
+              onPressed: isLoading ? null : _deleteAppointment,
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Randevuyu Sil'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
             ),
             // 6) Notes
             TextField(

@@ -343,15 +343,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       return;
     }
     
-    // Validate postponed date if status is "Ertelendi"
-    if (_selectedStatus == AppointmentStatus.postponed && _postponedDate == null) {
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Lütfen ertelenen tarih için bir tarih seçiniz.',
-      );
-      return;
-    }
+    // The postponed date is optional: the new date is often not known when the
+    // postponement is recorded, and it can be filled in later.
 
     // A user-originated postponement consumes a postponement right; admin-
     // originated ones do not. Warn the admin when a user-originated
@@ -704,49 +697,67 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
 
               // Postponed date picker (shown only when status is Postponed)
               if (_selectedStatus == AppointmentStatus.postponed)
-                ListTile(
-                  title: const Text(
-                    'Ertelenen Tarih',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: _postponedDate != null
-                      ? Text(
-                    DateFormatter.formatNumericDateTime(_postponedDate!),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        )
-                      : const Text('Tarih seçilmedi'),
-                  trailing: const Icon(Icons.calendar_today),
-                  onTap: () async {
-                    final DateTime? pickedDate = await showDatePicker(
-                      context: context,
-                      initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
-                      // Postponed date may also be in the past (no future-only limit).
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime(2100),
-                    );
-                    if (pickedDate != null && mounted) {
-                      final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
-                        context,
-                        initialTime: _postponedDate != null
-                            ? TimeOfDay.fromDateTime(_postponedDate!)
-                            : const TimeOfDay(hour: 9, minute: 0),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // The postponed date may be filled in later, so it is not
+                    // required to save the appointment.
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: Text(
+                        '(ZORUNLU DEĞİL, belli değilse sonra seçiniz.)',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ListTile(
+                    title: const Text(
+                      'Ertelenen Tarih',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: _postponedDate != null
+                        ? Text(
+                      DateFormatter.formatNumericDateTime(_postponedDate!),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          )
+                        : const Text('Tarih seçilmedi'),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final DateTime? pickedDate = await showDatePicker(
+                        context: context,
+                        initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
+                        // Postponed date may also be in the past (no future-only limit).
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
                       );
-                      if (pickedTime != null && mounted) {
-                        setState(() {
-                          _postponedDate = DateTime(
-                            pickedDate.year,
-                            pickedDate.month,
-                            pickedDate.day,
-                            pickedTime.hour,
-                            pickedTime.minute,
-                          );
-                        });
+                      if (pickedDate != null && mounted) {
+                        final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
+                          context,
+                          initialTime: _postponedDate != null
+                              ? TimeOfDay.fromDateTime(_postponedDate!)
+                              : const TimeOfDay(hour: 9, minute: 0),
+                        );
+                        if (pickedTime != null && mounted) {
+                          setState(() {
+                            _postponedDate = DateTime(
+                              pickedDate.year,
+                              pickedDate.month,
+                              pickedDate.day,
+                              pickedTime.hour,
+                              pickedTime.minute,
+                            );
+                          });
+                        }
                       }
-                    }
-                  },
+                    },
+                  ),
+                  ],
                 ),
               if (_selectedStatus == AppointmentStatus.postponed)
                 const SizedBox(height: 16),

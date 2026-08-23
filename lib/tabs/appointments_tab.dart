@@ -23,8 +23,6 @@ extension AppointmentStatusExtension on AppointmentStatus {
         return Colors.blue;
       case AppointmentStatus.burned:
         return Colors.orange;
-      case AppointmentStatus.canceled:
-        return Colors.red;
       case AppointmentStatus.postponed:
         return Colors.purple;
     }
@@ -38,8 +36,6 @@ extension AppointmentStatusExtension on AppointmentStatus {
         return Icons.event;
       case AppointmentStatus.burned:
         return Icons.local_fire_department;
-      case AppointmentStatus.canceled:
-        return Icons.cancel;
       case AppointmentStatus.postponed:
         return Icons.update;
     }
@@ -236,11 +232,13 @@ class _AppointmentsTabState
       ) {
     // Inline stats (no setState)
     final appts = filteredItems.cast<AppointmentModel>();
-    int upcoming = 0, completed = 0, cancelled = 0;
+    int upcoming = 0, completed = 0;
     for (final a in appts) {
-      if (a.status == AppointmentStatus.scheduled) upcoming++;
-      else if (a.status == AppointmentStatus.completed) completed++;
-      else if (a.status == AppointmentStatus.canceled) cancelled++;
+      if (a.status == AppointmentStatus.scheduled) {
+        upcoming++;
+      } else if (a.status == AppointmentStatus.completed) {
+        completed++;
+      }
     }
 
     final statusOptions = {for (var s in AppointmentStatus.values) s: s.label};
@@ -275,17 +273,6 @@ class _AppointmentsTabState
                     label: 'Tamamlanan',
                     icon: Icons.check_circle_outline,
                     color: Colors.green,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  fit: FlexFit.tight,
-                  child: _buildStatCard(
-                    context,
-                    count: cancelled,
-                    label: 'İptal Edilen',
-                    icon: Icons.cancel_outlined,
-                    color: Colors.red,
                   ),
                 ),
               ],
@@ -757,8 +744,12 @@ class _AppointmentsTabState
                             'Orijinal: ${_longDf.format(appointment.appointmentDateTime)} ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
+                          // The postponed date is optional, so it may still be
+                          // unset while the new date is being agreed on.
                           Text(
-                            'Ertelenen: ${_longDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}',
+                            appointment.postponedDate != null
+                                ? 'Ertelenen: ${_longDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}'
+                                : 'Ertelenen: tarih seçilmedi',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
                         ],

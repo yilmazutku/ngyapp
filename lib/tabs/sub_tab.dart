@@ -686,7 +686,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                     }).toList(),
                   ),
                 
-                // Show more button if >5 visible appointments OR has other statuses (burned/canceled/postponed)
+                // Show more button if >5 visible appointments OR has other statuses (burned/postponed)
                 if (showMoreButton) ...[
                   const SizedBox(height: 4),
                   TextButton(
