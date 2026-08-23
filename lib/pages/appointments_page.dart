@@ -297,36 +297,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     }
   }
 
-  Future<void> _cancelAppointment(AppointmentModel appointment) async {
-    try {
-      final appointmentManager =
-          Provider.of<AppointmentManager>(context, listen: false);
-
-      if (await appointmentManager.cancelAppointment(
-          appointment.appointmentId, appointment.userId,
-          canceledBy: 'user')) {
-        if (!mounted) return;
-        await DialogUtils.openInfo(
-          context,
-          title: 'Başarılı',
-          message: 'Randevu başarıyla iptal edildi.',
-        );
-      }
-      if (!mounted) return;
-      setState(() {
-        _fetchAvailableTimes();
-      });
-    } catch (e, stackTrace) {
-      logger.err('Error canceling appointment: {}, stack trace: {}', [e,stackTrace]);
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Randevu iptal edilirken bir hata oluştu: $e',
-      );
-    }
-  }
-
   void _navigateToPastAppointments() {
     logger.debug('Navigating to past appointments page');
     Navigator.push(
@@ -739,45 +709,39 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
+            // The subtitle now carries two lines, which a default ListTile is
+            // not tall enough for.
+            isThreeLine: true,
             leading: const Icon(Icons.event_note, color: Colors.deepPurple),
             title: Text(
               DateFormat('dd.MM.yyyy - HH:mm', 'tr_TR')
                   .format(appointment.appointmentDateTime),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            subtitle: Text('Görüşme Türü: ${appointment.meetingType.label}'),
-            trailing: IconButton(
-              icon: const Icon(Icons.cancel, color: Colors.red),
-              onPressed: () async {
-                bool? confirmCancel = await showDialog<bool>(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return AlertDialog(
-                      title: const Text("Randevuyu İptal Et"),
-                      content: const Text(
-                          "Bu randevuyu iptal etmek istediğinize emin misiniz?"),
-                      actions: [
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(false);
-                          },
-                          child: const Text("Hayır"),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Görüşme Türü: ${appointment.meetingType.label}'),
+                const SizedBox(height: 6),
+                // Appointments are no longer cancelled from the app. The icon
+                // is only a marker for the notice next to it, not a button.
+                Row(
+                  children: [
+                    Icon(Icons.cancel, size: 16, color: Colors.red.shade700),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'İptal için ofisi arayınız.',
+                        style: TextStyle(
+                          color: Colors.red.shade700,
+                          fontWeight: FontWeight.w600,
                         ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(true);
-                          },
-                          child: const Text("Evet"),
-                        ),
-                      ],
-                    );
-                  },
-                );
-
-                if (confirmCancel == true) {
-                  await _cancelAppointment(appointment);
-                }
-              },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         );
