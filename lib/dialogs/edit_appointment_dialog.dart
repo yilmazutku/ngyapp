@@ -401,6 +401,64 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     }
   }
 
+  /// Deletes the appointment for good, after an explicit confirmation.
+  ///
+  /// AppointmentManager gives the package's meeting back in the same batch when
+  /// the deleted appointment had consumed one (see deleteAppointment).
+  Future<void> _deleteAppointment() async {
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Randevu Sil',
+      message:
+          '${DateFormatter.formatNumericDateTime(widget.appointment.appointmentDateTime)} '
+          'tarihli randevu kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\n'
+          'Silmek istediğinizden emin misiniz?',
+      confirmText: 'Evet, Sil',
+      cancelText: 'Vazgeç',
+    );
+    if (!confirmed || !mounted) return;
+
+    startLoading();
+    try {
+      final appointmentManager =
+          Provider.of<AppointmentManager>(context, listen: false);
+      final deleted = await appointmentManager.deleteAppointment(
+        widget.appointment.appointmentId,
+        widget.appointment.userId,
+        deletedBy: 'admin',
+      );
+
+      if (!mounted) return;
+      if (!deleted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Randevu bulunamadı, silinemedi.',
+        );
+        return;
+      }
+
+      widget.onAppointmentUpdated();
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Randevu silindi.',
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Randevu silinirken bir hata oluştu: $e',
+      );
+    } finally {
+      if (mounted) stopLoading();
+    }
+  }
+
   Future<void> _cancelAppointment() async {
     // Ask the user to confirm cancellation
     final confirm = await showDialog<bool>(
@@ -667,7 +725,10 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 },
               ),
             
-            // 3) Subscription Dropdown
+            // 3) Subscription Dropdown. The dropdown sits *under* the label
+            // rather than in `trailing`: a long package name claimed the whole
+            // row width there, leaving the "Paket" label a few pixels and
+            // wrapping it one letter per line on phones.
             ListTile(
               title: const Text('Paket'),
               subtitle: _isLoadingSubscriptions
@@ -682,12 +743,12 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                         Text('Yükleniyor...'),
                       ],
                     )
-                  : null,
-              trailing: _isLoadingSubscriptions
-                  ? null
                   : DropdownButton<String?>(
                       value: _selectedSubscriptionId,
                       hint: const Text('Seçiniz'),
+                      // Fills the row and ellipsizes long names instead of
+                      // stretching the dropdown to fit them.
+                      isExpanded: true,
                       onChanged: (String? newValue) {
                         setState(() {
                           _selectedSubscriptionId = newValue;
@@ -737,14 +798,31 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               hourController: _hourController,
               minuteController: _minuteController,
             ),
-            // 5) Cancel Button
-            ElevatedButton(
-              onPressed: _cancelAppointment,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Randevuyu İptal Et'),
+            // 5) Cancel / delete. Cancelling keeps the record ("İptal Edildi"),
+            // deleting removes it for good; both give the package's meeting
+            // back when the appointment had consumed one.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ElevatedButton(
+                  onPressed: isLoading ? null : _cancelAppointment,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Randevuyu İptal Et'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: isLoading ? null : _deleteAppointment,
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Randevuyu Sil'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                ),
+              ],
             ),
             // 6) Notes
             TextField(

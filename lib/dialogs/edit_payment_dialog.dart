@@ -273,6 +273,19 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                   ? Image.network(widget.payment.dekontUrl!, height: 100)
                   : const Text('Dekont Görseli Seçilmedi'),
             ],
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: isLoading ? null : _deletePayment,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Ödemeyi Sil'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -290,6 +303,56 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
         if (isLoading) const LoadingOverlay(message: 'Ödeme güncelleniyor...'),
       ],
     );
+  }
+
+  /// Deletes the payment for good, after an explicit confirmation.
+  ///
+  /// PaymentProvider takes the amount back off the linked package when the
+  /// deleted payment was a completed one (see deletePayment).
+  Future<void> _deletePayment() async {
+    final formattedAmount =
+        NumberFormat('#,##0.00', 'tr_TR').format(widget.payment.amount);
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Ödeme Sil',
+      message: '$formattedAmount ₺ tutarındaki ${widget.payment.status.label} '
+          'ödeme kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\n'
+          'Silmek istediğinizden emin misiniz?',
+      confirmText: 'Evet, Sil',
+      cancelText: 'Vazgeç',
+    );
+    if (!confirmed || !mounted) return;
+
+    startLoading();
+    try {
+      final paymentProvider =
+          Provider.of<PaymentProvider>(context, listen: false);
+      await paymentProvider.deletePayment(
+        widget.payment.paymentId,
+        widget.payment.userId,
+      );
+
+      if (!mounted) return;
+      widget.onPaymentUpdated();
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Ödeme silindi.',
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      logger.err('Error deleting payment ${widget.payment.paymentId}: {}', [e]);
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Ödeme silinirken bir hata oluştu: $e',
+      );
+    } finally {
+      if (mounted) stopLoading();
+    }
   }
 
   /// TR/EN-friendly numeric parser.
