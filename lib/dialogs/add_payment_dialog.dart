@@ -348,52 +348,6 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
     
     // Subscription is now optional - "paketsiz ödeme" is allowed
 
-    // Show confirmation dialog
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Ekle'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                  'Aşağıdaki ödemeyi eklemek istediğinizden emin misiniz?'),
-              const SizedBox(height: 16),
-              Text('Miktar: ${_amountController.text} TL'),
-              Text('Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}'),
-              Text('Durum: ${_paymentStatus.label}'),
-              Text('Ödeme Türü: ${_paymentType.label}'),
-              if (_selectedDueDate != null)
-                Text(
-                  'Planlanan Tarih: ${df.format(_selectedDueDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_selectedPaymentDate != null)
-                Text(
-                  'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldSave != true) return;
-
     startLoading();
 
     try {

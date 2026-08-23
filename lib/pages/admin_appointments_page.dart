@@ -622,55 +622,52 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     return appointments;
   }
 
-  /// Cancel an appointment
-  Future<void> _cancelAppointment(AppointmentModel appointment) async {
+  /// Delete an appointment. Appointments are no longer cancelled — the record
+  /// is either kept or removed for good.
+  Future<void> _deleteAppointment(AppointmentModel appointment) async {
     try {
       final appointmentManager = Provider.of<AppointmentManager>(context, listen: false);
-      final success = await appointmentManager.cancelAppointment(
+      final success = await appointmentManager.deleteAppointment(
         appointment.appointmentId,
         appointment.userId,
-        canceledBy: 'Admin',
+        deletedBy: 'Admin',
       );
 
       if (!mounted) return;
       if (success) {
-        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Randevu başarıyla iptal edildi.');
+        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Randevu başarıyla silindi.');
         if (!mounted) return;
-        // A spent postponement right is not given back by a cancel.
+        // A spent postponement right is not given back by a delete.
         await PostponementNotices.warnRightKept(context, appointment);
         if (!mounted) return;
         _fetchAllAppointments();
         setState(() {}); // ensure FutureBuilder re-runs if needed
       } else {
-        await DialogUtils.openError(context, title: 'Hata', message: 'Randevu iptal edilemedi.');
+        await DialogUtils.openError(context, title: 'Hata', message: 'Randevu bulunamadı, silinemedi.');
       }
     } catch (e) {
       if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Randevu iptal edilirken bir hata oluştu: $e',
+        message: 'Randevu silinirken bir hata oluştu: $e',
       );
     }
   }
 
-  /// Confirm and delete an appointment
+  /// Confirm and delete an appointment. Same confirmation as the appointments
+  /// tab uses.
   void _onDeleteClicked(AppointmentModel appt) async {
-    final confirmDelete = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text("Randevu İptali"),
-          content: const Text("Bu randevuyu iptal etmek istediğinizden emin misiniz?"),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text("Hayır")),
-            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text("Evet")),
-          ],
-        );
-      },
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Randevu Silme',
+      message: '${_fullFmt.format(appt.appointmentDateTime)} '
+          'tarihli randevuyu silmek istediğinizden emin misiniz?',
+      confirmText: 'Evet, Sil',
+      cancelText: 'İptal',
     );
-    if (confirmDelete == true) {
-      await _cancelAppointment(appt);
+    if (confirmed) {
+      await _deleteAppointment(appt);
     }
   }
 
@@ -1513,7 +1510,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                   onPressed: () => _showEditAppointmentDialog(context, appointment),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.cancel, color: Colors.red),
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  tooltip: 'Randevuyu Sil',
                   onPressed: () => _onDeleteClicked(appointment),
                 ),
               ],

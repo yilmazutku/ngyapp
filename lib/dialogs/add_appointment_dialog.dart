@@ -373,54 +373,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       }
     }
 
-    // Show confirmation dialog
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Randevu Ekle'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                  'Aşağıdaki randevuyu eklemek istediğinizden emin misiniz?'),
-              const SizedBox(height: 16),
-              Text('Kullanıcı: ${_selectedUser!.name}'),
-              Text('Tarih: ${DateFormatter.formatNumericDate(_selectedDate)}'),
-              Text('Saat: ${_selectedTime.format(context)}'),
-              Text('Görüşme Tipi: ${_selectedMeetingType.label}'),
-              Text('Randevu Türü: ${_selectedAppointmentType.lbl}'),
-              Text('Görüşme Süresi: ${_durationController.text.isNotEmpty ? _durationController.text : _selectedAppointmentType.getDurationForMeetingType(_selectedMeetingType)} dk'),
-              Text('Durum: ${_selectedStatus.label}'),
-              if (_selectedStatus == AppointmentStatus.postponed && _postponedDate != null)
-                Text(
-                  'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_selectedStatus == AppointmentStatus.postponed)
-                Text('Erteleme Kaynağı: ${_postponedBy.label}'),
-              Text('Paket: ${_selectedSubscription?.packageName ?? 'Paketsiz (Ön Görüşme)'}'),
-              if (_notesController.text.isNotEmpty)
-                Text('Notlar: ${_notesController.text}'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-  logger.info('shouldSave={}',[shouldSave]);
-    if (shouldSave != true) return;
-
     final appointmentManager =
         Provider.of<AppointmentManager>(context, listen: false);
     final durationMinutes = int.tryParse(_durationController.text) ??
