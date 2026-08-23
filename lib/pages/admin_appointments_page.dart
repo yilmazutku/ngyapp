@@ -14,6 +14,7 @@ import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/edit_event_dialog.dart';
 import '../dialogs/overlap_warning_dialog.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/postponement_notices.dart';
 import '../widgets/app_bar_with_back.dart';
 
 final Logger logger = Logger.forClass(AdminAppointmentsPage);
@@ -634,6 +635,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       if (!mounted) return;
       if (success) {
         await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Randevu başarıyla iptal edildi.');
+        if (!mounted) return;
+        // A spent postponement right is not given back by a cancel.
+        await PostponementNotices.warnRightKept(context, appointment);
+        if (!mounted) return;
         _fetchAllAppointments();
         setState(() {}); // ensure FutureBuilder re-runs if needed
       } else {

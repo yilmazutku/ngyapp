@@ -9,6 +9,7 @@ import '../providers/sub_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/add_appointment_dialog.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/postponement_notices.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
 
@@ -910,11 +911,14 @@ class _AppointmentsTabState
       if (!mounted) return;
       refreshData(); // instead of setState(fetchData())
 
-      DialogUtils.openInfo(
+      await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
         message: 'Randevu başarıyla silindi.',
       );
+      if (!mounted) return;
+      // A spent postponement right is not given back by a delete.
+      await PostponementNotices.warnRightKept(context, appointment);
     } catch (e) {
       if (!mounted) return;
       DialogUtils.openError(

@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
@@ -9,6 +8,7 @@ import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/postponement_notices.dart';
 import '../utils/time_picker_utils.dart';
 import '../widgets/loading_overlay.dart';
 import 'dialog_widgets.dart';
@@ -234,6 +234,18 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         _originalStatus != AppointmentStatus.postponed &&
         _postponedBy == PostponeSource.user;
 
+    // The mirror case: a user-originated postponement is taken back and the
+    // appointment returns to "Planlandı", so the right it paid for is given
+    // back. Both the source and the package are read from the *stored*
+    // appointment, since that is where the right was taken from — the admin may
+    // have changed either field in this very edit.
+    final String? originalSubscriptionId = widget.appointment.subscriptionId;
+    final bool isPostponementReverted =
+        _originalStatus == AppointmentStatus.postponed &&
+        widget.appointment.postponedBy == PostponeSource.user &&
+        _appointmentStatus == AppointmentStatus.scheduled &&
+        (originalSubscriptionId?.isNotEmpty ?? false);
+
     // Warn the admin when a user-originated postponement is applied but the
     // customer has no postponement rights left.
     if (isNewUserPostponement && _selectedSubscriptionId != null) {
@@ -359,24 +371,29 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       // Send update to Firestore
       await appointmentManager.updateAppointment(updatedAppointment);
       
-      // Only user-originated postponements consume a postponement right. Use an
-      // atomic increment so concurrent edits can't clobber the counter.
+      // Only user-originated postponements consume a postponement right, and
+      // taking one back returns it. Both directions go through the same atomic
+      // adjustment, which also keeps the counter at or above zero.
+      if (!mounted) return;
+      final subProvider = Provider.of<SubProvider>(context, listen: false);
+
       if (isNewUserPostponement && _selectedSubscriptionId != null) {
-        try {
-          final subProvider = Provider.of<SubProvider>(context, listen: false);
-          await subProvider.updateSubscription(
-            userId: widget.appointment.userId,
-            subscriptionId: _selectedSubscriptionId!,
-            updateData: {
-              'postponementsUsed': FieldValue.increment(1),
-              'updateDate': Timestamp.fromDate(DateTime.now()),
-              'updateUser': 'admin',
-            },
-          );
-        } catch (e) {
-          debugPrint('Error updating postponement: $e');
-          // Continue even if postponement update fails
-        }
+        await subProvider.adjustPostponementsUsed(
+          userId: widget.appointment.userId,
+          subscriptionId: _selectedSubscriptionId!,
+          delta: 1,
+        );
+      }
+
+      if (isPostponementReverted) {
+        await subProvider.adjustPostponementsUsed(
+          userId: widget.appointment.userId,
+          subscriptionId: originalSubscriptionId!,
+          delta: -1,
+        );
+        if (!mounted) return;
+        await PostponementNotices.informRightReturned(context);
+        if (!mounted) return;
       }
 
       // Notify parent & close
@@ -446,6 +463,9 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         message: 'Randevu silindi.',
       );
       if (!mounted) return;
+      // Deleting does not give a spent postponement right back either.
+      await PostponementNotices.warnRightKept(context, widget.appointment);
+      if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -504,6 +524,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
             title: 'Başarılı',
             message: 'Randevu başarıyla iptal edildi.',
           );
+          if (!mounted) return;
+          // Cancelling does not give a spent postponement right back; say so
+          // while the admin is still here to act on it.
+          await PostponementNotices.warnRightKept(context, widget.appointment);
+          if (!mounted) return;
           widget.onAppointmentUpdated();
           Navigator.of(context).pop();
         } else {
