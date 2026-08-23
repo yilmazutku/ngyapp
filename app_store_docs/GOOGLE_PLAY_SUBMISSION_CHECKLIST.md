@@ -35,7 +35,7 @@ storeFile=../ngy-release-key.jks
 
 ## Phase 2: Build the App Bundle
 
-- [ ] Bump version in `pubspec.yaml` if needed (currently 1.0.1+8)
+- [ ] Bump version in `pubspec.yaml` if needed (currently 1.0.2+9)
 - [ ] Run `flutter clean`
 - [ ] Run `flutter build appbundle --release`
 - [ ] Verify the `.aab` file at `build/app/outputs/bundle/release/app-release.aab`

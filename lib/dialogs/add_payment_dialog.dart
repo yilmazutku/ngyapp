@@ -393,13 +393,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
         await DialogUtils.openInfo(
           context,
           title: 'Başarılı',
-          message: 'Ödeme başarıyla eklendi.\n\n'
-              'Miktar: ${_amountController.text} TL\n'
-              'Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}\n'
-              'Durum: ${_paymentStatus.label}\n'
-              'Ödeme Türü: ${_paymentType.label}\n'
-              '${_selectedDueDate != null ? 'Planlanan Tarih: ${df.format(_selectedDueDate!)}\n' : ''}'
-              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}\n' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {

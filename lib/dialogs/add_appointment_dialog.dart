@@ -446,17 +446,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         await DialogUtils.openInfo(
           context,
           title: 'Başarılı',
-          message: 'Randevu detayları:\n\n'
-              'Kullanıcı: ${widget.userId != null ? _selectedUser!.name : _selectedUser!.name}\n'
-              'Tarih: ${DateFormatter.formatNumericDate(_selectedDate)}\n'
-              'Saat: ${_selectedTime.format(context)}\n'
-              'Görüşme Tipi: ${_selectedMeetingType.label}\n'
-              'Randevu Türü: ${_selectedAppointmentType.lbl}\n'
-              'Görüşme Süresi: $durationMinutes dk\n'
-              'Durum: ${_selectedStatus.label}\n'
-              '${_selectedStatus == AppointmentStatus.postponed && _postponedDate != null ? 'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}\n' : ''}'
-              'Paket: ${_selectedSubscription?.packageName ?? 'Paketsiz (Ön Görüşme)'}'
-              '${_notesController.text.isNotEmpty ? '\nNotlar: ${_notesController.text}' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {
