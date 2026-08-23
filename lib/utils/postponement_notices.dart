@@ -35,13 +35,21 @@ class PostponementNotices {
       'düşülmüştü. Randevu silindi, ancak düşülen hak geri verilmedi.\n\n'
       'Geri vermek isterseniz paket düzenleme kısmından ayarlayabilirsiniz.';
 
-  /// Shown after a cancelled appointment that had already paid a right becomes
-  /// a postponement: the right does not change, and the admin is told so in the
-  /// same loud form as the other notices.
+  /// Shown after a cancelled appointment becomes a postponement. The answer
+  /// given when it was cancelled stands, so no right changes hands either way;
+  /// the admin is told which of the two cases applies, in the same loud form as
+  /// the other notices.
   static const String _deductionNotRepeatedMessage =
       'Bu randevu iptal edilirken danışanın erteleme hakkından bir adet '
       'düşülmüştü. Randevu ertelendi durumuna alındı ve erteleme hakkından '
       'tekrar düşülmedi.';
+
+  static const String _noDeductionAtCancelMessage =
+      'Bu randevu iptal edilirken danışanın erteleme hakkından düşülmemişti. '
+      'Randevu ertelendi durumuna alındı ve erteleme hakkından yine '
+      'düşülmedi; iptal sırasındaki tercihiniz geçerlidir.\n\n'
+      'Hakkın düşülmesini isterseniz paket düzenleme kısmından '
+      'ayarlayabilirsiniz.';
 
   static const String _rightReturnedMessage =
       'Randevu tekrar planlandı durumuna alındı. Bu randevu için kullanılan '
@@ -128,13 +136,18 @@ class PostponementNotices {
     );
   }
 
-  /// Tells the admin no second right was spent when a cancelled appointment
-  /// became a postponement.
-  static Future<void> informDeductionNotRepeated(BuildContext context) {
+  /// Tells the admin that turning a cancellation into a postponement did not
+  /// touch the customer's rights, and what was decided at cancel time.
+  static Future<void> informDeductionNotRepeated(
+    BuildContext context, {
+    required bool deductedAtCancel,
+  }) {
     return DialogUtils.openAttentionInfo(
       context,
       title: _title,
-      message: _deductionNotRepeatedMessage,
+      message: deductedAtCancel
+          ? _deductionNotRepeatedMessage
+          : _noDeductionAtCancelMessage,
     );
   }
 

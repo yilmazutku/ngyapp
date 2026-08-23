@@ -258,17 +258,21 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       enteredTime.minute,
     );
 
+    // Turning a cancellation into a postponement never charges a right, whoever
+    // asked for it. The answer given when the appointment was cancelled is the
+    // one that stands: charging again here would mean two separate decisions
+    // about one visit, which the admin has no way to see or undo later.
+    final bool cancelToPostponement =
+        _isCanceled && _appointmentStatus == AppointmentStatus.postponed;
+
     // A user-originated postponement that is newly applied (the appointment was
     // not already postponed). Only these consume the customer's postponement
     // rights; admin-originated postponements never do.
-    // A cancelled appointment that already paid a right does not pay again when
-    // it becomes a postponement: the same right simply changes owner.
-    final bool rightAlreadySpent = _canceledWithDeduction;
     final bool isNewUserPostponement =
         _appointmentStatus == AppointmentStatus.postponed &&
         _originalStatus != AppointmentStatus.postponed &&
         _postponedBy == PostponeSource.user &&
-        !rightAlreadySpent;
+        !cancelToPostponement;
 
     // The mirror case: a user-originated postponement is taken back and the
     // appointment returns to "Planlandı", so the right it paid for is given
@@ -276,13 +280,15 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     // appointment, since that is where the right was taken from — the admin may
     // have changed either field in this very edit.
     final String? originalSubscriptionId = widget.appointment.subscriptionId;
-    // A stored postponement carries a spent right either because the customer
-    // asked for it, or because it inherited the flag from a cancellation that
-    // was charged; both are returned when the appointment goes back to
-    // "Planlandı".
+    // Whether the stored postponement actually cost a right. A postponement
+    // that came out of a cancellation records the cancel-time answer on
+    // postponementDeducted, and that answer wins: an explicit false means the
+    // admin said "hayır, düşülmesin" back then, so there is nothing to give
+    // back. Only an ordinary postponement (flag not set) falls back to its
+    // source.
     final bool storedPostponementSpentRight =
-        widget.appointment.postponedBy == PostponeSource.user ||
-        widget.appointment.postponementDeducted == true;
+        widget.appointment.postponementDeducted ??
+            (widget.appointment.postponedBy == PostponeSource.user);
     final bool isPostponementReverted =
         _originalStatus == AppointmentStatus.postponed &&
         storedPostponementSpentRight &&
@@ -303,8 +309,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     // stays spent and is from now on carried by the postponement.
     final bool leavingCanceled = _originalStatus == AppointmentStatus.canceled &&
         _appointmentStatus != AppointmentStatus.canceled;
-    final bool carriesDeductionToPostponement = rightAlreadySpent &&
-        _appointmentStatus == AppointmentStatus.postponed;
 
     // Warn the admin when a user-originated postponement is applied but the
     // customer has no postponement rights left.
@@ -349,8 +353,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         // Carried over: toMap() writes every field, so dropping this here would
         // silently clear the record of a deducted postponement right. It is
         // cleared on purpose only when the appointment stops being cancelled.
-        postponementDeducted: carriesDeductionToPostponement
-            ? true
+        // A postponement born from a cancellation keeps the cancel-time answer
+        // explicitly (true *or* false), so a later revert knows whether a right
+        // is owed back without having to re-read the deleted cancellation.
+        postponementDeducted: cancelToPostponement
+            ? _canceledWithDeduction
             : (leavingCanceled ? null : widget.appointment.postponementDeducted),
         postponedDate: _appointmentStatus == AppointmentStatus.postponed ? _postponedDate : null,
         postponedBy: _appointmentStatus == AppointmentStatus.postponed ? _postponedBy : null,
@@ -396,8 +403,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       );
 
       // Told last, so it is the message the admin leaves the dialog with.
-      if (carriesDeductionToPostponement && mounted) {
-        await PostponementNotices.informDeductionNotRepeated(context);
+      if (cancelToPostponement && mounted) {
+        await PostponementNotices.informDeductionNotRepeated(
+          context,
+          deductedAtCancel: _canceledWithDeduction,
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -670,7 +680,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                       'İptal edilmiş randevu yalnızca "Planlandı" veya '
                       '"Ertelendi" durumuna alınabilir. "Planlandı" seçilirse '
                       'iptalde düşülen erteleme hakkı iade edilir; '
-                      '"Ertelendi" seçilirse hak tekrar düşülmez.',
+                      '"Ertelendi" seçilirse iptal sırasındaki tercih geçerli '
+                      'kalır, erteleme hakkı yeniden hesaplanmaz.',
                       style: TextStyle(fontSize: 12),
                     )
                   : null,
