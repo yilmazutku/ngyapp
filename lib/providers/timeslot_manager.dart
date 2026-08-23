@@ -137,6 +137,8 @@ class TimeslotManager extends ChangeNotifier {
   /// A slot is blocked if it falls within the appointment's duration [start, end).
   bool isSlotBlockedByAppointment(
       DateTime slotDateTime, AppointmentModel appointment) {
+    if (appointment.status == AppointmentStatus.canceled) return false;
+
     final apptStart = appointment.appointmentDateTime;
     final apptEnd =
         apptStart.add(Duration(minutes: appointment.durationMinutes));
@@ -241,7 +243,9 @@ class TimeslotManager extends ChangeNotifier {
         // time must not write the same slot twice.
         final bookedTimeSlots = <String>{};
         for (var appointment in appointments) {
-          bookedTimeSlots.add(_slotKey(appointment.appointmentDateTime));
+          if (appointment.status != AppointmentStatus.canceled) {
+            bookedTimeSlots.add(_slotKey(appointment.appointmentDateTime));
+          }
         }
 
         if (bookedTimeSlots.isNotEmpty) {
@@ -311,7 +315,9 @@ class TimeslotManager extends ChangeNotifier {
       final bookedTimeSlots = <String>{};
       final appointmentsBySlot = <String, List<AppointmentModel>>{};
 
-      final activeAppointments = appointments;
+      final activeAppointments = appointments
+          .where((a) => a.status != AppointmentStatus.canceled)
+          .toList();
 
       // One read per client, in parallel: several appointments of the day
       // usually belong to the same person.

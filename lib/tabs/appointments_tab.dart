@@ -23,6 +23,8 @@ extension AppointmentStatusExtension on AppointmentStatus {
         return Colors.blue;
       case AppointmentStatus.burned:
         return Colors.orange;
+      case AppointmentStatus.canceled:
+        return Colors.red;
       case AppointmentStatus.postponed:
         return Colors.purple;
     }
@@ -36,6 +38,8 @@ extension AppointmentStatusExtension on AppointmentStatus {
         return Icons.event;
       case AppointmentStatus.burned:
         return Icons.local_fire_department;
+      case AppointmentStatus.canceled:
+        return Icons.cancel;
       case AppointmentStatus.postponed:
         return Icons.update;
     }
@@ -232,13 +236,11 @@ class _AppointmentsTabState
       ) {
     // Inline stats (no setState)
     final appts = filteredItems.cast<AppointmentModel>();
-    int upcoming = 0, completed = 0;
+    int upcoming = 0, completed = 0, cancelled = 0;
     for (final a in appts) {
-      if (a.status == AppointmentStatus.scheduled) {
-        upcoming++;
-      } else if (a.status == AppointmentStatus.completed) {
-        completed++;
-      }
+      if (a.status == AppointmentStatus.scheduled) upcoming++;
+      else if (a.status == AppointmentStatus.completed) completed++;
+      else if (a.status == AppointmentStatus.canceled) cancelled++;
     }
 
     final statusOptions = {for (var s in AppointmentStatus.values) s: s.label};
@@ -273,6 +275,17 @@ class _AppointmentsTabState
                     label: 'Tamamlanan',
                     icon: Icons.check_circle_outline,
                     color: Colors.green,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  fit: FlexFit.tight,
+                  child: _buildStatCard(
+                    context,
+                    count: cancelled,
+                    label: 'İptal Edilen',
+                    icon: Icons.cancel_outlined,
+                    color: Colors.red,
                   ),
                 ),
               ],

@@ -284,6 +284,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         updateDate: DateTime.now(),
         createUser: widget.appointment.createUser,
         updateUser: 'admin', // Assuming admin is updating
+        canceledBy: widget.appointment.canceledBy,
+        canceledAt: widget.appointment.canceledAt,
+        // Carried over: toMap() writes every field, so dropping this here would
+        // silently clear the record of a deducted postponement right.
+        postponementDeducted: widget.appointment.postponementDeducted,
         postponedDate: _appointmentStatus == AppointmentStatus.postponed ? _postponedDate : null,
         postponedBy: _appointmentStatus == AppointmentStatus.postponed ? _postponedBy : null,
         durationMinutes: durationMinutes,
@@ -336,6 +341,79 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       }
     } finally {
       stopLoading();
+    }
+  }
+
+  /// Cancels the appointment: the record stays as "İptal Edildi".
+  ///
+  /// The admin is asked whether the cancellation should spend one of the
+  /// customer's postponement rights; the answer is stored on the appointment so
+  /// a later delete can say what happened to that right.
+  Future<void> _cancelAppointment() async {
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'İptal Onayı',
+      message: 'Bu randevuyu iptal etmek istediğinizden emin misiniz?',
+      confirmText: 'Evet, İptal Et',
+      cancelText: 'Hayır',
+    );
+    if (!confirmed || !mounted) return;
+
+    // null => the admin backed out at this second step; nothing is cancelled.
+    final deduct = await PostponementNotices.askDeductOnCancel(
+      context,
+      remainingRights: _remainingPostponements,
+    );
+    if (deduct == null || !mounted) return;
+
+    startLoading();
+    try {
+      final appointmentManager =
+          Provider.of<AppointmentManager>(context, listen: false);
+
+      final success = await appointmentManager.cancelAppointment(
+        widget.appointment.appointmentId,
+        widget.appointment.userId,
+        canceledBy: 'admin',
+        deductPostponement: deduct,
+      );
+
+      if (!mounted) return;
+      if (!success) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Randevu iptal edilemedi.',
+        );
+        return;
+      }
+
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: deduct
+            ? 'Randevu iptal edildi ve danışanın erteleme hakkından bir adet '
+                'düşüldü.'
+            : 'Randevu iptal edildi. Erteleme hakkından düşülmedi.',
+      );
+      if (!mounted) return;
+      // A postponement right the *appointment* had already spent is not given
+      // back by cancelling either.
+      await PostponementNotices.warnRightKept(context, widget.appointment);
+      if (!mounted) return;
+
+      widget.onAppointmentUpdated();
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Randevu iptal edilirken bir hata oluştu: $e',
+      );
+    } finally {
+      if (mounted) stopLoading();
     }
   }
 
@@ -671,17 +749,31 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               hourController: _hourController,
               minuteController: _minuteController,
             ),
-            // 5) Delete. An appointment is no longer cancelled — it is either
-            // kept or removed for good. Deleting gives the package's meeting
-            // back when the appointment had consumed one.
-            ElevatedButton.icon(
-              onPressed: isLoading ? null : _deleteAppointment,
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Randevuyu Sil'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
+            // 5) Cancel / delete. Cancelling keeps the record ("İptal Edildi"),
+            // deleting removes it for good; both give the package's meeting back
+            // when the appointment had consumed one.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ElevatedButton(
+                  onPressed: isLoading ? null : _cancelAppointment,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Randevuyu İptal Et'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: isLoading ? null : _deleteAppointment,
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Randevuyu Sil'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                ),
+              ],
             ),
             // 6) Notes
             TextField(

@@ -158,7 +158,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       logger.debug('Checking for existing appointments in week: {} to {}', 
         [weekStartDate, weekEndDate]);
       
-      // Statuses that count as "having an appointment"
+      // Statuses that count as "having an appointment" (exclude only canceled)
       const validStatuses = {
         AppointmentStatus.scheduled,
         AppointmentStatus.completed,
@@ -307,13 +307,15 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     );
   }
 
-  /// Appointments belonging to [subId], sorted by date ascending.
+  /// Non-canceled appointments belonging to [subId], sorted by date ascending.
   List<AppointmentModel> _packageAppointments(
     _AppointmentsView view,
     String subId,
   ) {
     return view.appointments
-        .where((a) => a.subscriptionId == subId)
+        .where((a) =>
+            a.subscriptionId == subId &&
+            a.status != AppointmentStatus.canceled)
         .toList()
       ..sort((a, b) => a.appointmentDateTime.compareTo(b.appointmentDateTime));
   }
@@ -348,7 +350,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
   }
 
   /// Whether [appt] is the package's very first appointment: no meeting has
-  /// been held yet and this is the earliest appointment of the
+  /// been held yet and this is the earliest non-canceled appointment of the
   /// package.
   bool _isFirstAppointmentOfPackage(
     AppointmentModel appt,
@@ -685,7 +687,9 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
 
   Widget _buildAppointmentsList(_AppointmentsView view) {
     final upcomingAppointments = view.appointments.where((appointment) {
-      return appointment.appointmentDateTime.isAfter(DateTime.now());
+      return appointment.appointmentDateTime.isAfter(DateTime.now()) &&
+          appointment.status != AppointmentStatus.canceled /*&&
+          !(appointment.isDeleted ?? false)*/;
     }).toList();
 
     if (upcomingAppointments.isEmpty) {
@@ -811,9 +815,11 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
 
       if (!mounted) return;
 
+      // Filter past appointments including canceled ones
       final now = DateTime.now();
       final pastAppointments = appointments.where((appointment) {
-        return appointment.appointmentDateTime.isBefore(now);
+        return appointment.appointmentDateTime.isBefore(now) ||
+            appointment.status == AppointmentStatus.canceled;
       }).toList();
 
       // Sort by date - most recent first
@@ -999,6 +1005,11 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
           backgroundColor: Colors.green,
           child: Icon(Icons.check, color: Colors.white),
         );
+      case AppointmentStatus.canceled:
+        return const CircleAvatar(
+          backgroundColor: Colors.red,
+          child: Icon(Icons.close, color: Colors.white),
+        );
       case AppointmentStatus.scheduled:
         return const CircleAvatar(
           backgroundColor: Colors.blue,
@@ -1016,6 +1027,8 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     switch (status) {
       case AppointmentStatus.completed:
         return 'Yapıldı';
+      case AppointmentStatus.canceled:
+        return 'İptal Edildi';
       case AppointmentStatus.scheduled:
         return 'Planlandı';
       case AppointmentStatus.burned:
@@ -1030,6 +1043,8 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
       case AppointmentStatus.completed:
       case AppointmentStatus.burned:
         return Colors.green;
+      case AppointmentStatus.canceled:
+        return Colors.red;
       case AppointmentStatus.scheduled:
         return Colors.blue;
       default:
