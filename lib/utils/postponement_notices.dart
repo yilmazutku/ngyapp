@@ -35,6 +35,14 @@ class PostponementNotices {
       'düşülmüştü. Randevu silindi, ancak düşülen hak geri verilmedi.\n\n'
       'Geri vermek isterseniz paket düzenleme kısmından ayarlayabilirsiniz.';
 
+  /// Shown after a cancelled appointment that had already paid a right becomes
+  /// a postponement: the right does not change, and the admin is told so in the
+  /// same loud form as the other notices.
+  static const String _deductionNotRepeatedMessage =
+      'Bu randevu iptal edilirken danışanın erteleme hakkından bir adet '
+      'düşülmüştü. Randevu ertelendi durumuna alındı ve erteleme hakkından '
+      'tekrar düşülmedi.';
+
   static const String _rightReturnedMessage =
       'Randevu tekrar planlandı durumuna alındı. Bu randevu için kullanılan '
       'erteleme hakkı danışana geri verildi.';
@@ -117,6 +125,16 @@ class PostponementNotices {
           ),
         ],
       ),
+    );
+  }
+
+  /// Tells the admin no second right was spent when a cancelled appointment
+  /// became a postponement.
+  static Future<void> informDeductionNotRepeated(BuildContext context) {
+    return DialogUtils.openAttentionInfo(
+      context,
+      title: _title,
+      message: _deductionNotRepeatedMessage,
     );
   }
 
