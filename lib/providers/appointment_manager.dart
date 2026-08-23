@@ -15,12 +15,14 @@ class AppointmentManager extends ChangeNotifier {
 
   AppointmentManager({required this.subProvider});
 
-  /// AppointmentStatus.fromLabel already falls back to "Planlandı" for an
-  /// unknown label; this only adds the null case for a document with no status.
-  AppointmentStatus _statusFromLabelSafe(String? label) =>
-      label == null
-          ? AppointmentStatus.scheduled
-          : AppointmentStatus.fromLabel(label);
+  AppointmentStatus _statusFromLabelSafe(String? label) {
+    if (label == null) return AppointmentStatus.scheduled;
+    try {
+      return AppointmentStatus.fromLabel(label);
+    } catch (_) {
+      return AppointmentStatus.scheduled;
+    }
+  }
 
   // ---------------------- CREATE ----------------------
 
@@ -250,16 +252,93 @@ class AppointmentManager extends ChangeNotifier {
     return queued;
   }
 
-  // ---------------------- DELETE ----------------------
+  // ---------------------- DELETE / CANCEL ----------------------
 
-  /// Removes an appointment and gives back the subscription meeting it had
-  /// consumed. Both writes land in one batch, so the counters can never drift
-  /// away from the appointments that are actually stored.
   Future<bool> deleteAppointment(
       String appointmentId,
       String userId, {
         required String deletedBy,
       }) async {
+    final released = await _releaseAppointment(
+      appointmentId: appointmentId,
+      userId: userId,
+      actor: deletedBy,
+      operation: 'deleteAppointment',
+      applyWrite: (batch, apptRef) => batch.delete(apptRef),
+    );
+    return released != null;
+  }
+
+  /// Cancels an appointment: the record stays, marked "İptal Edildi", and the
+  /// subscription meeting it had consumed is given back.
+  ///
+  /// [deductPostponement] is the admin's answer to "erteleme hakkından
+  /// düşülsün mü?". When true, one of the customer's postponement rights is
+  /// spent and the appointment remembers it (postponementDeducted), so a later
+  /// delete can tell the admin the right stays spent.
+  Future<bool> cancelAppointment(
+      String appointmentId,
+      String userId, {
+        required String canceledBy,
+        bool deductPostponement = false,
+      }) async {
+    final now = Timestamp.now();
+    final released = await _releaseAppointment(
+      appointmentId: appointmentId,
+      userId: userId,
+      actor: canceledBy,
+      operation: 'cancelAppointment',
+      applyWrite: (batch, apptRef) => batch.update(apptRef, {
+        'status': AppointmentStatus.canceled.label,
+        'canceledBy': canceledBy,
+        'canceledAt': now,
+        'postponementDeducted': deductPostponement,
+        'updateDate': now,
+        'updateUser': canceledBy,
+      }),
+    );
+
+    if (released == null) return false;
+
+    // Only after the cancellation actually landed: a right must never be spent
+    // for an appointment that was not cancelled. The package comes from the
+    // document _releaseAppointment already read, so it is not read twice.
+    if (deductPostponement) {
+      final subId = released['subscriptionId'] as String?;
+      if (subId != null && subId.isNotEmpty) {
+        await subProvider.adjustPostponementsUsed(
+          userId: userId,
+          subscriptionId: subId,
+          delta: 1,
+          updateUser: canceledBy,
+        );
+      } else {
+        logger.warn(
+          'cancelAppointment: postponement deduction skipped, appointment {} has no subscription',
+          [appointmentId],
+        );
+      }
+    }
+
+    return true;
+  }
+
+  /// Shared body of delete and cancel: both take the appointment out of the
+  /// schedule and must give back the subscription meeting it had consumed.
+  /// The appointment write and the counter land in one batch.
+  ///
+  /// Returns the appointment's stored data on success (so the caller can act on
+  /// fields it already read, e.g. the package), or null when there was no such
+  /// appointment.
+  Future<Map<String, dynamic>?> _releaseAppointment({
+    required String appointmentId,
+    required String userId,
+    required String actor,
+    required String operation,
+    required void Function(
+            WriteBatch batch, DocumentReference<Map<String, dynamic>> apptRef)
+        applyWrite,
+  }) async {
     try {
       final db = FirebaseFirestore.instance;
       final apptRef = _apptRef(userId, appointmentId);
@@ -267,10 +346,10 @@ class AppointmentManager extends ChangeNotifier {
       final snap = await apptRef.get();
       if (!snap.exists) {
         logger.warn(
-          'deleteAppointment: appointment not found, user={}, appt={}',
-          [userId, appointmentId],
+          '{}: appointment not found, user={}, appt={}',
+          [operation, userId, appointmentId],
         );
-        return false;
+        return null;
       }
 
       final data = snap.data() as Map<String, dynamic>;
@@ -282,11 +361,11 @@ class AppointmentManager extends ChangeNotifier {
           await _subscriptionExists(userId, subId);
 
       final batch = db.batch();
-      batch.delete(apptRef);
+      applyWrite(batch, apptRef);
       if (touchesSub) {
         logger.info(
-          'deleteAppointment: decrement {} for user={}, sub={}',
-          [counterField, userId, subId],
+          '{}: decrement {} for user={}, sub={}',
+          [operation, counterField, userId, subId],
         );
         batch.update(_subRef(userId, subId!), <String, Object?>{
           counterField: FieldValue.increment(-1),
@@ -298,11 +377,10 @@ class AppointmentManager extends ChangeNotifier {
         subProvider.markChanged();
       }
 
-      logger.info('Appointment deletedBy={}: appointmentId={}',
-          [deletedBy, appointmentId]);
-      return true;
+      logger.info('{} by={}: appointmentId={}', [operation, actor, appointmentId]);
+      return data;
     } catch (e) {
-      logger.err('Error deleting appointment: {}', [e]);
+      logger.err('Error in {}: {}', [operation, e]);
       rethrow;
     }
   }
@@ -524,7 +602,7 @@ class AppointmentManager extends ChangeNotifier {
     return result;
   }
 
-  /// Returns the appointments on the same day whose time interval
+  /// Returns the non-canceled appointments on the same day whose time interval
   /// overlaps `[start, start + durationMinutes)`. Used to warn the admin
   /// (without blocking) when a new appointment or event clashes with an
   /// existing meeting. Each returned appointment has its [AppointmentModel.user]
@@ -547,6 +625,7 @@ class AppointmentManager extends ChangeNotifier {
     );
 
     final overlapping = dayAppointments.where((a) {
+      if (a.status == AppointmentStatus.canceled) return false;
       final effStart = effectiveStart(a);
       final effEnd = effStart.add(Duration(minutes: a.durationMinutes));
       // Half-open interval overlap test.
