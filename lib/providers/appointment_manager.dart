@@ -15,14 +15,12 @@ class AppointmentManager extends ChangeNotifier {
 
   AppointmentManager({required this.subProvider});
 
-  AppointmentStatus _statusFromLabelSafe(String? label) {
-    if (label == null) return AppointmentStatus.scheduled;
-    try {
-      return AppointmentStatus.fromLabel(label);
-    } catch (_) {
-      return AppointmentStatus.scheduled;
-    }
-  }
+  /// AppointmentStatus.fromLabel already falls back to "Planlandı" for an
+  /// unknown label; this only adds the null case for a document with no status.
+  AppointmentStatus _statusFromLabelSafe(String? label) =>
+      label == null
+          ? AppointmentStatus.scheduled
+          : AppointmentStatus.fromLabel(label);
 
   // ---------------------- CREATE ----------------------
 
@@ -252,55 +250,16 @@ class AppointmentManager extends ChangeNotifier {
     return queued;
   }
 
-  // ---------------------- DELETE / CANCEL ----------------------
+  // ---------------------- DELETE ----------------------
 
+  /// Removes an appointment and gives back the subscription meeting it had
+  /// consumed. Both writes land in one batch, so the counters can never drift
+  /// away from the appointments that are actually stored.
   Future<bool> deleteAppointment(
       String appointmentId,
       String userId, {
         required String deletedBy,
       }) async {
-    return _releaseAppointment(
-      appointmentId: appointmentId,
-      userId: userId,
-      actor: deletedBy,
-      operation: 'deleteAppointment',
-      applyWrite: (batch, apptRef) => batch.delete(apptRef),
-    );
-  }
-
-  Future<bool> cancelAppointment(
-      String appointmentId,
-      String userId, {
-        required String canceledBy,
-      }) async {
-    final now = Timestamp.now();
-    return _releaseAppointment(
-      appointmentId: appointmentId,
-      userId: userId,
-      actor: canceledBy,
-      operation: 'cancelAppointment',
-      applyWrite: (batch, apptRef) => batch.update(apptRef, {
-        'status': AppointmentStatus.canceled.label,
-        'canceledBy': canceledBy,
-        'canceledAt': now,
-        'updateDate': now,
-        'updateUser': canceledBy,
-      }),
-    );
-  }
-
-  /// Shared body of delete and cancel: both take the appointment out of the
-  /// schedule and must give back the subscription meeting it had consumed.
-  /// The appointment write and the counter land in one batch.
-  Future<bool> _releaseAppointment({
-    required String appointmentId,
-    required String userId,
-    required String actor,
-    required String operation,
-    required void Function(
-            WriteBatch batch, DocumentReference<Map<String, dynamic>> apptRef)
-        applyWrite,
-  }) async {
     try {
       final db = FirebaseFirestore.instance;
       final apptRef = _apptRef(userId, appointmentId);
@@ -308,8 +267,8 @@ class AppointmentManager extends ChangeNotifier {
       final snap = await apptRef.get();
       if (!snap.exists) {
         logger.warn(
-          '{}: appointment not found, user={}, appt={}',
-          [operation, userId, appointmentId],
+          'deleteAppointment: appointment not found, user={}, appt={}',
+          [userId, appointmentId],
         );
         return false;
       }
@@ -323,11 +282,11 @@ class AppointmentManager extends ChangeNotifier {
           await _subscriptionExists(userId, subId);
 
       final batch = db.batch();
-      applyWrite(batch, apptRef);
+      batch.delete(apptRef);
       if (touchesSub) {
         logger.info(
-          '{}: decrement {} for user={}, sub={}',
-          [operation, counterField, userId, subId],
+          'deleteAppointment: decrement {} for user={}, sub={}',
+          [counterField, userId, subId],
         );
         batch.update(_subRef(userId, subId!), <String, Object?>{
           counterField: FieldValue.increment(-1),
@@ -339,10 +298,11 @@ class AppointmentManager extends ChangeNotifier {
         subProvider.markChanged();
       }
 
-      logger.info('{} by={}: appointmentId={}', [operation, actor, appointmentId]);
+      logger.info('Appointment deletedBy={}: appointmentId={}',
+          [deletedBy, appointmentId]);
       return true;
     } catch (e) {
-      logger.err('Error in {}: {}', [operation, e]);
+      logger.err('Error deleting appointment: {}', [e]);
       rethrow;
     }
   }
@@ -564,7 +524,7 @@ class AppointmentManager extends ChangeNotifier {
     return result;
   }
 
-  /// Returns the non-canceled appointments on the same day whose time interval
+  /// Returns the appointments on the same day whose time interval
   /// overlaps `[start, start + durationMinutes)`. Used to warn the admin
   /// (without blocking) when a new appointment or event clashes with an
   /// existing meeting. Each returned appointment has its [AppointmentModel.user]
@@ -587,7 +547,6 @@ class AppointmentManager extends ChangeNotifier {
     );
 
     final overlapping = dayAppointments.where((a) {
-      if (a.status == AppointmentStatus.canceled) return false;
       final effStart = effectiveStart(a);
       final effEnd = effStart.add(Duration(minutes: a.durationMinutes));
       // Half-open interval overlap test.

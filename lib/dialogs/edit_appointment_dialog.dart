@@ -284,8 +284,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         updateDate: DateTime.now(),
         createUser: widget.appointment.createUser,
         updateUser: 'admin', // Assuming admin is updating
-        canceledBy: widget.appointment.canceledBy,
-        canceledAt: widget.appointment.canceledAt,
         postponedDate: _appointmentStatus == AppointmentStatus.postponed ? _postponedDate : null,
         postponedBy: _appointmentStatus == AppointmentStatus.postponed ? _postponedBy : null,
         durationMinutes: durationMinutes,
