@@ -1563,14 +1563,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
         await DialogUtils.openInfo(
           context,
           title: 'Başarılı',
-          message: 'Ödeme başarıyla eklendi.\n\n'
-              'Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}\n'
-              'Miktar: ${_amountController.text} TL\n'
-              'Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}\n'
-              'Durum: ${_paymentStatus.label}\n'
-              'Ödeme Türü: ${_paymentType.label}\n'
-              '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
-              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {
@@ -2074,18 +2067,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
 
     final newAmount = parsedAmount;
 
-    // Package name for the success message.
-    String? newSubName;
-    if (_selectedSubscriptionId != null) {
-      try {
-        newSubName = _availableSubscriptions
-            .firstWhere((s) => s.subscriptionId == _selectedSubscriptionId)
-            .packageName;
-      } catch (e) {
-        newSubName = 'Bilinmeyen Paket';
-      }
-    }
-
     startLoading();
 
     try {
@@ -2316,14 +2297,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
         await DialogUtils.openInfo(
           context,
           title: 'Başarılı',
-          message: 'Ödeme başarıyla güncellendi.\n\n'
-              'Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}\n'
-              'Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL\n'
-              'Durum: ${_paymentStatus.label}\n'
-              'Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}\n'
-              '${newSubName != null ? 'Bağlı Paket: $newSubName\n' : 'Bağlı Paket: Yok\n'}'
-              '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
-              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {

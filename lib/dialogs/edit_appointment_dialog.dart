@@ -326,7 +326,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
-        message: 'Randevu başarıyla güncellendi.',
+        message: 'İşlem Başarılı.',
       );
     } catch (e) {
       if (mounted) {
