@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
@@ -9,6 +8,7 @@ import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/postponement_notices.dart';
 import '../utils/time_picker_utils.dart';
 import '../widgets/loading_overlay.dart';
 import 'dialog_widgets.dart';
@@ -234,6 +234,18 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         _originalStatus != AppointmentStatus.postponed &&
         _postponedBy == PostponeSource.user;
 
+    // The mirror case: a user-originated postponement is taken back and the
+    // appointment returns to "Planlandı", so the right it paid for is given
+    // back. Both the source and the package are read from the *stored*
+    // appointment, since that is where the right was taken from — the admin may
+    // have changed either field in this very edit.
+    final String? originalSubscriptionId = widget.appointment.subscriptionId;
+    final bool isPostponementReverted =
+        _originalStatus == AppointmentStatus.postponed &&
+        widget.appointment.postponedBy == PostponeSource.user &&
+        _appointmentStatus == AppointmentStatus.scheduled &&
+        (originalSubscriptionId?.isNotEmpty ?? false);
+
     // Warn the admin when a user-originated postponement is applied but the
     // customer has no postponement rights left.
     if (isNewUserPostponement && _selectedSubscriptionId != null) {
@@ -359,24 +371,29 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       // Send update to Firestore
       await appointmentManager.updateAppointment(updatedAppointment);
       
-      // Only user-originated postponements consume a postponement right. Use an
-      // atomic increment so concurrent edits can't clobber the counter.
+      // Only user-originated postponements consume a postponement right, and
+      // taking one back returns it. Both directions go through the same atomic
+      // adjustment, which also keeps the counter at or above zero.
+      if (!mounted) return;
+      final subProvider = Provider.of<SubProvider>(context, listen: false);
+
       if (isNewUserPostponement && _selectedSubscriptionId != null) {
-        try {
-          final subProvider = Provider.of<SubProvider>(context, listen: false);
-          await subProvider.updateSubscription(
-            userId: widget.appointment.userId,
-            subscriptionId: _selectedSubscriptionId!,
-            updateData: {
-              'postponementsUsed': FieldValue.increment(1),
-              'updateDate': Timestamp.fromDate(DateTime.now()),
-              'updateUser': 'admin',
-            },
-          );
-        } catch (e) {
-          debugPrint('Error updating postponement: $e');
-          // Continue even if postponement update fails
-        }
+        await subProvider.adjustPostponementsUsed(
+          userId: widget.appointment.userId,
+          subscriptionId: _selectedSubscriptionId!,
+          delta: 1,
+        );
+      }
+
+      if (isPostponementReverted) {
+        await subProvider.adjustPostponementsUsed(
+          userId: widget.appointment.userId,
+          subscriptionId: originalSubscriptionId!,
+          delta: -1,
+        );
+        if (!mounted) return;
+        await PostponementNotices.informRightReturned(context);
+        if (!mounted) return;
       }
 
       // Notify parent & close
@@ -398,6 +415,67 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       }
     } finally {
       stopLoading();
+    }
+  }
+
+  /// Deletes the appointment for good, after an explicit confirmation.
+  ///
+  /// AppointmentManager gives the package's meeting back in the same batch when
+  /// the deleted appointment had consumed one (see deleteAppointment).
+  Future<void> _deleteAppointment() async {
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Randevu Sil',
+      message:
+          '${DateFormatter.formatNumericDateTime(widget.appointment.appointmentDateTime)} '
+          'tarihli randevu kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\n'
+          'Silmek istediğinizden emin misiniz?',
+      confirmText: 'Evet, Sil',
+      cancelText: 'Vazgeç',
+    );
+    if (!confirmed || !mounted) return;
+
+    startLoading();
+    try {
+      final appointmentManager =
+          Provider.of<AppointmentManager>(context, listen: false);
+      final deleted = await appointmentManager.deleteAppointment(
+        widget.appointment.appointmentId,
+        widget.appointment.userId,
+        deletedBy: 'admin',
+      );
+
+      if (!mounted) return;
+      if (!deleted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: 'Randevu bulunamadı, silinemedi.',
+        );
+        return;
+      }
+
+      widget.onAppointmentUpdated();
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Randevu silindi.',
+      );
+      if (!mounted) return;
+      // Deleting does not give a spent postponement right back either.
+      await PostponementNotices.warnRightKept(context, widget.appointment);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Randevu silinirken bir hata oluştu: $e',
+      );
+    } finally {
+      if (mounted) stopLoading();
     }
   }
 
@@ -446,6 +524,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
             title: 'Başarılı',
             message: 'Randevu başarıyla iptal edildi.',
           );
+          if (!mounted) return;
+          // Cancelling does not give a spent postponement right back; say so
+          // while the admin is still here to act on it.
+          await PostponementNotices.warnRightKept(context, widget.appointment);
+          if (!mounted) return;
           widget.onAppointmentUpdated();
           Navigator.of(context).pop();
         } else {
@@ -667,7 +750,10 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 },
               ),
             
-            // 3) Subscription Dropdown
+            // 3) Subscription Dropdown. The dropdown sits *under* the label
+            // rather than in `trailing`: a long package name claimed the whole
+            // row width there, leaving the "Paket" label a few pixels and
+            // wrapping it one letter per line on phones.
             ListTile(
               title: const Text('Paket'),
               subtitle: _isLoadingSubscriptions
@@ -682,12 +768,12 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                         Text('Yükleniyor...'),
                       ],
                     )
-                  : null,
-              trailing: _isLoadingSubscriptions
-                  ? null
                   : DropdownButton<String?>(
                       value: _selectedSubscriptionId,
                       hint: const Text('Seçiniz'),
+                      // Fills the row and ellipsizes long names instead of
+                      // stretching the dropdown to fit them.
+                      isExpanded: true,
                       onChanged: (String? newValue) {
                         setState(() {
                           _selectedSubscriptionId = newValue;
@@ -737,14 +823,31 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               hourController: _hourController,
               minuteController: _minuteController,
             ),
-            // 5) Cancel Button
-            ElevatedButton(
-              onPressed: _cancelAppointment,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Randevuyu İptal Et'),
+            // 5) Cancel / delete. Cancelling keeps the record ("İptal Edildi"),
+            // deleting removes it for good; both give the package's meeting
+            // back when the appointment had consumed one.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ElevatedButton(
+                  onPressed: isLoading ? null : _cancelAppointment,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Randevuyu İptal Et'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: isLoading ? null : _deleteAppointment,
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Randevuyu Sil'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                ),
+              ],
             ),
             // 6) Notes
             TextField(

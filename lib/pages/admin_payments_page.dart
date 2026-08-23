@@ -2238,37 +2238,9 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
         // User changed: delete from old user, add to new user
         _logger.info('User changed from $_originalUserId to ${_selectedUser!.userId}');
 
-        // Remove from old subscription if payment was completed
-        if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
-          _logger.info('Removing amount from old subscription $oldSubscriptionId');
-          try {
-            final oldSubDoc = await FirebaseFirestore.instance
-                .collection('users')
-                .doc(_originalUserId)
-                .collection('subscriptions')
-                .doc(oldSubscriptionId)
-                .get();
-
-            if (oldSubDoc.exists) {
-              final oldSubData = oldSubDoc.data() as Map<String, dynamic>;
-              double currentAmountPaid = (oldSubData['amountPaid'] ?? 0).toDouble();
-              double newAmountPaid = (currentAmountPaid - oldAmount).clamp(0, double.infinity);
-
-              await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(_originalUserId)
-                  .collection('subscriptions')
-                  .doc(oldSubscriptionId)
-                  .update({'amountPaid': newAmountPaid});
-
-              _logger.info('Updated old subscription $oldSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid');
-            }
-          } catch (e) {
-            _logger.err('Error updating old subscription $oldSubscriptionId: {}', [e]);
-          }
-        }
-
-        // Delete payment from old user
+        // Delete payment from old user. deletePayment takes the amount back
+        // off the old package itself when the payment was a completed one, so
+        // it is no longer subtracted here.
         await paymentProvider.deletePayment(oldPayment.paymentId, _originalUserId);
         _logger.info('Deleted payment from old user $_originalUserId');
 

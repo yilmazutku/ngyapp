@@ -878,7 +878,13 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
             // record(s). Planned payments are never deleted from here; they
             // are managed from the payments tab.
             for (final payment in _completedPayments) {
-              await paymentProvider.deletePayment(payment.paymentId, userId);
+              // This dialog has already written the package's amountPaid above,
+              // so the delete must not subtract the amount a second time.
+              await paymentProvider.deletePayment(
+                payment.paymentId,
+                userId,
+                adjustSubscriptionTotal: false,
+              );
             }
           }
 

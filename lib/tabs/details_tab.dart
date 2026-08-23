@@ -634,6 +634,10 @@ class _DetailsTabState extends State<DetailsTab>
       initialDate: _birthDate ?? DateTime(now.year - 20),
       firstDate: DateTime(1900),
       lastDate: now,
+      // Opens straight on the keyboard entry the pencil icon used to lead to:
+      // typing a birth date is faster than scrolling decades in the calendar.
+      // The calendar stays one tap away via the picker's own toggle.
+      initialEntryMode: DatePickerEntryMode.input,
     );
     if (picked != null && mounted) {
       setState(() => _birthDate = picked);

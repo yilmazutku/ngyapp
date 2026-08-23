@@ -388,6 +388,64 @@ class SubProvider extends ChangeNotifier {
     }
   }
 
+  /// Moves a subscription's `postponementsUsed` by [delta], atomically.
+  ///
+  /// Only user-originated postponements are tracked here, so this is what
+  /// consumes and gives back the customer's postponement rights. The counter is
+  /// kept at or above zero: giving a right back more often than it was taken
+  /// must never make the customer look like they have extra rights.
+  ///
+  /// Returns whether the adjustment was applied.
+  Future<bool> adjustPostponementsUsed({
+    required String userId,
+    required String subscriptionId,
+    required int delta,
+    String updateUser = 'admin',
+  }) async {
+    if (subscriptionId.isEmpty || delta == 0) return true;
+
+    try {
+      final subRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('subscriptions')
+          .doc(subscriptionId);
+
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(subRef);
+        if (!snap.exists) {
+          logger.warn('Sub not found for postponement update: user={}, sub={}',
+              [userId, subscriptionId]);
+          return;
+        }
+
+        final raw = snap.data()?['postponementsUsed'];
+        final int current =
+            raw is int ? raw : int.tryParse('$raw') ?? 0;
+        final int next = (current + delta) < 0 ? 0 : current + delta;
+
+        tx.update(subRef, {
+          'postponementsUsed': next,
+          'updateDate': Timestamp.fromDate(DateTime.now()),
+          'updateUser': updateUser,
+        });
+        logger.info(
+          'postponementsUsed adjusted: user={}, sub={}, delta={}, from {} to {}',
+          [userId, subscriptionId, delta, current, next],
+        );
+      });
+
+      _subChanged = true;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      logger.err(
+          'Error adjusting postponementsUsed for userId={}, subscriptionId={}: {}',
+          [userId, subscriptionId, e]);
+      return false;
+    }
+  }
+
   /// Moves a subscription's `amountPaid` by [delta], atomically.
   ///
   /// Callers used to read the current total — often from a stale in-memory
