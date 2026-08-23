@@ -27,8 +27,9 @@ class PostponementNotices {
       'ayarlayınız.';
 
   /// Shown after deleting a *cancelled* appointment whose cancellation had
-  /// deducted a right. The admin took that decision knowingly at cancel time,
-  /// so this is a plain note rather than the loud warning above.
+  /// deducted a right. Uses the same loud treatment as [_rightKeptMessage]:
+  /// the right stays spent either way, so both cases must be equally hard to
+  /// miss.
   static const String _canceledRightKeptMessage =
       'Bu randevu iptal edilirken danışanın erteleme hakkından bir adet '
       'düşülmüştü. Randevu silindi, ancak düşülen hak geri verilmedi.\n\n'
@@ -59,7 +60,7 @@ class PostponementNotices {
     AppointmentModel appointment,
   ) async {
     if (_canceledWithDeduction(appointment)) {
-      await DialogUtils.openInfo(
+      await DialogUtils.openAttentionInfo(
         context,
         title: _title,
         message: _canceledRightKeptMessage,

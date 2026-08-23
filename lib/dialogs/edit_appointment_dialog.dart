@@ -184,6 +184,26 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     });
   }
 
+  /// Whether the *stored* appointment is cancelled. Editing is restricted in
+  /// that case: the only status change allowed is going back to "Planlandı".
+  bool get _isCanceled => _originalStatus == AppointmentStatus.canceled;
+
+  /// Statuses the admin may pick in this dialog.
+  ///
+  /// - A cancelled appointment may only stay cancelled or go back to
+  ///   "Planlandı"; that revert returns the right the cancellation spent.
+  /// - "İptal Edildi" is never picked here: cancelling goes through the
+  ///   "Randevuyu İptal Et" button so the erteleme-hakkı question is asked and
+  ///   the cancellation is recorded on the appointment.
+  List<AppointmentStatus> get _selectableStatuses {
+    if (_isCanceled) {
+      return const [AppointmentStatus.canceled, AppointmentStatus.scheduled];
+    }
+    return AppointmentStatus.values
+        .where((s) => s != AppointmentStatus.canceled)
+        .toList();
+  }
+
   /// Remaining postponement rights for the currently selected subscription,
   /// or null when no (valid) subscription is selected. Only user-originated
   /// postponements count against the right (admin's never do), via
@@ -246,6 +266,20 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         _appointmentStatus == AppointmentStatus.scheduled &&
         (originalSubscriptionId?.isNotEmpty ?? false);
 
+    // The same case for a cancellation: the appointment was cancelled with
+    // "evet, düşülsün" and is now put back to "Planlandı", so the right that
+    // cancellation spent is returned exactly like a taken-back postponement.
+    final bool isCancellationReverted =
+        _originalStatus == AppointmentStatus.canceled &&
+        widget.appointment.postponementDeducted == true &&
+        _appointmentStatus == AppointmentStatus.scheduled &&
+        (originalSubscriptionId?.isNotEmpty ?? false);
+
+    // Leaving "İptal Edildi" clears the cancellation record; the deduction flag
+    // only survives while the appointment is still cancelled.
+    final bool leavingCanceled = _originalStatus == AppointmentStatus.canceled &&
+        _appointmentStatus != AppointmentStatus.canceled;
+
     // Warn the admin when a user-originated postponement is applied but the
     // customer has no postponement rights left.
     if (isNewUserPostponement && _selectedSubscriptionId != null) {
@@ -284,11 +318,13 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         updateDate: DateTime.now(),
         createUser: widget.appointment.createUser,
         updateUser: 'admin', // Assuming admin is updating
-        canceledBy: widget.appointment.canceledBy,
-        canceledAt: widget.appointment.canceledAt,
+        canceledBy: leavingCanceled ? null : widget.appointment.canceledBy,
+        canceledAt: leavingCanceled ? null : widget.appointment.canceledAt,
         // Carried over: toMap() writes every field, so dropping this here would
-        // silently clear the record of a deducted postponement right.
-        postponementDeducted: widget.appointment.postponementDeducted,
+        // silently clear the record of a deducted postponement right. It is
+        // cleared on purpose only when the appointment stops being cancelled.
+        postponementDeducted:
+            leavingCanceled ? null : widget.appointment.postponementDeducted,
         postponedDate: _appointmentStatus == AppointmentStatus.postponed ? _postponedDate : null,
         postponedBy: _appointmentStatus == AppointmentStatus.postponed ? _postponedBy : null,
         durationMinutes: durationMinutes,
@@ -311,7 +347,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         );
       }
 
-      if (isPostponementReverted) {
+      if (isPostponementReverted || isCancellationReverted) {
         await subProvider.adjustPostponementsUsed(
           userId: widget.appointment.userId,
           subscriptionId: originalSubscriptionId!,
@@ -588,7 +624,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                     _handleStatusChange(newValue);
                   }
                 },
-                items: AppointmentStatus.values
+                items: _selectableStatuses
                     .map<DropdownMenuItem<AppointmentStatus>>(
                         (AppointmentStatus status) {
                   return DropdownMenuItem<AppointmentStatus>(
@@ -597,6 +633,14 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                   );
                 }).toList(),
               ),
+              subtitle: _isCanceled
+                  ? const Text(
+                      'İptal edilmiş randevu yalnızca "Planlandı" durumuna '
+                      'geri alınabilir. Geri alınırsa, iptalde düşülen '
+                      'erteleme hakkı danışana iade edilir.',
+                      style: TextStyle(fontSize: 12),
+                    )
+                  : null,
             ),
             
             // 2.4) Postponement source (shown only when status is Postponed).
@@ -756,14 +800,15 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               spacing: 8,
               runSpacing: 8,
               children: [
-                ElevatedButton(
-                  onPressed: isLoading ? null : _cancelAppointment,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
+                if (!_isCanceled)
+                  ElevatedButton(
+                    onPressed: isLoading ? null : _cancelAppointment,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Randevuyu İptal Et'),
                   ),
-                  child: const Text('Randevuyu İptal Et'),
-                ),
                 OutlinedButton.icon(
                   onPressed: isLoading ? null : _deleteAppointment,
                   icon: const Icon(Icons.delete_outline),
