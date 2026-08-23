@@ -263,83 +263,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       }
     }
     
-    // Get the selected subscription name for display ("Paketsiz" when none).
-    final selectedSubName = _selectedSubscriptionId == null
-        ? 'Paketsiz'
-        : _availableSubscriptions
-            .firstWhere(
-              (s) => s.subscriptionId == _selectedSubscriptionId,
-              orElse: () => SubscriptionModel(
-                subscriptionId: '',
-                userId: '',
-                packageName: 'Silinmiş Paket',
-                startDate: DateTime.now(),
-                totalMeetings: 0,
-                allowedPostponements: 0,
-                totalAmount: 0,
-                meetingType: SubsMeetingType.faceToFace,
-              ),
-            )
-            .packageName;
-    
-    // Show confirmation dialog
-    final shouldUpdate = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Randevu Güncelle'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                  'Aşağıdaki değişiklikleri yapmak istediğinizden emin misiniz?'),
-              const SizedBox(height: 16),
-              Text('Görüşme Tipi: ${_meetingType.label}'),
-              Text('Randevu Türü: ${_appointmentType.lbl}'),
-              Text('Görüşme Süresi: ${_durationController.text.isNotEmpty ? _durationController.text : _appointmentType.getDurationForMeetingType(_meetingType)} dk'),
-              Text('Durum: ${_appointmentStatus.label}'),
-              if (_appointmentStatus == AppointmentStatus.postponed && _postponedDate != null)
-                Text(
-                  'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_appointmentStatus == AppointmentStatus.postponed)
-                Text('Erteleme Kaynağı: ${_postponedBy.label}'),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Paket: '),
-                  Expanded(
-                    child: Text(
-                      selectedSubName,
-                      style: const TextStyle(color: Colors.black87),
-                    ),
-                  ),
-                ],
-              ),
-              Text(
-                  'Tarih: ${DateFormatter.formatNumericDateTime(_appointmentDateTime)}'),
-              if (_notesController.text.isNotEmpty)
-                Text('Notlar: ${_notesController.text}'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldUpdate != true) return;
-
     startLoading();
 
     try {
@@ -425,13 +348,12 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
   Future<void> _deleteAppointment() async {
     final confirmed = await DialogUtils.openConfirm(
       context,
-      title: 'Randevu Sil',
+      title: 'Randevu Silme',
       message:
           '${DateFormatter.formatNumericDateTime(widget.appointment.appointmentDateTime)} '
-          'tarihli randevu kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\n'
-          'Silmek istediğinizden emin misiniz?',
+          'tarihli randevuyu silmek istediğinizden emin misiniz?',
       confirmText: 'Evet, Sil',
-      cancelText: 'Vazgeç',
+      cancelText: 'İptal',
     );
     if (!confirmed || !mounted) return;
 
@@ -476,78 +398,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       );
     } finally {
       if (mounted) stopLoading();
-    }
-  }
-
-  Future<void> _cancelAppointment() async {
-    // Ask the user to confirm cancellation
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('İptal Onayı'),
-          content: const Text(
-              'Bu randevuyu iptal etmek istediğinizden emin misiniz?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Hayır'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet, İptal Et'),
-            ),
-          ],
-        );
-      },
-    );
-
-    // If user confirmed, proceed
-    if (confirm == true) {
-      startLoading();
-      
-      try {
-        final appointmentManager =
-            Provider.of<AppointmentManager>(context, listen: false);
-
-        // Indicate who canceled it. Adjust as needed ("user", "admin", etc.).
-        final success = await appointmentManager.cancelAppointment(
-          widget.appointment.appointmentId,
-          widget.appointment.userId,
-          canceledBy: 'User',
-        );
-
-        if (!mounted) return;
-        if (success) {
-          await DialogUtils.openInfo(
-            context,
-            title: 'Başarılı',
-            message: 'Randevu başarıyla iptal edildi.',
-          );
-          if (!mounted) return;
-          // Cancelling does not give a spent postponement right back; say so
-          // while the admin is still here to act on it.
-          await PostponementNotices.warnRightKept(context, widget.appointment);
-          if (!mounted) return;
-          widget.onAppointmentUpdated();
-          Navigator.of(context).pop();
-        } else {
-          await DialogUtils.openError(
-            context,
-            title: 'Hata',
-            message: 'Randevu iptal edilemedi.',
-          );
-        }
-      } catch (e) {
-        if (!mounted) return;
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message: 'Randevu iptal edilirken bir hata oluştu: $e',
-        );
-      } finally {
-        stopLoading();
-      }
     }
   }
 
@@ -823,31 +673,17 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               hourController: _hourController,
               minuteController: _minuteController,
             ),
-            // 5) Cancel / delete. Cancelling keeps the record ("İptal Edildi"),
-            // deleting removes it for good; both give the package's meeting
+            // 5) Delete. An appointment is no longer cancelled — it is either
+            // kept or removed for good. Deleting gives the package's meeting
             // back when the appointment had consumed one.
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ElevatedButton(
-                  onPressed: isLoading ? null : _cancelAppointment,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Randevuyu İptal Et'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: isLoading ? null : _deleteAppointment,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Randevuyu Sil'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
-                  ),
-                ),
-              ],
+            ElevatedButton.icon(
+              onPressed: isLoading ? null : _deleteAppointment,
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Randevuyu Sil'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
             ),
             // 6) Notes
             TextField(

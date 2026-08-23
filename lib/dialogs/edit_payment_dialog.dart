@@ -460,7 +460,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
     final oldPaymentDate = oldPayment.paymentDate;
     final oldDueDate = oldPayment.dueDate;
     final oldDekontUrl = oldPayment.dekontUrl;
-    final oldSubsId=oldPayment.subscriptionId;
     final oldPaymentDateStr =
     oldPaymentDate != null ? df.format(oldPaymentDate) : 'null';
     final oldDueDateStr =
@@ -483,87 +482,18 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
       logger.info('- Associated subscription: ${oldPayment.subscriptionId}');
     }
 
-    // Get subscription names for display
-    String? oldSubName;
+    // Package name for the success message.
     String? newSubName;
-    if (oldSubsId != null) {
-      try {
-        final oldSub = _availableSubscriptions.firstWhere(
-          (s) => s.subscriptionId == oldSubsId,
-        );
-        oldSubName = oldSub.packageName;
-      } catch (e) {
-        oldSubName = 'Silinmiş Paket';
-        logger.warn('Old subscription $oldSubsId not found in available subscriptions');
-      }
-    }
     if (_selectedSubscriptionId != null) {
       try {
-        final newSub = _availableSubscriptions.firstWhere(
-          (s) => s.subscriptionId == _selectedSubscriptionId,
-        );
-        newSubName = newSub.packageName;
+        newSubName = _availableSubscriptions
+            .firstWhere((s) => s.subscriptionId == _selectedSubscriptionId)
+            .packageName;
       } catch (e) {
         newSubName = 'Bilinmeyen Paket';
-        logger.warn('Selected subscription $_selectedSubscriptionId not found in available subscriptions');
+        logger.warn(
+            'Selected subscription $_selectedSubscriptionId not found in available subscriptions');
       }
-    }
-
-    // Confirm
-    final shouldUpdate = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Güncelle'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Aşağıdaki değişiklikleri yapmak istediğinizden emin misiniz?'),
-                const SizedBox(height: 16),
-                Text('Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL'),
-                Text('Durum: ${_paymentStatus.label}'),
-                Text('Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}'),
-                if (_selectedSubscriptionId != null)
-                  Text('Bağlı Paket: $newSubName')
-                else
-                  const Text('Bağlı Paket: Yok'),
-                if (_selectedSubscriptionId!=oldSubsId)
-                  Text(
-                    'Paket Değişti: ${oldSubName ?? "Yok"} → ${newSubName ?? "Yok"}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
-                  ),
-                if (_selectedDueDate != null)
-                  Text(
-                    'Planlanan Tarih: ${df.format(_selectedDueDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_selectedPaymentDate != null)
-                  Text(
-                    'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-    if (shouldUpdate != true) {
-      logger.info('Payment update cancelled by user for payment ${oldPayment.paymentId}');
-      return;
     }
 
     startLoading();

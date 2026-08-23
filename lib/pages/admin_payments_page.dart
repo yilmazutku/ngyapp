@@ -1523,52 +1523,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
       return;
     }
 
-    // Show confirmation dialog - matches AddPaymentDialog style
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Ekle'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Aşağıdaki ödemeyi eklemek istediğinizden emin misiniz?'),
-              const SizedBox(height: 16),
-              Text('Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}'),
-              Text('Miktar: ${_amountController.text} TL'),
-              Text('Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}'),
-              Text('Durum: ${_paymentStatus.label}'),
-              Text('Ödeme Türü: ${_paymentType.label}'),
-              if (_selectedDueDate != null)
-                Text(
-                  'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_selectedPaymentDate != null)
-                Text(
-                  'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldSave != true) return;
-
     startLoading();
 
     try {
@@ -2116,92 +2070,20 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     final oldPayment = widget.payment;
     final oldAmount = oldPayment.amount;
     final oldStatus = oldPayment.status;
-    final oldSubsId = oldPayment.subscriptionId;
     final userChanged = _selectedUser!.userId != _originalUserId;
 
     final newAmount = parsedAmount;
 
-    // Get subscription names for display
-    String? oldSubName;
+    // Package name for the success message.
     String? newSubName;
-    if (oldSubsId != null) {
-      try {
-        final oldSub = _availableSubscriptions.firstWhere((s) => s.subscriptionId == oldSubsId);
-        oldSubName = oldSub.packageName;
-      } catch (e) {
-        oldSubName = 'Silinmiş Paket';
-      }
-    }
     if (_selectedSubscriptionId != null) {
       try {
-        final newSub = _availableSubscriptions.firstWhere((s) => s.subscriptionId == _selectedSubscriptionId);
-        newSubName = newSub.packageName;
+        newSubName = _availableSubscriptions
+            .firstWhere((s) => s.subscriptionId == _selectedSubscriptionId)
+            .packageName;
       } catch (e) {
         newSubName = 'Bilinmeyen Paket';
       }
-    }
-
-    // Confirm - matches EditPaymentDialog style
-    final shouldUpdate = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Güncelle'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Aşağıdaki değişiklikleri yapmak istediğinizden emin misiniz?'),
-                const SizedBox(height: 16),
-                Text('Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}'),
-                Text('Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL'),
-                Text('Durum: ${_paymentStatus.label}'),
-                Text('Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}'),
-                if (_selectedSubscriptionId != null)
-                  Text('Bağlı Paket: $newSubName')
-                else
-                  const Text('Bağlı Paket: Yok'),
-                if (_selectedSubscriptionId != oldSubsId)
-                  Text(
-                    'Paket Değişti: ${oldSubName ?? "Yok"} → ${newSubName ?? "Yok"}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
-                  ),
-                if (userChanged)
-                  Text(
-                    'Kullanıcı Değişti: ${widget.userById[_originalUserId]?.name ?? "Bilinmeyen"} → ${_selectedUser!.name}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
-                  ),
-                if (_selectedDueDate != null)
-                  Text(
-                    'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_selectedPaymentDate != null)
-                  Text(
-                    'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-    if (shouldUpdate != true) {
-      _logger.info('Payment update cancelled by user for payment ${oldPayment.paymentId}');
-      return;
     }
 
     startLoading();
