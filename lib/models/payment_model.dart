@@ -164,7 +164,7 @@ extension PaymentModelUIUser on PaymentModel {
               ),
             ),
             Text(
-              '${amount.toStringAsFixed(2)} ₺',
+              '${amount.toStringAsFixed(0)} ₺',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: status == PaymentStatus.completed
@@ -254,7 +254,7 @@ extension PaymentModelUI on PaymentModel {
             ),
             const SizedBox(width: 8),
             Text(
-              '${amount.toStringAsFixed(2)} ₺',
+              '${amount.toStringAsFixed(0)} ₺',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: status == PaymentStatus.completed

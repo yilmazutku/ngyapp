@@ -393,7 +393,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           icon: Icons.payments_rounded,
           color: Colors.red.shade700,
           title: _paymentReminderTitle,
-          subtitle: 'Miktar: ${missing.toStringAsFixed(2)} TL',
+          subtitle: 'Miktar: ${missing.toStringAsFixed(0)} TL',
         ));
       }
     }

@@ -21,6 +21,7 @@ import '../utils/payment_export_util.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/filter_chip_group.dart';
 
 final Logger logger = Logger.forClass(AdminPaymentsPage);
 final DateFormat kDateFormat = DateFormat('dd.MM.yyyy', 'tr_TR');
@@ -35,6 +36,24 @@ const double kPeriodDropdownWidth = 160;
 /// take before they start scrolling on their own, so the payment list always
 /// keeps room.
 const double kMonthTabHeaderMaxHeightRatio = 0.6;
+
+/// How the payment list is ordered.
+///
+/// One option per direction, the way the tabs do it: a "sort by" list plus a
+/// separate ascending switch made the reader combine two controls in their head
+/// to know what they were looking at.
+enum PaymentSortOption {
+  dateDescending('Tarih Azalan'),
+  dateAscending('Tarih Artan'),
+  amountDescending('Tutar Azalan'),
+  amountAscending('Tutar Artan'),
+  userNameAscending('Kullanıcı A-Z'),
+  userNameDescending('Kullanıcı Z-A');
+
+  const PaymentSortOption(this.label);
+
+  final String label;
+}
 
 class AdminPaymentsPage extends StatefulWidget {
   const AdminPaymentsPage({super.key});
@@ -57,9 +76,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   PaymentStatus? _statusFilter;
   DateTime? _startDate;
   DateTime? _endDate;
-  String? _sortBy = 'dueDate';
   // Newest first by default: August's payments belong above July's.
-  bool _sortAscending = false;
+  PaymentSortOption _sortOption = PaymentSortOption.dateDescending;
 
   /// Whether the per-tab statistics card is expanded.
   bool _showStats = false;
@@ -152,6 +170,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
       // 2) Fetch all payments with Firebase-side filtering (status only)
       // Date range filtering is done client-side due to conditional date field logic
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
       final allPayments = await paymentProvider.fetchAllPayments(
         statusFilter: _statusFilter,
@@ -301,7 +321,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   /// Apply client-side filters (search, date range, and sorting)
   /// Status filter is applied on Firebase side
   void _applyClientSideFilters() {
-    logger.info('Applying client-side filters - Search: "$_searchQuery", DateRange: $_startDate to $_endDate, SortBy: $_sortBy, SortAscending: $_sortAscending');
+    logger.info('Applying client-side filters - Search: "$_searchQuery", DateRange: $_startDate to $_endDate, Sort: ${_sortOption.label}');
 
     List<PaymentModel> filtered = List.from(_allPayments);
 
@@ -350,27 +370,29 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     }
 
     // Sort (client-side: complex sorting not supported by Firebase)
+    DateTime relevantDate(PaymentModel p) => p.status == PaymentStatus.completed
+        ? (p.paymentDate ?? DateTime.fromMillisecondsSinceEpoch(0))
+        : (p.dueDate ?? DateTime.fromMillisecondsSinceEpoch(0));
+    // Sorted on the displayed value (ad + soyad), not on the first name.
+    String displayName(PaymentModel p) => _userById[p.userId]?.fullName ?? '';
+
     filtered.sort((a, b) {
-      switch (_sortBy) {
-        case 'dueDate':
-          DateTime relevant(PaymentModel p) =>
-              p.status == PaymentStatus.completed
-                  ? (p.paymentDate ?? DateTime.fromMillisecondsSinceEpoch(0))
-                  : (p.dueDate ?? DateTime.fromMillisecondsSinceEpoch(0));
-          final da = relevant(a), db = relevant(b);
-          return _sortAscending ? da.compareTo(db) : db.compareTo(da);
-        case 'amount':
-          return _sortAscending ? a.amount.compareTo(b.amount) : b.amount.compareTo(a.amount);
-        case 'userName':
-          // Sorted on the displayed value (ad + soyad), not on the first name.
-          final ua = _userById[a.userId]?.fullName ?? '';
-          final ub = _userById[b.userId]?.fullName ?? '';
-          return _sortAscending ? ua.compareTo(ub) : ub.compareTo(ua);
-        default:
-          return 0;
+      switch (_sortOption) {
+        case PaymentSortOption.dateDescending:
+          return relevantDate(b).compareTo(relevantDate(a));
+        case PaymentSortOption.dateAscending:
+          return relevantDate(a).compareTo(relevantDate(b));
+        case PaymentSortOption.amountDescending:
+          return b.amount.compareTo(a.amount);
+        case PaymentSortOption.amountAscending:
+          return a.amount.compareTo(b.amount);
+        case PaymentSortOption.userNameAscending:
+          return displayName(a).compareTo(displayName(b));
+        case PaymentSortOption.userNameDescending:
+          return displayName(b).compareTo(displayName(a));
       }
     });
-    logger.info('Sorting applied - SortBy: $_sortBy, SortAscending: $_sortAscending');
+    logger.info('Sorting applied - ${_sortOption.label}');
 
     _filteredPayments = filtered;
     _recomputeTabCounts(_filteredPayments); // update labels
@@ -381,7 +403,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   /// Apply filters and trigger data reload for Firebase-side filters
   /// Search and sort are applied client-side only
   void _applyFilters() {
-    logger.info('Applying filters - Status: $_statusFilter, DateRange: $_startDate to $_endDate, SortBy: $_sortBy, SortAscending: $_sortAscending');
+    logger.info('Applying filters - Status: $_statusFilter, DateRange: $_startDate to $_endDate, Sort: ${_sortOption.label}');
     
     // For status and date range changes, reload data from Firebase
     // Search and sort will be applied client-side in _loadData()
@@ -395,8 +417,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       _startDate = null;
       _endDate = null;
       _searchQuery = null;
-      _sortBy = 'dueDate';
-      _sortAscending = false;
+      _sortOption = PaymentSortOption.dateDescending;
     });
     // Reload data with no filters (Firebase-side)
     _loadData();
@@ -644,7 +665,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                           avatar:
                               const Icon(Icons.paid, size: 18, color: Colors.green),
                           label: Text(
-                            'Tamamlanan: ${totalPaid.toStringAsFixed(2)} ₺ '
+                            'Tamamlanan: ${totalPaid.toStringAsFixed(0)} ₺ '
                             '(${payments.length} ödeme)',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
@@ -654,7 +675,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                             avatar: const Icon(Icons.event,
                                 size: 18, color: Colors.orange),
                             label: Text(
-                              'Planlanan: ${plannedTotal.toStringAsFixed(2)} ₺ '
+                              'Planlanan: ${plannedTotal.toStringAsFixed(0)} ₺ '
                               '(${plannedPayments!.length} ödeme)',
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
@@ -931,10 +952,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                 _statItem('Tamamlanan Ödemeler', count.toString(),
                     Icons.check_circle, Colors.green),
                 _statItem('Tamamlanan Toplam',
-                    '${totalPaid.toStringAsFixed(2)} ₺', Icons.paid, Colors.green),
+                    '${totalPaid.toStringAsFixed(0)} ₺', Icons.paid, Colors.green),
                 if (plannedTotal != null)
                   _statItem('Planlanan Toplam',
-                      '${plannedTotal.toStringAsFixed(2)} ₺', Icons.event,
+                      '${plannedTotal.toStringAsFixed(0)} ₺', Icons.event,
                       Colors.orange),
               ],
             ),
@@ -953,7 +974,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                 children: totalsByType.entries
                     .map((entry) => _statItem(
                           entry.key.label,
-                          '${entry.value.toStringAsFixed(2)} ₺',
+                          '${entry.value.toStringAsFixed(0)} ₺',
                           _paymentTypeIcon(entry.key),
                           Colors.teal,
                         ))
@@ -1154,8 +1175,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     DateTime? tempStartDate = tabRange?.start ?? _startDate;
     DateTime? tempEndDate = tabRange?.end ?? _endDate;
     String? tempSearchQuery = _searchQuery;
-    String? tempSortBy = _sortBy;
-    bool tempSortAscending = _sortAscending;
+    PaymentSortOption tempSortOption = _sortOption;
 
     showDialog(
       context: context,
@@ -1185,26 +1205,15 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                       ),
                       const SizedBox(height: 16),
                       
-                      // Status filter
-                      const Text('Durum:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<PaymentStatus?>(
-                        value: tempStatus,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          hintText: 'Tümü',
-                        ),
-                        items: [
-                          const DropdownMenuItem<PaymentStatus?>(
-                            value: null,
-                            child: Text('Tümü'),
-                          ),
-                          ...PaymentStatus.values.map((status) => DropdownMenuItem(
-                            value: status,
-                            child: Text(status.label),
-                          )),
-                        ],
-                        onChanged: (value) => setDialogState(() => tempStatus = value),
+                      // Status filter, as chips — same control the tabs use.
+                      FilterChipGroup<PaymentStatus>(
+                        title: 'Durum Filtresi:',
+                        selectedValue: tempStatus,
+                        options: {
+                          for (final s in PaymentStatus.values) s: s.label
+                        },
+                        onSelected: (value) =>
+                            setDialogState(() => tempStatus = value),
                       ),
                       const SizedBox(height: 16),
                       
@@ -1252,27 +1261,17 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                       ),
                       const SizedBox(height: 16),
                       
-                      // Sort options
-                      const Text('Sıralama:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: tempSortBy,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [
-                          const DropdownMenuItem(value: 'dueDate', child: Text('Tarihe Göre')),
-                          const DropdownMenuItem(value: 'amount', child: Text('Tutara Göre')),
-                          const DropdownMenuItem(value: 'userName', child: Text('Kullanıcı Adına Göre')),
-                        ],
-                        onChanged: (value) => setDialogState(() => tempSortBy = value),
-                      ),
-                      const SizedBox(height: 8),
-                      SwitchListTile(
-                        title: const Text('Artan Sıralama'),
-                        value: tempSortAscending,
-                        onChanged: (value) => setDialogState(() => tempSortAscending = value),
-                        contentPadding: EdgeInsets.zero,
+                      // Sort, as chips — one per direction, like the tabs.
+                      FilterChipGroup<PaymentSortOption>(
+                        title: 'Sıralama:',
+                        selectedValue: tempSortOption,
+                        showAllOption: false,
+                        options: {
+                          for (final o in PaymentSortOption.values) o: o.label
+                        },
+                        onSelected: (value) => setDialogState(() {
+                          if (value != null) tempSortOption = value;
+                        }),
                       ),
                     ],
                   ),
@@ -1291,8 +1290,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                       _startDate = tempStartDate;
                       _endDate = tempEndDate;
                       _searchQuery = tempSearchQuery;
-                      _sortBy = tempSortBy;
-                      _sortAscending = tempSortAscending;
+                      _sortOption = tempSortOption;
                     });
                     _applyFilters();
                   },
@@ -1318,6 +1316,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     if (!confirmed) return;
 
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
       await paymentProvider.deletePayment(payment.paymentId, payment.userId);
 
@@ -1548,6 +1548,8 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
 
         // The delta is applied against the stored total, so a concurrently
         // recorded payment is not overwritten by this (possibly stale) model.
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final subProvider = Provider.of<SubProvider>(context, listen: false);
         await subProvider.adjustAmountPaid(
           userId: _selectedUser!.userId,
@@ -1561,8 +1563,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
 
       widget.onPaymentAdded();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
           message: 'İşlem Başarılı.',
@@ -1672,7 +1673,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                           String amountInfo = '';
                           if (sub.amountPaid < sub.totalAmount) {
                             final remaining = sub.totalAmount - sub.amountPaid;
-                            amountInfo = ' (Kalan ödeme: ${remaining.toStringAsFixed(2)} TL)';
+                            amountInfo = ' (Kalan ödeme: ${remaining.toStringAsFixed(0)} TL)';
                           }
                           return DropdownMenuItem<SubscriptionModel?>(
                             value: sub,
@@ -2098,6 +2099,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
       _logger.info('- Status: ${oldStatus.label} -> ${_paymentStatus.label}');
       _logger.info('- Subscription changed: $subscriptionChanged');
 
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
 
       if (userChanged) {
@@ -2296,8 +2299,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
 
       widget.onPaymentUpdated();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
           message: 'İşlem Başarılı.',

@@ -125,7 +125,8 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
       title: 'Ölçümü Sil',
       message: '${DateFormat('d MMMM y', 'tr_TR').format(measurement.measDate)} tarihli ölçüm silinsin mi?',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     setState(() => _isSaving = true);
     try {
@@ -137,6 +138,8 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
         refreshData();
       }
     } catch (e) {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       await DialogUtils.openError(context, title: 'Hata', message: 'Ölçüm silinirken hata oluştu: $e');
     } finally {
       if (mounted) setState(() => _isSaving = false);

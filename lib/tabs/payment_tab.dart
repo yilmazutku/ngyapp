@@ -35,7 +35,9 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   PaymentStatus? _tempStatus;
 
   // Cache formatters once (reduces jank)
-  final NumberFormat _currencyFormat = NumberFormat('#,##0.00 ₺', 'tr_TR');
+  // Whole lira, no kuruş: payment amounts are never entered with a decimal
+  // part, so showing ",00" on every card is noise.
+  final NumberFormat _currencyFormat = NumberFormat('#,##0 ₺', 'tr_TR');
   final DateFormat _dateFormat = DateFormat('d MMMM y', 'tr_TR');
 
   final Map<String, String> _subscriptionCache = {}; // Cache for subscription names
@@ -487,7 +489,7 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
                 icon: Icons.delete,
                 label: 'Sil',
                 foregroundColor: Colors.red,
-                onPressed: () => _showDeletePaymentDialog(context, payment),
+                onPressed: () => _showDeletePaymentDialog(payment),
               ),
             ]),
           ]),
@@ -510,7 +512,7 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   }
 
   // RESTORED: Delete flow with dialog feedback + refresh
-  Future<void> _showDeletePaymentDialog(BuildContext context, PaymentModel payment) async {
+  Future<void> _showDeletePaymentDialog(PaymentModel payment) async {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Ödeme Sil',
@@ -518,7 +520,8 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     try {
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);

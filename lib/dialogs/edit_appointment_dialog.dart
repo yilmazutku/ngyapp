@@ -259,6 +259,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     startLoading();
 
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final appointmentManager =
           Provider.of<AppointmentManager>(context, listen: false);
 
@@ -313,8 +315,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       // Notify parent & close
       widget.onAppointmentUpdated();
       if (!mounted) return;
-      Navigator.of(context).pop();
-      await DialogUtils.openInfo(
+      await DialogUtils.popThenInfo(
         context,
         title: 'Başarılı',
         message: 'İşlem Başarılı.',
@@ -346,7 +347,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       confirmText: 'Evet, Sil',
       cancelText: 'İptal',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     startLoading();
     try {
@@ -585,7 +587,9 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                       firstDate: DateTime(2000),
                       lastDate: DateTime(2100),
                     );
-                    if (pickedDate != null && mounted) {
+                    // context here is build()'s parameter, so the guard has to
+                    // be on that context, not on the State.
+                    if (pickedDate != null && context.mounted) {
                       final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
                         context,
                         initialTime: _postponedDate != null

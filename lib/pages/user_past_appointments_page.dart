@@ -70,6 +70,8 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
       _applyFilters();
     } catch (e) {
       logger.err('Error fetching all past appointments: $e');
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: 'Hata',

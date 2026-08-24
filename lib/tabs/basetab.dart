@@ -174,7 +174,8 @@ abstract class BaseTabState<T, W extends BaseTab<T>> extends State<W>
   /// notifications a single write produces (the write's own provider plus the
   /// subscriptions provider) into one refetch instead of two.
   void scheduleRefresh() {
-    if (_refreshScheduled || !mounted) return;
+    if (_refreshScheduled) return;
+    if (!mounted) return;
     _refreshScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshScheduled = false;

@@ -169,7 +169,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     }
   }
 
-  void _showAddEventDialog(BuildContext context, DateTime selectedDate) {
+  void _showAddEventDialog(DateTime selectedDate) {
     final nameCtrl = TextEditingController();
     final startHourCtrl = TextEditingController(text: '09');
     final startMinCtrl = TextEditingController(text: '00');
@@ -315,8 +315,13 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                       conflicts: conflicts);
                   if (!proceed) return;
                 }
+                // Guarded on the dialog's own context, which is the one
+                // being popped.
+                if (!dialogContext.mounted) return;
                 Navigator.pop(dialogContext);
                 try {
+                  // Re-checked after the await: the page may be gone by now.
+                  if (!mounted) return;
                   final eventProvider =
                       Provider.of<EventProvider>(context, listen: false);
                   await eventProvider.addEvent(EventModel(
@@ -366,6 +371,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           message: '"${event.name}" etkinliğini silmek istiyor musunuz?',
         );
         if (confirm) {
+          // Re-checked after the await: the widget may be gone by now.
+          if (!mounted) return;
           final eventProvider =
               Provider.of<EventProvider>(context, listen: false);
           await eventProvider.deleteEvent(event.eventId);
@@ -1036,7 +1043,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                       child: SizedBox(
                         height: 22,
                         child: ElevatedButton.icon(
-                          onPressed: () => _showAddEventDialog(context, day),
+                          onPressed: () => _showAddEventDialog(day),
                           icon: const Icon(Icons.add, size: 12),
                           label: const Text('Diğer', style: TextStyle(fontSize: 12)),
                           style: ElevatedButton.styleFrom(
@@ -1348,7 +1355,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => _showAddEventDialog(context, day),
+                  onPressed: () => _showAddEventDialog(day),
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('Diğer'),
                   style: ElevatedButton.styleFrom(

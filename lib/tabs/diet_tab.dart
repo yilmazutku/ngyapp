@@ -245,6 +245,9 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
             message: '${dietDoc.displayName} silinsin mi?',
           );
           if (confirmed == true) {
+            // Re-checked after the await, on the context this card was built
+            // with rather than on the State.
+            if (!context.mounted) return;
             final dietProvider = Provider.of<DietProvider>(context, listen: false);
             await dietProvider.deleteDiet(userId: widget.userId, docId: dietDoc.docId);
             if (mounted) refreshData();

@@ -144,6 +144,8 @@ class _AddTestDialogState extends State<AddTestDialog> {
         message: 'Test başarıyla eklendi.',
       );
       widget.onTestAdded();
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
       logger.err('Error adding test: {}', [e]);

@@ -91,6 +91,8 @@ class _TestsTabState extends State<TestsTab> {
       int success = 0;
       final List<String> failed = [];
       try {
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final provider = Provider.of<TestProvider>(context, listen: false);
         for (int i = 0; i < total; i++) {
           final file = files[i];
@@ -173,7 +175,8 @@ class _TestsTabState extends State<TestsTab> {
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
-    if (ok != true || !mounted) return;
+    if (ok != true) return;
+    if (!mounted) return;
 
     try {
       final provider = Provider.of<TestProvider>(context, listen: false);
@@ -184,6 +187,8 @@ class _TestsTabState extends State<TestsTab> {
       );
       if (!mounted) return;
       await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Dosya silindi.');
+      // Re-checked: the tab can be left while the dialog is open.
+      if (!mounted) return;
       setState(() { _filesFuture = _fetchFiles(); });
     } catch (e) {
       if (!mounted) return;

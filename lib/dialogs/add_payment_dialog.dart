@@ -287,7 +287,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
               child: const Text('İptal'),
             ),
             ElevatedButton(
-              onPressed: isLoading ? null : () => _addPayment(context),
+              onPressed: isLoading ? null : _addPayment,
               child: const Text('Ödeme Ekle'),
             ),
           ],
@@ -309,7 +309,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
     });
   }
 
-  Future<void> _addPayment(BuildContext context) async {
+  Future<void> _addPayment() async {
     if (_amountController.text.isEmpty) {
       logger.err('_addPayment: Amount is required.');
       if (mounted) {
@@ -374,6 +374,8 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
 
         // The delta is applied against the stored total, so a concurrently
         // recorded payment is not overwritten by this (possibly stale) model.
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final subProvider = Provider.of<SubProvider>(context, listen: false);
         await subProvider.adjustAmountPaid(
           userId: widget.userId,
@@ -389,8 +391,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
 
       widget.onPaymentAdded();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
           message: 'İşlem Başarılı.',
