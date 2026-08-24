@@ -12,6 +12,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/time_picker_utils.dart';
 import '../models/time_range_config.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(AdminTimeSlotsPage);
 
@@ -928,9 +929,9 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
             children: [
-              IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: 'Seçimi İptal',
+              LabeledActionButton(
+                icon: Icons.close,
+                label: 'Seçimi İptal',
                 onPressed: _toggleBulkSelectMode,
               ),
               Expanded(
@@ -1878,10 +1879,10 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                 ),
               ],
             ),
-            trailing: IconButton(
-              icon: Icon(_showCalendar ? Icons.expand_less : Icons.expand_more, size: 32),
+            trailing: LabeledActionButton(
+              icon: _showCalendar ? Icons.expand_less : Icons.expand_more,
+              label: _showCalendar ? 'Takvimi Gizle' : 'Takvimi Göster',
               onPressed: () => setState(() => _showCalendar = !_showCalendar),
-              tooltip: _showCalendar ? 'Takvimi Gizle' : 'Takvimi Göster',
             ),
           ),
           if (_showCalendar)

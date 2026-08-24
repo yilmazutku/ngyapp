@@ -11,6 +11,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
 import '../utils/pdf_launcher.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 class DietEditPage extends StatefulWidget {
   final String userId;
@@ -146,10 +147,10 @@ class _DietEditPageState extends State<DietEditPage> {
             // Add meal button (single-list diets only; when split into weekday
             // and weekend sections, each section has its own add button).
             if (!_hasWeekend)
-              IconButton(
-                icon: const Icon(Icons.add),
+              LabeledActionButton(
+                icon: Icons.add,
+                label: 'Öğün Ekle',
                 onPressed: () => _showAddMealDialog(_editableData),
-                tooltip: 'Öğün Ekle',
               ),
             // Save button
             _isLoading
@@ -157,15 +158,16 @@ class _DietEditPageState extends State<DietEditPage> {
                     padding: EdgeInsets.all(10.0),
                     child: CircularProgressIndicator(color: Colors.white),
                   )
-                : IconButton(
-                    icon: const Icon(Icons.save),
+                : LabeledActionButton(
+                    icon: Icons.save,
+                    label: 'Kaydet',
                     onPressed: _hasChanges ? _saveDiet : null,
-                    tooltip: 'Kaydet',
                   ),
           ],
           // Share button (available in both modes)
-          IconButton(
-            icon: const Icon(Icons.share),
+          LabeledActionButton(
+            icon: Icons.share,
+            label: 'Paylaş',
             onPressed: () {
               // Share functionality - can be implemented later
               DialogUtils.openError(
@@ -174,7 +176,6 @@ class _DietEditPageState extends State<DietEditPage> {
                 message: 'Paylaşım özelliği henüz aktif değil.',
               );
             },
-            tooltip: 'Paylaş',
           ),
         ],
       ),
@@ -493,8 +494,11 @@ class _DietEditPageState extends State<DietEditPage> {
 
                 // Delete meal button (only in edit mode)
                 if (!widget.viewOnly)
-                  IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
+                  LabeledActionButton(
+                    dense: true,
+                    icon: Icons.delete,
+                    label: 'Öğünü Sil',
+                    foregroundColor: Colors.red,
                     onPressed: () => _confirmDeleteMeal(data, mealName),
                     tooltip: 'Öğünü Sil',
                   ),
@@ -1310,13 +1314,12 @@ class _DietEditPageState extends State<DietEditPage> {
               ),
             ),
           ),
-          IconButton(
-            icon:
-                const Icon(Icons.remove_circle, color: Colors.red, size: 20),
+          LabeledActionButton(
+            dense: true,
+            icon: Icons.remove_circle,
+            label: 'Satırı Sil',
+            foregroundColor: Colors.red,
             onPressed: () => _deleteContentItem(data, mealName, index),
-            tooltip: 'Satırı Sil',
-            constraints: const BoxConstraints(),
-            padding: const EdgeInsets.all(8),
           ),
         ],
       ),
@@ -1358,13 +1361,12 @@ class _DietEditPageState extends State<DietEditPage> {
               child: Text(content, style: const TextStyle(fontSize: 16)),
             ),
           ),
-          IconButton(
-            icon:
-                const Icon(Icons.remove_circle, color: Colors.red, size: 20),
+          LabeledActionButton(
+            dense: true,
+            icon: Icons.remove_circle,
+            label: 'Öğeyi Sil',
+            foregroundColor: Colors.red,
             onPressed: () => _deleteContentItem(data, mealName, index),
-            tooltip: 'Öğeyi Sil',
-            constraints: const BoxConstraints(),
-            padding: const EdgeInsets.all(8),
           ),
         ],
       ),

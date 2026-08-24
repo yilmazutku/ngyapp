@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../utils/dialog_utils.dart';
 import 'news_model.dart';
 import 'news_provider.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Dialog for adding or editing a news/announcement
 class AddNewsDialog extends StatefulWidget {
@@ -535,11 +536,12 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
               ),
             ),
             const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.add_circle),
-              color: Theme.of(context).primaryColor,
+            LabeledActionButton(
+              dense: true,
+              icon: Icons.add_circle,
+              label: 'Bağlantı Ekle',
+              foregroundColor: Theme.of(context).primaryColor,
               onPressed: _addLink,
-              tooltip: 'Bağlantı Ekle',
             ),
           ],
         ),

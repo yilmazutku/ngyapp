@@ -22,6 +22,10 @@ class AppConstants {
 
   /// The display name of the application
   static const String appName = 'untitled';
+
+  /// Version shown to the user (top-right of the home page).
+  /// Keep in step with the `version:` field in pubspec.yaml.
+  static const String appVersion = '1.0.2';
   
   /// The app description shown in various places
   static const String appDescription = 'A new Flutter project.';

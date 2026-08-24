@@ -12,6 +12,7 @@ import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
+import '../widgets/labeled_action_button.dart';
 
 class PaymentsTab extends BaseTab<PaymentProvider> {
   const PaymentsTab({super.key, required super.userId})
@@ -465,20 +466,19 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
               Text(payment.notes!, maxLines: 2, overflow: TextOverflow.ellipsis),
             ],
             const SizedBox(height: 12),
-            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              IconButton(
-                icon: const Icon(Icons.edit, size: 20),
+            Wrap(alignment: WrapAlignment.end, children: [
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.edit,
+                label: 'Düzenle',
                 onPressed: () => _showEditPaymentDialog(context, payment),
-                tooltip: 'Düzenle',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
               ),
-              IconButton(
-                icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.delete,
+                label: 'Sil',
+                foregroundColor: Colors.red,
                 onPressed: () => _showDeletePaymentDialog(context, payment),
-                tooltip: 'Sil',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
               ),
             ]),
           ]),

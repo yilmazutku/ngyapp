@@ -6,6 +6,7 @@ import '../utils/dialog_utils.dart';
 import '../providers/appointment_manager.dart';
 import 'package:provider/provider.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(PastAppointmentsPage);
 
@@ -273,13 +274,14 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
       appBar: AppBarWithBack(
         title: 'Geçmiş Randevular',
         actions: [
-          IconButton(
-            icon: const Icon(Icons.filter_alt),
+          LabeledActionButton(
+            icon: Icons.filter_alt,
+            label: 'Filtrele',
             onPressed: _showFilterDialog,
           ),
-          IconButton(
-            icon: Icon(
-                _isDateAscending ? Icons.arrow_downward : Icons.arrow_upward),
+          LabeledActionButton(
+            icon: _isDateAscending ? Icons.arrow_downward : Icons.arrow_upward,
+            label: _isDateAscending ? 'Tarih: Artan' : 'Tarih: Azalan',
             onPressed: _toggleDateSorting,
           ),
         ],
@@ -415,22 +417,26 @@ class PaginationControls extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        IconButton(
+        LabeledActionButton(
+          dense: true,
+          icon: Icons.arrow_back_ios,
+          label: 'Önceki',
+          foregroundColor: theme.primaryColor,
           onPressed:
               currentPage > 1 ? () => onPageChanged(currentPage - 1) : null,
-          icon: const Icon(Icons.arrow_back_ios),
-          color: theme.primaryColor,
         ),
         Text(
           '$currentPage / $totalPages',
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
-        IconButton(
+        LabeledActionButton(
+          dense: true,
+          icon: Icons.arrow_forward_ios,
+          label: 'Sonraki',
+          foregroundColor: theme.primaryColor,
           onPressed: currentPage < totalPages
               ? () => onPageChanged(currentPage + 1)
               : null,
-          icon: const Icon(Icons.arrow_forward_ios),
-          color: theme.primaryColor,
         ),
       ],
     );

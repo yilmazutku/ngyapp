@@ -14,6 +14,7 @@ import '../providers/sub_provider.dart';
 import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/loading_overlay.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Admin page for adding multiple appointments and payments linked to a single
 /// subscription at once. Every created record is linked to [subscription] (its
@@ -413,9 +414,11 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
                 ),
                 const Spacer(),
                 if (_apptEntries.length > 1)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    tooltip: 'Satırı sil',
+                  LabeledActionButton(
+                    dense: true,
+                    icon: Icons.delete_outline,
+                    label: 'Satırı Sil',
+                    foregroundColor: Colors.red,
                     onPressed: () => setState(() {
                       _apptEntries.removeAt(index).dispose();
                     }),
@@ -510,9 +513,11 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
                 ),
                 const Spacer(),
                 if (_paymentEntries.length > 1)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    tooltip: 'Satırı sil',
+                  LabeledActionButton(
+                    dense: true,
+                    icon: Icons.delete_outline,
+                    label: 'Satırı Sil',
+                    foregroundColor: Colors.red,
                     onPressed: () => setState(() {
                       _paymentEntries.removeAt(index).dispose();
                     }),

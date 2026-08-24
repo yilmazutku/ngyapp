@@ -5,6 +5,7 @@ import 'basetab.dart';
 import '../utils/date_formatter.dart';
 import '../widgets/filter_chip_group.dart';
 import '../models/filter_params.dart';
+import '../widgets/labeled_action_button.dart';
 abstract class FilterableTabState<P, T extends BaseTab<P>>
     extends BaseTabState<P, T> {
   final TextEditingController searchController = TextEditingController();
@@ -970,14 +971,12 @@ class DateRangeFilter extends StatelessWidget {
       children: [
         Expanded(child: button),
         if (showClearButton && selectedRange != null)
-          IconButton(
-            icon: const Icon(Icons.clear),
-            onPressed: () => onRangeSelected(null),
+          LabeledActionButton(
+            dense: true,
+            icon: Icons.clear,
+            label: 'Temizle',
             tooltip: 'Tarih filtresini temizle',
-            constraints: const BoxConstraints(
-              minWidth: 40,
-              minHeight: 40,
-            ),
+            onPressed: () => onRangeSelected(null),
           ),
       ],
     );

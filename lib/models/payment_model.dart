@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import 'logger.dart';
+import '../widgets/labeled_action_button.dart';
 
 class PaymentModel {
   final String paymentId;
@@ -203,20 +204,23 @@ extension PaymentModelUIUser on PaymentModel {
           ],
         ),
 
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+        trailing: Wrap(
+          alignment: WrapAlignment.end,
           children: [
             if (showEditButton)
-              IconButton(
-                icon: const Icon(Icons.edit),
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.edit,
+                label: 'Düzenle',
                 onPressed: onTap,
-                tooltip: 'Düzenle',
               ),
             if (showDeleteButton && onDelete != null)
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.delete,
+                label: 'Sil',
+                foregroundColor: Colors.red,
                 onPressed: onDelete,
-                tooltip: 'Sil',
               ),
           ],
         ),
@@ -279,20 +283,23 @@ extension PaymentModelUI on PaymentModel {
             if (notes != null && notes!.isNotEmpty) Text('Not: $notes'),
           ],
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+        trailing: Wrap(
+          alignment: WrapAlignment.end,
           children: [
             if (showEditButton && onEdit != null)
-              IconButton(
-                icon: const Icon(Icons.edit),
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.edit,
+                label: 'Düzenle',
                 onPressed: onEdit,
-                tooltip: 'Düzenle',
               ),
             if (showDeleteButton && onDelete != null)
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.delete,
+                label: 'Sil',
+                foregroundColor: Colors.red,
                 onPressed: onDelete,
-                tooltip: 'Sil',
               ),
           ],
         ),

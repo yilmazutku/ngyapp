@@ -7,6 +7,7 @@ import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// DetailsTab doesn't use filtering so it doesn't extend BaseTab
 /// It's a standalone StatefulWidget
@@ -390,10 +391,12 @@ class _DetailsTabState extends State<DetailsTab>
                       const Text('Kullanıcı Bilgilerini Düzenle',
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       const Spacer(),
-                      IconButton(
-                        onPressed: () => setState(() => _isEditing = false),
-                        icon: const Icon(Icons.close),
+                      LabeledActionButton(
+                        dense: true,
+                        icon: Icons.close,
+                        label: 'Vazgeç',
                         tooltip: 'Düzenlemeyi İptal Et',
+                        onPressed: () => setState(() => _isEditing = false),
                       ),
                     ],
                   ),

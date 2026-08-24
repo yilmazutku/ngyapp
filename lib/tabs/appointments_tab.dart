@@ -12,6 +12,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Extension to add color and icon getters to AppointmentStatus
 extension AppointmentStatusExtension on AppointmentStatus {
@@ -759,23 +760,23 @@ class _AppointmentsTabState
                     const Spacer(),
                   
                   // Right side: Action buttons
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  Wrap(
+                    alignment: WrapAlignment.end,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, size: 20),
-                        onPressed: () => _showEditAppointmentDialog(context, appointment),
-                        tooltip: 'Düzenle',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                      LabeledActionButton(
+                        dense: true,
+                        icon: Icons.edit,
+                        label: 'Düzenle',
+                        onPressed: () =>
+                            _showEditAppointmentDialog(context, appointment),
                       ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                        onPressed: () => _confirmDeleteAppointment(context, appointment),
-                        tooltip: 'Sil',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                      LabeledActionButton(
+                        dense: true,
+                        icon: Icons.delete,
+                        label: 'Sil',
+                        foregroundColor: Colors.red,
+                        onPressed: () =>
+                            _confirmDeleteAppointment(context, appointment),
                       ),
                     ],
                   ),

@@ -15,6 +15,7 @@ import 'basetab.dart';
 import 'filterable_tab.dart';
 import '../models/logger.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/labeled_action_button.dart';
 
 class MeasTab extends BaseTab<MeasProvider> {
   const MeasTab({super.key, required super.userId})
@@ -50,7 +51,8 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
   static const double _wConstip = 140;
   static const double _wOther = 260;
   static const double _wCal = 80;
-  static const double _wActions = 120;
+  // Wide enough for the labelled "Düzenle" / "Sil" buttons in the row.
+  static const double _wActions = 190;
 
   // Row horizontal padding (must match header/data row padding)
   static const double _rowHPad = 12;
@@ -434,8 +436,19 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(icon: const Icon(Icons.edit, size: 20), onPressed: () => _showEditMeasurementDialog(context, m)),
-                IconButton(icon: const Icon(Icons.delete, size: 20), onPressed: () => _deleteMeasurement(m)),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.edit,
+                  label: 'Düzenle',
+                  onPressed: () => _showEditMeasurementDialog(context, m),
+                ),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.delete,
+                  label: 'Sil',
+                  foregroundColor: Colors.red,
+                  onPressed: () => _deleteMeasurement(m),
+                ),
               ],
             ),
           ),

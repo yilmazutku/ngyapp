@@ -11,6 +11,7 @@ import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Admin chat list page displaying all chats where the admin is a participant.
 /// 
@@ -323,9 +324,9 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
             _enterSelectionMode();
           },
         ),
-        IconButton(
-          tooltip: 'Yenile',
-          icon: const Icon(Icons.refresh),
+        LabeledActionButton(
+          icon: Icons.refresh,
+          label: 'Yenile',
           onPressed: () {
             logger.info('Manual refresh button tapped');
             setState(() {
@@ -351,15 +352,15 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
       ),
       title: Text('$count seçildi'),
       actions: [
-        IconButton(
-          tooltip: 'Tümünü Seç',
-          icon: const Icon(Icons.select_all),
+        LabeledActionButton(
+          icon: Icons.select_all,
+          label: 'Tümünü Seç',
           onPressed: canSelectAll ? _selectAllVisible : null,
         ),
-        IconButton(
-          tooltip: 'Seçilenleri Sil',
-          icon: const Icon(Icons.delete),
-          color: count == 0 ? null : Colors.red,
+        LabeledActionButton(
+          icon: Icons.delete,
+          label: 'Seçilenleri Sil',
+          foregroundColor: count == 0 ? null : Colors.red,
           onPressed: count == 0 ? null : _handleDeleteSelectedChats,
         ),
       ],
@@ -650,9 +651,11 @@ class _ChatListItem extends StatelessWidget {
                   // Delete chat (and all its photos) — admin only.
                   // Hidden in bulk-select mode (bulk delete lives in the app bar).
                   if (!selectionMode)
-                    IconButton(
-                      tooltip: 'Sohbeti Sil',
-                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    LabeledActionButton(
+                      dense: true,
+                      icon: Icons.delete_outline,
+                      label: 'Sohbeti Sil',
+                      foregroundColor: Colors.red,
                       onPressed: () {
                         logger.debug('Chat delete icon tapped. chatId={}', [chatId]);
                         onDelete(chatId, displayName);

@@ -14,6 +14,7 @@ import '../providers/appointment_manager.dart';
 import '../utils/dialog_utils.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
+import '../widgets/labeled_action_button.dart';
 final Logger logger = Logger.forClass(SubscriptionsTab);
 class SubscriptionsTab extends BaseTab<SubProvider> {
   const SubscriptionsTab({super.key, required super.userId})
@@ -477,27 +478,35 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                 _buildStatusBadge(s.status),
               ]),
             ),
-            Row(children: [
-              Tooltip(
-                message: 'Toplu Ödeme/Randevu Ekle',
-                child: TextButton.icon(
-                  style: TextButton.styleFrom(foregroundColor: Colors.green),
-                  icon: const Icon(Icons.playlist_add),
-                  label: const Text('Toplu Ekle'),
+            // Wrap, not Row: on a narrow phone three labelled buttons drop
+            // onto a second line instead of overflowing.
+            Wrap(
+              alignment: WrapAlignment.end,
+              children: [
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.playlist_add,
+                  label: 'Toplu Ekle',
+                  tooltip: 'Toplu Ödeme/Randevu Ekle',
+                  foregroundColor: Colors.green,
                   onPressed: () => _openBulkAdd(context, s),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.edit, color: Colors.blue),
-                tooltip: 'Düzenle',
-                onPressed: () => _showEditSubscriptionDialog(context, s),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                tooltip: 'Sil',
-                onPressed: () => _showDeleteConfirmationDialog(context, s),
-              ),
-            ]),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.edit,
+                  label: 'Düzenle',
+                  foregroundColor: Colors.blue,
+                  onPressed: () => _showEditSubscriptionDialog(context, s),
+                ),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.delete,
+                  label: 'Sil',
+                  foregroundColor: Colors.red,
+                  onPressed: () => _showDeleteConfirmationDialog(context, s),
+                ),
+              ],
+            ),
           ]),
 
           if (noPostponeLeft && s.allowedPostponements > 0)
