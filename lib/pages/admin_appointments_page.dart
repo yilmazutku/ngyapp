@@ -35,11 +35,19 @@ const int kGridStartMinutes = kStartHour * 60 + kStartMinute; // 510 (08:30)
 const int kGridEndMinutes = kEndHour * 60; // 1200 (20:00)
 // First full-hour label/line at or after the grid start (09:00 when 08:30).
 const int kFirstFullHour = kStartMinute == 0 ? kStartHour : kStartHour + 1;
-const double kTotalGridHeight = 900; // Total height for the time grid (adjust to fit more/less on screen)
-/*1320:big
-660 → 1 px/min, fits twice as much, smaller cards
-990 → 1.5 px/min, good balance
-1980 → 3 px/min, larger cards, more scrolling*/
+// Total height of the time grid. This is the one number to turn when the cards
+// feel too cramped or the day needs to fit on less scrolling — everything else
+// (pixels per minute, card heights, card font sizes) is derived from it.
+//
+// At 1200 (1.74 px/min) a two-line label fits from ~16 minutes upward, and at
+// the full 11px font from ~20 minutes upward — so every real appointment type
+// (Tartım is drawn at a 20-minute minimum, the rest are 30/45/60) shows both
+// lines even when two of them share a slot side by side.
+//
+// 900  → 1.30 px/min, less scrolling, two lines only from ~21 min
+// 1200 → 1.74 px/min, current
+// 1980 → 2.87 px/min, large cards, a lot of scrolling
+const double kTotalGridHeight = 1200;
 
 const double kTimeColumnWidth = 50.0; // Width of the time labels column
 const double kDayHeaderHeight = 54.0; // Height for day title + add button
