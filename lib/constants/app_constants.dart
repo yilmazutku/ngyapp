@@ -21,7 +21,7 @@ class AppConstants {
   AppConstants._();
 
   /// The display name of the application
-  static const String appName = 'untitled';
+  static const String appName = 'Dyt. Nilay Göktepe Yılmaz';
 
   /// Version shown to the user (top-right of the home page).
   /// Keep in step with the `version:` field in pubspec.yaml.
