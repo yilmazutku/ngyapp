@@ -9,6 +9,7 @@ import '../models/logger.dart';
 import '../providers/test_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/storage_upload.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger log = Logger.forClass(TestsTab);
 
@@ -330,9 +331,11 @@ class _TestsTabState extends State<TestsTab> {
                       title: Text(f.fileName),
                       subtitle: Text(dtStr),
                       onTap: () => _openFile(f),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        tooltip: 'Sil',
+                      trailing: LabeledActionButton(
+                        dense: true,
+                        icon: Icons.delete,
+                        label: 'Sil',
+                        foregroundColor: Colors.red,
                         onPressed: () => _deleteFile(f),
                       ),
                     );

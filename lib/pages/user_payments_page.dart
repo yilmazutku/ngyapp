@@ -6,6 +6,7 @@ import '../models/payment_model.dart';
 import '../models/logger.dart';
 import '../providers/payment_provider.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// A page that displays a user's payments with filtering and sorting.
 /// Overdue first, then planned, then completed.
@@ -334,12 +335,14 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
       appBar: AppBarWithBack(
         title: 'Ödemelerim',
         actions: [
-          IconButton(
-            icon: const Icon(Icons.filter_list),
+          LabeledActionButton(
+            icon: Icons.filter_list,
+            label: 'Filtrele',
             onPressed: _showFilterDialog,
           ),
-          IconButton(
-            icon: const Icon(Icons.clear),
+          LabeledActionButton(
+            icon: Icons.clear,
+            label: 'Filtreleri Temizle',
             onPressed: _clearFilters,
           ),
         ],

@@ -16,6 +16,7 @@ import '../dialogs/overlap_warning_dialog.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(AdminAppointmentsPage);
 
@@ -23,7 +24,7 @@ final Logger logger = Logger.forClass(AdminAppointmentsPage);
 const bool kIsScrollable = true; // horizontal scrolling
 const double kMainMargin = 4.0; // Margin around the day columns
 const double kDayTitleFontSize = 14.0; // Font size for the day header
-const int kDaysToShow = 7; // Monday to Sunday (7 days)
+const int kDaysToShow = 6; // Pazartesi..Cumartesi (Pazar gösterilmez)
 
 // Time grid constants
 const int kStartHour = 8; // grid starts at 08:30 (see kStartMinute)
@@ -42,6 +43,8 @@ const double kTotalGridHeight = 900; // Total height for the time grid (adjust t
 
 const double kTimeColumnWidth = 50.0; // Width of the time labels column
 const double kDayHeaderHeight = 54.0; // Height for day title + add button
+// Same header, mobile layout (single-day view has a slimmer header).
+const double kMobileDayHeaderHeight = 36.0;
 const double kDayDividerWidth = 1; // Width of vertical dividing lines between days (editable)
 
 
@@ -54,6 +57,25 @@ const int kTartimMinDisplayMinutes = 20;
 // 11 hours (9-20) = 660 minutes, so kTotalGridHeight / 660 = pixels per minute
 const double kPixelsPerMinute =
     kTotalGridHeight / (kGridEndMinutes - kGridStartMinutes);
+
+// --- Appointment/event card text geometry -----------------------------------
+// A card's height is fixed by its duration (durationMinutes * kPixelsPerMinute),
+// so the only way to be sure the label fits is to derive the font size from that
+// height instead of picking it by hand. Every value the calculation depends on
+// is a constant here, so the grid can be retuned from one place.
+const double kCardVerticalMargin = 1.0; // card margin, top and bottom
+const double kCardHorizontalMargin = 2.0;
+const double kCardPadding = 4.0; // inner padding on every side
+// Line height as a multiple of the font size. Pinned instead of left to the
+// font's own metrics, otherwise "two lines" is not a number we can compute.
+const double kCardTextLineHeight = 1.15;
+// The label is allowed to wrap onto this many lines; the font is shrunk until
+// that many lines fit in the card.
+const int kCardMaxTextLines = 2;
+const double kCardMaxFontSize = 11.0;
+// Never shrink past this: below it the label is unreadable, and clipping the
+// text is the better failure.
+const double kCardMinFontSize = 7.5;
 
 // Hoisted formatters (avoid re-creating in every build)
 final DateFormat _dayTitleFmt = DateFormat('d MMMM EEEE', 'tr_TR');
@@ -330,7 +352,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     });
   }
 
-  Widget _buildEventCard(EventModel event) {
+  Widget _buildEventCard(EventModel event, double cardHeight) {
     final String timeRange =
         '${_timeFmt.format(event.startDateTime)}-${_timeFmt.format(event.endDateTime)}';
     final String displayText = '$timeRange ${event.name}';
@@ -356,20 +378,17 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       child: Container(
         width: double.infinity,
         height: double.infinity,
-        margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-        padding: const EdgeInsets.all(4),
+        margin: const EdgeInsets.symmetric(
+          horizontal: kCardHorizontalMargin,
+          vertical: kCardVerticalMargin,
+        ),
+        padding: const EdgeInsets.all(kCardPadding),
         decoration: BoxDecoration(
           color: Colors.deepPurple.shade50,
           borderRadius: BorderRadius.circular(1),
           border: Border.all(color: Colors.deepPurple.shade200, width: 1),
         ),
-        child: Text(
-          displayText,
-          style: const TextStyle(
-              fontSize: 11, fontWeight: FontWeight.bold),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 3,
-        ),
+        child: _cardText(displayText, cardHeight),
       ),
     );
   }
@@ -600,9 +619,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         case 'Tarih Azalan':
           return _getEffectiveDate(b).compareTo(_getEffectiveDate(a));
         case 'İsim A-Z':
-          return (a.user?.name ?? '').compareTo(b.user?.name ?? '');
+          return (a.user?.fullName ?? '').compareTo(b.user?.fullName ?? '');
         case 'İsim Z-A':
-          return (b.user?.name ?? '').compareTo(a.user?.name ?? '');
+          return (b.user?.fullName ?? '').compareTo(a.user?.fullName ?? '');
         default:
           return 0;
       }
@@ -737,23 +756,25 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     for (final appt in dayAppointments) {
       final start = _effectiveTime(appt);
       if (!_isWithinGrid(start)) continue;
+      // "Tartım" visits keep their real (short) duration for overlap packing
+      // but render at a taller minimum height so the label stays readable.
+      final double height = _displayHeightForAppointment(appt);
       entries.add(_PositionedEntry(
         start: start,
         end: start.add(Duration(minutes: appt.durationMinutes)),
-        // "Tartım" visits keep their real (short) duration for overlap packing
-        // but render at a taller minimum height so the label stays readable.
-        displayHeight: _displayHeightForAppointment(appt),
-        card: _buildAppointmentCard(appt),
+        displayHeight: height,
+        card: _buildAppointmentCard(appt, height),
       ));
     }
     // "Diğer" events.
     for (final event in _eventsForDay(day)) {
       if (!_isWithinGrid(event.startDateTime)) continue;
+      final double height = _getHeightForDuration(event.durationMinutes);
       entries.add(_PositionedEntry(
         start: event.startDateTime,
         end: event.endDateTime,
-        displayHeight: _getHeightForDuration(event.durationMinutes),
-        card: _buildEventCard(event),
+        displayHeight: height,
+        card: _buildEventCard(event, height),
       ));
     }
     if (entries.isEmpty) return const <Widget>[];
@@ -827,6 +848,37 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     return durationMinutes * kPixelsPerMinute;
   }
 
+  /// Largest font size at which [lines] lines of text still fit inside a card
+  /// of [cardHeight] pixels.
+  ///
+  /// The card's height is dictated by the appointment's duration and its width
+  /// by how many appointments share the same slot, so a hand-picked font size
+  /// cannot promise anything: two cards side by side halve the width, the label
+  /// wraps onto a second line, and that second line has to be paid for out of a
+  /// height nobody adjusted. Deriving the size from the real geometry is what
+  /// makes "two lines fit" a fact rather than a hope.
+  static double _cardFontSize(double cardHeight, {int lines = kCardMaxTextLines}) {
+    final double usable =
+        cardHeight - (2 * kCardVerticalMargin) - (2 * kCardPadding);
+    final double perLine = usable / lines;
+    return (perLine / kCardTextLineHeight)
+        .clamp(kCardMinFontSize, kCardMaxFontSize);
+  }
+
+  /// The label inside a calendar card, sized to fit [cardHeight].
+  static Widget _cardText(String text, double cardHeight) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: _cardFontSize(cardHeight),
+        height: kCardTextLineHeight,
+        fontWeight: FontWeight.bold,
+      ),
+      overflow: TextOverflow.ellipsis,
+      maxLines: kCardMaxTextLines,
+    );
+  }
+
   /// Height of an appointment card. "Tartım" visits are very short (5 min), so
   /// their card is given a taller minimum height ([kTartimMinDisplayMinutes]) so
   /// the label stays readable, without changing the stored duration.
@@ -842,7 +894,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   double get _timeGridHeight => kTotalGridHeight;
 
   /// Appointment card (lightweight build) - now fills its positioned container
-  Widget _buildAppointmentCard(AppointmentModel appt) {
+  Widget _buildAppointmentCard(AppointmentModel appt, double cardHeight) {
     final bool isPostponed = appt.status == AppointmentStatus.postponed && appt.postponedDate != null;
     final DateTime effectiveTime = isPostponed ? appt.postponedDate! : appt.appointmentDateTime;
     
@@ -852,7 +904,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     // Box text: "{saat} {DosyaNo}-{Ad Soyad}". The meeting type is intentionally
     // NOT shown, and the file number + dash is omitted when the client has none.
-    final String nameSurname = '${appt.user!.name} ${appt.user!.surname}';
+    final String nameSurname = appt.user!.fullName;
     final String? dosyaNo = appt.user!.dosyaNo?.trim();
     final String namePart = (dosyaNo != null && dosyaNo.isNotEmpty)
         ? '$dosyaNo-$nameSurname'
@@ -861,14 +913,16 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     final Color cardColor = appt.appointmentType.getBgColor(appt.meetingType);
     final Color borderColor = appt.appointmentType.getBorderColor(appt.meetingType);
-      double fontSize=appt.durationMinutes>29?11:10;
     return GestureDetector(
       onTap: () => _showEditAppointmentDialog(context, appt),
       child: Container(
         width: double.infinity,
         height: double.infinity,
-        margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-        padding: const EdgeInsets.all(4),
+        margin: const EdgeInsets.symmetric(
+          horizontal: kCardHorizontalMargin,
+          vertical: kCardVerticalMargin,
+        ),
+        padding: const EdgeInsets.all(kCardPadding),
         decoration: BoxDecoration(
           color: cardColor,
           borderRadius: BorderRadius.circular(1),
@@ -877,14 +931,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Text(
-                displayText,
-                style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold/*fontSize==11?FontWeight.bold:FontWeight.normal*/),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 3,
-              ),
-            ),
+            Expanded(child: _cardText(displayText, cardHeight)),
           ],
         ),
       ),
@@ -1059,9 +1106,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       child: Row(
         children: [
           // Previous day button
-          IconButton(
-            icon: const Icon(Icons.chevron_left, size: 28),
-            tooltip: 'Önceki Gün',
+          LabeledActionButton(
+            dense: true,
+            icon: Icons.chevron_left,
+            label: 'Önceki Gün',
             onPressed: () {
               setState(() {
                 _selectedDay = _selectedDay.subtract(const Duration(days: 1));
@@ -1106,9 +1154,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             ),
           ),
           // Next day button
-          IconButton(
-            icon: const Icon(Icons.chevron_right, size: 28),
-            tooltip: 'Sonraki Gün',
+          LabeledActionButton(
+            dense: true,
+            icon: Icons.chevron_right,
+            label: 'Sonraki Gün',
             onPressed: () {
               setState(() {
                 _selectedDay = _selectedDay.add(const Duration(days: 1));
@@ -1168,7 +1217,11 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           final nextIcon = const Icon(Icons.arrow_forward_ios);
 
           final Widget prevBtn = isNarrow
-              ? IconButton(icon: prevIcon, tooltip: 'Önceki Hafta', onPressed: goPrev)
+              ? LabeledActionButton(
+                  dense: true,
+                  icon: Icons.arrow_back_ios,
+                  label: 'Önceki Hafta',
+                  onPressed: goPrev)
               : ElevatedButton.icon(
                   onPressed: goPrev,
                   icon: prevIcon,
@@ -1181,7 +1234,11 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                 );
 
           final Widget nextBtn = isNarrow
-              ? IconButton(icon: nextIcon, tooltip: 'Sonraki Hafta', onPressed: goNext)
+              ? LabeledActionButton(
+                  dense: true,
+                  icon: Icons.arrow_forward_ios,
+                  label: 'Sonraki Hafta',
+                  onPressed: goNext)
               : ElevatedButton.icon(
                   onPressed: goNext,
                   icon: nextIcon,
@@ -1234,19 +1291,18 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   // ==================== Content Views ====================
 
   // Mobile header height constant (compact, just the add button)
-  static const double _kMobileHeaderHeight = 36.0;
 
   /// Build single day view for mobile (full-width, no redundant header)
   Widget _buildSingleDayView(Map<DateTime, List<AppointmentModel>> byDay) {
     final dayKey = _dateOnly(_selectedDay);
     final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
     
-    final totalHeight = _kMobileHeaderHeight + _timeGridHeight;
+    final totalHeight = kMobileDayHeaderHeight + _timeGridHeight;
 
     Widget gridContent = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildTimeColumn(headerHeight: _kMobileHeaderHeight),
+        _buildTimeColumn(headerHeight: kMobileDayHeaderHeight),
         // Full-width day content (no fixed width constraint)
         Expanded(
           child: _buildMobileDayContent(_selectedDay, dayAppointments),
@@ -1275,7 +1331,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       children: [
         // Compact header with just the add button (date is in navigation bar)
         Container(
-          height: _kMobileHeaderHeight,
+          height: kMobileDayHeaderHeight,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: Row(
             children: [
@@ -1401,21 +1457,27 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           return ListTile(
             title: Text('Tarih: ${_fullFmt.format(effectiveDate)}'),
             subtitle: Text(
-              'Kullanıcı: ${appointment.user?.name ?? 'Bilinmiyor'}\n'
+              'Kullanıcı: ${appointment.user?.fullName ?? 'Bilinmiyor'}\n'
                   'Tür: ${appointment.meetingType.label}\n'
                   'Durum: ${appointment.status.label}'
                   '${isPostponed ? '\nOrijinal: ${_fullFmt.format(appointment.appointmentDateTime)}\nErtelenen: ${_fullFmt.format(appointment.postponedDate!)}' : ''}',
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
+            trailing: Wrap(
+              alignment: WrapAlignment.end,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: () => _showEditAppointmentDialog(context, appointment),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.edit,
+                  label: 'Düzenle',
+                  onPressed: () =>
+                      _showEditAppointmentDialog(context, appointment),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.delete_outline,
+                  label: 'Sil',
                   tooltip: 'Randevuyu Sil',
+                  foregroundColor: Colors.red,
                   onPressed: () => _onDeleteClicked(appointment),
                 ),
               ],
@@ -1433,8 +1495,16 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       appBar: AppBarWithBack(
         title: 'Danışan Randevuları',
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: () => setState(() => _fetchAllAppointments())),
-          IconButton(icon: const Icon(Icons.date_range), onPressed: _pickDateRange),
+          LabeledActionButton(
+            icon: Icons.refresh,
+            label: 'Yenile',
+            onPressed: () => setState(() => _fetchAllAppointments()),
+          ),
+          LabeledActionButton(
+            icon: Icons.date_range,
+            label: 'Tarih Aralığı',
+            onPressed: _pickDateRange,
+          ),
           DropdownButton<MeetingType?>(
             value: selectedMeetingType,
             hint: const Text('Görüşme Türü'),
@@ -1446,27 +1516,13 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               _fetchAllAppointments();
             }),
           ),
-          IconButton(
-            icon: Stack(
-              children: [
-                const Icon(Icons.filter_list),
-                if (selectedStatuses.length != AppointmentStatus.values.length)
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(6)),
-                      constraints: const BoxConstraints(minWidth: 12, minHeight: 12),
-                      child: Text(
-                        '${AppointmentStatus.values.length - selectedStatuses.length}',
-                        style: const TextStyle(color: Colors.white, fontSize: 8),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+          LabeledActionButton(
+            icon: Icons.filter_list,
+            // The count of hidden statuses used to be a red badge on a bare
+            // icon; as a label it says the same thing in words.
+            label: selectedStatuses.length == AppointmentStatus.values.length
+                ? 'Filtrele'
+                : 'Filtrele (${AppointmentStatus.values.length - selectedStatuses.length} gizli)',
             onPressed: () => _showStatusFilterDialog(context),
           ),
           DropdownButton<String>(
@@ -1480,9 +1536,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           ),
           if (selectedMeetingType != null ||
               selectedStatuses.length != AppointmentStatus.values.length)
-            IconButton(
-              icon: const Icon(Icons.clear),
-              tooltip: 'Filtreleri Temizle',
+            LabeledActionButton(
+              icon: Icons.clear,
+              label: 'Filtreleri Temizle',
               onPressed: () => setState(() {
                 selectedMeetingType = null;
                 selectedStatuses = Set.from(AppointmentStatus.values);

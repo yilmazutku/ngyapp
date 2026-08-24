@@ -5,6 +5,7 @@ import 'package:ngy_app/models/user_model.dart';
 
 import 'appointment_color_palette.dart';
 import 'appointment_duration_config.dart';
+import '../widgets/labeled_action_button.dart';
 
 class AppointmentModel {
   final String appointmentId;
@@ -153,10 +154,11 @@ class AppointmentModel {
                   ),
                 ),
                 if (showEditButton && onEdit != null)
-                  IconButton(
-                    icon: const Icon(Icons.edit),
+                  LabeledActionButton(
+                    dense: true,
+                    icon: Icons.edit,
+                    label: 'Düzenle',
                     onPressed: onEdit,
-                    tooltip: 'Düzenle',
                   ),
               ],
             ),

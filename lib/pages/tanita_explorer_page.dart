@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger log = Logger.forClass(TanitaExplorerPage);
 
@@ -309,9 +310,11 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
                         leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
                         title: Text(pdf.fileName),
                         subtitle: Text(pdf.uploadTime?.toLocal().toString() ?? ''),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          tooltip: 'Sil',
+                        trailing: LabeledActionButton(
+                          dense: true,
+                          icon: Icons.delete,
+                          label: 'Sil',
+                          foregroundColor: Colors.red,
                           onPressed: _busy ? null : () => _deletePdf(pdf),
                         ),
                         onTap: () async {

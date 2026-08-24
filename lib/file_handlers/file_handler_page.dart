@@ -15,6 +15,7 @@ import 'delete_file_mobile.dart';
 import 'file_handler.dart'; // New conditional import
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger log = Logger.forClass(FileHandlerPage);
 
@@ -63,11 +64,11 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
       appBar: AppBarWithBack(
         title: 'Diyet Listeleri Yöneticisi',
         actions: [
-          // Export button
-          IconButton(
-            icon: const Icon(Icons.upload_file),
-            onPressed: () => _showExportDialog(context),
+          LabeledActionButton(
+            icon: Icons.upload_file,
+            label: 'JSON Yükle',
             tooltip: 'JSON Dosya Yükle',
+            onPressed: () => _showExportDialog(context),
           ),
         ],
       ),

@@ -90,6 +90,10 @@ class UserModel {
     };
   }
 
+  /// "Ad Soyad" for display. Falls back to whichever half exists, so a record
+  /// missing one of them never renders a stray space.
+  String get fullName => '$name $surname'.trim();
+
   @override
   String toString() {
     return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, phone: $phone, birthDate: $birthDate}';

@@ -19,6 +19,7 @@ import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 
 import '../constants/app_constants.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// ChatPage displays the chat interface for both regular users and admins.
 /// 
@@ -638,9 +639,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         actions: [
           // Admins can permanently delete the chat (and its uploaded photos)
           if (_isAdminUser)
-            IconButton(
-              tooltip: 'Sohbeti Sil',
-              icon: const Icon(Icons.delete_outline),
+            LabeledActionButton(
+              icon: Icons.delete_outline,
+              label: 'Sohbeti Sil',
               onPressed: _confirmAndDeleteChat,
             ),
         ],

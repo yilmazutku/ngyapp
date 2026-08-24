@@ -8,6 +8,7 @@ import '../providers/customer_summary_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import 'customer_sum.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(DanisanlarOzetPage);
 
@@ -59,9 +60,9 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
         backgroundColor: Colors.blue.shade800,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Yenile',
+          LabeledActionButton(
+            icon: Icons.refresh,
+            label: 'Yenile',
             onPressed: _refreshCurrent,
           ),
         ],

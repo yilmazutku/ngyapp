@@ -20,6 +20,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/payment_export_util.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/loading_overlay.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(AdminPaymentsPage);
 final DateFormat kDateFormat = DateFormat('dd.MM.yyyy', 'tr_TR');
@@ -340,7 +341,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         final u = _userById[p.userId];
         final name = (u?.name ?? '').toLowerCase();
         final surname = (u?.surname ?? '').toLowerCase();
-        final fullName = '$name $surname'.trim();
+        final fullName = (u?.fullName ?? '').toLowerCase();
         final email = (u?.email ?? '').toLowerCase();
         final notes = p.notes?.toLowerCase() ?? '';
         return name.contains(q) || surname.contains(q) || fullName.contains(q) || email.contains(q) || notes.contains(q);
@@ -361,8 +362,9 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         case 'amount':
           return _sortAscending ? a.amount.compareTo(b.amount) : b.amount.compareTo(a.amount);
         case 'userName':
-          final ua = _userById[a.userId]?.name ?? '';
-          final ub = _userById[b.userId]?.name ?? '';
+          // Sorted on the displayed value (ad + soyad), not on the first name.
+          final ua = _userById[a.userId]?.fullName ?? '';
+          final ub = _userById[b.userId]?.fullName ?? '';
           return _sortAscending ? ua.compareTo(ub) : ub.compareTo(ua);
         default:
           return 0;
@@ -404,8 +406,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     setState(() => _showStats = !_showStats);
   }
 
-  /// Get user name from user ID via cache
-  String _getUserName(String userId) => _userById[userId]?.name ?? 'Unknown';
+  /// Display name for a user id, from the cache. Ad *and* soyad, so payment
+  /// widgets identify the client the same way the rest of the app does.
+  String _getUserName(String userId) =>
+      _userById[userId]?.fullName ?? 'Bilinmiyor';
 
   void _showEditPaymentDialog(PaymentModel payment) {
     logger.info(
@@ -1045,13 +1049,14 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
             ),
           ),
           if (_statusFilter != null || _startDate != null || _endDate != null || _searchQuery != null)
-            IconButton(
-              icon: const Icon(Icons.filter_list_off),
-              tooltip: 'Filtreleri Temizle',
+            LabeledActionButton(
+              icon: Icons.filter_list_off,
+              label: 'Filtreleri Temizle',
               onPressed: _resetFilters,
             ),
-          IconButton(
-            icon: const Icon(Icons.search),
+          LabeledActionButton(
+            icon: Icons.search,
+            label: 'Ara',
             onPressed: () async {
               await showSearch(
                 context: context,
@@ -1413,7 +1418,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
   Future<void> _onUserSelected(UserModel user) async {
     setState(() {
       _selectedUser = user;
-      _userSearchController.text = '${user.name} ${user.surname}'.trim();
+      _userSearchController.text = user.fullName;
       _showUserDropdown = false;
       _isLoadingSubscriptions = true;
       _selectedSubscription = null;
@@ -1644,7 +1649,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                                     radius: 16,
                                     child: Text(user.name.isNotEmpty ? user.name[0].toUpperCase() : '?'),
                                   ),
-                                  title: Text('${user.name} ${user.surname}'.trim()),
+                                  title: Text(user.fullName),
                                   subtitle: Text(user.email, style: const TextStyle(fontSize: 12)),
                                   onTap: () => _onUserSelected(user),
                                 );
@@ -1883,7 +1888,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     _originalUserId = widget.payment.userId;
     _selectedUser = widget.userById[widget.payment.userId];
     _userSearchController.text = _selectedUser != null
-        ? '${_selectedUser!.name} ${_selectedUser!.surname}'.trim()
+        ? _selectedUser!.fullName
         : 'Bilinmeyen Kullanıcı';
     _filteredUsers = widget.users;
 
@@ -1967,7 +1972,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
 
     setState(() {
       _selectedUser = user;
-      _userSearchController.text = '${user.name} ${user.surname}'.trim();
+      _userSearchController.text = user.fullName;
       _showUserDropdown = false;
 
       if (userChanged) {
@@ -2375,7 +2380,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                                       style: TextStyle(color: isSelected ? Colors.white : null),
                                     ),
                                   ),
-                                  title: Text('${user.name} ${user.surname}'.trim()),
+                                  title: Text(user.fullName),
                                   subtitle: Text(user.email, style: const TextStyle(fontSize: 12)),
                                   onTap: () => _onUserSelected(user),
                                 );
@@ -2604,7 +2609,8 @@ class PaymentSearchDelegate extends SearchDelegate<String> {
   @override
   Widget buildResults(BuildContext context) => buildSuggestions(context);
 
-  String _getUserName(String userId) => userById[userId]?.name ?? 'Unknown';
+  String _getUserName(String userId) =>
+      userById[userId]?.fullName ?? 'Bilinmiyor';
 
   @override
   Widget buildSuggestions(BuildContext context) {
