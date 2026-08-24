@@ -71,7 +71,6 @@ import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
 import 'pages/testing_page.dart';
-import 'constants/app_constants.dart';
 import 'widgets/labeled_action_button.dart';
 
 /// Global platform configuration instance
@@ -782,19 +781,6 @@ class _HomePageState extends State<HomePage> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Version sits to the left of the logout button so it is
-                      // always visible without opening a menu.
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          'Versiyon: ${AppConstants.appVersion}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
                       LabeledActionButton(
                         icon: Icons.logout,
                         label: 'Çıkış Yap',
