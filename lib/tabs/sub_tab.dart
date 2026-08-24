@@ -39,8 +39,11 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   late final ValueNotifier<SubActiveStatus?> _tempStatusVN;
 
   // Provider + scroll
-  late final SubProvider _subProvider;
-  late final AppointmentManager _appointmentManager;
+  // Both are resolved from a post-frame callback, so they stay nullable: the
+  // tab can be disposed (or a fetch can start) before that callback runs, and
+  // neither dispose() nor a fetch may trip over an unassigned late field.
+  SubProvider? _subProvider;
+  AppointmentManager? _appointmentManager;
   final ScrollController _listCtrl = ScrollController();
   
   // Cache for subscription appointments
@@ -64,31 +67,30 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
 
     // Hook provider after first frame so context is ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _subProvider = context.read<SubProvider>();
+      if (!mounted) return;
+      final provider = context.read<SubProvider>();
+      _subProvider = provider;
       _appointmentManager = context.read<AppointmentManager>();
-      _subProvider.addListener(_onSubChanged);
+      provider.addListener(_onSubChanged);
     });
   }
 
   void _onSubChanged() {
-    if (_subProvider.subChanged) {
-      _subProvider.resetSubChanged();
-      // Clear appointment cache before refreshing to prevent duplicates
-      _subscriptionAppointments.clear();
-      refreshData(); // triggers one rebuild for the list only
-    }
+    final provider = _subProvider;
+    if (provider == null || !provider.subChanged) return;
+    provider.resetSubChanged();
+    // Clear appointment cache before refreshing to prevent duplicates
+    _subscriptionAppointments.clear();
+    // Deferred: this runs inside notifyListeners(), which a write can fire
+    // while a build is in progress.
+    scheduleRefresh();
   }
 
   @override
   void dispose() {
     _listCtrl.dispose();
     _subscriptionAppointments.clear();
-    // _subProvider is set in a post-frame callback; guard it
-    try {
-      _subProvider.removeListener(_onSubChanged);
-    } catch (_) {
-      // no-op if not attached yet
-    }
+    _subProvider?.removeListener(_onSubChanged);
     _tempStatusVN.dispose();
     super.dispose();
   }
@@ -113,7 +115,9 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       if (_subscriptionAppointments.containsKey(cacheKey)) return;
       
       try {
-        final appointments = await _appointmentManager.fetchAppointments(
+        final manager =
+            _appointmentManager ?? context.read<AppointmentManager>();
+        final appointments = await manager.fetchAppointments(
           sub.subscriptionId,
           userId: sub.userId,
           showAllAppointments: false,

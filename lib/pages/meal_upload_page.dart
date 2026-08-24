@@ -574,6 +574,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   Future<void> _saveDailyData() async {
     // Validate steps input first
+    // The keyboard has no business staying up over the result of the save.
+    FocusManager.instance.primaryFocus?.unfocus();
+
     int? steps = int.tryParse(_stepsController.text);
     if (steps == null && _stepsController.text.isNotEmpty) {
       if (!mounted) return;
@@ -922,6 +925,11 @@ class _MealUploadPageState extends State<MealUploadPage> {
                       controller: _stepsController,
                       focusNode: _stepsFocusNode,
                       keyboardType: TextInputType.number,
+                      // A number keyboard has no return key on iOS, so the
+                      // field also has to offer a way out of itself.
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _stepsFocusNode.unfocus(),
+                      onTapOutside: (_) => _stepsFocusNode.unfocus(),
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13),
                       decoration: InputDecoration(
