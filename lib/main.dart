@@ -216,6 +216,14 @@ class MyApp extends StatelessWidget {
         child: MaterialApp(
           navigatorKey: navKey, // <-- IMPORTANT for notification tap navigation
           debugShowCheckedModeBanner: false,
+          // Tapping anywhere outside a text field closes the keyboard, on every
+          // screen. Done once here rather than per page: a field that forgets it
+          // leaves the on-screen keyboard covering the page with no way back.
+          builder: (context, child) => GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+            child: child,
+          ),
           theme: ThemeData(
             primarySwatch: Colors.purple,
             primaryColor: const Color(0xFFA16AEC),

@@ -37,7 +37,10 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
   final Logger logger = Logger.forClass(_MeasurementsTabState);
 
   bool _isSaving = false;
-  late final MeasProvider _measProvider;
+  // Nullable and set from a post-frame callback: the tab can be disposed before
+  // that callback runs, and dispose() must not touch a field that was never
+  // assigned.
+  MeasProvider? _measProvider;
 
   // Single vertical scroller (like AppointmentsTab)
   final ScrollController _listCtrl = ScrollController();
@@ -73,22 +76,26 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
   }
 
   void _setupMeasurementListener() {
-    _measProvider = Provider.of<MeasProvider>(context, listen: false);
-    _measProvider.addListener(_onMeasurementProviderChanged);
+    if (!mounted) return;
+    final provider = Provider.of<MeasProvider>(context, listen: false);
+    _measProvider = provider;
+    provider.addListener(_onMeasurementProviderChanged);
   }
 
   void _onMeasurementProviderChanged() {
-    if (_measProvider.measurementChanged) {
-      _measProvider.resetMeasurementChanged();
-      refreshData();
-    }
+    final provider = _measProvider;
+    if (provider == null || !provider.measurementChanged) return;
+    provider.resetMeasurementChanged();
+    // See PaymentsTab: notifications arrive mid-build, so the refetch waits
+    // for the frame to finish.
+    scheduleRefresh();
   }
 
   @override
   void dispose() {
     _listCtrl.dispose();
     _hCtrl.dispose();
-    _measProvider.removeListener(_onMeasurementProviderChanged);
+    _measProvider?.removeListener(_onMeasurementProviderChanged);
     super.dispose();
   }
 

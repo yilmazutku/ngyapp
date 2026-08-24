@@ -39,7 +39,10 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   final DateFormat _dateFormat = DateFormat('d MMMM y', 'tr_TR');
 
   final Map<String, String> _subscriptionCache = {}; // Cache for subscription names
-  late final PaymentProvider _paymentProvider;
+  // Nullable and set from a post-frame callback: the tab can be disposed before
+  // that callback runs, and dispose() must not touch a field that was never
+  // assigned.
+  PaymentProvider? _paymentProvider;
   final ScrollController _listCtrl = ScrollController();
 
   @override
@@ -50,8 +53,10 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   }
 
   void _setupPaymentListener() {
-    _paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
-    _paymentProvider.addListener(_onPaymentProviderChanged);
+    if (!mounted) return;
+    final provider = Provider.of<PaymentProvider>(context, listen: false);
+    _paymentProvider = provider;
+    provider.addListener(_onPaymentProviderChanged);
   }
   
   Future<String> _getSubscriptionName(String subscriptionId) async {
@@ -70,16 +75,20 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   }
 
   void _onPaymentProviderChanged() {
-    if (_paymentProvider.paymentChanged) {
-      _paymentProvider.resetPaymentChanged();
-      refreshData();
-    }
+    final provider = _paymentProvider;
+    if (provider == null || !provider.paymentChanged) return;
+    provider.resetPaymentChanged();
+    // Deferred: this runs inside notifyListeners(), which a write can fire
+    // while a build is in progress or while its own Firestore work is still
+    // settling. Refetching right here refetched twice per write and could
+    // setState during build.
+    scheduleRefresh();
   }
 
   @override
   void dispose() {
     _listCtrl.dispose();
-    _paymentProvider.removeListener(_onPaymentProviderChanged);
+    _paymentProvider?.removeListener(_onPaymentProviderChanged);
     super.dispose();
   }
 
