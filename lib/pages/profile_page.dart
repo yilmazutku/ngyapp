@@ -119,7 +119,8 @@ class _ProfilePageState extends State<ProfilePage> {
       cancelText: 'Vazgeç',
     );
 
-    if (!firstConfirm || !mounted) return;
+    if (!firstConfirm) return;
+    if (!mounted) return;
 
     final secondConfirm = await DialogUtils.openConfirm(
       context,
@@ -132,7 +133,8 @@ class _ProfilePageState extends State<ProfilePage> {
       cancelText: 'Vazgeç',
     );
 
-    if (!secondConfirm || !mounted) return;
+    if (!secondConfirm) return;
+    if (!mounted) return;
 
     bool loadingOpen = false;
     try {
@@ -187,7 +189,8 @@ class _ProfilePageState extends State<ProfilePage> {
       cancelText: 'Vazgeç',
     );
 
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     setState(() => _isResettingPassword = true);
 

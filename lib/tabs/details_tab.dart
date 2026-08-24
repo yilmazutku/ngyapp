@@ -223,7 +223,8 @@ class _DetailsTabState extends State<DetailsTab>
       cancelText: 'Vazgeç',
     );
 
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 

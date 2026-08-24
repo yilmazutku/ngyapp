@@ -927,6 +927,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         );
         
         // Close dialog first, then notify parent about the update
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         Navigator.of(context).pop();
         
         // Call the update callback after dialog is closed

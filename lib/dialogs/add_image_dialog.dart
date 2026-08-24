@@ -252,6 +252,8 @@ class _AddImageDialogState extends State<AddImageDialog> {
           message: 'Resim başarıyla yüklendi.',
         );
 
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         Navigator.of(context).pop();
       } else {
         setState(() {

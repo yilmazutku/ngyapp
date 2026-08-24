@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/payment_model.dart';
 import '../models/logger.dart';
 import '../providers/payment_provider.dart';
 import '../widgets/app_bar_with_back.dart';
-import '../widgets/labeled_action_button.dart';
 
-/// A page that displays a user's payments with filtering and sorting.
+/// A page that displays a user's payments, grouped as overdue, then planned,
+/// then completed, newest first inside each group. No filters: the client is
+/// looking at their own handful of payments, not searching a ledger.
 /// Overdue first, then planned, then completed.
 class UserPaymentsPage extends StatefulWidget {
   final String userId;
@@ -34,19 +34,6 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
   /// Whether we're loading data (show a spinner).
   bool _isLoading = false;
 
-  // --------------------------------------------------
-  // Filter Fields
-  // --------------------------------------------------
-
-  /// Selected status for filtering (if null, show all).
-  PaymentStatus? _selectedStatus;
-
-  /// Selected date range for filtering (if null, no date constraint).
-  DateTimeRange? _selectedDateRange;
-
-  /// Ascending or descending sort by date (applied *within* each group).
-  /// Newest first by default: August's payments belong above July's.
-  bool _isDateAscending = false;
 
   @override
   void initState() {
@@ -101,41 +88,9 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
   void _applyFilters() {
     _logger.info('Applying filters in UserPaymentsPage.');
 
-    // Start with all
     List<PaymentModel> filtered = List.from(_allPayments);
 
-    // 1) Filter by status
-    if (_selectedStatus != null) {
-      filtered = filtered.where((p) => p.status == _selectedStatus).toList();
-      _logger.info('Status filter: ${_selectedStatus!.label}, results: ${filtered.length}.');
-    }
-
-    // 2) Filter by date range
-    if (_selectedDateRange != null) {
-      final start = _selectedDateRange!.start;
-      final end = _selectedDateRange!.end;
-
-      filtered = filtered.where((p) {
-        // If completed, we compare paymentDate
-        // otherwise, we compare dueDate
-        final relevantDate = (p.status == PaymentStatus.completed)
-            ? p.paymentDate
-            : p.dueDate;
-        if (relevantDate == null) return false;
-
-        return relevantDate.isAfter(start.subtract(const Duration(days: 1))) &&
-            relevantDate.isBefore(end.add(const Duration(days: 1)));
-      }).toList();
-
-      _logger.info(
-          'Date range filter: '
-              '${DateFormat('dd.MM.yyyy').format(start)} - '
-              '${DateFormat('dd.MM.yyyy').format(end)}, '
-              'results: ${filtered.length}.'
-      );
-    }
-
-    // 3) Group sort: Overdue -> Planned -> Completed
+    // Group sort: Overdue -> Planned -> Completed
     filtered.sort((a, b) {
       final scoreA = _getStatusScore(a);
       final scoreB = _getStatusScore(b);
@@ -155,7 +110,8 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
           ? (b.paymentDate ?? DateTime.fromMillisecondsSinceEpoch(0))
           : (b.dueDate ?? DateTime.fromMillisecondsSinceEpoch(0));
 
-      return _isDateAscending ? dateA.compareTo(dateB) : dateB.compareTo(dateA);
+      // Newest first: August's payments belong above July's.
+      return dateB.compareTo(dateA);
     });
 
     setState(() {
@@ -172,17 +128,6 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
     if (p.isOverdue) return 0; // Overdue first
     if (p.status == PaymentStatus.planned) return 1; // Planned next
     return 2; // Completed last
-  }
-
-  /// Clear all filters, revert to ascending date
-  void _clearFilters() {
-    _logger.info('Clearing all filters in UserPaymentsPage.');
-    setState(() {
-      _selectedStatus = null;
-      _selectedDateRange = null;
-      _isDateAscending = false;
-    });
-    _applyFilters();
   }
 
   // --------------------------------------------------
@@ -208,122 +153,6 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
     );
   }
 
-  /// Open a filter dialog for PaymentStatus, date range, and sort direction.
-  void _showFilterDialog() {
-    _logger.info('Opening filter dialog in UserPaymentsPage.');
-
-    // Temporary copies
-    PaymentStatus? tempStatus = _selectedStatus;
-    DateTimeRange? tempDateRange = _selectedDateRange;
-    bool tempIsDateAscending = _isDateAscending;
-
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return AlertDialog(
-              title: const Text('Filtre Seçenekleri'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Status Filter
-                    DropdownButtonFormField<PaymentStatus>(
-                      value: tempStatus,
-                      decoration: const InputDecoration(
-                        labelText: 'Durum',
-                      ),
-                      items: PaymentStatus.values.map((PaymentStatus status) {
-                        return DropdownMenuItem<PaymentStatus>(
-                          value: status,
-                          child: Text(status.label),
-                        );
-                      }).toList()
-                        ..insert(
-                          0,
-                          const DropdownMenuItem<PaymentStatus>(
-                            value: null,
-                            child: Text('Tümü'),
-                          ),
-                        ),
-                      onChanged: (PaymentStatus? newValue) {
-                        setDialogState(() {
-                          tempStatus = newValue;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Date Range Filter
-                    ElevatedButton(
-                      onPressed: () async {
-                        final DateTimeRange? picked = await showDateRangePicker(
-                          context: dialogContext,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2100),
-                          initialDateRange: tempDateRange ??
-                              DateTimeRange(
-                                start: DateTime.now(),
-                                end: DateTime.now().add(const Duration(days: 7)),
-                              ),
-                        );
-                        if (picked != null) {
-                          setDialogState(() {
-                            tempDateRange = picked;
-                          });
-                        }
-                      },
-                      child: Text(
-                        (tempDateRange == null)
-                            ? 'Tarih Aralığı Seç'
-                            : '${DateFormat('dd.MM.yyyy').format(tempDateRange!.start)} - '
-                            '${DateFormat('dd.MM.yyyy').format(tempDateRange!.end)}',
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Sort Order Toggle
-                    SwitchListTile(
-                      title: const Text('Tarihi Artan Sırada Göster'),
-                      value: tempIsDateAscending,
-                      onChanged: (bool value) {
-                        setDialogState(() {
-                          tempIsDateAscending = value;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop(); // Close w/o applying
-                  },
-                  child: const Text('Vazgeç'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    // Apply chosen filters
-                    setState(() {
-                      _selectedStatus = tempStatus;
-                      _selectedDateRange = tempDateRange;
-                      _isDateAscending = tempIsDateAscending;
-                    });
-                    Navigator.of(dialogContext).pop();
-                    _applyFilters();
-                  },
-                  child: const Text('Uygula'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   // --------------------------------------------------
   // Build Methods
   // --------------------------------------------------
@@ -334,18 +163,6 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Ödemelerim',
-        actions: [
-          LabeledActionButton(
-            icon: Icons.filter_list,
-            label: 'Filtrele',
-            onPressed: _showFilterDialog,
-          ),
-          LabeledActionButton(
-            icon: Icons.clear,
-            label: 'Filtreleri Temizle',
-            onPressed: _clearFilters,
-          ),
-        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

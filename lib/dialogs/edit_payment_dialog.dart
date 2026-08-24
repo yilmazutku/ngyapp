@@ -321,7 +321,8 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
       confirmText: 'Evet, Sil',
       cancelText: 'Vazgeç',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     startLoading();
     try {
@@ -526,6 +527,8 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
         notificationTimes: widget.payment.notificationTimes,
       );
 
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
       final subProvider = paymentProvider.subProvider;
       logger.info('Updating payment in database...');
@@ -598,8 +601,7 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
 
       widget.onPaymentUpdated();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
           message: 'İşlem Başarılı.',

@@ -21,7 +21,8 @@ final Logger logger = Logger.forClass(CustomerSummaryProvider);
 /// only renders the returned [CustomerSummaryRow]s.
 class CustomerSummaryProvider extends ChangeNotifier {
   final DateFormat _dateFormat = DateFormat('dd.MM.yyyy');
-  final NumberFormat _amountFormat = NumberFormat('#,##0.##', 'tr_TR');
+  // Whole lira: payment amounts are never entered with a decimal part.
+  final NumberFormat _amountFormat = NumberFormat('#,##0', 'tr_TR');
 
   CollectionReference<Map<String, dynamic>> get _usersRef =>
       FirebaseFirestore.instance.collection('users');

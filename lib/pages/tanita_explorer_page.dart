@@ -95,6 +95,8 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
       int success = 0;
       final List<String> failed = [];
       try {
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final provider = Provider.of<MeasProvider>(context, listen: false);
         for (int i = 0; i < total; i++) {
           final file = files[i];
@@ -188,7 +190,8 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true) return;
+    if (!mounted) return;
 
     bool loadingOpen = false;
     if (mounted) {
@@ -322,7 +325,8 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
                           if (await canLaunchUrl(uri)) {
                             await launchUrl(uri, mode: LaunchMode.externalApplication);
                           } else {
-                            if (mounted) {
+                            // context here is build()'s parameter.
+                            if (context.mounted) {
                               await DialogUtils.openError(
                                 context,
                                 title: 'Hata',

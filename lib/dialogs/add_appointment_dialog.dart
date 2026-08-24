@@ -366,6 +366,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       }
     }
 
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final appointmentManager =
         Provider.of<AppointmentManager>(context, listen: false);
     final durationMinutes = int.tryParse(_durationController.text) ??
@@ -416,6 +418,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         // an atomic increment so concurrent edits can't clobber the counter.
         if (isUserPostponement && _selectedSubscription != null) {
           try {
+            // Re-checked after the await: the widget may be gone by now.
+            if (!mounted) return;
             final subProvider =
                 Provider.of<SubProvider>(context, listen: false);
             await subProvider.updateSubscription(
@@ -435,8 +439,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         widget.onAppointmentAdded();
 
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
           message: 'İşlem Başarılı.',
@@ -736,7 +739,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                         firstDate: DateTime(2000),
                         lastDate: DateTime(2100),
                       );
-                      if (pickedDate != null && mounted) {
+                      // context here is build()'s parameter, so the guard has
+                      // to be on that context, not on the State.
+                      if (pickedDate != null && context.mounted) {
                         final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
                           context,
                           initialTime: _postponedDate != null

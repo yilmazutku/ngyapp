@@ -424,7 +424,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => _showEditSubscriptionDialog(context, s),
+        onTap: () => _showEditSubscriptionDialog(s),
         child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -500,14 +500,14 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                   icon: Icons.edit,
                   label: 'Düzenle',
                   foregroundColor: Colors.blue,
-                  onPressed: () => _showEditSubscriptionDialog(context, s),
+                  onPressed: () => _showEditSubscriptionDialog(s),
                 ),
                 LabeledActionButton(
                   dense: true,
                   icon: Icons.delete,
                   label: 'Sil',
                   foregroundColor: Colors.red,
-                  onPressed: () => _showDeleteConfirmationDialog(context, s),
+                  onPressed: () => _showDeleteConfirmationDialog(s),
                 ),
               ],
             ),
@@ -599,14 +599,14 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
               children: [
                 const Text('Ödeme Bilgisi: ', style: TextStyle(fontWeight: FontWeight.bold)),
                 Text(
-                  '${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.amountPaid)} / ',
+                  '${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 0).format(s.amountPaid)} / ',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: s.amountPaid < s.totalAmount ? Colors.red : Colors.green,
                   ),
                 ),
                 Text(
-                  NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount),
+                  NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 0).format(s.totalAmount),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
@@ -628,7 +628,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                     Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 16),
                     const SizedBox(width: 4),
                     Text(
-                      'Eksik Ödeme: ${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount - s.amountPaid)}',
+                      'Eksik Ödeme: ${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 0).format(s.totalAmount - s.amountPaid)}',
                       style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ],
@@ -736,7 +736,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     });
   }
 
-  Future<void> _showEditSubscriptionDialog(BuildContext context, SubscriptionModel s) async {
+  Future<void> _showEditSubscriptionDialog(SubscriptionModel s) async {
     try {
       if (!mounted) return;
       await showDialog(
@@ -755,7 +755,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     }
   }
 
-  Future<void> _showDeleteConfirmationDialog(BuildContext context, SubscriptionModel s) async {
+  Future<void> _showDeleteConfirmationDialog(SubscriptionModel s) async {
     try {
       final confirmed = await DialogUtils.openConfirm(
         context,
@@ -805,7 +805,8 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   }
   
   void _showAllAppointments(BuildContext context, SubscriptionModel subscription, List<AppointmentModel> appointments) {
-    if (appointments.isEmpty || !mounted) return;
+    if (appointments.isEmpty) return;
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

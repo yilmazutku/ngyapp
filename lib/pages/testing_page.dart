@@ -665,7 +665,8 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
       confirmText: 'Sıfırla',
       cancelText: 'İptal',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
     setState(() {
       for (final slot in AppointmentColorSlot.values) {
         _draft[slot] = null;
@@ -1030,7 +1031,8 @@ class _AppointmentDurationsSectionState
       confirmText: 'Sıfırla',
       cancelText: 'İptal',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
     setState(() {
       for (final slot in AppointmentDurationSlot.values) {
         _controllers[slot]!.text = slot.defaultMinutes.toString();

@@ -124,7 +124,8 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
       cancelText: 'İptal',
     );
 
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     bool loadingOpen = false;
     try {

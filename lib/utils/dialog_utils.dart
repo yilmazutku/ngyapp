@@ -54,6 +54,24 @@ class DialogUtils {
   }
 
   /// Shows a confirmation dialog with a message and an OK button
+  /// Closes the current route, then shows an info dialog on a context that
+  /// survives that pop.
+  ///
+  /// Calling [openInfo] with the popped route's own context looks up an
+  /// ancestor of a deactivated element. In debug that throws; in both modes the
+  /// dialog that was supposed to confirm the save simply never appeared. The
+  /// navigator's own context outlives the route, so the message still lands.
+  static Future<void> popThenInfo(
+    BuildContext context, {
+    required String title,
+    required String message,
+  }) async {
+    final navigator = Navigator.of(context);
+    final hostContext = navigator.context;
+    navigator.pop();
+    await openInfo(hostContext, title: title, message: message);
+  }
+
   static Future<void> openInfo(
     BuildContext context, {
     required String title,

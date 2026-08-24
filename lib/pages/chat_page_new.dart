@@ -157,6 +157,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final chat = context.read<ChatManager>();
 
     bool loadingOpen = false;
@@ -328,6 +330,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final chat = context.read<ChatManager>();
     logger.info('Gallery image picker opened. chatId={}', [_chatId]);
 
@@ -352,6 +356,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       if (meal != null) {
         logger.info('Starting meal image upload (gallery). meal={} userId={}', [meal.name, _currentUid]);
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
         final downloadUrl = await mealStateManager.uploadMealImg(
           meal: meal,
@@ -413,6 +419,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final chat = context.read<ChatManager>();
     logger.info('Camera capture opened. chatId={}', [_chatId]);
 
@@ -440,6 +448,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       if (meal != null) {
         logger.info('Starting meal image upload (camera). meal={} userId={}', [meal.name, _currentUid]);
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
         final downloadUrl = await mealStateManager.uploadMealImg(
           meal: meal,

@@ -122,12 +122,13 @@ class _AddMeasurementDialogState extends State<AddMeasurementDialog> {
         createUser: 'admin', // aynı pattern: ödeme eklerken kullandığınız gibi
       );
 
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final provider = Provider.of<MeasProvider>(context, listen: false);
       await provider.addMeasurement(widget.userId, meas);
 
       if (!mounted) return;
-      Navigator.of(context).pop(); // close dialog first
-      await DialogUtils.openInfo(
+      await DialogUtils.popThenInfo(
         context,
         title: 'Başarılı',
         message: 'Ölçüm başarıyla eklendi.',

@@ -57,7 +57,8 @@ class _EditEventDialogState extends State<EditEventDialog>
       firstDate: DateTime.now().subtract(const Duration(days: 365)),
       lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
     );
-    if (pickedDate == null || !mounted) return;
+    if (pickedDate == null) return;
+    if (!mounted) return;
 
     setState(() {
       _startDateTime = DateTime(
@@ -166,6 +167,8 @@ class _EditEventDialogState extends State<EditEventDialog>
 
     startLoading();
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final eventProvider =
           Provider.of<EventProvider>(context, listen: false);
       final updated = EventModel(
@@ -179,8 +182,7 @@ class _EditEventDialogState extends State<EditEventDialog>
 
       widget.onEventUpdated();
       if (!mounted) return;
-      Navigator.of(context).pop();
-      await DialogUtils.openInfo(
+      await DialogUtils.popThenInfo(
         context,
         title: 'Başarılı',
         message: 'Etkinlik başarıyla güncellendi.',
@@ -211,6 +213,8 @@ class _EditEventDialogState extends State<EditEventDialog>
 
     startLoading();
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final eventProvider =
           Provider.of<EventProvider>(context, listen: false);
       await eventProvider.deleteEvent(widget.event.eventId);
@@ -221,8 +225,7 @@ class _EditEventDialogState extends State<EditEventDialog>
         widget.onEventUpdated();
       }
       if (!mounted) return;
-      Navigator.of(context).pop();
-      await DialogUtils.openInfo(
+      await DialogUtils.popThenInfo(
         context,
         title: 'Başarılı',
         message: 'Etkinlik başarıyla silindi.',

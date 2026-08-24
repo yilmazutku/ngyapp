@@ -110,6 +110,8 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     startLoading(timeout: const Duration(minutes: 2));
     int added = 0;
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final manager = Provider.of<AppointmentManager>(context, listen: false);
       final baseId = DateTime.now().millisecondsSinceEpoch;
       for (int i = 0; i < _apptEntries.length; i++) {
@@ -216,8 +218,12 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     startLoading(timeout: const Duration(minutes: 2));
     int added = 0;
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider =
           Provider.of<PaymentProvider>(context, listen: false);
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final subProvider = Provider.of<SubProvider>(context, listen: false);
       final SubscriptionModel? linkedSub = _selectedSubscription;
       double addedAmount = 0;

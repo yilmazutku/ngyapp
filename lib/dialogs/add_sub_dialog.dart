@@ -652,6 +652,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       // If payment is received, create a payment record
       if (paymentReceived && subscriptionId != null) {
         try {
+          // Re-checked after the await: the widget may be gone by now.
+          if (!mounted) return;
           final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
           final double paymentAmount = totalAmount;
           
@@ -692,6 +694,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       // dialog's amount and the entered due date.
       if (paymentPlanned && subscriptionId != null) {
         try {
+          // Re-checked after the await: the widget may be gone by now.
+          if (!mounted) return;
           final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
           final DateTime plannedDate = _plannedDate ?? _startDate!;
 
@@ -739,6 +743,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                 : 'Paket başarıyla eklendi.',
       );
       widget.onSubscriptionAdded();
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
       logger.err('Error adding subscription: {}', [e]);
