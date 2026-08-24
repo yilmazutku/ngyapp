@@ -388,7 +388,8 @@ class SubProvider extends ChangeNotifier {
     }
   }
 
-  /// Moves a subscription's `postponementsUsed` by [delta], atomically.
+  /// Moves a subscription's `postponementsUsed` by [delta] with a server-side
+  /// increment.
   ///
   /// Only user-originated postponements are tracked here, so this is what
   /// consumes and gives back the customer's postponement rights. The counter is
@@ -411,29 +412,31 @@ class SubProvider extends ChangeNotifier {
           .collection('subscriptions')
           .doc(subscriptionId);
 
-      await FirebaseFirestore.instance.runTransaction((tx) async {
-        final snap = await tx.get(subRef);
-        if (!snap.exists) {
-          logger.warn('Sub not found for postponement update: user={}, sub={}',
-              [userId, subscriptionId]);
-          return;
-        }
+      final snap = await subRef.get();
+      if (!snap.exists) {
+        logger.warn('Sub not found for postponement update: user={}, sub={}',
+            [userId, subscriptionId]);
+        return false;
+      }
 
-        final raw = snap.data()?['postponementsUsed'];
-        final int current =
-            raw is int ? raw : int.tryParse('$raw') ?? 0;
-        final int next = (current + delta) < 0 ? 0 : current + delta;
+      final raw = snap.data()?['postponementsUsed'];
+      final int current = raw is int ? raw : int.tryParse('$raw') ?? 0;
+      // Clamped delta rather than a clamped absolute value: the write itself
+      // stays a server-side increment, so two adjustments landing together
+      // still add up instead of overwriting each other.
+      final int appliedDelta = (current + delta) < 0 ? -current : delta;
 
-        tx.update(subRef, {
-          'postponementsUsed': next,
+      if (appliedDelta != 0) {
+        await subRef.update({
+          'postponementsUsed': FieldValue.increment(appliedDelta),
           'updateDate': Timestamp.fromDate(DateTime.now()),
           'updateUser': updateUser,
         });
-        logger.info(
-          'postponementsUsed adjusted: user={}, sub={}, delta={}, from {} to {}',
-          [userId, subscriptionId, delta, current, next],
-        );
-      });
+      }
+      logger.info(
+        'postponementsUsed adjusted: user={}, sub={}, delta={}, applied={}, from {}',
+        [userId, subscriptionId, delta, appliedDelta, current],
+      );
 
       _subChanged = true;
       notifyListeners();
@@ -446,7 +449,16 @@ class SubProvider extends ChangeNotifier {
     }
   }
 
-  /// Moves a subscription's `amountPaid` by [delta], atomically.
+  /// Moves a subscription's `amountPaid` by [delta] with a server-side
+  /// increment.
+  ///
+  /// Deliberately NOT a `runTransaction`: on the Windows build a transaction
+  /// re-enters the Firestore plugin and throws "Firestore instance has already
+  /// been started and its settings can no longer be changed", which took down
+  /// the app whenever a payment was edited or deleted from the payments tab
+  /// (that tab refetches on the provider notification, so a query overlapped
+  /// the transaction). `FieldValue.increment` is applied by the server, so the
+  /// add-up guarantee survives without a client transaction.
   ///
   /// Callers used to read the current total — often from a stale in-memory
   /// subscription model — add their own amount and write the result back. Two
@@ -469,25 +481,28 @@ class SubProvider extends ChangeNotifier {
           .collection('subscriptions')
           .doc(subscriptionId);
 
-      await FirebaseFirestore.instance.runTransaction((tx) async {
-        final snap = await tx.get(subRef);
-        if (!snap.exists) {
-          logger.warn('Sub not found for amountPaid update: user={}, sub={}',
-              [userId, subscriptionId]);
-          return;
-        }
+      final snap = await subRef.get();
+      if (!snap.exists) {
+        logger.warn('Sub not found for amountPaid update: user={}, sub={}',
+            [userId, subscriptionId]);
+        return false;
+      }
 
-        final raw = snap.data()?['amountPaid'];
-        final double current =
-            raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0;
-        final double next = (current + delta).clamp(0, double.infinity).toDouble();
+      final raw = snap.data()?['amountPaid'];
+      final double current =
+          raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0;
+      // Clamped delta rather than a clamped absolute value: the write itself
+      // stays a server-side increment, so two payments recorded at the same
+      // moment still add up instead of overwriting each other.
+      final double appliedDelta = (current + delta) < 0 ? -current : delta;
 
-        tx.update(subRef, {'amountPaid': next});
-        logger.info(
-          'amountPaid adjusted: user={}, sub={}, delta={}, from {} to {}',
-          [userId, subscriptionId, delta, current, next],
-        );
-      });
+      if (appliedDelta != 0) {
+        await subRef.update({'amountPaid': FieldValue.increment(appliedDelta)});
+      }
+      logger.info(
+        'amountPaid adjusted: user={}, sub={}, delta={}, applied={}, from {}',
+        [userId, subscriptionId, delta, appliedDelta, current],
+      );
 
       _subChanged = true;
       notifyListeners();

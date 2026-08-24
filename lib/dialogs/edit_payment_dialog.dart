@@ -311,7 +311,7 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
   /// deleted payment was a completed one (see deletePayment).
   Future<void> _deletePayment() async {
     final formattedAmount =
-        NumberFormat('#,##0.00', 'tr_TR').format(widget.payment.amount);
+        NumberFormat('#,##0', 'tr_TR').format(widget.payment.amount);
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Ödeme Sil',

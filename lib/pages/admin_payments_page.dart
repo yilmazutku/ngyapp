@@ -906,7 +906,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     double? plannedTotal,
   }) {
     final rangeText = '${kDateFormat.format(start)} - ${kDateFormat.format(end)}';
-    final average = count > 0 ? totalPaid / count : 0.0;
 
     return Card(
       margin: const EdgeInsets.all(8),
@@ -937,8 +936,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                   _statItem('Planlanan Toplam',
                       '${plannedTotal.toStringAsFixed(2)} ₺', Icons.event,
                       Colors.orange),
-                _statItem('Ortalama Ödeme', '${average.toStringAsFixed(2)} ₺',
-                    Icons.trending_up, Colors.blue),
               ],
             ),
             const Divider(height: 32),
@@ -1314,7 +1311,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       context,
       title: 'Ödeme Sil',
       message:
-      '${_getUserName(payment.userId)} kullanıcısına ait ${payment.amount.toStringAsFixed(2)} ₺ tutarındaki ödemeyi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.',
+      '${_getUserName(payment.userId)} kullanıcısına ait ${payment.amount.toStringAsFixed(0)} ₺ tutarındaki ödemeyi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.',
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
@@ -1892,7 +1889,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
         : 'Bilinmeyen Kullanıcı';
     _filteredUsers = widget.users;
 
-    _amountController.text = widget.payment.amount.toString();
+    // Whole number: the amount field is not a place for kuruş.
+    _amountController.text = widget.payment.amount.toStringAsFixed(0);
     _selectedPaymentDate = widget.payment.paymentDate ?? DateTime.now();
     _selectedDueDate = widget.payment.dueDate;
     _paymentStatus = widget.payment.status;

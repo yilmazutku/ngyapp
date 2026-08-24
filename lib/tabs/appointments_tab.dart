@@ -118,6 +118,10 @@ class _AppointmentsTabState
   final DateFormat _shortDf = DateFormat('HH:mm', 'tr_TR');
 // if you still want the short one:
   final DateFormat _longDf = DateFormat('d MMMM yyyy', 'tr_TR');
+  // Same date with the weekday appended. Kept separate from [_longDf] because
+  // that one is also parsed back to sort the day groups; only the displayed
+  // text carries the day name.
+  final DateFormat _longDayDf = DateFormat('d MMMM yyyy EEEE', 'tr_TR');
 
   // ---- SCROLL IMPROVEMENTS ----
   // Explicit controller for the main list to avoid PrimaryScrollController mismatches
@@ -482,7 +486,7 @@ class _AppointmentsTabState
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  dateKey,
+                  _longDayDf.format(_longDf.parse(dateKey)),
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -742,14 +746,14 @@ class _AppointmentsTabState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Orijinal: ${_longDf.format(appointment.appointmentDateTime)} ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
+                            'Orijinal: ${_longDayDf.format(appointment.appointmentDateTime)} ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
                           // The postponed date is optional, so it may still be
                           // unset while the new date is being agreed on.
                           Text(
                             appointment.postponedDate != null
-                                ? 'Ertelenen: ${_longDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}'
+                                ? 'Ertelenen: ${_longDayDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}'
                                 : 'Ertelenen: tarih seçilmedi',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
