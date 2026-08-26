@@ -126,6 +126,9 @@ class _CustomerSummaryTab extends StatefulWidget {
 
 class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     with AutomaticKeepAliveClientMixin {
+  /// Tahsil edilmemiş ödemelerde tutarın altında gösterilen not.
+  static const String _plannedPaymentNote = '(Planlandı)';
+
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
 
@@ -294,6 +297,11 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
                   color: Colors.black87,
                 ),
                 border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+                // Planlanan ödemelerde tutar hücresi iki satırlı olur; satır
+                // yüksekliği sabit kalırsa taşar. Alt sınır Material'ın
+                // varsayılanı, üst sınır kaldırıldı: satır içeriğine göre büyür.
+                dataRowMinHeight: kMinInteractiveDimension,
+                dataRowMaxHeight: double.infinity,
                 columns: _buildColumns(postponedColumns),
                 rows: _rows.map((r) => _buildRow(r, postponedColumns)).toList(),
               ),
@@ -341,7 +349,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         ),
         if (widget.showPayment) ...[
           _cell(row.paymentDate),
-          _cell(row.paymentAmount),
+          _amountCell(row.paymentAmount, isPlanned: row.paymentIsPlanned),
           _cell(row.paymentType),
         ],
         _cell(row.packageType),
@@ -417,14 +425,37 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     }
   }
 
-  DataCell _cell(SummaryCell cell) {
+  DataCell _cell(SummaryCell cell) => DataCell(_cellText(cell));
+
+  Text _cellText(SummaryCell cell) {
+    return Text(
+      cell.text,
+      style: TextStyle(
+        color: cell.isError ? Colors.red.shade700 : null,
+        fontWeight: cell.isError ? FontWeight.bold : null,
+      ),
+    );
+  }
+
+  /// Ödeme tutarı hücresi. Gösterilen ödeme henüz tahsil edilmemişse tutarın
+  /// altına kalın "(Planlandı)" notu düşülür; sütun numeric olduğu için içerik
+  /// sağa yaslanır.
+  DataCell _amountCell(SummaryCell cell, {required bool isPlanned}) {
+    if (!isPlanned) return _cell(cell);
     return DataCell(
-      Text(
-        cell.text,
-        style: TextStyle(
-          color: cell.isError ? Colors.red.shade700 : null,
-          fontWeight: cell.isError ? FontWeight.bold : null,
-        ),
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _cellText(cell),
+          Text(
+            _plannedPaymentNote,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ],
       ),
     );
   }

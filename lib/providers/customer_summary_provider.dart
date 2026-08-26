@@ -142,6 +142,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
       paymentDate: payment.date,
       paymentAmount: payment.amount,
       paymentType: payment.type,
+      paymentIsPlanned: payment.isPlanned,
       packageInfo: packageInfo,
       packageType: packageTypeCell,
       notes: notes,
@@ -206,15 +207,22 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Resolves the most recent completed payment *of the row's package* into
-  /// display cells.
+  /// Resolves the payment shown for the row's package into display cells.
   ///
   /// The lookup is deliberately scoped to [subscriptionId]: a payment made for
   /// an earlier package — or a "Paketsiz" one — is not this package's payment,
   /// and showing it here made an unpaid package look paid while its own detail
   /// still (correctly) reported "Eksik Ödeme".
-  /// - No completed payment on this package => empty cells (nothing paid yet).
-  /// - Completed payment with no payment date => "Hata" for the date cell.
+  ///
+  /// Hangi ödeme gösterilir:
+  /// - Pakette tamamlanmış ödeme varsa en son alınan o gösterilir.
+  /// - Yoksa paketin planlanan ödemesi gösterilir: tutar, planlanan tarih ve
+  ///   ödeme şekli aynı sütunlara yazılır, hücreler
+  ///   [_PaymentCells.isPlanned] ile işaretlenir; tablo tutarın altına
+  ///   "(Planlandı)" notunu düşer. Birden fazla planlanan ödeme varsa tahsil
+  ///   sırası gelen (tarihi en yakın olan) gösterilir.
+  /// - Pakette hiç ödeme kaydı yoksa hücreler boş kalır.
+  /// - Tarihi olmayan bir ödeme => tarih hücresinde "Hata".
   Future<_PaymentCells> _resolveLastPayment(
       String userId, String subscriptionId) async {
     try {
@@ -228,12 +236,14 @@ class CustomerSummaryProvider extends ChangeNotifier {
           .get();
 
       final completed = <PaymentModel>[];
+      final planned = <PaymentModel>[];
       for (final doc in snap.docs) {
         try {
           final payment = PaymentModel.fromDocument(doc);
-          // Planned ("Planlandı") payments are money that has not arrived yet.
           if (payment.status == PaymentStatus.completed) {
             completed.add(payment);
+          } else if (payment.status == PaymentStatus.planned) {
+            planned.add(payment);
           }
         } catch (e) {
           logger.warn('Skipping malformed payment {} for user {}: {}',
@@ -241,29 +251,43 @@ class CustomerSummaryProvider extends ChangeNotifier {
         }
       }
 
-      if (completed.isEmpty) return const _PaymentCells.empty();
+      // Alınmış para, planlanan paranın önüne geçer: en son tahsil edilen
+      // ödeme gösterilir. createDate yedek sıralama anahtarı, tarihi eksik bir
+      // ödeme listeden düşmesin diye.
+      if (completed.isNotEmpty) {
+        completed.sort((a, b) => (b.effectiveDate ?? b.createDate)
+            .compareTo(a.effectiveDate ?? a.createDate));
+        return _paymentCellsFor(completed.first, isPlanned: false);
+      }
 
-      // Latest first, using createDate as a fallback ordering key so payments
-      // with a missing paymentDate still participate instead of vanishing.
-      completed.sort((a, b) => (b.paymentDate ?? b.createDate)
-          .compareTo(a.paymentDate ?? a.createDate));
+      // Henüz tahsil edilmemiş paket: sırada bekleyen (tarihi en yakın)
+      // planlanan ödeme gösterilir, "(Planlandı)" notuyla.
+      if (planned.isNotEmpty) {
+        planned.sort((a, b) => (a.effectiveDate ?? a.createDate)
+            .compareTo(b.effectiveDate ?? b.createDate));
+        return _paymentCellsFor(planned.first, isPlanned: true);
+      }
 
-      final last = completed.first;
-
-      final dateCell = last.paymentDate != null
-          ? SummaryCell(_dateFormat.format(last.paymentDate!))
-          : const SummaryCell.error();
-
-      final amountCell = SummaryCell(_amountFormat.format(last.amount));
-
-      final typeCell = SummaryCell(last.paymentType.label);
-
-      return _PaymentCells(date: dateCell, amount: amountCell, type: typeCell);
+      return const _PaymentCells.empty();
     } catch (e) {
       logger.err('Error resolving last payment for user {} sub {}: {}',
           [userId, subscriptionId, e]);
       return const _PaymentCells.error();
     }
+  }
+
+  /// Turns a single payment into the three payment cells of a row.
+  _PaymentCells _paymentCellsFor(PaymentModel payment,
+      {required bool isPlanned}) {
+    final DateTime? date = payment.effectiveDate;
+    return _PaymentCells(
+      date: date != null
+          ? SummaryCell(_dateFormat.format(date))
+          : const SummaryCell.error(),
+      amount: SummaryCell(_amountFormat.format(payment.amount)),
+      type: SummaryCell(payment.paymentType.label),
+      isPlanned: isPlanned,
+    );
   }
 
   /// Resolves both the session (seans) cells and the postponed-appointment
@@ -420,19 +444,26 @@ class _PaymentCells {
   final SummaryCell amount;
   final SummaryCell type;
 
+  /// Gösterilen ödeme henüz tahsil edilmemiş ("Planlandı") bir ödeme mi.
+  /// Tablo bu durumda tutarın altına "(Planlandı)" notunu düşer.
+  final bool isPlanned;
+
   const _PaymentCells({
     required this.date,
     required this.amount,
     required this.type,
+    this.isPlanned = false,
   });
 
   const _PaymentCells.empty()
       : date = const SummaryCell.empty(),
         amount = const SummaryCell.empty(),
-        type = const SummaryCell.empty();
+        type = const SummaryCell.empty(),
+        isPlanned = false;
 
   const _PaymentCells.error()
       : date = const SummaryCell.error(),
         amount = const SummaryCell.error(),
-        type = const SummaryCell.error();
+        type = const SummaryCell.error(),
+        isPlanned = false;
 }

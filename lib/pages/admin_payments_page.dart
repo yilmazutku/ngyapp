@@ -369,10 +369,11 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       logger.info('Search filter applied with query: "$_searchQuery", results: ${filtered.length}');
     }
 
-    // Sort (client-side: complex sorting not supported by Firebase)
-    DateTime relevantDate(PaymentModel p) => p.status == PaymentStatus.completed
-        ? (p.paymentDate ?? DateTime.fromMillisecondsSinceEpoch(0))
-        : (p.dueDate ?? DateTime.fromMillisecondsSinceEpoch(0));
+    // Sort (client-side: complex sorting not supported by Firebase).
+    // Tarih anahtarı ödeme kartında gösterilen tarihtir; mantık
+    // PaymentModel.effectiveDate içinde tek yerde duruyor.
+    DateTime relevantDate(PaymentModel p) =>
+        p.effectiveDate ?? DateTime.fromMillisecondsSinceEpoch(0);
     // Sorted on the displayed value (ad + soyad), not on the first name.
     String displayName(PaymentModel p) => _userById[p.userId]?.fullName ?? '';
 

@@ -2,7 +2,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../dialogs/add_meas_dialog.dart';
@@ -14,6 +13,7 @@ import '../providers/meas_provider.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
 import '../models/logger.dart';
+import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/labeled_action_button.dart';
 
@@ -123,7 +123,8 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Ölçümü Sil',
-      message: '${DateFormat('d MMMM y', 'tr_TR').format(measurement.measDate)} tarihli ölçüm silinsin mi?',
+      message: '${DateFormatter.formatNumericDate(measurement.measDate)} '
+          'tarihli ölçüm silinsin mi?',
     );
     if (!confirmed) return;
     if (!mounted) return;
@@ -428,7 +429,7 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
       padding: const EdgeInsets.symmetric(horizontal: _rowHPad, vertical: 10),
       child: Row(
         children: [
-          _dCell(DateFormat('d MMMM y', 'tr_TR').format(m.measDate), _wDate, align: TextAlign.left),
+          _dCell(DateFormatter.formatNumericDate(m.measDate), _wDate, align: TextAlign.left),
           _dCell(_vNum(m.chest), _wNum),
           _dCell(_vNum(m.back), _wNum),
           _dCell(_vNum(m.waist), _wNum),
