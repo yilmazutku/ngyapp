@@ -26,6 +26,12 @@ class EditSubscriptionDialog extends StatefulWidget {
 }
 
 class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
+  /// "Ödenmiş Miktar" salt okunur: tutar yalnızca gerçek ödeme kayıtlarından
+  /// hesaplanmalı, elle yazılmamalı.
+  static const String _amountPaidNote =
+      'Bu alan düzenlenemez. Değiştirmek için Ödemeler sekmesinden ödeme '
+      'ekleyin veya düzenleyin.';
+
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _packageNameController;
   late TextEditingController _notesController;
@@ -387,15 +393,18 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 ),
                 const SizedBox(height: 16),
 
-                // Amount paid is always visible/editable.
+                // Ödenmiş miktar her zaman görünür ama salt okunur.
                 TextFormField(
                   controller: _amountPaidController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: wholeLiraInputFormatters,
+                  // Salt okunur: değer ödeme kayıtlarından gelir. Elle
+                  // yazılabildiğinde paketin ödenen tutarı gerçek ödemelerden
+                  // kopabiliyordu.
+                  readOnly: true,
                   decoration: InputDecoration(
                     labelText: 'Ödenmiş Miktar (TL)',
                     border: const OutlineInputBorder(),
-                    helperText: 'Tam lira; kuruş girilmez.',
+                    helperText: _amountPaidNote,
+                    helperMaxLines: 3,
                     filled: _isPaymentIncomplete,
                     fillColor:
                         _isPaymentIncomplete ? Colors.red.shade100 : null,

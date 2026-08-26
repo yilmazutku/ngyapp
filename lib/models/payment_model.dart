@@ -40,6 +40,17 @@ class PaymentModel {
     this.updateUser,
   }) : createDate = createDate ?? DateTime.now();
 
+  /// Ödemenin listelerde *gösterilen* tarihi: tamamlanmış ödemede ödeme
+  /// tarihi, planlanan ödemede planlanan (vade) tarihi. Diğer alan yalnızca
+  /// yedek olarak kullanılır.
+  ///
+  /// Sıralama da bunun üzerinden yapılmalı: planlanan bir ödeme düzenlendiğinde
+  /// `paymentDate` alanı da yazıldığı için ham `paymentDate` ile sıralamak
+  /// listeyi kullanıcının gördüğü tarihten farklı diziyordu.
+  DateTime? get effectiveDate => status == PaymentStatus.completed
+      ? (paymentDate ?? dueDate)
+      : (dueDate ?? paymentDate);
+
   /// Whether this planned payment is overdue ("Geciken") as of now.
   ///
   /// Compared at *day* granularity: a payment counts as overdue only once its

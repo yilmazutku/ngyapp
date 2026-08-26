@@ -31,12 +31,18 @@ class CustomerSummaryRow {
   final SummaryCell dosyaNo;
   final String fullName;
 
-  /// Latest *completed* payment of the row's subscription. Empty cells when the
-  /// package has not been paid yet — a payment belonging to another package (or
-  /// a "Paketsiz" one) is never shown here.
+  /// Payment shown for the row's subscription: the latest completed one, or the
+  /// next planned one when nothing has been collected yet (see
+  /// [paymentIsPlanned]). Empty cells when the package carries no payment at
+  /// all — a payment belonging to another package (or a "Paketsiz" one) is
+  /// never shown here.
   final SummaryCell paymentDate;
   final SummaryCell paymentAmount;
   final SummaryCell paymentType;
+
+  /// Gösterilen ödeme henüz tahsil edilmemiş ("Planlandı") bir ödeme mi.
+  /// Tabloda tutarın altına kalın "(Planlandı)" notu bununla düşülür.
+  final bool paymentIsPlanned;
   final SummaryCell packageInfo;
 
   /// Package duration type (e.g. 1 Aylık / 3 Aylık); empty for legacy packages
@@ -69,6 +75,7 @@ class CustomerSummaryRow {
     required this.paymentDate,
     required this.paymentAmount,
     required this.paymentType,
+    this.paymentIsPlanned = false,
     required this.packageInfo,
     this.packageType = const SummaryCell.empty(),
     required this.notes,

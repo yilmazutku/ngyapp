@@ -31,6 +31,11 @@ class PaymentsTab extends BaseTab<PaymentProvider> {
 }
 
 class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab> {
+  /// Tarihi hiç olmayan ödemeler listenin en altına düşsün diye kullanılan
+  /// sıralama yedeği.
+  static final DateTime _unsortableDate =
+      DateTime.fromMillisecondsSinceEpoch(0);
+
   PaymentStatus? _selectedStatus;
   PaymentStatus? _tempStatus;
 
@@ -283,10 +288,13 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   Widget buildFilteredContent(BuildContext context, List<dynamic> filteredItems) {
     final payments = List<PaymentModel>.from(filteredItems.cast<PaymentModel>());
 
-    // Sort once per build
+    // Varsayılan sıralama: tarihi en yeni olan en üstte (25 Ağustos, 24
+    // Ağustos'un üzerinde). Anahtar, kartta gösterilen tarihtir
+    // (PaymentModel.effectiveDate); ham paymentDate ile sıralamak, düzenlenmiş
+    // planlı ödemelerde listeyi gösterilen tarihten farklı diziyordu.
     payments.sort((a, b) {
-      final aDate = a.paymentDate ?? a.dueDate ?? DateTime(1900);
-      final bDate = b.paymentDate ?? b.dueDate ?? DateTime(1900);
+      final aDate = a.effectiveDate ?? _unsortableDate;
+      final bDate = b.effectiveDate ?? _unsortableDate;
       return bDate.compareTo(aDate);
     });
 
@@ -397,11 +405,16 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
         ? Icons.pending_actions
         : Icons.cancel_outlined;
 
-    final String dateText = (payment.paymentDate != null)
-        ? 'Ödeme Tarihi: ${_dateFormat.format(payment.paymentDate!)}'
-        : (payment.dueDate != null)
-        ? 'Vade Tarihi: ${_dateFormat.format(payment.dueDate!)}'
-        : 'Tarih belirtilmemiş';
+    // Gösterilen tarih sıralama anahtarıyla aynı olmalı: planlanan bir ödeme
+    // düzenlendiğinde paymentDate de yazıldığı için, ham paymentDate'e bakmak
+    // planlı ödemede vade yerine düzenleme tarihini gösteriyordu.
+    final DateTime? shownDate = payment.effectiveDate;
+    final String dateLabel = payment.status == PaymentStatus.completed
+        ? 'Ödeme Tarihi'
+        : 'Vade Tarihi';
+    final String dateText = shownDate == null
+        ? 'Tarih belirtilmemiş'
+        : '$dateLabel: ${_dateFormat.format(shownDate)}';
 
     return Card(
       key: ValueKey(payment.paymentId),
