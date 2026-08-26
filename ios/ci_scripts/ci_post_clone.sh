@@ -72,14 +72,27 @@ if [ -f "ios/Flutter/flutter_export_environment.sh" ]; then
     echo "flutter_export_environment.sh OK"
 else
     echo "WARNING: flutter_export_environment.sh missing – creating manually"
+
+    # Sürümü elle yazma: pubspec.yaml tek kaynak olmalı. Sabit bir değer
+    # yazıldığında App Store Connect "build numarası daha yüksek olmalı" diyerek
+    # yüklemeyi reddedebiliyor. Generated.xcconfig yukarıda doğrulandı, değerleri
+    # oradan oku.
+    EXPORT_BUILD_NAME=$(grep '^FLUTTER_BUILD_NAME=' ios/Flutter/Generated.xcconfig | cut -d= -f2-)
+    EXPORT_BUILD_NUMBER=$(grep '^FLUTTER_BUILD_NUMBER=' ios/Flutter/Generated.xcconfig | cut -d= -f2-)
+    if [ -z "$EXPORT_BUILD_NAME" ] || [ -z "$EXPORT_BUILD_NUMBER" ]; then
+        echo "ERROR: Generated.xcconfig içinde sürüm bilgisi bulunamadı!"
+        exit 1
+    fi
+    echo "Sürüm pubspec'ten alındı: $EXPORT_BUILD_NAME+$EXPORT_BUILD_NUMBER"
+
     cat > ios/Flutter/flutter_export_environment.sh <<ENVEOF
 #!/bin/sh
 export FLUTTER_ROOT="$HOME/flutter"
 export FLUTTER_APPLICATION_PATH="$CI_PRIMARY_REPOSITORY_PATH"
 export FLUTTER_TARGET="lib/main.dart"
 export FLUTTER_BUILD_DIR=build
-export FLUTTER_BUILD_NAME=1.0.1
-export FLUTTER_BUILD_NUMBER=8
+export FLUTTER_BUILD_NAME=$EXPORT_BUILD_NAME
+export FLUTTER_BUILD_NUMBER=$EXPORT_BUILD_NUMBER
 export DART_OBFUSCATION=false
 export TRACK_WIDGET_CREATION=true
 export TREE_SHAKE_ICONS=true
