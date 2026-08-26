@@ -20,7 +20,7 @@
 | Secondary Category (optional) | - | [ ] |
 
 **Recommended:**
-- **App Name:** NGY Diyetisyen
+- **App Name:** Dyt. Nilay Göktepe Yılmaz
 - **Subtitle:** Kişisel Beslenme Takibi
 - **Primary Category:** Health & Fitness
 - **Secondary Category:** Medical (optional)

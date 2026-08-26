@@ -2,9 +2,14 @@
 
 ## App Name (30 characters max)
 ```
-NGY
+Dyt. Nilay Göktepe Yılmaz
 ```
-Character count: 3
+Character count: 25
+
+> Bu alan App Store Connect > App Information > Name alanına birebir girilir.
+> TestFlight'ta ve App Store'da görünen ad budur; uygulamanın içindeki ya da
+> ikon altındaki addan (ios/Runner/Info.plist > CFBundleDisplayName) bağımsızdır
+> ve kodla değiştirilemez.
 
 ## Subtitle (30 characters max)
 ```
