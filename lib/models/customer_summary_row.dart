@@ -41,7 +41,7 @@ class CustomerSummaryRow {
   final SummaryCell paymentType;
 
   /// Gösterilen ödeme henüz tahsil edilmemiş ("Planlandı") bir ödeme mi.
-  /// Tabloda tutarın altına kalın "(Planlandı)" notu bununla düşülür.
+  /// Tabloda tutarın soluna kalın "(P)" işareti bununla konur.
   final bool paymentIsPlanned;
   final SummaryCell packageInfo;
 

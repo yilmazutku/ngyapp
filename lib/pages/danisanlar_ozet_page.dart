@@ -126,8 +126,8 @@ class _CustomerSummaryTab extends StatefulWidget {
 
 class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     with AutomaticKeepAliveClientMixin {
-  /// Tahsil edilmemiş ödemelerde tutarın altında gösterilen not.
-  static const String _plannedPaymentNote = '(Planlandı)';
+  /// Tahsil edilmemiş ödemelerde tutarın solunda gösterilen işaret.
+  static const String _plannedPaymentMark = '(P)';
 
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
@@ -297,11 +297,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
                   color: Colors.black87,
                 ),
                 border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-                // Planlanan ödemelerde tutar hücresi iki satırlı olur; satır
-                // yüksekliği sabit kalırsa taşar. Alt sınır Material'ın
-                // varsayılanı, üst sınır kaldırıldı: satır içeriğine göre büyür.
-                dataRowMinHeight: kMinInteractiveDimension,
-                dataRowMaxHeight: double.infinity,
                 columns: _buildColumns(postponedColumns),
                 rows: _rows.map((r) => _buildRow(r, postponedColumns)).toList(),
               ),
@@ -425,37 +420,31 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     }
   }
 
-  DataCell _cell(SummaryCell cell) => DataCell(_cellText(cell));
+  DataCell _cell(SummaryCell cell) =>
+      DataCell(Text(cell.text, style: _cellStyle(cell)));
 
-  Text _cellText(SummaryCell cell) {
-    return Text(
-      cell.text,
-      style: TextStyle(
+  TextStyle _cellStyle(SummaryCell cell) => TextStyle(
         color: cell.isError ? Colors.red.shade700 : null,
         fontWeight: cell.isError ? FontWeight.bold : null,
-      ),
-    );
-  }
+      );
 
   /// Ödeme tutarı hücresi. Gösterilen ödeme henüz tahsil edilmemişse tutarın
-  /// altına kalın "(Planlandı)" notu düşülür; sütun numeric olduğu için içerik
-  /// sağa yaslanır.
+  /// solunda kalın "(P)" işareti gösterilir. Hücre tek satır kalır; sütun
+  /// numeric olduğu için içerik sağa yaslıdır.
   DataCell _amountCell(SummaryCell cell, {required bool isPlanned}) {
     if (!isPlanned) return _cell(cell);
     return DataCell(
-      Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _cellText(cell),
-          Text(
-            _plannedPaymentNote,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(fontWeight: FontWeight.bold),
-          ),
-        ],
+      Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: '$_plannedPaymentMark ',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            TextSpan(text: cell.text),
+          ],
+        ),
+        style: _cellStyle(cell),
       ),
     );
   }

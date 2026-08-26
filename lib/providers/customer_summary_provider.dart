@@ -218,9 +218,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// - Pakette tamamlanmış ödeme varsa en son alınan o gösterilir.
   /// - Yoksa paketin planlanan ödemesi gösterilir: tutar, planlanan tarih ve
   ///   ödeme şekli aynı sütunlara yazılır, hücreler
-  ///   [_PaymentCells.isPlanned] ile işaretlenir; tablo tutarın altına
-  ///   "(Planlandı)" notunu düşer. Birden fazla planlanan ödeme varsa tahsil
-  ///   sırası gelen (tarihi en yakın olan) gösterilir.
+  ///   [_PaymentCells.isPlanned] ile işaretlenir; tablo tutarın soluna "(P)"
+  ///   işaretini koyar. Birden fazla planlanan ödeme varsa tahsil sırası gelen
+  ///   (tarihi en yakın olan) gösterilir.
   /// - Pakette hiç ödeme kaydı yoksa hücreler boş kalır.
   /// - Tarihi olmayan bir ödeme => tarih hücresinde "Hata".
   Future<_PaymentCells> _resolveLastPayment(
@@ -445,7 +445,7 @@ class _PaymentCells {
   final SummaryCell type;
 
   /// Gösterilen ödeme henüz tahsil edilmemiş ("Planlandı") bir ödeme mi.
-  /// Tablo bu durumda tutarın altına "(Planlandı)" notunu düşer.
+  /// Tablo bu durumda tutarın soluna "(P)" işaretini koyar.
   final bool isPlanned;
 
   const _PaymentCells({
