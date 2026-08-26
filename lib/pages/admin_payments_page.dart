@@ -15,12 +15,45 @@ import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/amount_input_utils.dart';
+import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/payment_export_util.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/loading_overlay.dart';
+import '../widgets/labeled_action_button.dart';
+import '../widgets/filter_chip_group.dart';
 
 final Logger logger = Logger.forClass(AdminPaymentsPage);
 final DateFormat kDateFormat = DateFormat('dd.MM.yyyy', 'tr_TR');
+final DateFormat kMonthNameFormat = DateFormat('MMMM', 'tr_TR');
+final DateFormat kMonthYearFormat = DateFormat('MMMM yyyy', 'tr_TR');
+
+/// Width of the "Geçmiş Aylar" period dropdowns; they sit in a Wrap so they
+/// reflow instead of overflowing on narrow windows.
+const double kPeriodDropdownWidth = 160;
+
+/// Share of a month tab's height the period picker + toolbar + stats card may
+/// take before they start scrolling on their own, so the payment list always
+/// keeps room.
+const double kMonthTabHeaderMaxHeightRatio = 0.6;
+
+/// How the payment list is ordered.
+///
+/// One option per direction, the way the tabs do it: a "sort by" list plus a
+/// separate ascending switch made the reader combine two controls in their head
+/// to know what they were looking at.
+enum PaymentSortOption {
+  dateDescending('Tarih Azalan'),
+  dateAscending('Tarih Artan'),
+  amountDescending('Tutar Azalan'),
+  amountAscending('Tutar Artan'),
+  userNameAscending('Kullanıcı A-Z'),
+  userNameDescending('Kullanıcı Z-A');
+
+  const PaymentSortOption(this.label);
+
+  final String label;
+}
 
 class AdminPaymentsPage extends StatefulWidget {
   const AdminPaymentsPage({super.key});
@@ -43,61 +76,70 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   PaymentStatus? _statusFilter;
   DateTime? _startDate;
   DateTime? _endDate;
-  String? _sortBy = 'dueDate';
-  bool _sortAscending = true;
+  // Newest first by default: August's payments belong above July's.
+  PaymentSortOption _sortOption = PaymentSortOption.dateDescending;
 
-  // Stats (lazy: computed only when the user opens the stats)
+  /// Whether the per-tab statistics card is expanded.
   bool _showStats = false;
-  bool _statsDirty = true;
-  int _upcomingCount = 0;
-  int _completedCount = 0;
-  int _overdueCount = 0;
-  double _totalAmountDue = 0;
-  double _totalAmountPaid = 0;
 
   // Cached tab counts (avoid recomputing in build)
   int _countThisWeek = 0;
   int _countNextWeek = 0;
   int _countThisMonth = 0;
   int _countLastMonth = 0;
+  int _countHistoryMonth = 0;
   int _countUpcoming = 0;
-  int _countCompleted = 0;
   int _countOverdue = 0;
 
+  // "Geçmiş Aylar" selection: starts two months back because the previous month
+  // already has its own tab. Only the current month and earlier are selectable.
+  static const int _historyMonthsBack = 2;
+  late int _historyYear;
+  late int _historyMonth;
+
+  /// Guards the Excel export so the button cannot be triggered twice.
+  bool _isExporting = false;
+
   // Tab positions referenced by index-based logic (date pre-fill / active tab).
-  // Full order: Tümü(0) · Bu Hafta(1) · Gelecek Hafta(2) · Bu Ay(3) ·
-  // Geçen Ay(4) · Gelecek(5) · Tamamlanan(6) · Geciken(7).
-  static const int _tabThisWeek = 1;
-  static const int _tabNextWeek = 2;
-  static const int _tabThisMonth = 3;
-  static const int _tabLastMonth = 4;
-  static const int _tabCount = 8;
+  // Full order: Bu Ay(0) · Geçen Ay(1) · Bu Hafta(2) · Gelecek Hafta(3) ·
+  // Geçmiş Aylar(4) · Gelecek(5) · Geciken(6).
+  static const int _tabThisMonth = 0;
+  static const int _tabLastMonth = 1;
+  static const int _tabThisWeek = 2;
+  static const int _tabNextWeek = 3;
+  static const int _tabHistoryMonth = 4;
+  static const int _tabCount = 7;
 
   /// Explicit controller so the app-bar filter action can read the active tab
   /// (a DefaultTabController is not visible from the app-bar's context).
   late final TabController _tabController;
 
   /// One controller per tab list. Each Scrollbar + ListView shares the same controller.
-  late final ScrollController _allCtrl;
   late final ScrollController _thisWeekCtrl;
   late final ScrollController _nextWeekCtrl;
   late final ScrollController _thisMonthCtrl;
   late final ScrollController _lastMonthCtrl;
+  late final ScrollController _historyCtrl;
   late final ScrollController _upcomingCtrl;
-  late final ScrollController _completedCtrl;
   late final ScrollController _overdueCtrl;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabCount, vsync: this);
-    _allCtrl = ScrollController();
+    final initialHistoryMonth = DateTime(
+      DateTime.now().year,
+      DateTime.now().month - _historyMonthsBack,
+      1,
+    );
+    _historyYear = initialHistoryMonth.year;
+    _historyMonth = initialHistoryMonth.month;
     _thisWeekCtrl = ScrollController();
     _nextWeekCtrl = ScrollController();
     _thisMonthCtrl = ScrollController();
     _lastMonthCtrl = ScrollController();
+    _historyCtrl = ScrollController();
     _upcomingCtrl = ScrollController();
-    _completedCtrl = ScrollController();
     _overdueCtrl = ScrollController();
     _loadData();
   }
@@ -105,13 +147,12 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   @override
   void dispose() {
     _tabController.dispose();
-    _allCtrl.dispose();
     _thisWeekCtrl.dispose();
     _nextWeekCtrl.dispose();
     _thisMonthCtrl.dispose();
     _lastMonthCtrl.dispose();
+    _historyCtrl.dispose();
     _upcomingCtrl.dispose();
-    _completedCtrl.dispose();
     _overdueCtrl.dispose();
     super.dispose();
   }
@@ -129,6 +170,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
       // 2) Fetch all payments with Firebase-side filtering (status only)
       // Date range filtering is done client-side due to conditional date field logic
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
       final allPayments = await paymentProvider.fetchAllPayments(
         statusFilter: _statusFilter,
@@ -140,12 +183,9 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         _userById = map;
         _allPayments = allPayments;
 
-        // Apply remaining client-side filters (search, sorting)
+        // Apply remaining client-side filters (search, sorting); this also
+        // refreshes the tab counts used as labels.
         _applyClientSideFilters();
-
-        // Refresh tab counts (labels) and mark stats dirty
-        _recomputeTabCounts(_filteredPayments);
-        _statsDirty = true;
         _isLoading = false;
       });
 
@@ -186,15 +226,20 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     final endOfLastMonth =
     DateTime(now.year, now.month, 1).subtract(const Duration(seconds: 1));
 
+    // Selected "Geçmiş Aylar" month.
+    final startOfHistoryMonth = DateTime(_historyYear, _historyMonth, 1);
+    final endOfHistoryMonth = DateTime(_historyYear, _historyMonth + 1, 1)
+        .subtract(const Duration(seconds: 1));
+
     bool inRange(DateTime d, DateTime s, DateTime e) =>
         d.isAfter(s.subtract(const Duration(seconds: 1))) &&
             d.isBefore(e.add(const Duration(seconds: 1)));
 
-    int thisWeek = 0, nextWeek = 0, thisMonth = 0, lastMonth = 0, upcoming = 0, completed = 0, overdue = 0;
+    int thisWeek = 0, nextWeek = 0, thisMonth = 0, lastMonth = 0, historyMonth = 0,
+        upcoming = 0, overdue = 0;
 
     for (final p in source) {
       if (p.status == PaymentStatus.completed) {
-        completed++;
         // Month tabs only count completed payments by their payment date.
         if (p.paymentDate != null) {
           if (inRange(p.paymentDate!, startOfThisMonth, endOfThisMonth)) {
@@ -202,6 +247,9 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
           }
           if (inRange(p.paymentDate!, startOfLastMonth, endOfLastMonth)) {
             lastMonth++;
+          }
+          if (inRange(p.paymentDate!, startOfHistoryMonth, endOfHistoryMonth)) {
+            historyMonth++;
           }
         }
       } else if (p.status == PaymentStatus.planned && p.dueDate != null) {
@@ -227,8 +275,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     _countNextWeek = nextWeek;
     _countThisMonth = thisMonth;
     _countLastMonth = lastMonth;
+    _countHistoryMonth = historyMonth;
     _countUpcoming = upcoming;
-    _countCompleted = completed;
     _countOverdue = overdue;
   }
 
@@ -240,7 +288,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   }
 
   /// The date window a given tab represents, or null for tabs that are not
-  /// bounded by a fixed range (Tümü / Gelecek / Tamamlanan / Geciken).
+  /// bounded by a fixed range (Gelecek / Geciken).
   /// The end is expressed at day granularity; date filtering widens it to
   /// 23:59:59 where needed.
   DateTimeRange? _tabDateRange(int tabIndex) {
@@ -260,6 +308,11 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         final start = DateTime(now.year, now.month - 1, 1);
         final end = DateTime(now.year, now.month, 1).subtract(const Duration(days: 1));
         return DateTimeRange(start: start, end: end);
+      case _tabHistoryMonth:
+        final start = DateTime(_historyYear, _historyMonth, 1);
+        final end = DateTime(_historyYear, _historyMonth + 1, 1)
+            .subtract(const Duration(days: 1));
+        return DateTimeRange(start: start, end: end);
       default:
         return null;
     }
@@ -268,7 +321,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   /// Apply client-side filters (search, date range, and sorting)
   /// Status filter is applied on Firebase side
   void _applyClientSideFilters() {
-    logger.info('Applying client-side filters - Search: "$_searchQuery", DateRange: $_startDate to $_endDate, SortBy: $_sortBy, SortAscending: $_sortAscending');
+    logger.info('Applying client-side filters - Search: "$_searchQuery", DateRange: $_startDate to $_endDate, Sort: ${_sortOption.label}');
 
     List<PaymentModel> filtered = List.from(_allPayments);
 
@@ -308,7 +361,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         final u = _userById[p.userId];
         final name = (u?.name ?? '').toLowerCase();
         final surname = (u?.surname ?? '').toLowerCase();
-        final fullName = '$name $surname'.trim();
+        final fullName = (u?.fullName ?? '').toLowerCase();
         final email = (u?.email ?? '').toLowerCase();
         final notes = p.notes?.toLowerCase() ?? '';
         return name.contains(q) || surname.contains(q) || fullName.contains(q) || email.contains(q) || notes.contains(q);
@@ -317,30 +370,32 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     }
 
     // Sort (client-side: complex sorting not supported by Firebase)
+    DateTime relevantDate(PaymentModel p) => p.status == PaymentStatus.completed
+        ? (p.paymentDate ?? DateTime.fromMillisecondsSinceEpoch(0))
+        : (p.dueDate ?? DateTime.fromMillisecondsSinceEpoch(0));
+    // Sorted on the displayed value (ad + soyad), not on the first name.
+    String displayName(PaymentModel p) => _userById[p.userId]?.fullName ?? '';
+
     filtered.sort((a, b) {
-      switch (_sortBy) {
-        case 'dueDate':
-          DateTime relevant(PaymentModel p) =>
-              p.status == PaymentStatus.completed
-                  ? (p.paymentDate ?? DateTime.fromMillisecondsSinceEpoch(0))
-                  : (p.dueDate ?? DateTime.fromMillisecondsSinceEpoch(0));
-          final da = relevant(a), db = relevant(b);
-          return _sortAscending ? da.compareTo(db) : db.compareTo(da);
-        case 'amount':
-          return _sortAscending ? a.amount.compareTo(b.amount) : b.amount.compareTo(a.amount);
-        case 'userName':
-          final ua = _userById[a.userId]?.name ?? '';
-          final ub = _userById[b.userId]?.name ?? '';
-          return _sortAscending ? ua.compareTo(ub) : ub.compareTo(ua);
-        default:
-          return 0;
+      switch (_sortOption) {
+        case PaymentSortOption.dateDescending:
+          return relevantDate(b).compareTo(relevantDate(a));
+        case PaymentSortOption.dateAscending:
+          return relevantDate(a).compareTo(relevantDate(b));
+        case PaymentSortOption.amountDescending:
+          return b.amount.compareTo(a.amount);
+        case PaymentSortOption.amountAscending:
+          return a.amount.compareTo(b.amount);
+        case PaymentSortOption.userNameAscending:
+          return displayName(a).compareTo(displayName(b));
+        case PaymentSortOption.userNameDescending:
+          return displayName(b).compareTo(displayName(a));
       }
     });
-    logger.info('Sorting applied - SortBy: $_sortBy, SortAscending: $_sortAscending');
+    logger.info('Sorting applied - ${_sortOption.label}');
 
     _filteredPayments = filtered;
     _recomputeTabCounts(_filteredPayments); // update labels
-    _statsDirty = true; // filters changed → stats must refresh next time they're shown
 
     logger.info('Client-side filters applied successfully. Total filtered payments: ${filtered.length}');
   }
@@ -348,7 +403,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   /// Apply filters and trigger data reload for Firebase-side filters
   /// Search and sort are applied client-side only
   void _applyFilters() {
-    logger.info('Applying filters - Status: $_statusFilter, DateRange: $_startDate to $_endDate, SortBy: $_sortBy, SortAscending: $_sortAscending');
+    logger.info('Applying filters - Status: $_statusFilter, DateRange: $_startDate to $_endDate, Sort: ${_sortOption.label}');
     
     // For status and date range changes, reload data from Firebase
     // Search and sort will be applied client-side in _loadData()
@@ -362,60 +417,20 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       _startDate = null;
       _endDate = null;
       _searchQuery = null;
-      _sortBy = 'dueDate';
-      _sortAscending = true;
-      _statsDirty = true;
+      _sortOption = PaymentSortOption.dateDescending;
     });
     // Reload data with no filters (Firebase-side)
     _loadData();
   }
 
-  // Compute stats only when the user opens the stats section.
-  void _onStatsButtonPressed() {
-    if (_showStats) {
-      setState(() => _showStats = false);
-      return;
-    }
-
-    int upcoming = 0, completed = 0, overdue = 0;
-    double amountDue = 0, amountPaid = 0;
-
-    if (_statsDirty) {
-      for (final p in _filteredPayments) {
-        if (p.status == PaymentStatus.completed) {
-          completed++;
-          amountPaid += p.amount;
-        } else if (p.status == PaymentStatus.planned) {
-          if (p.dueDate != null) {
-            // Day-granularity: a payment due today is upcoming, not overdue.
-            if (p.isOverdue) {
-              overdue++;
-            } else {
-              upcoming++;
-            }
-            amountDue += p.amount;
-          }
-        }
-      }
-    }
-
-    setState(() {
-      _showStats = true;
-      if (_statsDirty) {
-        _upcomingCount = upcoming;
-        _completedCount = completed;
-        _overdueCount = overdue;
-        _totalAmountDue = amountDue;
-        _totalAmountPaid = amountPaid;
-        _statsDirty = false;
-      }
-    });
-
-    logger.info('Stats computed on demand (lazy).');
+  void _toggleStats() {
+    setState(() => _showStats = !_showStats);
   }
 
-  /// Get user name from user ID via cache
-  String _getUserName(String userId) => _userById[userId]?.name ?? 'Unknown';
+  /// Display name for a user id, from the cache. Ad *and* soyad, so payment
+  /// widgets identify the client the same way the rest of the app does.
+  String _getUserName(String userId) =>
+      _userById[userId]?.fullName ?? 'Bilinmiyor';
 
   void _showEditPaymentDialog(PaymentModel payment) {
     logger.info(
@@ -464,54 +479,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     );
   }
 
-  Widget _buildStatsCard() {
-    String dateRangeText = _startDate != null && _endDate != null
-        ? '${kDateFormat.format(_startDate!)} - ${kDateFormat.format(_endDate!)}'
-        : 'Tüm Tarihler';
-
-    return Card(
-      margin: const EdgeInsets.all(8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Ödeme İstatistikleri',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                Text(dateRangeText, style: const TextStyle(fontSize: 14, color: Colors.grey)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _statItem('Planlanan Ödemeler', _upcomingCount.toString(),
-                    Icons.calendar_today, Colors.blue),
-                _statItem('Tamamlanan Ödemeler', _completedCount.toString(),
-                    Icons.check_circle, Colors.green),
-                _statItem('Geciken Ödemeler', _overdueCount.toString(),
-                    Icons.warning, Colors.red),
-              ],
-            ),
-            const Divider(height: 32),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _statItem('Toplam Beklenen', '${_totalAmountDue.toStringAsFixed(2)} ₺',
-                    Icons.account_balance_wallet, Colors.orange),
-                _statItem('Toplam Ödenen', '${_totalAmountPaid.toStringAsFixed(2)} ₺',
-                    Icons.paid, Colors.green),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _statItem(String label, String value, IconData icon, Color color) {
     return Column(
       children: [
@@ -520,49 +487,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(fontSize: 12)),
-      ],
-    );
-  }
-
-  Widget _buildAllPaymentsTab() {
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: ElevatedButton.icon(
-            onPressed: _onStatsButtonPressed,
-            icon: Icon(_showStats ? Icons.expand_less : Icons.expand_more),
-            label: Text(_showStats ? 'İstatistikleri Gizle' : 'İstatistikleri Göster'),
-          ),
-        ),
-        AnimatedCrossFade(
-          firstChild: _buildStatsCard(),
-          secondChild: const SizedBox.shrink(),
-          crossFadeState:
-          _showStats ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-          duration: const Duration(milliseconds: 300),
-        ),
-        Expanded(
-          child: _filteredPayments.isEmpty
-              ? const Center(child: Text('Ödeme bulunamadı.'))
-              : Scrollbar(
-            thickness: 8.0,
-            radius: const Radius.circular(4.0),
-            controller: _allCtrl,
-            child: ListView.builder(
-              key: const PageStorageKey('all_payments'),
-              controller: _allCtrl,
-              addAutomaticKeepAlives: false,
-              // itemExtent: 120, // <- if your cards have fixed height, uncomment for a big boost
-              itemCount: _filteredPayments.length,
-              itemBuilder: (context, index) {
-                return _buildPaymentCard(_filteredPayments[index]);
-              },
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -644,15 +568,25 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     );
   }
 
-  /// Shared builder for the month-based tabs (Bu Ay / Geçen Ay): lists the
-  /// completed payments whose payment date falls inside [tabIndex]'s window and
-  /// shows a matching stats card at the top.
+  /// Shared builder for the month-based tabs (Bu Ay / Geçen Ay / Geçmiş Aylar):
+  /// lists the completed payments whose payment date falls inside [tabIndex]'s
+  /// window, shows the month total plus a matching stats card, and offers an
+  /// Excel export of exactly those rows.
+  ///
+  /// [header] is rendered above the toolbar and lets a tab add its own controls
+  /// (the month/year picker of "Geçmiş Aylar").
+  ///
+  /// [showPlannedSummary] additionally surfaces what is still planned for the
+  /// period next to what has been collected; only "Bu Ay" needs that contrast,
+  /// the closed months do not.
   Widget _buildMonthPaymentsTab({
     required int tabIndex,
     required ScrollController controller,
     required String storageKey,
     required String statsTitle,
     required String emptyMessage,
+    Widget? header,
+    bool showPlannedSummary = false,
   }) {
     final range = _tabDateRange(tabIndex)!;
     final start = range.start;
@@ -666,63 +600,333 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     }).toList();
 
     final totalPaid = payments.fold<double>(0, (sum, p) => sum + p.amount);
+    final totalsByType = _totalsByPaymentType(payments);
 
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: ElevatedButton.icon(
-            onPressed: _onStatsButtonPressed,
-            icon: Icon(_showStats ? Icons.expand_less : Icons.expand_more),
-            label: Text(_showStats ? 'İstatistikleri Gizle' : 'İstatistikleri Göster'),
-          ),
-        ),
-        AnimatedCrossFade(
-          firstChild: _buildMonthStatsCard(
-            title: statsTitle,
-            count: payments.length,
-            totalPaid: totalPaid,
-            start: start,
-            end: range.end,
-          ),
-          secondChild: const SizedBox.shrink(),
-          crossFadeState:
-          _showStats ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-          duration: const Duration(milliseconds: 300),
-        ),
-        Expanded(
-          child: payments.isEmpty
-              ? Center(child: Text(emptyMessage))
-              : Scrollbar(
-            thickness: 8.0,
-            radius: const Radius.circular(4.0),
-            controller: controller,
-            child: ListView.builder(
-              key: PageStorageKey(storageKey),
-              controller: controller,
-              addAutomaticKeepAlives: false,
-              itemCount: payments.length,
-              itemBuilder: (context, index) {
-                return _buildPaymentCard(payments[index]);
-              },
+    // Still-planned payments of the same period, matched by their due date.
+    // Null on the tabs that do not ask for the planned/collected contrast.
+    final plannedPayments = showPlannedSummary
+        ? _filteredPayments.where((payment) {
+            if (payment.status != PaymentStatus.planned) return false;
+            final date = payment.dueDate;
+            return date != null && !date.isBefore(start) && !date.isAfter(end);
+          }).toList()
+        : null;
+    final plannedTotal =
+        plannedPayments?.fold<double>(0, (sum, p) => sum + p.amount);
+
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    // The header/toolbar/stats block is capped and scrolls on its own so an
+    // expanded stats card can never squeeze the list out of the viewport.
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: constraints.maxHeight * kMonthTabHeaderMaxHeightRatio,
+            ),
+            child: SingleChildScrollView(
+              primary: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (header != null) header,
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: _toggleStats,
+                          icon: Icon(
+                              _showStats ? Icons.expand_less : Icons.expand_more),
+                          label: Text(_showStats
+                              ? 'İstatistikleri Gizle'
+                              : 'İstatistikleri Göster'),
+                        ),
+                        // Excel export is desktop-only
+                        // (see PaymentExportUtil.isSupported).
+                        if (PaymentExportUtil.isSupported)
+                          ElevatedButton.icon(
+                            onPressed: _isExporting || payments.isEmpty
+                                ? null
+                                : () => _exportMonthPayments(
+                                      payments: payments,
+                                      monthStart: start,
+                                    ),
+                            icon: const Icon(Icons.file_download),
+                            label: const Text('Excel Olarak Dışa Aktar'),
+                          ),
+                        Chip(
+                          avatar:
+                              const Icon(Icons.paid, size: 18, color: Colors.green),
+                          label: Text(
+                            'Tamamlanan: ${totalPaid.toStringAsFixed(0)} ₺ '
+                            '(${payments.length} ödeme)',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        if (plannedTotal != null)
+                          Chip(
+                            avatar: const Icon(Icons.event,
+                                size: 18, color: Colors.orange),
+                            label: Text(
+                              'Planlanan: ${plannedTotal.toStringAsFixed(0)} ₺ '
+                              '(${plannedPayments!.length} ödeme)',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  AnimatedCrossFade(
+                    firstChild: _buildMonthStatsCard(
+                      title: statsTitle,
+                      count: payments.length,
+                      totalPaid: totalPaid,
+                      plannedTotal: plannedTotal,
+                      totalsByType: totalsByType,
+                      start: start,
+                      end: range.end,
+                    ),
+                    secondChild: const SizedBox.shrink(),
+                    crossFadeState: _showStats
+                        ? CrossFadeState.showFirst
+                        : CrossFadeState.showSecond,
+                    duration: const Duration(milliseconds: 300),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ],
+          Expanded(
+            child: payments.isEmpty
+                ? Center(child: Text(emptyMessage))
+                : Scrollbar(
+              thickness: 8.0,
+              radius: const Radius.circular(4.0),
+              controller: controller,
+              child: ListView.builder(
+                key: PageStorageKey(storageKey),
+                controller: controller,
+                addAutomaticKeepAlives: false,
+                itemCount: payments.length,
+                itemBuilder: (context, index) {
+                  return _buildPaymentCard(payments[index]);
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
     );
+  }
+
+  /// Money collected per payment type, keyed in [PaymentType] declaration order
+  /// and skipping the types that did not occur.
+  Map<PaymentType, double> _totalsByPaymentType(List<PaymentModel> payments) {
+    final totals = <PaymentType, double>{};
+    for (final payment in payments) {
+      totals[payment.paymentType] =
+          (totals[payment.paymentType] ?? 0) + payment.amount;
+    }
+    return {
+      for (final type in PaymentType.values)
+        if (totals.containsKey(type)) type: totals[type]!,
+    };
+  }
+
+  static IconData _paymentTypeIcon(PaymentType type) {
+    switch (type) {
+      case PaymentType.nakit:
+        return Icons.payments;
+      case PaymentType.pos:
+        return Icons.credit_card;
+      case PaymentType.iban:
+        return Icons.account_balance;
+      case PaymentType.na:
+        return Icons.help_outline;
+    }
+  }
+
+  /// The "Geçmiş Aylar" month/year picker. Only the current month and earlier
+  /// can be selected, so the tab can never show an empty future month.
+  Widget _buildHistoryMonthSelector() {
+    final now = DateTime.now();
+    final years = _selectableHistoryYears(now);
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            const Text('Dönem:', style: TextStyle(fontWeight: FontWeight.bold)),
+            SizedBox(
+              width: kPeriodDropdownWidth,
+              child: DropdownButtonFormField<int>(
+                value: _historyYear,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Yıl',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: years
+                    .map((year) => DropdownMenuItem<int>(
+                          value: year,
+                          child: Text('$year'),
+                        ))
+                    .toList(),
+                onChanged: (year) {
+                  if (year == null) return;
+                  // Switching to the current year can leave a future month
+                  // selected, so clamp it back to the current month.
+                  final month = (year == now.year && _historyMonth > now.month)
+                      ? now.month
+                      : _historyMonth;
+                  _selectHistoryMonth(year: year, month: month);
+                },
+              ),
+            ),
+            SizedBox(
+              width: kPeriodDropdownWidth,
+              child: DropdownButtonFormField<int>(
+                value: _historyMonth,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Ay',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: List.generate(DateTime.monthsPerYear, (index) {
+                  final month = index + 1;
+                  // Future months of the current year stay visible but greyed
+                  // out, so the admin sees why they cannot be picked.
+                  final selectable = _historyYear < now.year || month <= now.month;
+                  return DropdownMenuItem<int>(
+                    value: month,
+                    enabled: selectable,
+                    child: Text(
+                      kMonthNameFormat.format(DateTime(_historyYear, month)),
+                      style: selectable ? null : const TextStyle(color: Colors.grey),
+                    ),
+                  );
+                }),
+                onChanged: (month) {
+                  if (month == null) return;
+                  _selectHistoryMonth(year: _historyYear, month: month);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Years offered in the "Geçmiş Aylar" picker: every year that has a completed
+  /// payment, up to the current one (always at least the current year and the
+  /// selected one, so the dropdown value is never missing from its items).
+  List<int> _selectableHistoryYears(DateTime now) {
+    int earliest = now.year;
+    for (final payment in _allPayments) {
+      final date = payment.paymentDate;
+      if (payment.status == PaymentStatus.completed && date != null) {
+        if (date.year < earliest) earliest = date.year;
+      }
+    }
+    if (_historyYear < earliest) earliest = _historyYear;
+    return [for (int year = now.year; year >= earliest; year--) year];
+  }
+
+  void _selectHistoryMonth({required int year, required int month}) {
+    if (year == _historyYear && month == _historyMonth) return;
+    logger.info('Geçmiş Aylar selection changed to {}/{}', [month, year]);
+    setState(() {
+      _historyYear = year;
+      _historyMonth = month;
+      _recomputeTabCounts(_filteredPayments); // refresh the tab label
+    });
+  }
+
+  /// Exports the given month's completed payments to an .xlsx file.
+  ///
+  /// The save location is asked for first and the loading indicator only covers
+  /// the encode/write step, so no spinner sits on top of the native dialog while
+  /// the user is picking a folder.
+  Future<void> _exportMonthPayments({
+    required List<PaymentModel> payments,
+    required DateTime monthStart,
+  }) async {
+    final titleLabel = 'Ödemeler ${kMonthYearFormat.format(monthStart)}';
+    setState(() => _isExporting = true);
+
+    bool loadingOpen = false;
+    void closeLoading() {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+    }
+
+    try {
+      final targetPath =
+          await PaymentExportUtil.promptForTargetPath(titleLabel: titleLabel);
+      if (targetPath == null) {
+        logger.info('Excel export cancelled');
+        return;
+      }
+
+      if (!mounted) return;
+      DialogUtils.openLoading(context, message: 'Excel dosyası hazırlanıyor...');
+      loadingOpen = true;
+
+      await PaymentExportUtil.writePayments(
+        targetPath: targetPath,
+        payments: payments,
+        userById: _userById,
+        titleLabel: titleLabel,
+      );
+
+      closeLoading();
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Dışa Aktarma Tamamlandı',
+        message: '${payments.length} ödeme dışa aktarıldı.\n\nDosya: $targetPath',
+      );
+    } catch (e) {
+      logger.err('Excel export failed: {}', [e]);
+      closeLoading();
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Excel dışa aktarılırken bir hata oluştu: $e',
+      );
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
   }
 
   Widget _buildMonthStatsCard({
     required String title,
     required int count,
     required double totalPaid,
+    required Map<PaymentType, double> totalsByType,
     required DateTime start,
     required DateTime end,
+    double? plannedTotal,
   }) {
     final rangeText = '${kDateFormat.format(start)} - ${kDateFormat.format(end)}';
-    final average = count > 0 ? totalPaid / count : 0.0;
 
     return Card(
       margin: const EdgeInsets.all(8),
@@ -740,17 +944,42 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
               ],
             ),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            Wrap(
+              spacing: 24,
+              runSpacing: 16,
+              alignment: WrapAlignment.spaceAround,
               children: [
                 _statItem('Tamamlanan Ödemeler', count.toString(),
                     Icons.check_circle, Colors.green),
-                _statItem('Toplam Ödenen', '${totalPaid.toStringAsFixed(2)} ₺',
-                    Icons.paid, Colors.green),
-                _statItem('Ortalama Ödeme', '${average.toStringAsFixed(2)} ₺',
-                    Icons.trending_up, Colors.blue),
+                _statItem('Tamamlanan Toplam',
+                    '${totalPaid.toStringAsFixed(0)} ₺', Icons.paid, Colors.green),
+                if (plannedTotal != null)
+                  _statItem('Planlanan Toplam',
+                      '${plannedTotal.toStringAsFixed(0)} ₺', Icons.event,
+                      Colors.orange),
               ],
             ),
+            const Divider(height: 32),
+            const Text('Ödeme Tipine Göre Tahsilat',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            if (totalsByType.isEmpty)
+              const Text('Bu dönemde tamamlanan ödeme yok.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey))
+            else
+              Wrap(
+                spacing: 24,
+                runSpacing: 16,
+                alignment: WrapAlignment.spaceAround,
+                children: totalsByType.entries
+                    .map((entry) => _statItem(
+                          entry.key.label,
+                          '${entry.value.toStringAsFixed(0)} ₺',
+                          _paymentTypeIcon(entry.key),
+                          Colors.teal,
+                        ))
+                    .toList(),
+              ),
           ],
         ),
       ),
@@ -780,30 +1009,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         itemCount: upcomingPayments.length,
         itemBuilder: (context, index) {
           return _buildPaymentCard(upcomingPayments[index]);
-        },
-      ),
-    );
-  }
-
-  Widget _buildCompletedPaymentsTab() {
-    final completedPayments =
-    _filteredPayments.where((p) => p.status == PaymentStatus.completed).toList();
-
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : completedPayments.isEmpty
-        ? const Center(child: Text('Tamamlanan ödeme bulunamadı.'))
-        : Scrollbar(
-      thickness: 8.0,
-      radius: const Radius.circular(4.0),
-      controller: _completedCtrl,
-      child: ListView.builder(
-        key: const PageStorageKey('completed'),
-        controller: _completedCtrl,
-        addAutomaticKeepAlives: false,
-        itemCount: completedPayments.length,
-        itemBuilder: (context, index) {
-          return _buildPaymentCard(completedPayments[index]);
         },
       ),
     );
@@ -862,13 +1067,14 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
             ),
           ),
           if (_statusFilter != null || _startDate != null || _endDate != null || _searchQuery != null)
-            IconButton(
-              icon: const Icon(Icons.filter_list_off),
-              tooltip: 'Filtreleri Temizle',
+            LabeledActionButton(
+              icon: Icons.filter_list_off,
+              label: 'Filtreleri Temizle',
               onPressed: _resetFilters,
             ),
-          IconButton(
-            icon: const Icon(Icons.search),
+          LabeledActionButton(
+            icon: Icons.search,
+            label: 'Ara',
             onPressed: () async {
               await showSearch(
                 context: context,
@@ -899,13 +1105,12 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
             child: TabBar(
               controller: _tabController,
               tabs: [
-                Tab(text: 'Tüm Ödemeler (${_filteredPayments.length})'),
-                Tab(text: 'Bu Hafta (${_countThisWeek})'),
-                Tab(text: 'Gelecek Hafta (${_countNextWeek})'),
                 Tab(text: 'Bu Ay (${_countThisMonth})'),
                 Tab(text: 'Geçen Ay (${_countLastMonth})'),
+                Tab(text: 'Bu Hafta (${_countThisWeek})'),
+                Tab(text: 'Gelecek Hafta (${_countNextWeek})'),
+                Tab(text: 'Geçmiş Aylar (${_countHistoryMonth})'),
                 Tab(text: 'Gelecek (${_countUpcoming})'),
-                Tab(text: 'Tamamlanan (${_countCompleted})'),
                 Tab(text: 'Geciken (${_countOverdue})'),
               ],
               isScrollable: true,
@@ -918,15 +1123,15 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildAllPaymentsTab(),
-                _buildThisWeekPaymentsTab(),
-                _buildNextWeekPaymentsTab(),
                 _buildMonthPaymentsTab(
                   tabIndex: _tabThisMonth,
                   controller: _thisMonthCtrl,
                   storageKey: 'this_month',
                   statsTitle: 'Bu Ay İstatistikleri',
                   emptyMessage: 'Bu ay için tamamlanan ödeme bulunamadı.',
+                  // Only the current month contrasts what is still expected
+                  // with what has already been collected.
+                  showPlannedSummary: true,
                 ),
                 _buildMonthPaymentsTab(
                   tabIndex: _tabLastMonth,
@@ -935,8 +1140,19 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                   statsTitle: 'Geçen Ay İstatistikleri',
                   emptyMessage: 'Geçen ay için tamamlanan ödeme bulunamadı.',
                 ),
+                _buildThisWeekPaymentsTab(),
+                _buildNextWeekPaymentsTab(),
+                _buildMonthPaymentsTab(
+                  tabIndex: _tabHistoryMonth,
+                  controller: _historyCtrl,
+                  storageKey: 'history_month',
+                  statsTitle:
+                      '${kMonthYearFormat.format(DateTime(_historyYear, _historyMonth))} İstatistikleri',
+                  emptyMessage:
+                      'Seçilen ay için tamamlanan ödeme bulunamadı.',
+                  header: _buildHistoryMonthSelector(),
+                ),
                 _buildUpcomingPaymentsTab(),
-                _buildCompletedPaymentsTab(),
                 _buildOverduePaymentsTab(),
               ],
             ),
@@ -948,10 +1164,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
   /// Show filter dialog for payments
   void _showFilterDialog(BuildContext context) {
-    // Date-bounded tabs (Bu Hafta / Gelecek Hafta / Geçen Ay) open the filter with
-    // their own date window pre-selected. Open-ended tabs (Tümü / Gelecek /
-    // Tamamlanan / Geciken) keep whatever range is currently applied, so by default
-    // Gelecek and Geciken open with no date selection.
+    // Date-bounded tabs (Bu Ay / Geçen Ay / Bu Hafta / Gelecek Hafta / Geçmiş
+    // Aylar) open the filter with their own date window pre-selected. Open-ended
+    // tabs (Gelecek / Geciken) keep whatever range is currently applied, so by
+    // default they open with no date selection.
     final tabRange = _tabDateRange(_tabController.index);
 
     // Create temporary filter values
@@ -959,8 +1175,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     DateTime? tempStartDate = tabRange?.start ?? _startDate;
     DateTime? tempEndDate = tabRange?.end ?? _endDate;
     String? tempSearchQuery = _searchQuery;
-    String? tempSortBy = _sortBy;
-    bool tempSortAscending = _sortAscending;
+    PaymentSortOption tempSortOption = _sortOption;
 
     showDialog(
       context: context,
@@ -990,26 +1205,15 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                       ),
                       const SizedBox(height: 16),
                       
-                      // Status filter
-                      const Text('Durum:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<PaymentStatus?>(
-                        value: tempStatus,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          hintText: 'Tümü',
-                        ),
-                        items: [
-                          const DropdownMenuItem<PaymentStatus?>(
-                            value: null,
-                            child: Text('Tümü'),
-                          ),
-                          ...PaymentStatus.values.map((status) => DropdownMenuItem(
-                            value: status,
-                            child: Text(status.label),
-                          )),
-                        ],
-                        onChanged: (value) => setDialogState(() => tempStatus = value),
+                      // Status filter, as chips — same control the tabs use.
+                      FilterChipGroup<PaymentStatus>(
+                        title: 'Durum Filtresi:',
+                        selectedValue: tempStatus,
+                        options: {
+                          for (final s in PaymentStatus.values) s: s.label
+                        },
+                        onSelected: (value) =>
+                            setDialogState(() => tempStatus = value),
                       ),
                       const SizedBox(height: 16),
                       
@@ -1030,8 +1234,8 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                               onPressed: () async {
                                 final picked = await showDateRangePicker(
                                   context: context,
-                                  firstDate: DateTime(2020),
-                                  lastDate: DateTime(2030),
+                                  firstDate: kPaymentDateFirst,
+                                  lastDate: kPaymentDateLast,
                                   initialDateRange: tempStartDate != null && tempEndDate != null
                                       ? DateTimeRange(start: tempStartDate!, end: tempEndDate!)
                                       : null,
@@ -1057,27 +1261,17 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                       ),
                       const SizedBox(height: 16),
                       
-                      // Sort options
-                      const Text('Sıralama:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: tempSortBy,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [
-                          const DropdownMenuItem(value: 'dueDate', child: Text('Tarihe Göre')),
-                          const DropdownMenuItem(value: 'amount', child: Text('Tutara Göre')),
-                          const DropdownMenuItem(value: 'userName', child: Text('Kullanıcı Adına Göre')),
-                        ],
-                        onChanged: (value) => setDialogState(() => tempSortBy = value),
-                      ),
-                      const SizedBox(height: 8),
-                      SwitchListTile(
-                        title: const Text('Artan Sıralama'),
-                        value: tempSortAscending,
-                        onChanged: (value) => setDialogState(() => tempSortAscending = value),
-                        contentPadding: EdgeInsets.zero,
+                      // Sort, as chips — one per direction, like the tabs.
+                      FilterChipGroup<PaymentSortOption>(
+                        title: 'Sıralama:',
+                        selectedValue: tempSortOption,
+                        showAllOption: false,
+                        options: {
+                          for (final o in PaymentSortOption.values) o: o.label
+                        },
+                        onSelected: (value) => setDialogState(() {
+                          if (value != null) tempSortOption = value;
+                        }),
                       ),
                     ],
                   ),
@@ -1096,8 +1290,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                       _startDate = tempStartDate;
                       _endDate = tempEndDate;
                       _searchQuery = tempSearchQuery;
-                      _sortBy = tempSortBy;
-                      _sortAscending = tempSortAscending;
+                      _sortOption = tempSortOption;
                     });
                     _applyFilters();
                   },
@@ -1116,13 +1309,15 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       context,
       title: 'Ödeme Sil',
       message:
-      '${_getUserName(payment.userId)} kullanıcısına ait ${payment.amount.toStringAsFixed(2)} ₺ tutarındaki ödemeyi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.',
+      '${_getUserName(payment.userId)} kullanıcısına ait ${payment.amount.toStringAsFixed(0)} ₺ tutarındaki ödemeyi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.',
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
     if (!confirmed) return;
 
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
       await paymentProvider.deletePayment(payment.paymentId, payment.userId);
 
@@ -1220,7 +1415,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
   Future<void> _onUserSelected(UserModel user) async {
     setState(() {
       _selectedUser = user;
-      _userSearchController.text = '${user.name} ${user.surname}'.trim();
+      _userSearchController.text = user.fullName;
       _showUserDropdown = false;
       _isLoadingSubscriptions = true;
       _selectedSubscription = null;
@@ -1330,52 +1525,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
       return;
     }
 
-    // Show confirmation dialog - matches AddPaymentDialog style
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Ekle'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Aşağıdaki ödemeyi eklemek istediğinizden emin misiniz?'),
-              const SizedBox(height: 16),
-              Text('Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}'),
-              Text('Miktar: ${_amountController.text} TL'),
-              Text('Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}'),
-              Text('Durum: ${_paymentStatus.label}'),
-              Text('Ödeme Türü: ${_paymentType.label}'),
-              if (_selectedDueDate != null)
-                Text(
-                  'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_selectedPaymentDate != null)
-                Text(
-                  'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldSave != true) return;
-
     startLoading();
 
     try {
@@ -1396,33 +1545,28 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
       // Update subscription's amountPaid if a subscription is selected and payment is completed
       if (_selectedSubscription != null && _paymentStatus == PaymentStatus.completed) {
         final subscriptionId = _selectedSubscription!.subscriptionId;
-        final newAmountPaid = _selectedSubscription!.amountPaid + paymentAmount;
 
+        // The delta is applied against the stored total, so a concurrently
+        // recorded payment is not overwritten by this (possibly stale) model.
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final subProvider = Provider.of<SubProvider>(context, listen: false);
-        await subProvider.updateAmountPaid(
+        await subProvider.adjustAmountPaid(
           userId: _selectedUser!.userId,
           subscriptionId: subscriptionId,
-          amountPaid: newAmountPaid,
+          delta: paymentAmount,
         );
 
-        _selectedSubscription!.amountPaid = newAmountPaid;
-        _logger.info('Updated subscription $subscriptionId amountPaid to $newAmountPaid');
+        _selectedSubscription!.amountPaid += paymentAmount;
+        _logger.info('Added $paymentAmount to subscription $subscriptionId amountPaid');
       }
 
       widget.onPaymentAdded();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
-          message: 'Ödeme başarıyla eklendi.\n\n'
-              'Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}\n'
-              'Miktar: ${_amountController.text} TL\n'
-              'Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}\n'
-              'Durum: ${_paymentStatus.label}\n'
-              'Ödeme Türü: ${_paymentType.label}\n'
-              '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
-              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {
@@ -1503,7 +1647,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                                     radius: 16,
                                     child: Text(user.name.isNotEmpty ? user.name[0].toUpperCase() : '?'),
                                   ),
-                                  title: Text('${user.name} ${user.surname}'.trim()),
+                                  title: Text(user.fullName),
                                   subtitle: Text(user.email, style: const TextStyle(fontSize: 12)),
                                   onTap: () => _onUserSelected(user),
                                 );
@@ -1529,7 +1673,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                           String amountInfo = '';
                           if (sub.amountPaid < sub.totalAmount) {
                             final remaining = sub.totalAmount - sub.amountPaid;
-                            amountInfo = ' (Kalan ödeme: ${remaining.toStringAsFixed(2)} TL)';
+                            amountInfo = ' (Kalan ödeme: ${remaining.toStringAsFixed(0)} TL)';
                           }
                           return DropdownMenuItem<SubscriptionModel?>(
                             value: sub,
@@ -1622,8 +1766,8 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                         DateTime? pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedDueDate ?? DateTime.now(),
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime(2030),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         if (pickedDate != null) {
                           setState(() => _selectedDueDate = pickedDate);
@@ -1650,8 +1794,8 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                         DateTime? pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedPaymentDate ?? DateTime.now(),
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime.now(),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         // Keep the previously selected date if the user cancels.
                         if (pickedDate != null) {
@@ -1742,11 +1886,12 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     _originalUserId = widget.payment.userId;
     _selectedUser = widget.userById[widget.payment.userId];
     _userSearchController.text = _selectedUser != null
-        ? '${_selectedUser!.name} ${_selectedUser!.surname}'.trim()
+        ? _selectedUser!.fullName
         : 'Bilinmeyen Kullanıcı';
     _filteredUsers = widget.users;
 
-    _amountController.text = widget.payment.amount.toString();
+    // Whole number: the amount field is not a place for kuruş.
+    _amountController.text = widget.payment.amount.toStringAsFixed(0);
     _selectedPaymentDate = widget.payment.paymentDate ?? DateTime.now();
     _selectedDueDate = widget.payment.dueDate;
     _paymentStatus = widget.payment.status;
@@ -1826,7 +1971,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
 
     setState(() {
       _selectedUser = user;
-      _userSearchController.text = '${user.name} ${user.surname}'.trim();
+      _userSearchController.text = user.fullName;
       _showUserDropdown = false;
 
       if (userChanged) {
@@ -1922,93 +2067,9 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     final oldPayment = widget.payment;
     final oldAmount = oldPayment.amount;
     final oldStatus = oldPayment.status;
-    final oldSubsId = oldPayment.subscriptionId;
     final userChanged = _selectedUser!.userId != _originalUserId;
 
     final newAmount = parsedAmount;
-
-    // Get subscription names for display
-    String? oldSubName;
-    String? newSubName;
-    if (oldSubsId != null) {
-      try {
-        final oldSub = _availableSubscriptions.firstWhere((s) => s.subscriptionId == oldSubsId);
-        oldSubName = oldSub.packageName;
-      } catch (e) {
-        oldSubName = 'Silinmiş Paket';
-      }
-    }
-    if (_selectedSubscriptionId != null) {
-      try {
-        final newSub = _availableSubscriptions.firstWhere((s) => s.subscriptionId == _selectedSubscriptionId);
-        newSubName = newSub.packageName;
-      } catch (e) {
-        newSubName = 'Bilinmeyen Paket';
-      }
-    }
-
-    // Confirm - matches EditPaymentDialog style
-    final shouldUpdate = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Güncelle'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Aşağıdaki değişiklikleri yapmak istediğinizden emin misiniz?'),
-                const SizedBox(height: 16),
-                Text('Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}'),
-                Text('Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL'),
-                Text('Durum: ${_paymentStatus.label}'),
-                Text('Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}'),
-                if (_selectedSubscriptionId != null)
-                  Text('Bağlı Paket: $newSubName')
-                else
-                  const Text('Bağlı Paket: Yok'),
-                if (_selectedSubscriptionId != oldSubsId)
-                  Text(
-                    'Paket Değişti: ${oldSubName ?? "Yok"} → ${newSubName ?? "Yok"}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
-                  ),
-                if (userChanged)
-                  Text(
-                    'Kullanıcı Değişti: ${widget.userById[_originalUserId]?.name ?? "Bilinmeyen"} → ${_selectedUser!.name}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
-                  ),
-                if (_selectedDueDate != null)
-                  Text(
-                    'Planlanan Tarih: ${_df.format(_selectedDueDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_selectedPaymentDate != null)
-                  Text(
-                    'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-    if (shouldUpdate != true) {
-      _logger.info('Payment update cancelled by user for payment ${oldPayment.paymentId}');
-      return;
-    }
 
     startLoading();
 
@@ -2038,43 +2099,17 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
       _logger.info('- Status: ${oldStatus.label} -> ${_paymentStatus.label}');
       _logger.info('- Subscription changed: $subscriptionChanged');
 
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
 
       if (userChanged) {
         // User changed: delete from old user, add to new user
         _logger.info('User changed from $_originalUserId to ${_selectedUser!.userId}');
 
-        // Remove from old subscription if payment was completed
-        if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
-          _logger.info('Removing amount from old subscription $oldSubscriptionId');
-          try {
-            final oldSubDoc = await FirebaseFirestore.instance
-                .collection('users')
-                .doc(_originalUserId)
-                .collection('subscriptions')
-                .doc(oldSubscriptionId)
-                .get();
-
-            if (oldSubDoc.exists) {
-              final oldSubData = oldSubDoc.data() as Map<String, dynamic>;
-              double currentAmountPaid = (oldSubData['amountPaid'] ?? 0).toDouble();
-              double newAmountPaid = (currentAmountPaid - oldAmount).clamp(0, double.infinity);
-
-              await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(_originalUserId)
-                  .collection('subscriptions')
-                  .doc(oldSubscriptionId)
-                  .update({'amountPaid': newAmountPaid});
-
-              _logger.info('Updated old subscription $oldSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid');
-            }
-          } catch (e) {
-            _logger.err('Error updating old subscription $oldSubscriptionId: {}', [e]);
-          }
-        }
-
-        // Delete payment from old user
+        // Delete payment from old user. deletePayment takes the amount back
+        // off the old package itself when the payment was a completed one, so
+        // it is no longer subtracted here.
         await paymentProvider.deletePayment(oldPayment.paymentId, _originalUserId);
         _logger.info('Deleted payment from old user $_originalUserId');
 
@@ -2264,18 +2299,10 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
 
       widget.onPaymentUpdated();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
-          message: 'Ödeme başarıyla güncellendi.\n\n'
-              'Kullanıcı: ${_selectedUser!.name} ${_selectedUser!.surname}\n'
-              'Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL\n'
-              'Durum: ${_paymentStatus.label}\n'
-              'Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}\n'
-              '${newSubName != null ? 'Bağlı Paket: $newSubName\n' : 'Bağlı Paket: Yok\n'}'
-              '${_selectedDueDate != null ? 'Planlanan Tarih: ${_df.format(_selectedDueDate!)}\n' : ''}'
-              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${_df.format(_selectedPaymentDate!)}\n' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {
@@ -2353,7 +2380,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                                       style: TextStyle(color: isSelected ? Colors.white : null),
                                     ),
                                   ),
-                                  title: Text('${user.name} ${user.surname}'.trim()),
+                                  title: Text(user.fullName),
                                   subtitle: Text(user.email, style: const TextStyle(fontSize: 12)),
                                   onTap: () => _onUserSelected(user),
                                 );
@@ -2474,8 +2501,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                         final pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedDueDate ?? now,
-                          firstDate: now.subtract(const Duration(days: 365)),
-                          lastDate: now.add(const Duration(days: 365)),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         // Keep the previously selected date if the user cancels.
                         if (pickedDate != null) {
@@ -2502,8 +2529,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                         final pickedDate = await showDatePicker(
                           context: context,
                           initialDate: _selectedPaymentDate ?? DateTime.now(),
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime.now(),
+                          firstDate: kPaymentDateFirst,
+                          lastDate: kPaymentDateLast,
                         );
                         // Keep the previously selected date if the user cancels.
                         if (pickedDate != null) {
@@ -2582,7 +2609,8 @@ class PaymentSearchDelegate extends SearchDelegate<String> {
   @override
   Widget buildResults(BuildContext context) => buildSuggestions(context);
 
-  String _getUserName(String userId) => userById[userId]?.name ?? 'Unknown';
+  String _getUserName(String userId) =>
+      userById[userId]?.fullName ?? 'Bilinmiyor';
 
   @override
   Widget buildSuggestions(BuildContext context) {

@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import '../firebase_options.dart';
 import '../models/logger.dart';
 import '../models/user_model.dart';
+import '../utils/date_formatter.dart';
 import '../widgets/app_bar_with_back.dart';
 
 class _CapitalizeWordsFormatter extends TextInputFormatter {
@@ -55,6 +56,10 @@ class _CreateUserPageState extends State<CreateUserPage> {
   final TextEditingController _referenceController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _tcNoController = TextEditingController();
+  // Birth date is picked with a date widget, like the details tab does.
+  DateTime? _birthDate;
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _dosyaNoController = TextEditingController();
 
@@ -67,6 +72,9 @@ class _CreateUserPageState extends State<CreateUserPage> {
     String? reference,
     String? notes,
     String? dosyaNo,
+    String? phone,
+    String? tcNo,
+    DateTime? birthDate,
   }) async {
     if (name.isEmpty) {
       _showMessageDialog('Hata', 'Lütfen isim alanını doldurunuz.');
@@ -147,6 +155,9 @@ class _CreateUserPageState extends State<CreateUserPage> {
         reference: reference,
         notes: notes,
         dosyaNo: dosyaNo,
+        phone: phone,
+        tcNo: tcNo,
+        birthDate: birthDate,
       );
 
       // Store user data in Firestore
@@ -244,6 +255,26 @@ class _CreateUserPageState extends State<CreateUserPage> {
               ),
               const SizedBox(height: 10),
               TextField(
+                controller: _tcNoController,
+                decoration: const InputDecoration(
+                  labelText: 'Tc No (Opsiyonel)',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 10),
+              _buildBirthDateField(),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Telefon Numarası (Opsiyonel)',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 10),
+              TextField(
                 controller: _nameController,
                 decoration: const InputDecoration(
                   labelText: 'İsim Giriniz',
@@ -317,6 +348,8 @@ class _CreateUserPageState extends State<CreateUserPage> {
                   final reference = _referenceController.text.trim();
                   final notes = _notesController.text.trim();
                   final email = _emailController.text.trim();
+                  final phone = _phoneController.text.trim();
+                  final tcNo = _tcNoController.text.trim();
                   final dosyaNo = _dosyaNoController.text.trim();
                   final password = _passwordController.text.trim().isNotEmpty
                       ? _passwordController.text.trim()
@@ -331,6 +364,9 @@ class _CreateUserPageState extends State<CreateUserPage> {
                     reference: reference.isNotEmpty ? reference : null,
                     notes: notes.isNotEmpty ? notes : null,
                     dosyaNo: dosyaNo.isNotEmpty ? dosyaNo : null,
+                    phone: phone.isNotEmpty ? phone : null,
+                    tcNo: tcNo.isNotEmpty ? tcNo : null,
+                    birthDate: _birthDate,
                   );
                 },
                 child: const Text('Kullanıcı Oluştur'),
@@ -342,6 +378,47 @@ class _CreateUserPageState extends State<CreateUserPage> {
     );
   }
 
+  /// Birth date input styled like the surrounding text fields, since a plain
+  /// TextField cannot offer a calendar.
+  Widget _buildBirthDateField() {
+    return InkWell(
+      onTap: _pickBirthDate,
+      borderRadius: BorderRadius.circular(4),
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          labelText: 'Doğum Tarihi (Opsiyonel)',
+          border: OutlineInputBorder(),
+          suffixIcon: Icon(Icons.calendar_today),
+        ),
+        child: Text(
+          _birthDate != null
+              ? DateFormatter.formatNumericDate(_birthDate!)
+              : 'Tarih seçiniz',
+          style: TextStyle(
+            color: _birthDate != null ? null : Theme.of(context).hintColor,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(now.year - 20),
+      firstDate: DateTime(1900),
+      lastDate: now,
+      // Opens straight on the keyboard entry the pencil icon used to lead to:
+      // typing a birth date is faster than scrolling decades in the calendar.
+      // The calendar stays one tap away via the picker's own toggle.
+      initialEntryMode: DatePickerEntryMode.input,
+    );
+    if (picked != null && mounted) {
+      setState(() => _birthDate = picked);
+    }
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -350,6 +427,8 @@ class _CreateUserPageState extends State<CreateUserPage> {
     _referenceController.dispose();
     _notesController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
+    _tcNoController.dispose();
     _passwordController.dispose();
     _dosyaNoController.dispose();
     super.dispose();

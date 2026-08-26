@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger log = Logger.forClass(TanitaExplorerPage);
 
@@ -94,6 +95,8 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
       int success = 0;
       final List<String> failed = [];
       try {
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final provider = Provider.of<MeasProvider>(context, listen: false);
         for (int i = 0; i < total; i++) {
           final file = files[i];
@@ -187,7 +190,8 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true) return;
+    if (!mounted) return;
 
     bool loadingOpen = false;
     if (mounted) {
@@ -309,9 +313,11 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
                         leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
                         title: Text(pdf.fileName),
                         subtitle: Text(pdf.uploadTime?.toLocal().toString() ?? ''),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          tooltip: 'Sil',
+                        trailing: LabeledActionButton(
+                          dense: true,
+                          icon: Icons.delete,
+                          label: 'Sil',
+                          foregroundColor: Colors.red,
                           onPressed: _busy ? null : () => _deletePdf(pdf),
                         ),
                         onTap: () async {
@@ -319,7 +325,8 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
                           if (await canLaunchUrl(uri)) {
                             await launchUrl(uri, mode: LaunchMode.externalApplication);
                           } else {
-                            if (mounted) {
+                            // context here is build()'s parameter.
+                            if (context.mounted) {
                               await DialogUtils.openError(
                                 context,
                                 title: 'Hata',

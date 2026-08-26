@@ -343,15 +343,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       return;
     }
     
-    // Validate postponed date if status is "Ertelendi"
-    if (_selectedStatus == AppointmentStatus.postponed && _postponedDate == null) {
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Lütfen ertelenen tarih için bir tarih seçiniz.',
-      );
-      return;
-    }
+    // The postponed date is optional: the new date is often not known when the
+    // postponement is recorded, and it can be filled in later.
 
     // A user-originated postponement consumes a postponement right; admin-
     // originated ones do not. Warn the admin when a user-originated
@@ -373,54 +366,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
       }
     }
 
-    // Show confirmation dialog
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Randevu Ekle'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                  'Aşağıdaki randevuyu eklemek istediğinizden emin misiniz?'),
-              const SizedBox(height: 16),
-              Text('Kullanıcı: ${_selectedUser!.name}'),
-              Text('Tarih: ${DateFormatter.formatNumericDate(_selectedDate)}'),
-              Text('Saat: ${_selectedTime.format(context)}'),
-              Text('Görüşme Tipi: ${_selectedMeetingType.label}'),
-              Text('Randevu Türü: ${_selectedAppointmentType.lbl}'),
-              Text('Görüşme Süresi: ${_durationController.text.isNotEmpty ? _durationController.text : _selectedAppointmentType.getDurationForMeetingType(_selectedMeetingType)} dk'),
-              Text('Durum: ${_selectedStatus.label}'),
-              if (_selectedStatus == AppointmentStatus.postponed && _postponedDate != null)
-                Text(
-                  'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_selectedStatus == AppointmentStatus.postponed)
-                Text('Erteleme Kaynağı: ${_postponedBy.label}'),
-              Text('Paket: ${_selectedSubscription?.packageName ?? 'Paketsiz (Ön Görüşme)'}'),
-              if (_notesController.text.isNotEmpty)
-                Text('Notlar: ${_notesController.text}'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-  logger.info('shouldSave={}',[shouldSave]);
-    if (shouldSave != true) return;
-
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final appointmentManager =
         Provider.of<AppointmentManager>(context, listen: false);
     final durationMinutes = int.tryParse(_durationController.text) ??
@@ -471,6 +418,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         // an atomic increment so concurrent edits can't clobber the counter.
         if (isUserPostponement && _selectedSubscription != null) {
           try {
+            // Re-checked after the await: the widget may be gone by now.
+            if (!mounted) return;
             final subProvider =
                 Provider.of<SubProvider>(context, listen: false);
             await subProvider.updateSubscription(
@@ -490,21 +439,10 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         widget.onAppointmentAdded();
 
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
-          message: 'Randevu detayları:\n\n'
-              'Kullanıcı: ${widget.userId != null ? _selectedUser!.name : _selectedUser!.name}\n'
-              'Tarih: ${DateFormatter.formatNumericDate(_selectedDate)}\n'
-              'Saat: ${_selectedTime.format(context)}\n'
-              'Görüşme Tipi: ${_selectedMeetingType.label}\n'
-              'Randevu Türü: ${_selectedAppointmentType.lbl}\n'
-              'Görüşme Süresi: $durationMinutes dk\n'
-              'Durum: ${_selectedStatus.label}\n'
-              '${_selectedStatus == AppointmentStatus.postponed && _postponedDate != null ? 'Ertelenen Tarih: ${DateFormatter.formatNumericDateTime(_postponedDate!)}\n' : ''}'
-              'Paket: ${_selectedSubscription?.packageName ?? 'Paketsiz (Ön Görüşme)'}'
-              '${_notesController.text.isNotEmpty ? '\nNotlar: ${_notesController.text}' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {
@@ -762,49 +700,69 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
 
               // Postponed date picker (shown only when status is Postponed)
               if (_selectedStatus == AppointmentStatus.postponed)
-                ListTile(
-                  title: const Text(
-                    'Ertelenen Tarih',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: _postponedDate != null
-                      ? Text(
-                    DateFormatter.formatNumericDateTime(_postponedDate!),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        )
-                      : const Text('Tarih seçilmedi'),
-                  trailing: const Icon(Icons.calendar_today),
-                  onTap: () async {
-                    final DateTime? pickedDate = await showDatePicker(
-                      context: context,
-                      initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
-                      // Postponed date may also be in the past (no future-only limit).
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime(2100),
-                    );
-                    if (pickedDate != null && mounted) {
-                      final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
-                        context,
-                        initialTime: _postponedDate != null
-                            ? TimeOfDay.fromDateTime(_postponedDate!)
-                            : const TimeOfDay(hour: 9, minute: 0),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // The postponed date may be filled in later, so it is not
+                    // required to save the appointment.
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: Text(
+                        '(ZORUNLU DEĞİL, belli değilse sonra seçiniz.)',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ListTile(
+                    title: const Text(
+                      'Ertelenen Tarih',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: _postponedDate != null
+                        ? Text(
+                      DateFormatter.formatNumericDateTime(_postponedDate!),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          )
+                        : const Text('Tarih seçilmedi'),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final DateTime? pickedDate = await showDatePicker(
+                        context: context,
+                        initialDate: _postponedDate ?? DateTime.now().add(const Duration(days: 1)),
+                        // Postponed date may also be in the past (no future-only limit).
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
                       );
-                      if (pickedTime != null && mounted) {
-                        setState(() {
-                          _postponedDate = DateTime(
-                            pickedDate.year,
-                            pickedDate.month,
-                            pickedDate.day,
-                            pickedTime.hour,
-                            pickedTime.minute,
-                          );
-                        });
+                      // context here is build()'s parameter, so the guard has
+                      // to be on that context, not on the State.
+                      if (pickedDate != null && context.mounted) {
+                        final TimeOfDay? pickedTime = await TimePickerUtils.pickTime(
+                          context,
+                          initialTime: _postponedDate != null
+                              ? TimeOfDay.fromDateTime(_postponedDate!)
+                              : const TimeOfDay(hour: 9, minute: 0),
+                        );
+                        if (pickedTime != null && mounted) {
+                          setState(() {
+                            _postponedDate = DateTime(
+                              pickedDate.year,
+                              pickedDate.month,
+                              pickedDate.day,
+                              pickedTime.hour,
+                              pickedTime.minute,
+                            );
+                          });
+                        }
                       }
-                    }
-                  },
+                    },
+                  ),
+                  ],
                 ),
               if (_selectedStatus == AppointmentStatus.postponed)
                 const SizedBox(height: 16),

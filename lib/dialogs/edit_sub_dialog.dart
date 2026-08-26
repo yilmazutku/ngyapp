@@ -6,6 +6,7 @@ import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
+import '../utils/amount_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
 import '../utils/date_input_utils.dart';
@@ -91,10 +92,11 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         TextEditingController(text: widget.subscription.notes ?? '');
     _totalMeetingsController = TextEditingController(
         text: widget.subscription.totalMeetings.toString());
-    _totalAmountController =
-        TextEditingController(text: widget.subscription.totalAmount.toString());
-    _amountPaidController =
-        TextEditingController(text: widget.subscription.amountPaid.toString());
+    // Tutarlar tam liradır: alanlarda "7200.0" değil "7200" gösterilir.
+    _totalAmountController = TextEditingController(
+        text: formatWholeLira(widget.subscription.totalAmount));
+    _amountPaidController = TextEditingController(
+        text: formatWholeLira(widget.subscription.amountPaid));
     _onlineMeetingsController = TextEditingController(
         text: widget.subscription.onlineMeetings?.toString() ?? "0");
     _faceToFaceMeetingsController = TextEditingController(
@@ -177,8 +179,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   }
   
   void _updatePaymentStatus() {
-    final totalAmount = double.tryParse(_totalAmountController.text) ?? 0.0;
-    final amountPaid = double.tryParse(_amountPaidController.text) ?? 0.0;
+    final totalAmount = parseWholeLiraOrNull(_totalAmountController.text) ?? 0;
+    final amountPaid = parseWholeLiraOrNull(_amountPaidController.text) ?? 0;
     
     setState(() {
       _isPaymentIncomplete = amountPaid < totalAmount;
@@ -367,15 +369,17 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 TextFormField(
                   controller: _totalAmountController,
                   keyboardType: TextInputType.number,
+                  inputFormatters: wholeLiraInputFormatters,
                   decoration: const InputDecoration(
                     labelText: 'Toplam Ücret (TL)',
                     border: OutlineInputBorder(),
+                    helperText: 'Tam lira; kuruş girilmez.',
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Lütfen toplam ödeme miktarını giriniz.';
                     }
-                    if (double.tryParse(value) == null) {
+                    if (parseWholeLiraOrNull(value) == null) {
                       return 'Geçersiz ödeme miktarı. Lütfen kontrol ediniz.';
                     }
                     return null;
@@ -387,9 +391,11 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 TextFormField(
                   controller: _amountPaidController,
                   keyboardType: TextInputType.number,
+                  inputFormatters: wholeLiraInputFormatters,
                   decoration: InputDecoration(
                     labelText: 'Ödenmiş Miktar (TL)',
                     border: const OutlineInputBorder(),
+                    helperText: 'Tam lira; kuruş girilmez.',
                     filled: _isPaymentIncomplete,
                     fillColor:
                         _isPaymentIncomplete ? Colors.red.shade100 : null,
@@ -406,7 +412,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     if (value == null || value.isEmpty) {
                       return 'Lütfen ödenmiş miktarı giriniz.';
                     }
-                    if (double.tryParse(value) == null) {
+                    if (parseWholeLiraOrNull(value) == null) {
                       return 'Geçerli bir miktar girin.';
                     }
                     return null;
@@ -447,7 +453,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     // Default the amount to the package total and pick a real
                     // payment type when turning payment on.
                     final paid =
-                        double.tryParse(_amountPaidController.text) ?? 0.0;
+                        parseWholeLiraOrNull(_amountPaidController.text) ?? 0;
                     if (paid <= 0) {
                       _amountPaidController.text = _totalAmountController.text;
                     }
@@ -781,11 +787,13 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
 
         // Weight-tracking packages are free: no fee and no payment. When the
         // admin marks the payment as not received, nothing is considered paid.
-        final double totalAmount =
-            _isWeightTracking ? 0.0 : double.parse(_totalAmountController.text);
+        // Alanlar tam lira; modeldeki double'a yalnızca yazarken çevrilir.
+        final double totalAmount = _isWeightTracking
+            ? 0.0
+            : parseWholeLiraOrNull(_totalAmountController.text)!.toDouble();
         final double amountPaid = (_isWeightTracking || !_isPaymentReceived)
             ? 0.0
-            : double.parse(_amountPaidController.text);
+            : parseWholeLiraOrNull(_amountPaidController.text)!.toDouble();
         
         final String notes = _notesController.text.trim();
 
@@ -878,7 +886,13 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
             // record(s). Planned payments are never deleted from here; they
             // are managed from the payments tab.
             for (final payment in _completedPayments) {
-              await paymentProvider.deletePayment(payment.paymentId, userId);
+              // This dialog has already written the package's amountPaid above,
+              // so the delete must not subtract the amount a second time.
+              await paymentProvider.deletePayment(
+                payment.paymentId,
+                userId,
+                adjustSubscriptionTotal: false,
+              );
             }
           }
 
@@ -921,6 +935,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         );
         
         // Close dialog first, then notify parent about the update
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         Navigator.of(context).pop();
         
         // Call the update callback after dialog is closed

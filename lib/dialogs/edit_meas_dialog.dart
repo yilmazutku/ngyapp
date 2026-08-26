@@ -155,12 +155,13 @@ class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
     setState(() => _isSaving = true);
 
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final provider = Provider.of<MeasProvider>(context, listen: false);
       await provider.updateMeasurement(widget.userId, updated);
 
       if (!mounted) return;
-      Navigator.of(context).pop(); // close first
-      await DialogUtils.openInfo(
+      await DialogUtils.popThenInfo(
         context,
         title: 'Başarılı',
         message: 'Ölçüm başarıyla güncellendi.',

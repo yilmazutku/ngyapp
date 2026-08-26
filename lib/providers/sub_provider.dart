@@ -388,36 +388,129 @@ class SubProvider extends ChangeNotifier {
     }
   }
 
-  /// Updates the amountPaid field for a subscription
-  /// 
-  /// @param userId The ID of the user whose subscription to update
-  /// @param subscriptionId The ID of the subscription to update
-  /// @param amountPaid The new amount paid value
-  /// 
-  /// @return A boolean indicating whether the update was successful
-  Future<bool> updateAmountPaid({
+  /// Moves a subscription's `postponementsUsed` by [delta] with a server-side
+  /// increment.
+  ///
+  /// Only user-originated postponements are tracked here, so this is what
+  /// consumes and gives back the customer's postponement rights. The counter is
+  /// kept at or above zero: giving a right back more often than it was taken
+  /// must never make the customer look like they have extra rights.
+  ///
+  /// Returns whether the adjustment was applied.
+  Future<bool> adjustPostponementsUsed({
     required String userId,
     required String subscriptionId,
-    required double amountPaid,
+    required int delta,
+    String updateUser = 'admin',
   }) async {
+    if (subscriptionId.isEmpty || delta == 0) return true;
+
     try {
-      await FirebaseFirestore.instance
+      final subRef = FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
           .collection('subscriptions')
-          .doc(subscriptionId)
-          .update({
-            'amountPaid': amountPaid,
-          });
+          .doc(subscriptionId);
 
-      logger.info('Updated subscription {} amountPaid to {}', [subscriptionId, amountPaid]);
+      final snap = await subRef.get();
+      if (!snap.exists) {
+        logger.warn('Sub not found for postponement update: user={}, sub={}',
+            [userId, subscriptionId]);
+        return false;
+      }
+
+      final raw = snap.data()?['postponementsUsed'];
+      final int current = raw is int ? raw : int.tryParse('$raw') ?? 0;
+      // Clamped delta rather than a clamped absolute value: the write itself
+      // stays a server-side increment, so two adjustments landing together
+      // still add up instead of overwriting each other.
+      final int appliedDelta = (current + delta) < 0 ? -current : delta;
+
+      if (appliedDelta != 0) {
+        await subRef.update({
+          'postponementsUsed': FieldValue.increment(appliedDelta),
+          'updateDate': Timestamp.fromDate(DateTime.now()),
+          'updateUser': updateUser,
+        });
+      }
+      logger.info(
+        'postponementsUsed adjusted: user={}, sub={}, delta={}, applied={}, from {}',
+        [userId, subscriptionId, delta, appliedDelta, current],
+      );
+
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error updating amountPaid for subscription id={} for userId={}: {}', 
-          [subscriptionId, userId, e]);
-      rethrow;
+      logger.err(
+          'Error adjusting postponementsUsed for userId={}, subscriptionId={}: {}',
+          [userId, subscriptionId, e]);
+      return false;
+    }
+  }
+
+  /// Moves a subscription's `amountPaid` by [delta] with a server-side
+  /// increment.
+  ///
+  /// Deliberately NOT a `runTransaction`: on the Windows build a transaction
+  /// re-enters the Firestore plugin and throws "Firestore instance has already
+  /// been started and its settings can no longer be changed", which took down
+  /// the app whenever a payment was edited or deleted from the payments tab
+  /// (that tab refetches on the provider notification, so a query overlapped
+  /// the transaction). `FieldValue.increment` is applied by the server, so the
+  /// add-up guarantee survives without a client transaction.
+  ///
+  /// Callers used to read the current total — often from a stale in-memory
+  /// subscription model — add their own amount and write the result back. Two
+  /// payments recorded around the same time then overwrote each other and the
+  /// package's paid total silently drifted. The delta is applied against the
+  /// stored value instead, and the total is never pushed below zero.
+  ///
+  /// Returns whether the adjustment was applied.
+  Future<bool> adjustAmountPaid({
+    required String userId,
+    required String subscriptionId,
+    required double delta,
+  }) async {
+    if (subscriptionId.isEmpty || delta == 0) return true;
+
+    try {
+      final subRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('subscriptions')
+          .doc(subscriptionId);
+
+      final snap = await subRef.get();
+      if (!snap.exists) {
+        logger.warn('Sub not found for amountPaid update: user={}, sub={}',
+            [userId, subscriptionId]);
+        return false;
+      }
+
+      final raw = snap.data()?['amountPaid'];
+      final double current =
+          raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0;
+      // Clamped delta rather than a clamped absolute value: the write itself
+      // stays a server-side increment, so two payments recorded at the same
+      // moment still add up instead of overwriting each other.
+      final double appliedDelta = (current + delta) < 0 ? -current : delta;
+
+      if (appliedDelta != 0) {
+        await subRef.update({'amountPaid': FieldValue.increment(appliedDelta)});
+      }
+      logger.info(
+        'amountPaid adjusted: user={}, sub={}, delta={}, applied={}, from {}',
+        [userId, subscriptionId, delta, appliedDelta, current],
+      );
+
+      _subChanged = true;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      logger.err('Error adjusting amountPaid for userId={}, subscriptionId={}: {}',
+          [userId, subscriptionId, e]);
+      return false;
     }
   }
 
@@ -434,64 +527,41 @@ class SubProvider extends ChangeNotifier {
     required bool deleteRelatedData,
   }) async {
     try {
+      final db = FirebaseFirestore.instance;
+      final userRef = db.collection('users').doc(userId);
+      final subRef = userRef.collection('subscriptions').doc(subscriptionId);
+
       if (deleteRelatedData) {
-        // Delete related appointments
-        final appointmentsSnap = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
+        // The three lookups share nothing, so they are issued together rather
+        // than one after the other.
+        final appointmentsFuture = userRef
             .collection('appointments')
             .where('subscriptionId', isEqualTo: subscriptionId)
             .get();
-            
-        final batch = FirebaseFirestore.instance.batch();
-        
-        for (var doc in appointmentsSnap.docs) {
-          batch.delete(doc.reference);
-        }
-        
-        // Delete related payments
-        final paymentsSnap = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
+        final paymentsFuture = userRef
             .collection('payments')
             .where('subscriptionId', isEqualTo: subscriptionId)
             .get();
-            
-        for (var doc in paymentsSnap.docs) {
-          batch.delete(doc.reference);
-        }
-        
-        // Delete related diet plans
-        final dietPlansSnap = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
+        final dietPlansFuture = userRef
             .collection('dietlists')
             .where('subscriptionId', isEqualTo: subscriptionId)
             .get();
-            
-        for (var doc in dietPlansSnap.docs) {
-          batch.delete(doc.reference);
-        }
-        
-        // Delete the subscription itself
-        batch.delete(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(userId)
-              .collection('subscriptions')
-              .doc(subscriptionId)
-        );
-        
-        // Commit the batch
-        await batch.commit();
+
+        final appointmentsSnap = await appointmentsFuture;
+        final paymentsSnap = await paymentsFuture;
+        final dietPlansSnap = await dietPlansFuture;
+
+        // Chunked: a single batch would throw once a subscription had more than
+        // 500 linked documents.
+        await _commitDeletesInChunks(db, <DocumentReference<Map<String, dynamic>>>[
+          ...appointmentsSnap.docs.map((doc) => doc.reference),
+          ...paymentsSnap.docs.map((doc) => doc.reference),
+          ...dietPlansSnap.docs.map((doc) => doc.reference),
+          subRef,
+        ]);
       } else {
         // Delete just the subscription
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .collection('subscriptions')
-            .doc(subscriptionId)
-            .delete();
+        await subRef.delete();
       }
 
       logger.info('Subscription deleted: {}', [subscriptionId]);

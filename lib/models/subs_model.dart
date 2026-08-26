@@ -1,5 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// Paket tutarlarını tam liraya çevirir.
+///
+/// `totalAmount` / `amountPaid` alanları Firestore'da geriye dönük uyumluluk
+/// için `double` olarak duruyor, ama uygulama bunları her zaman tam lira olarak
+/// okuyup yazar. Sayı olmayan bir değer eskisi gibi hata fırlatır; böylece
+/// bozuk kayıt sessizce 0'a düşmez, çağıran tarafta loglanır.
+double _wholeLira(Object? raw) {
+  if (raw is num) return raw.roundToDouble();
+  throw FormatException('Paket tutarı sayı değil: $raw');
+}
+
 enum SubsMeetingType {
   online('online'),
   faceToFace('face_to_face'),
@@ -131,8 +142,10 @@ class SubscriptionModel {
       meetingsBurned: data['meetingsBurned'] ?? 0,
       postponementsUsed: data['postponementsUsed'] ?? 0,
       allowedPostponements: data['allowedPostponements'],
-      totalAmount: data['totalAmount'].toDouble(),
-      amountPaid: data['amountPaid'].toDouble(),
+      // Paket tutarları tam liradır; kuruş taşıyan eski kayıtlar da tam
+      // liraya yuvarlanarak okunur (bkz. _wholeLira).
+      totalAmount: _wholeLira(data['totalAmount']),
+      amountPaid: _wholeLira(data['amountPaid']),
       status: SubActiveStatus.fromLabel(data['status']),
       meetingType: data['meetingType'] != null 
           ? SubsMeetingType.fromLabel(data['meetingType'])
@@ -160,8 +173,10 @@ class SubscriptionModel {
       'meetingsBurned': meetingsBurned,
       'postponementsUsed': postponementsUsed,
       'allowedPostponements': allowedPostponements,
-      'totalAmount': totalAmount,
-      'amountPaid': amountPaid,
+      // Alan tipi geriye dönük uyumluluk için double kalıyor, ama kuruşlu bir
+      // değer asla yazılmıyor.
+      'totalAmount': totalAmount.roundToDouble(),
+      'amountPaid': amountPaid.roundToDouble(),
       'status': status.label,
       'meetingType': meetingType.label,
       if (freezeDate != null) 'freezeDate': Timestamp.fromDate(freezeDate!),

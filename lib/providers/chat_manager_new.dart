@@ -264,41 +264,33 @@ class ChatManager extends ChangeNotifier {
       [chatId, participants, lastMessage ?? 'none', lastImageUrl ?? 'none', incrementUnreadForAdmins, incrementUnreadForUser]
     );
     
-    // Step 1: set() with merge for base fields (no dot-notation keys)
-    final baseData = <String, dynamic>{
+    // Everything lands in one write. set(merge: true) merges nested maps field
+    // by field, so 'adminUnreadCount' can be written as a nested map instead of
+    // the dot-notation keys that would force a second update() round trip.
+    // Both unread flags feed a single arrayUnion, so raising them together can
+    // no longer drop one side from hasUnreadFor.
+    final unreadFor = <String>[
+      if (incrementUnreadForAdmins) ...adminIds,
+      if (incrementUnreadForUser) chatId,
+    ];
+
+    final data = <String, dynamic>{
       'participants': participants,
       if (lastMessage != null) 'lastMessage': lastMessage,
       if (lastImageUrl != null) 'lastImageUrl': lastImageUrl,
       if (lastAt != null) 'lastMessageAt': lastAt,
       'updatedAt': FieldValue.serverTimestamp(),
+      if (incrementUnreadForAdmins)
+        'adminUnreadCount': {
+          for (final adminUid in adminIds) adminUid: FieldValue.increment(1),
+        },
+      if (incrementUnreadForUser) 'userUnreadCount': FieldValue.increment(1),
+      if (unreadFor.isNotEmpty) 'hasUnreadFor': FieldValue.arrayUnion(unreadFor),
     };
-    
-    await _chatDoc(chatId).set(baseData, SetOptions(merge: true));
-    
-    // Step 2: update() for unread counters — update() properly resolves
-    // dot-notation keys (e.g. 'adminUnreadCount.<uid>') as nested field paths.
-    final needsUnreadUpdate = incrementUnreadForAdmins || incrementUnreadForUser;
-    if (needsUnreadUpdate) {
-      final unreadData = <String, dynamic>{};
-      
-      if (incrementUnreadForAdmins) {
-        for (final adminUid in adminIds) {
-          unreadData['adminUnreadCount.$adminUid'] = FieldValue.increment(1);
-        }
-        unreadData['hasUnreadFor'] = FieldValue.arrayUnion(adminIds.toList());
-        logger.debug('Incrementing unread count for admins and updating hasUnreadFor');
-      }
-      
-      if (incrementUnreadForUser) {
-        unreadData['userUnreadCount'] = FieldValue.increment(1);
-        unreadData['hasUnreadFor'] = FieldValue.arrayUnion([chatId]);
-        logger.debug('Incrementing unread count for user and updating hasUnreadFor');
-      }
-      
-      await _chatDoc(chatId).update(unreadData);
-    }
-    
-    logger.debug('Chat doc ensured. chatId={}', [chatId]);
+
+    await _chatDoc(chatId).set(data, SetOptions(merge: true));
+
+    logger.debug('Chat doc ensured. chatId={} unreadFor={}', [chatId, unreadFor]);
   }
 
   /// Mark a chat as read for the current admin user.
@@ -450,7 +442,7 @@ class ChatManager extends ChangeNotifier {
       return 0;
     }
     
-    final value = (unreadMapRaw as Map)[adminUid];
+    final value = unreadMapRaw[adminUid];
     if (value == null) return 0;
     if (value is int) return value;
     if (value is num) return value.toInt();
@@ -792,14 +784,23 @@ class ChatManager extends ChangeNotifier {
       if (url.isNotEmpty) imageUrls.add(url);
     }
 
+    // Deleted in parallel batches: one round trip per image, serialised, made
+    // clearing a busy chat take minutes.
+    const storageDeleteConcurrency = 16;
+    final urlList = imageUrls.toList();
     int deletedImages = 0;
-    for (final url in imageUrls) {
-      try {
-        await storage.refFromURL(url).delete();
-        deletedImages++;
-      } catch (e) {
-        logger.warn('Failed to delete chat image from storage. chatId={} url={} error={}', [chatId, url, e]);
-      }
+    for (int i = 0; i < urlList.length; i += storageDeleteConcurrency) {
+      final chunk = urlList.skip(i).take(storageDeleteConcurrency);
+      final results = await Future.wait(chunk.map((url) async {
+        try {
+          await storage.refFromURL(url).delete();
+          return true;
+        } catch (e) {
+          logger.warn('Failed to delete chat image from storage. chatId={} url={} error={}', [chatId, url, e]);
+          return false;
+        }
+      }));
+      deletedImages += results.where((ok) => ok).length;
     }
     logger.info('Deleted {}/{} chat images from storage. chatId={}', [deletedImages, imageUrls.length, chatId]);
 

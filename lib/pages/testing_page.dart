@@ -9,6 +9,7 @@ import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_durations_provider.dart';
 import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger _specialLinesLogger = Logger.forClass(_SpecialLinesSection);
 final Logger _appointmentColorsLogger =
@@ -509,19 +510,21 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
                     color: Colors.grey.shade600,
                   ),
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
+                trailing: Wrap(
+                  alignment: WrapAlignment.end,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined),
-                      tooltip: 'Düzenle',
+                    LabeledActionButton(
+                      dense: true,
+                      icon: Icons.edit_outlined,
+                      label: 'Düzenle',
                       onPressed:
                           _saving ? null : () => _showEditDialog(index),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline,
-                          color: Colors.red),
-                      tooltip: 'Sil',
+                    LabeledActionButton(
+                      dense: true,
+                      icon: Icons.delete_outline,
+                      label: 'Sil',
+                      foregroundColor: Colors.red,
                       onPressed:
                           _saving ? null : () => _confirmDelete(index),
                     ),
@@ -662,7 +665,8 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
       confirmText: 'Sıfırla',
       cancelText: 'İptal',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
     setState(() {
       for (final slot in AppointmentColorSlot.values) {
         _draft[slot] = null;
@@ -1027,7 +1031,8 @@ class _AppointmentDurationsSectionState
       confirmText: 'Sıfırla',
       cancelText: 'İptal',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
     setState(() {
       for (final slot in AppointmentDurationSlot.values) {
         _controllers[slot]!.text = slot.defaultMinutes.toString();

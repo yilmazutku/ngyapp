@@ -53,31 +53,6 @@ class MeasProvider extends ChangeNotifier {
       rethrow;
     }
   }
-  Future<void> addBatchMeasurement(String userId, List<MeasurementModel> listMeasurements) async {
-    try {
-      logger.info('Adding new measurement for userId={}', [userId]);
-      for (MeasurementModel measurement in listMeasurements) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .collection('measurements')
-            .doc(measurement.measurementId)
-            .set(measurement.toMap());
-
-        logger.info('Successfully added measurement with id={}',
-            [measurement.measurementId]);
-      }
-      // Set the measurement changed flag
-      _measurementChanged = true;
-
-      // Notify listeners to trigger UI updates
-      notifyListeners();
-    } catch (e) {
-      logger.err('Failed to add measurement for userId={}: {}', [userId, e.toString()]);
-      logger.err('Error stack trace: {}', [StackTrace.current]);
-      rethrow;
-    }
-  }
   /// Updates an existing measurement for a user
   /// 
   /// @param userId The ID of the user whose measurement to update

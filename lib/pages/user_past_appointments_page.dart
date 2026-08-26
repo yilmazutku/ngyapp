@@ -6,6 +6,7 @@ import '../utils/dialog_utils.dart';
 import '../providers/appointment_manager.dart';
 import 'package:provider/provider.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(PastAppointmentsPage);
 
@@ -31,7 +32,8 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
   // Filters
   AppointmentStatus? _selectedStatus;
   DateTimeRange? _selectedDateRange;
-  bool _isDateAscending = true;
+  /// Newest first by default: the most recent appointment belongs at the top.
+  bool _isDateAscending = false;
 
   late final AppointmentManager _appointmentService;
 
@@ -68,6 +70,8 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
       _applyFilters();
     } catch (e) {
       logger.err('Error fetching all past appointments: $e');
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: 'Hata',
@@ -170,7 +174,7 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     setState(() {
       _selectedStatus = null;
       _selectedDateRange = null;
-      _isDateAscending = true;
+      _isDateAscending = false;
     });
     _applyFilters();
   }
@@ -265,39 +269,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     });
   }
 
-  Future<void> _cancelAppointment(AppointmentModel appointment) async {
-    try {
-      setState(() {
-        _isLoading = true;
-      });
-
-      await _appointmentService.cancelAppointment(
-          appointment.appointmentId, appointment.userId,
-          canceledBy: 'user');
-
-      if (!mounted) return;
-      await DialogUtils.openInfo(
-        context,
-        title: 'Başarılı',
-        message: 'Randevu başarıyla iptal edildi.',
-      );
-      _fetchAllAppointments();
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Randevu iptal edilirken bir hata oluştu: $e',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -305,13 +276,14 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
       appBar: AppBarWithBack(
         title: 'Geçmiş Randevular',
         actions: [
-          IconButton(
-            icon: const Icon(Icons.filter_alt),
+          LabeledActionButton(
+            icon: Icons.filter_alt,
+            label: 'Filtrele',
             onPressed: _showFilterDialog,
           ),
-          IconButton(
-            icon: Icon(
-                _isDateAscending ? Icons.arrow_downward : Icons.arrow_upward),
+          LabeledActionButton(
+            icon: _isDateAscending ? Icons.arrow_downward : Icons.arrow_upward,
+            label: _isDateAscending ? 'Tarih: Artan' : 'Tarih: Azalan',
             onPressed: _toggleDateSorting,
           ),
         ],
@@ -447,22 +419,26 @@ class PaginationControls extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        IconButton(
+        LabeledActionButton(
+          dense: true,
+          icon: Icons.arrow_back_ios,
+          label: 'Önceki',
+          foregroundColor: theme.primaryColor,
           onPressed:
               currentPage > 1 ? () => onPageChanged(currentPage - 1) : null,
-          icon: const Icon(Icons.arrow_back_ios),
-          color: theme.primaryColor,
         ),
         Text(
           '$currentPage / $totalPages',
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
-        IconButton(
+        LabeledActionButton(
+          dense: true,
+          icon: Icons.arrow_forward_ios,
+          label: 'Sonraki',
+          foregroundColor: theme.primaryColor,
           onPressed: currentPage < totalPages
               ? () => onPageChanged(currentPage + 1)
               : null,
-          icon: const Icon(Icons.arrow_forward_ios),
-          color: theme.primaryColor,
         ),
       ],
     );

@@ -5,6 +5,7 @@ import 'package:ngy_app/models/user_model.dart';
 
 import 'appointment_color_palette.dart';
 import 'appointment_duration_config.dart';
+import '../widgets/labeled_action_button.dart';
 
 class AppointmentModel {
   final String appointmentId;
@@ -20,8 +21,6 @@ class AppointmentModel {
   DateTime? updateDate;
   final String? createUser;
   String? updateUser;
-  String? canceledBy; // 'user' or 'admin'
-  DateTime? canceledAt;
   DateTime? postponedDate; // New date when appointment is postponed
   PostponeSource? postponedBy; // Who initiated the postponement (see PostponeSource)
   UserModel?
@@ -42,8 +41,6 @@ class AppointmentModel {
     this.updateDate,
     this.createUser,
     this.updateUser,
-    this.canceledBy,
-    this.canceledAt,
     this.postponedDate,
     this.postponedBy,
     this.user,
@@ -89,10 +86,6 @@ class AppointmentModel {
           : null),
       createUser: data['createUser'] ?? data['createdBy'],
       updateUser: data['updateUser'],
-      canceledBy: data['canceledBy'],
-      canceledAt: data['canceledAt'] != null
-          ? (data['canceledAt'] as Timestamp).toDate()
-          : null,
       postponedDate: data['postponedDate'] != null
           ? (data['postponedDate'] as Timestamp).toDate()
           : null,
@@ -107,7 +100,7 @@ class AppointmentModel {
 
   @override
   String toString() {
-    return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, canceledBy: $canceledBy, canceledAt: $canceledAt, postponedDate: $postponedDate, postponedBy: $postponedBy, duration: $durationMinutes}';
+    return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, postponedDate: $postponedDate, postponedBy: $postponedBy, duration: $durationMinutes}';
   }
 
   Map<String, dynamic> toMap() {
@@ -124,8 +117,6 @@ class AppointmentModel {
       'updateDate': updateDate != null ? Timestamp.fromDate(updateDate!) : null,
       'createUser': createUser,
       'updateUser': updateUser,
-      'canceledBy': canceledBy,
-      'canceledAt': canceledAt != null ? Timestamp.fromDate(canceledAt!) : null,
       'postponedDate': postponedDate != null ? Timestamp.fromDate(postponedDate!) : null,
       'postponedBy': postponedBy?.value,
       'isDeleted': isDeleted,
@@ -163,10 +154,11 @@ class AppointmentModel {
                   ),
                 ),
                 if (showEditButton && onEdit != null)
-                  IconButton(
-                    icon: const Icon(Icons.edit),
+                  LabeledActionButton(
+                    dense: true,
+                    icon: Icons.edit,
+                    label: 'Düzenle',
                     onPressed: onEdit,
-                    tooltip: 'Düzenle',
                   ),
               ],
             ),
@@ -202,16 +194,6 @@ class AppointmentModel {
                 _buildMeetingTypeChip(),
               ],
             ),
-            if (canceledBy != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'İptal Eden: $canceledBy',
-                style: TextStyle(
-                  color: Colors.red[700],
-                  fontSize: 12,
-                ),
-              ),
-            ],
           ],
         ),
         onTap: onTap,
@@ -228,7 +210,6 @@ class AppointmentModel {
       case AppointmentStatus.completed:
         chipColor = Colors.green;
         break;
-      case AppointmentStatus.canceled:
       case AppointmentStatus.postponed:
         chipColor = Colors.orange;
         break;
@@ -277,15 +258,25 @@ enum AppointmentStatus {
   completed('Yapıldı'),
   scheduled('Planlandı'),
   burned('Yakıldı'),
-  canceled('Iptal edildi'),
   postponed('Ertelendi');
 
   const AppointmentStatus(this.label);
 
   final String label;
 
+  /// Resolves a status from its stored label.
+  ///
+  /// Unknown labels fall back to [scheduled] instead of throwing. Records
+  /// written before appointment cancellation was removed still carry the old
+  /// "Iptal edildi" label, and a throw here would break every list that
+  /// contains one. [scheduled] is the safe landing spot: it is the only status
+  /// that moves no package counter, so deleting such a legacy record cannot
+  /// push meetingsCompleted or meetingsBurned out of step.
   static AppointmentStatus fromLabel(String label) {
-    return AppointmentStatus.values.firstWhere((e) => e.label == label);
+    return AppointmentStatus.values.firstWhere(
+      (e) => e.label == label,
+      orElse: () => AppointmentStatus.scheduled,
+    );
   }
 }
 

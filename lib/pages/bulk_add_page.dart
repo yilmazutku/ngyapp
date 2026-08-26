@@ -14,6 +14,7 @@ import '../providers/sub_provider.dart';
 import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/loading_overlay.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Admin page for adding multiple appointments and payments linked to a single
 /// subscription at once. Every created record is linked to [subscription] (its
@@ -109,6 +110,8 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     startLoading(timeout: const Duration(minutes: 2));
     int added = 0;
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final manager = Provider.of<AppointmentManager>(context, listen: false);
       final baseId = DateTime.now().millisecondsSinceEpoch;
       for (int i = 0; i < _apptEntries.length; i++) {
@@ -215,8 +218,12 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
     startLoading(timeout: const Duration(minutes: 2));
     int added = 0;
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider =
           Provider.of<PaymentProvider>(context, listen: false);
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final subProvider = Provider.of<SubProvider>(context, listen: false);
       final SubscriptionModel? linkedSub = _selectedSubscription;
       double addedAmount = 0;
@@ -238,13 +245,12 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
       // package summary stays accurate (mirrors the single add-payment flow).
       // Skipped for "Paketsiz" payments, which are not tied to any package.
       if (linkedSub != null && addedAmount > 0) {
-        final newAmountPaid = linkedSub.amountPaid + addedAmount;
-        await subProvider.updateAmountPaid(
+        await subProvider.adjustAmountPaid(
           userId: widget.subscription.userId,
           subscriptionId: linkedSub.subscriptionId,
-          amountPaid: newAmountPaid,
+          delta: addedAmount,
         );
-        linkedSub.amountPaid = newAmountPaid;
+        linkedSub.amountPaid += addedAmount;
       }
 
       if (mounted) {
@@ -414,9 +420,11 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
                 ),
                 const Spacer(),
                 if (_apptEntries.length > 1)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    tooltip: 'Satırı sil',
+                  LabeledActionButton(
+                    dense: true,
+                    icon: Icons.delete_outline,
+                    label: 'Satırı Sil',
+                    foregroundColor: Colors.red,
                     onPressed: () => setState(() {
                       _apptEntries.removeAt(index).dispose();
                     }),
@@ -511,9 +519,11 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
                 ),
                 const Spacer(),
                 if (_paymentEntries.length > 1)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    tooltip: 'Satırı sil',
+                  LabeledActionButton(
+                    dense: true,
+                    icon: Icons.delete_outline,
+                    label: 'Satırı Sil',
+                    foregroundColor: Colors.red,
                     onPressed: () => setState(() {
                       _paymentEntries.removeAt(index).dispose();
                     }),

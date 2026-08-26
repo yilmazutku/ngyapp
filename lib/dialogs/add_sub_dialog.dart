@@ -7,6 +7,7 @@ import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
+import '../utils/amount_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
 
@@ -282,11 +283,15 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     decoration: const InputDecoration(
                       labelText: 'Toplam Ücret (TL)',
                       border: OutlineInputBorder(),
+                      helperText: 'Tam lira; kuruş girilmez.',
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: wholeLiraInputFormatters,
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Lütfen toplam ücreti girin.';
-                      if (double.tryParse(v) == null) return 'Geçerli bir ücret girin.';
+                      if (parseWholeLiraOrNull(v) == null) {
+                        return 'Geçerli bir ücret girin.';
+                      }
                       return null;
                     },
                   ),
@@ -605,8 +610,10 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       final bool paymentReceived = !_isWeightTracking && _isPaymentReceived;
       final bool paymentPlanned =
           !_isWeightTracking && !paymentReceived && _isPaymentPlanned;
-      final double totalAmount =
-          _isWeightTracking ? 0.0 : double.parse(_totalAmountController.text);
+      // Alan tam lira; modeldeki double'a yalnızca yazarken çevrilir.
+      final double totalAmount = _isWeightTracking
+          ? 0.0
+          : parseWholeLiraOrNull(_totalAmountController.text)!.toDouble();
 
       final String notes = _notesController.text.trim();
 
@@ -652,6 +659,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       // If payment is received, create a payment record
       if (paymentReceived && subscriptionId != null) {
         try {
+          // Re-checked after the await: the widget may be gone by now.
+          if (!mounted) return;
           final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
           final double paymentAmount = totalAmount;
           
@@ -692,6 +701,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       // dialog's amount and the entered due date.
       if (paymentPlanned && subscriptionId != null) {
         try {
+          // Re-checked after the await: the widget may be gone by now.
+          if (!mounted) return;
           final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
           final DateTime plannedDate = _plannedDate ?? _startDate!;
 
@@ -739,6 +750,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                 : 'Paket başarıyla eklendi.',
       );
       widget.onSubscriptionAdded();
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
       logger.err('Error adding subscription: {}', [e]);

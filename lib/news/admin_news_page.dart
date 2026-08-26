@@ -7,6 +7,7 @@ import 'add_news_dialog.dart';
 import 'news_detail_page.dart';
 import 'news_model.dart';
 import 'news_provider.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Admin page for managing news/announcements
 class AdminNewsPage extends StatefulWidget {
@@ -123,7 +124,8 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
       cancelText: 'İptal',
     );
 
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     bool loadingOpen = false;
     try {
@@ -171,9 +173,9 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
         title: const Text('Duyuru Yönetimi'),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Yenile',
+          LabeledActionButton(
+            icon: Icons.refresh,
+            label: 'Yenile',
             onPressed: _loadNews,
           ),
         ],

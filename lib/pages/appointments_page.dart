@@ -158,7 +158,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       logger.debug('Checking for existing appointments in week: {} to {}', 
         [weekStartDate, weekEndDate]);
       
-      // Statuses that count as "having an appointment" (exclude only canceled)
+      // Statuses that count as "having an appointment"
       const validStatuses = {
         AppointmentStatus.scheduled,
         AppointmentStatus.completed,
@@ -297,36 +297,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     }
   }
 
-  Future<void> _cancelAppointment(AppointmentModel appointment) async {
-    try {
-      final appointmentManager =
-          Provider.of<AppointmentManager>(context, listen: false);
-
-      if (await appointmentManager.cancelAppointment(
-          appointment.appointmentId, appointment.userId,
-          canceledBy: 'user')) {
-        if (!mounted) return;
-        await DialogUtils.openInfo(
-          context,
-          title: 'Başarılı',
-          message: 'Randevu başarıyla iptal edildi.',
-        );
-      }
-      if (!mounted) return;
-      setState(() {
-        _fetchAvailableTimes();
-      });
-    } catch (e, stackTrace) {
-      logger.err('Error canceling appointment: {}, stack trace: {}', [e,stackTrace]);
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Randevu iptal edilirken bir hata oluştu: $e',
-      );
-    }
-  }
-
   void _navigateToPastAppointments() {
     logger.debug('Navigating to past appointments page');
     Navigator.push(
@@ -337,15 +307,13 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     );
   }
 
-  /// Non-canceled appointments belonging to [subId], sorted by date ascending.
+  /// Appointments belonging to [subId], sorted by date ascending.
   List<AppointmentModel> _packageAppointments(
     _AppointmentsView view,
     String subId,
   ) {
     return view.appointments
-        .where((a) =>
-            a.subscriptionId == subId &&
-            a.status != AppointmentStatus.canceled)
+        .where((a) => a.subscriptionId == subId)
         .toList()
       ..sort((a, b) => a.appointmentDateTime.compareTo(b.appointmentDateTime));
   }
@@ -380,7 +348,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
   }
 
   /// Whether [appt] is the package's very first appointment: no meeting has
-  /// been held yet and this is the earliest non-canceled appointment of the
+  /// been held yet and this is the earliest appointment of the
   /// package.
   bool _isFirstAppointmentOfPackage(
     AppointmentModel appt,
@@ -425,7 +393,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           icon: Icons.payments_rounded,
           color: Colors.red.shade700,
           title: _paymentReminderTitle,
-          subtitle: 'Miktar: ${missing.toStringAsFixed(2)} TL',
+          subtitle: 'Miktar: ${missing.toStringAsFixed(0)} TL',
         ));
       }
     }
@@ -717,9 +685,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
 
   Widget _buildAppointmentsList(_AppointmentsView view) {
     final upcomingAppointments = view.appointments.where((appointment) {
-      return appointment.appointmentDateTime.isAfter(DateTime.now()) &&
-          appointment.status != AppointmentStatus.canceled /*&&
-          !(appointment.isDeleted ?? false)*/;
+      return appointment.appointmentDateTime.isAfter(DateTime.now());
     }).toList();
 
     if (upcomingAppointments.isEmpty) {
@@ -739,45 +705,39 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
+            // The subtitle now carries two lines, which a default ListTile is
+            // not tall enough for.
+            isThreeLine: true,
             leading: const Icon(Icons.event_note, color: Colors.deepPurple),
             title: Text(
               DateFormat('dd.MM.yyyy - HH:mm', 'tr_TR')
                   .format(appointment.appointmentDateTime),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            subtitle: Text('Görüşme Türü: ${appointment.meetingType.label}'),
-            trailing: IconButton(
-              icon: const Icon(Icons.cancel, color: Colors.red),
-              onPressed: () async {
-                bool? confirmCancel = await showDialog<bool>(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return AlertDialog(
-                      title: const Text("Randevuyu İptal Et"),
-                      content: const Text(
-                          "Bu randevuyu iptal etmek istediğinize emin misiniz?"),
-                      actions: [
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(false);
-                          },
-                          child: const Text("Hayır"),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Görüşme Türü: ${appointment.meetingType.label}'),
+                const SizedBox(height: 6),
+                // Appointments are no longer cancelled from the app. The icon
+                // is only a marker for the notice next to it, not a button.
+                Row(
+                  children: [
+                    Icon(Icons.cancel, size: 16, color: Colors.red.shade700),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'İptal için ofisi arayınız.',
+                        style: TextStyle(
+                          color: Colors.red.shade700,
+                          fontWeight: FontWeight.w600,
                         ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(true);
-                          },
-                          child: const Text("Evet"),
-                        ),
-                      ],
-                    );
-                  },
-                );
-
-                if (confirmCancel == true) {
-                  await _cancelAppointment(appointment);
-                }
-              },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         );
@@ -851,11 +811,9 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
 
       if (!mounted) return;
 
-      // Filter past appointments including canceled ones
       final now = DateTime.now();
       final pastAppointments = appointments.where((appointment) {
-        return appointment.appointmentDateTime.isBefore(now) ||
-            appointment.status == AppointmentStatus.canceled;
+        return appointment.appointmentDateTime.isBefore(now);
       }).toList();
 
       // Sort by date - most recent first
@@ -1041,11 +999,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
           backgroundColor: Colors.green,
           child: Icon(Icons.check, color: Colors.white),
         );
-      case AppointmentStatus.canceled:
-        return const CircleAvatar(
-          backgroundColor: Colors.red,
-          child: Icon(Icons.close, color: Colors.white),
-        );
       case AppointmentStatus.scheduled:
         return const CircleAvatar(
           backgroundColor: Colors.blue,
@@ -1063,8 +1016,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     switch (status) {
       case AppointmentStatus.completed:
         return 'Yapıldı';
-      case AppointmentStatus.canceled:
-        return 'İptal Edildi';
       case AppointmentStatus.scheduled:
         return 'Planlandı';
       case AppointmentStatus.burned:
@@ -1079,8 +1030,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
       case AppointmentStatus.completed:
       case AppointmentStatus.burned:
         return Colors.green;
-      case AppointmentStatus.canceled:
-        return Colors.red;
       case AppointmentStatus.scheduled:
         return Colors.blue;
       default:

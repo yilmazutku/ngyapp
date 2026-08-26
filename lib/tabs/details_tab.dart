@@ -7,6 +7,7 @@ import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// DetailsTab doesn't use filtering so it doesn't extend BaseTab
 /// It's a standalone StatefulWidget
@@ -30,6 +31,7 @@ class _DetailsTabState extends State<DetailsTab>
   final _notesController = TextEditingController();
   final _dosyaNoController = TextEditingController();
   final _tcNoController = TextEditingController();
+  final _phoneController = TextEditingController();
   // Birth date is picked with a date widget (like the appointment dialogs).
   DateTime? _birthDate;
 
@@ -70,6 +72,7 @@ class _DetailsTabState extends State<DetailsTab>
     _notesController.dispose();
     _dosyaNoController.dispose();
     _tcNoController.dispose();
+    _phoneController.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -83,6 +86,7 @@ class _DetailsTabState extends State<DetailsTab>
     _notesController.text = user.notes ?? '';
     _dosyaNoController.text = user.dosyaNo ?? '';
     _tcNoController.text = user.tcNo ?? '';
+    _phoneController.text = user.phone ?? '';
     _birthDate = user.birthDate;
   }
 
@@ -134,6 +138,7 @@ class _DetailsTabState extends State<DetailsTab>
       notes: _notesController.text.isEmpty ? null : _notesController.text,
       dosyaNo: _dosyaNoController.text.trim().isEmpty ? null : _dosyaNoController.text.trim(),
       tcNo: _tcNoController.text.trim().isEmpty ? null : _tcNoController.text.trim(),
+      phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
       birthDate: _birthDate,
     );
 
@@ -218,7 +223,8 @@ class _DetailsTabState extends State<DetailsTab>
       cancelText: 'Vazgeç',
     );
 
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
@@ -327,6 +333,7 @@ class _DetailsTabState extends State<DetailsTab>
                                   ? DateFormatter.formatNumericDate(
                                       user.birthDate!)
                                   : ''),
+                          _buildReadOnlyField('Telefon', user.phone ?? ''),
                           _buildReadOnlyField('Ad', user.name),
                           _buildReadOnlyField('Soyisim', user.surname),
                           _buildReadOnlyField('E-posta', user.email),
@@ -385,10 +392,12 @@ class _DetailsTabState extends State<DetailsTab>
                       const Text('Kullanıcı Bilgilerini Düzenle',
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       const Spacer(),
-                      IconButton(
-                        onPressed: () => setState(() => _isEditing = false),
-                        icon: const Icon(Icons.close),
+                      LabeledActionButton(
+                        dense: true,
+                        icon: Icons.close,
+                        label: 'Vazgeç',
                         tooltip: 'Düzenlemeyi İptal Et',
+                        onPressed: () => setState(() => _isEditing = false),
                       ),
                     ],
                   ),
@@ -405,6 +414,8 @@ class _DetailsTabState extends State<DetailsTab>
                           _buildEditableField('Tc No', _tcNoController,
                               keyboardType: TextInputType.number),
                           _buildBirthDatePicker(),
+                          _buildEditableField('Telefon', _phoneController,
+                              keyboardType: TextInputType.phone),
                           _buildEditableField('Ad', _nameController, required: true),
                           _buildEditableField('Soyisim', _surnameController),
                           _buildEditableField('E-posta', _emailController,
@@ -627,6 +638,10 @@ class _DetailsTabState extends State<DetailsTab>
       initialDate: _birthDate ?? DateTime(now.year - 20),
       firstDate: DateTime(1900),
       lastDate: now,
+      // Opens straight on the keyboard entry the pencil icon used to lead to:
+      // typing a birth date is faster than scrolling decades in the calendar.
+      // The calendar stays one tap away via the picker's own toggle.
+      initialEntryMode: DatePickerEntryMode.input,
     );
     if (picked != null && mounted) {
       setState(() => _birthDate = picked);

@@ -16,6 +16,7 @@ class UserModel {
   final String? notes;
   final String? dosyaNo;
   final String? tcNo;
+  final String? phone;
   final DateTime? birthDate;
 
   UserModel({
@@ -34,6 +35,7 @@ class UserModel {
     this.notes,
     this.dosyaNo,
     this.tcNo,
+    this.phone,
     this.birthDate,
   }) : createDate = createDate ?? DateTime.now(); // Use provided or current time
 
@@ -60,6 +62,7 @@ class UserModel {
       notes: data['notes'],
       dosyaNo: data['dosyaNo'],
       tcNo: data['tcNo'],
+      phone: data['phone'],
       birthDate: data['birthDate'] != null
           ? (data['birthDate'] as Timestamp).toDate()
           : null,
@@ -82,12 +85,17 @@ class UserModel {
       if (notes != null) 'notes': notes,
       if (dosyaNo != null) 'dosyaNo': dosyaNo,
       if (tcNo != null) 'tcNo': tcNo,
+      if (phone != null) 'phone': phone,
       if (birthDate != null) 'birthDate': Timestamp.fromDate(birthDate!),
     };
   }
 
+  /// "Ad Soyad" for display. Falls back to whichever half exists, so a record
+  /// missing one of them never renders a stray space.
+  String get fullName => '$name $surname'.trim();
+
   @override
   String toString() {
-    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, birthDate: $birthDate}';
+    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, phone: $phone, birthDate: $birthDate}';
   }
 }

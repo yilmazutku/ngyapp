@@ -162,6 +162,28 @@ abstract class BaseTabState<T, W extends BaseTab<T>> extends State<W>
     });
   }
 
+  /// True while a [scheduleRefresh] is already queued for the next frame.
+  bool _refreshScheduled = false;
+
+  /// Runs [refreshData] once, after the current frame.
+  ///
+  /// Provider notifications arrive synchronously inside `notifyListeners()`,
+  /// which may run while a build is in progress; [refreshData] calls setState,
+  /// and setState during build is an error. Deferring by one frame makes the
+  /// refresh safe from any caller, and the flag collapses the several
+  /// notifications a single write produces (the write's own provider plus the
+  /// subscriptions provider) into one refetch instead of two.
+  void scheduleRefresh() {
+    if (_refreshScheduled) return;
+    if (!mounted) return;
+    _refreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshScheduled = false;
+      if (!mounted) return;
+      refreshData();
+    });
+  }
+
   void refreshData() {
     if (mounted) {
       // if (widget.userId.isEmpty) {

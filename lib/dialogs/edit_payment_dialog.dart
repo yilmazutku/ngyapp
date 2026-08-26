@@ -2,7 +2,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +11,7 @@ import 'package:flutter/services.dart';
 import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
+import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
@@ -50,7 +50,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
   bool _loadingSubscriptions = true;
 
   // kept for future use
-  final bool _enableNotifications = false;
   final DateFormat df=DateFormat('dd.MM.yyyy', 'tr_TR');
   // Subscription selection
   List<SubscriptionModel> _availableSubscriptions = [];
@@ -219,8 +218,8 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                   final pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedDueDate ?? now, // <- preserves previous
-                    firstDate: now.subtract(const Duration(days: 365)),
-                    lastDate: now.add(const Duration(days: 365)),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   // Keep the previously selected date if the user cancels.
                   if (pickedDate != null) {
@@ -248,8 +247,8 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                   final pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedPaymentDate ?? DateTime.now(), // <- preserves previous
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   // Keep the previously selected date if the user cancels.
                   if (pickedDate != null) {
@@ -274,6 +273,19 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
                   ? Image.network(widget.payment.dekontUrl!, height: 100)
                   : const Text('Dekont Görseli Seçilmedi'),
             ],
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: isLoading ? null : _deletePayment,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Ödemeyi Sil'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -291,6 +303,57 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
         if (isLoading) const LoadingOverlay(message: 'Ödeme güncelleniyor...'),
       ],
     );
+  }
+
+  /// Deletes the payment for good, after an explicit confirmation.
+  ///
+  /// PaymentProvider takes the amount back off the linked package when the
+  /// deleted payment was a completed one (see deletePayment).
+  Future<void> _deletePayment() async {
+    final formattedAmount =
+        NumberFormat('#,##0', 'tr_TR').format(widget.payment.amount);
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Ödeme Sil',
+      message: '$formattedAmount ₺ tutarındaki ${widget.payment.status.label} '
+          'ödeme kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\n'
+          'Silmek istediğinizden emin misiniz?',
+      confirmText: 'Evet, Sil',
+      cancelText: 'Vazgeç',
+    );
+    if (!confirmed) return;
+    if (!mounted) return;
+
+    startLoading();
+    try {
+      final paymentProvider =
+          Provider.of<PaymentProvider>(context, listen: false);
+      await paymentProvider.deletePayment(
+        widget.payment.paymentId,
+        widget.payment.userId,
+      );
+
+      if (!mounted) return;
+      widget.onPaymentUpdated();
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Ödeme silindi.',
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      logger.err('Error deleting payment ${widget.payment.paymentId}: {}', [e]);
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Ödeme silinirken bir hata oluştu: $e',
+      );
+    } finally {
+      if (mounted) stopLoading();
+    }
   }
 
   /// TR/EN-friendly numeric parser.
@@ -398,7 +461,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
     final oldPaymentDate = oldPayment.paymentDate;
     final oldDueDate = oldPayment.dueDate;
     final oldDekontUrl = oldPayment.dekontUrl;
-    final oldSubsId=oldPayment.subscriptionId;
     final oldPaymentDateStr =
     oldPaymentDate != null ? df.format(oldPaymentDate) : 'null';
     final oldDueDateStr =
@@ -419,89 +481,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
     logger.info('- Dekont Image: ${oldDekontUrl != null ? "Present" : "None"} -> ${_dekontImage != null ? "New image selected" : (oldDekontUrl != null ? "Unchanged" : "None")}');
     if (oldPayment.subscriptionId != null) {
       logger.info('- Associated subscription: ${oldPayment.subscriptionId}');
-    }
-
-    // Get subscription names for display
-    String? oldSubName;
-    String? newSubName;
-    if (oldSubsId != null) {
-      try {
-        final oldSub = _availableSubscriptions.firstWhere(
-          (s) => s.subscriptionId == oldSubsId,
-        );
-        oldSubName = oldSub.packageName;
-      } catch (e) {
-        oldSubName = 'Silinmiş Paket';
-        logger.warn('Old subscription $oldSubsId not found in available subscriptions');
-      }
-    }
-    if (_selectedSubscriptionId != null) {
-      try {
-        final newSub = _availableSubscriptions.firstWhere(
-          (s) => s.subscriptionId == _selectedSubscriptionId,
-        );
-        newSubName = newSub.packageName;
-      } catch (e) {
-        newSubName = 'Bilinmeyen Paket';
-        logger.warn('Selected subscription $_selectedSubscriptionId not found in available subscriptions');
-      }
-    }
-
-    // Confirm
-    final shouldUpdate = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Güncelle'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Aşağıdaki değişiklikleri yapmak istediğinizden emin misiniz?'),
-                const SizedBox(height: 16),
-                Text('Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL'),
-                Text('Durum: ${_paymentStatus.label}'),
-                Text('Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}'),
-                if (_selectedSubscriptionId != null)
-                  Text('Bağlı Paket: $newSubName')
-                else
-                  const Text('Bağlı Paket: Yok'),
-                if (_selectedSubscriptionId!=oldSubsId)
-                  Text(
-                    'Paket Değişti: ${oldSubName ?? "Yok"} → ${newSubName ?? "Yok"}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
-                  ),
-                if (_selectedDueDate != null)
-                  Text(
-                    'Planlanan Tarih: ${df.format(_selectedDueDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_selectedPaymentDate != null)
-                  Text(
-                    'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-    if (shouldUpdate != true) {
-      logger.info('Payment update cancelled by user for payment ${oldPayment.paymentId}');
-      return;
     }
 
     startLoading();
@@ -548,7 +527,10 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
         notificationTimes: widget.payment.notificationTimes,
       );
 
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
+      final subProvider = paymentProvider.subProvider;
       logger.info('Updating payment in database...');
       await paymentProvider.updatePayment(updatedPayment);
       logger.info('Payment ${updatedPayment.paymentId} updated successfully in database');
@@ -563,120 +545,53 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
           // Step 1: Remove amount from old subscription if it was completed
           if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
             logger.info('Removing amount from old subscription $oldSubscriptionId');
-            try {
-              final oldSubDoc = await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(widget.payment.userId)
-                  .collection('subscriptions')
-                  .doc(oldSubscriptionId)
-                  .get();
-
-              if (oldSubDoc.exists) {
-                final oldSubData = oldSubDoc.data() as Map<String, dynamic>;
-                double currentAmountPaid = (oldSubData['amountPaid'] ?? 0).toDouble();
-                double newAmountPaid = (currentAmountPaid - oldAmount).clamp(0, double.infinity);
-                
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.payment.userId)
-                    .collection('subscriptions')
-                    .doc(oldSubscriptionId)
-                    .update({'amountPaid': newAmountPaid});
-                
-                logger.info('Updated old subscription $oldSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (removed $oldAmount)');
-              } else {
-                logger.warn('Old subscription $oldSubscriptionId not found in database');
-              }
-            } catch (e) {
-              logger.err('Error updating old subscription $oldSubscriptionId: {}', [e]);
-            }
+            await subProvider.adjustAmountPaid(
+              userId: widget.payment.userId,
+              subscriptionId: oldSubscriptionId,
+              delta: -oldAmount,
+            );
           }
           
           // Step 2: Add amount to new subscription if it is completed
           if (newSubscriptionId != null && _paymentStatus == PaymentStatus.completed) {
             logger.info('Adding amount to new subscription $newSubscriptionId');
-            try {
-              final newSubDoc = await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(widget.payment.userId)
-                  .collection('subscriptions')
-                  .doc(newSubscriptionId)
-                  .get();
-
-              if (newSubDoc.exists) {
-                final newSubData = newSubDoc.data() as Map<String, dynamic>;
-                double currentAmountPaid = (newSubData['amountPaid'] ?? 0).toDouble();
-                double adjustedAmountPaid = currentAmountPaid + newAmount;
-                
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.payment.userId)
-                    .collection('subscriptions')
-                    .doc(newSubscriptionId)
-                    .update({'amountPaid': adjustedAmountPaid});
-                
-                logger.info('Updated new subscription $newSubscriptionId amountPaid from $currentAmountPaid to $adjustedAmountPaid (added $newAmount)');
-              } else {
-                logger.warn('New subscription $newSubscriptionId not found in database');
-              }
-            } catch (e) {
-              logger.err('Error updating new subscription $newSubscriptionId: {}', [e]);
-            }
+            await subProvider.adjustAmountPaid(
+              userId: widget.payment.userId,
+              subscriptionId: newSubscriptionId,
+              delta: newAmount,
+            );
           }
         } else if (newSubscriptionId != null) {
           // Same subscription, but amount or status changed
           logger.info('Same subscription - adjusting amount for subscription $newSubscriptionId');
-          try {
-            final subDoc = await FirebaseFirestore.instance
-                .collection('users')
-                .doc(widget.payment.userId)
-                .collection('subscriptions')
-                .doc(newSubscriptionId)
-                .get();
 
-            if (subDoc.exists) {
-              final subData = subDoc.data() as Map<String, dynamic>;
-              double currentAmountPaid = (subData['amountPaid'] ?? 0).toDouble();
-              
-              double adjustmentAmount = 0;
-              if (statusChanged) {
-                if (_paymentStatus == PaymentStatus.completed && oldStatus != PaymentStatus.completed) {
-                  adjustmentAmount = newAmount;
-                  logger.info('Status changed to completed - adding full amount $newAmount');
-                } else if (_paymentStatus != PaymentStatus.completed && oldStatus == PaymentStatus.completed) {
-                  adjustmentAmount = -oldAmount;
-                  logger.info('Status changed from completed - subtracting old amount $oldAmount');
-                }
-              } else if (_paymentStatus == PaymentStatus.completed && amountDifference != 0) {
-                adjustmentAmount = amountDifference;
-                logger.info('Amount changed for completed payment - adjusting by $amountDifference');
-              }
-              
-              if (adjustmentAmount != 0) {
-                final newAmountPaid = (currentAmountPaid + adjustmentAmount).clamp(0, double.infinity);
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.payment.userId)
-                    .collection('subscriptions')
-                    .doc(newSubscriptionId)
-                    .update({'amountPaid': newAmountPaid});
-                
-                logger.info('Adjusted subscription $newSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (adjustment: $adjustmentAmount)');
-              }
-            } else {
-              logger.warn('Subscription $newSubscriptionId not found in database');
+          double adjustmentAmount = 0;
+          if (statusChanged) {
+            if (_paymentStatus == PaymentStatus.completed && oldStatus != PaymentStatus.completed) {
+              adjustmentAmount = newAmount;
+              logger.info('Status changed to completed - adding full amount $newAmount');
+            } else if (_paymentStatus != PaymentStatus.completed && oldStatus == PaymentStatus.completed) {
+              adjustmentAmount = -oldAmount;
+              logger.info('Status changed from completed - subtracting old amount $oldAmount');
             }
-          } catch (e) {
-            logger.err('Error adjusting subscription $newSubscriptionId: {}', [e]);
+          } else if (_paymentStatus == PaymentStatus.completed && amountDifference != 0) {
+            adjustmentAmount = amountDifference;
+            logger.info('Amount changed for completed payment - adjusting by $amountDifference');
           }
+
+          await subProvider.adjustAmountPaid(
+            userId: widget.payment.userId,
+            subscriptionId: newSubscriptionId,
+            delta: adjustmentAmount,
+          );
         }
       }
 
       // The subscription's amountPaid may have changed in the adjustment block
-      // above (written directly to Firestore). updatePayment() already notified
-      // SubProvider, but that fired BEFORE these writes, so notify again now to
-      // guarantee the subscriptions tab refetches and shows the updated amount.
-      paymentProvider.subProvider.markChanged();
+      // above. updatePayment() already notified SubProvider, but that fired
+      // BEFORE these writes, so notify again now to guarantee the subscriptions
+      // tab refetches and shows the updated amount.
+      subProvider.markChanged();
 
       logger.info('Payment update completed successfully:');
       logger.info('- Final Amount: $newAmount');
@@ -686,17 +601,10 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
 
       widget.onPaymentUpdated();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
-          message: 'Ödeme başarıyla güncellendi.\n\n'
-              'Miktar: ${NumberFormat.decimalPattern('tr_TR').format(newAmount)} TL\n'
-              'Durum: ${_paymentStatus.label}\n'
-              'Ödeme Türü: ${(_paymentType ?? PaymentType.na).label}\n'
-              '${newSubName != null ? 'Bağlı Paket: $newSubName\n' : 'Bağlı Paket: Yok\n'}'
-              '${_selectedDueDate != null ? 'Planlanan Tarih: ${df.format(_selectedDueDate!)}\n' : ''}'
-              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}\n' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {

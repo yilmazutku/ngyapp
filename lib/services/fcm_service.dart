@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -43,6 +44,11 @@ class FcmService {
   
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  /// Registered once. saveFcmToken() runs again on every login, so subscribing
+  /// from there stacked a new listener per login and wrote the refreshed token
+  /// once per stacked listener.
+  StreamSubscription<String>? _tokenRefreshSub;
 
   // ===== Notification Configuration Flags =====
   
@@ -491,19 +497,26 @@ class FcmService {
 
       _logger.info('FCM token saved for user ${user.uid}');
 
-      // Listen for token refresh
-      _messaging.onTokenRefresh.listen((newToken) async {
-        _logger.info('FCM token refreshed');
-        final currentUser = _auth.currentUser;
-        if (currentUser == null) return;
-        
-        await _firestore.collection('users').doc(currentUser.uid).set({
-          'fcmToken': newToken,
-        }, SetOptions(merge: true));
-      });
+      _listenForTokenRefresh();
     } catch (e) {
       _logger.err('Error saving FCM token: $e');
     }
+  }
+
+  /// Keeps the stored token in sync when FCM rotates it. Idempotent: only the
+  /// first call subscribes.
+  void _listenForTokenRefresh() {
+    if (_tokenRefreshSub != null) return;
+
+    _tokenRefreshSub = _messaging.onTokenRefresh.listen((newToken) async {
+      _logger.info('FCM token refreshed');
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) return;
+
+      await _firestore.collection('users').doc(currentUser.uid).set({
+        'fcmToken': newToken,
+      }, SetOptions(merge: true));
+    });
   }
 
   /// Remove FCM token from Firestore for current user.

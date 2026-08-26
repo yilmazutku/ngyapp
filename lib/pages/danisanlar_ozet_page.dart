@@ -5,14 +5,18 @@ import '../models/customer_summary_row.dart';
 import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../providers/customer_summary_provider.dart';
+import '../providers/user_provider.dart';
+import '../utils/dialog_utils.dart';
+import 'customer_sum.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(DanisanlarOzetPage);
 
 /// Admin overview: customers grouped by subscription status. The first tab
 /// lists everyone with an *active* subscription; the second lists everyone
-/// with a *frozen* (Donduruldu) subscription. Each row shows the latest
-/// payment (date / amount / type), the package, and up to
-/// [CustomerSummaryRow.maxSeans] session (seans) dates.
+/// with a *frozen* (Donduruldu) subscription. Each row shows that
+/// subscription's latest payment (date / amount / type), the package, and up
+/// to [CustomerSummaryRow.maxSeans] session (seans) dates.
 class DanisanlarOzetPage extends StatefulWidget {
   const DanisanlarOzetPage({super.key});
 
@@ -56,9 +60,9 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
         backgroundColor: Colors.blue.shade800,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Yenile',
+          LabeledActionButton(
+            icon: Icons.refresh,
+            label: 'Yenile',
             onPressed: _refreshCurrent,
           ),
         ],
@@ -327,8 +331,13 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         DataCell(
           Text(
             row.fullName,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.blue.shade800,
+              decoration: TextDecoration.underline,
+            ),
           ),
+          onTap: () => _openCustomerDetails(row),
         ),
         if (widget.showPayment) ...[
           _cell(row.paymentDate),
@@ -345,6 +354,67 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         _cell(row.remainingPostponements),
       ],
     );
+  }
+
+  /// Opens the customer's own page on its "Detay" tab. Pushed on top of this
+  /// page, so its back button returns here; opened from anywhere else it
+  /// returns to whatever pushed it.
+  Future<void> _openCustomerDetails(CustomerSummaryRow row) async {
+    // The summary row only carries the id, and the customer page needs the full
+    // user record for its header.
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: 'Danışan açılıyor...');
+      loadingOpen = true;
+    }
+
+    void closeLoading() {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+    }
+
+    try {
+      final user = await userProvider.fetchUserDetails(userId: row.userId);
+      closeLoading();
+      if (!mounted) return;
+
+      if (user == null) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: '${row.fullName} için danışan kaydı bulunamadı.',
+        );
+        return;
+      }
+
+      logger.info('Opening customer details from summary: userId={}', [row.userId]);
+      // The details tab pops back with the deleted user's id when the admin
+      // removes them, so the row is dropped here instead of leaving a customer
+      // listed who no longer exists.
+      final deletedUserId = await Navigator.push<Object?>(
+        context,
+        MaterialPageRoute(builder: (_) => CustomerSummaryPage(user: user)),
+      );
+      if (!mounted) return;
+      if (deletedUserId is String && deletedUserId.isNotEmpty) {
+        setState(() {
+          _rows = _rows.where((r) => r.userId != deletedUserId).toList();
+        });
+      }
+    } catch (e) {
+      logger.err('Could not open customer details for {}: {}', [row.userId, e]);
+      closeLoading();
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Danışan bilgileri açılırken bir hata oluştu: $e',
+      );
+    }
   }
 
   DataCell _cell(SummaryCell cell) {

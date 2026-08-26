@@ -13,6 +13,7 @@ import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
+import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/loading_overlay.dart';
 
@@ -92,9 +93,6 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
   final ImagePicker _picker = ImagePicker();
 
   // New variables for notifications
-  final bool _enableNotifications = false;
-  final List<bool> _notificationOptions = [false, false, false, false];
-  final List<int> _notificationTimes = [72, 48, 24, 6]; // Hours before due date
 
   @override
   Widget build(BuildContext context) {
@@ -228,8 +226,8 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                   DateTime? pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedDueDate ?? DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime(2030),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   if (pickedDate != null) {
                     setState(() {
@@ -256,8 +254,8 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                   DateTime? pickedDate = await showDatePicker(
                     context: context,
                     initialDate: _selectedPaymentDate ?? DateTime.now(),
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
+                    firstDate: kPaymentDateFirst,
+                    lastDate: kPaymentDateLast,
                   );
                   // Keep the previously selected date if the user cancels.
                   if (pickedDate != null) {
@@ -289,7 +287,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
               child: const Text('İptal'),
             ),
             ElevatedButton(
-              onPressed: isLoading ? null : () => _addPayment(context),
+              onPressed: isLoading ? null : _addPayment,
               child: const Text('Ödeme Ekle'),
             ),
           ],
@@ -311,7 +309,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
     });
   }
 
-  Future<void> _addPayment(BuildContext context) async {
+  Future<void> _addPayment() async {
     if (_amountController.text.isEmpty) {
       logger.err('_addPayment: Amount is required.');
       if (mounted) {
@@ -350,52 +348,6 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
     
     // Subscription is now optional - "paketsiz ödeme" is allowed
 
-    // Show confirmation dialog
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Ödeme Ekle'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                  'Aşağıdaki ödemeyi eklemek istediğinizden emin misiniz?'),
-              const SizedBox(height: 16),
-              Text('Miktar: ${_amountController.text} TL'),
-              Text('Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}'),
-              Text('Durum: ${_paymentStatus.label}'),
-              Text('Ödeme Türü: ${_paymentType.label}'),
-              if (_selectedDueDate != null)
-                Text(
-                  'Planlanan Tarih: ${df.format(_selectedDueDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_selectedPaymentDate != null)
-                Text(
-                  'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              if (_dekontImage != null) const Text('Dekont: Yüklendi'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('İptal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Evet'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldSave != true) return;
-
     startLoading();
 
     try {
@@ -418,39 +370,31 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
 
       // Update subscription's amountPaid if a subscription is selected and payment is completed
       if (_selectedSubscription != null && _paymentStatus == PaymentStatus.completed) {
-        // Get the current subscription to update
         final subscriptionId = _selectedSubscription!.subscriptionId;
-        
-        // Calculate new amount paid
-        final newAmountPaid = _selectedSubscription!.amountPaid + paymentAmount;
-        
-        // Update the amountPaid field using provider
+
+        // The delta is applied against the stored total, so a concurrently
+        // recorded payment is not overwritten by this (possibly stale) model.
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final subProvider = Provider.of<SubProvider>(context, listen: false);
-        await subProvider.updateAmountPaid(
+        await subProvider.adjustAmountPaid(
           userId: widget.userId,
           subscriptionId: subscriptionId,
-          amountPaid: newAmountPaid,
+          delta: paymentAmount,
         );
-        
-        // Update local model to reflect the changes
-        _selectedSubscription!.amountPaid = newAmountPaid;
-            
-        logger.info('Updated subscription $subscriptionId amountPaid to $newAmountPaid');
+
+        // Keep the local model roughly in step for the rest of this dialog.
+        _selectedSubscription!.amountPaid += paymentAmount;
+
+        logger.info('Added $paymentAmount to subscription $subscriptionId amountPaid');
       }
 
       widget.onPaymentAdded();
       if (mounted) {
-        Navigator.of(context).pop();
-        await DialogUtils.openInfo(
+        await DialogUtils.popThenInfo(
           context,
           title: 'Başarılı',
-          message: 'Ödeme başarıyla eklendi.\n\n'
-              'Miktar: ${_amountController.text} TL\n'
-              'Bağlı Paket: ${_selectedSubscription?.packageName ?? "Yok"}\n'
-              'Durum: ${_paymentStatus.label}\n'
-              'Ödeme Türü: ${_paymentType.label}\n'
-              '${_selectedDueDate != null ? 'Planlanan Tarih: ${df.format(_selectedDueDate!)}\n' : ''}'
-              '${_selectedPaymentDate != null ? 'Ödeme Tarihi: ${df.format(_selectedPaymentDate!)}\n' : ''}',
+          message: 'İşlem Başarılı.',
         );
       }
     } catch (e) {

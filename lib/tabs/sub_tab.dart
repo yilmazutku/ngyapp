@@ -14,6 +14,7 @@ import '../providers/appointment_manager.dart';
 import '../utils/dialog_utils.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
+import '../widgets/labeled_action_button.dart';
 final Logger logger = Logger.forClass(SubscriptionsTab);
 class SubscriptionsTab extends BaseTab<SubProvider> {
   const SubscriptionsTab({super.key, required super.userId})
@@ -38,8 +39,11 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   late final ValueNotifier<SubActiveStatus?> _tempStatusVN;
 
   // Provider + scroll
-  late final SubProvider _subProvider;
-  late final AppointmentManager _appointmentManager;
+  // Both are resolved from a post-frame callback, so they stay nullable: the
+  // tab can be disposed (or a fetch can start) before that callback runs, and
+  // neither dispose() nor a fetch may trip over an unassigned late field.
+  SubProvider? _subProvider;
+  AppointmentManager? _appointmentManager;
   final ScrollController _listCtrl = ScrollController();
   
   // Cache for subscription appointments
@@ -63,31 +67,30 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
 
     // Hook provider after first frame so context is ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _subProvider = context.read<SubProvider>();
+      if (!mounted) return;
+      final provider = context.read<SubProvider>();
+      _subProvider = provider;
       _appointmentManager = context.read<AppointmentManager>();
-      _subProvider.addListener(_onSubChanged);
+      provider.addListener(_onSubChanged);
     });
   }
 
   void _onSubChanged() {
-    if (_subProvider.subChanged) {
-      _subProvider.resetSubChanged();
-      // Clear appointment cache before refreshing to prevent duplicates
-      _subscriptionAppointments.clear();
-      refreshData(); // triggers one rebuild for the list only
-    }
+    final provider = _subProvider;
+    if (provider == null || !provider.subChanged) return;
+    provider.resetSubChanged();
+    // Clear appointment cache before refreshing to prevent duplicates
+    _subscriptionAppointments.clear();
+    // Deferred: this runs inside notifyListeners(), which a write can fire
+    // while a build is in progress.
+    scheduleRefresh();
   }
 
   @override
   void dispose() {
     _listCtrl.dispose();
     _subscriptionAppointments.clear();
-    // _subProvider is set in a post-frame callback; guard it
-    try {
-      _subProvider.removeListener(_onSubChanged);
-    } catch (_) {
-      // no-op if not attached yet
-    }
+    _subProvider?.removeListener(_onSubChanged);
     _tempStatusVN.dispose();
     super.dispose();
   }
@@ -112,7 +115,9 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       if (_subscriptionAppointments.containsKey(cacheKey)) return;
       
       try {
-        final appointments = await _appointmentManager.fetchAppointments(
+        final manager =
+            _appointmentManager ?? context.read<AppointmentManager>();
+        final appointments = await manager.fetchAppointments(
           sub.subscriptionId,
           userId: sub.userId,
           showAllAppointments: false,
@@ -419,7 +424,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => _showEditSubscriptionDialog(context, s),
+        onTap: () => _showEditSubscriptionDialog(s),
         child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -477,27 +482,35 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                 _buildStatusBadge(s.status),
               ]),
             ),
-            Row(children: [
-              Tooltip(
-                message: 'Toplu Ödeme/Randevu Ekle',
-                child: TextButton.icon(
-                  style: TextButton.styleFrom(foregroundColor: Colors.green),
-                  icon: const Icon(Icons.playlist_add),
-                  label: const Text('Toplu Ekle'),
+            // Wrap, not Row: on a narrow phone three labelled buttons drop
+            // onto a second line instead of overflowing.
+            Wrap(
+              alignment: WrapAlignment.end,
+              children: [
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.playlist_add,
+                  label: 'Toplu Ekle',
+                  tooltip: 'Toplu Ödeme/Randevu Ekle',
+                  foregroundColor: Colors.green,
                   onPressed: () => _openBulkAdd(context, s),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.edit, color: Colors.blue),
-                tooltip: 'Düzenle',
-                onPressed: () => _showEditSubscriptionDialog(context, s),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                tooltip: 'Sil',
-                onPressed: () => _showDeleteConfirmationDialog(context, s),
-              ),
-            ]),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.edit,
+                  label: 'Düzenle',
+                  foregroundColor: Colors.blue,
+                  onPressed: () => _showEditSubscriptionDialog(s),
+                ),
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.delete,
+                  label: 'Sil',
+                  foregroundColor: Colors.red,
+                  onPressed: () => _showDeleteConfirmationDialog(s),
+                ),
+              ],
+            ),
           ]),
 
           if (noPostponeLeft && s.allowedPostponements > 0)
@@ -586,14 +599,14 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
               children: [
                 const Text('Ödeme Bilgisi: ', style: TextStyle(fontWeight: FontWeight.bold)),
                 Text(
-                  '${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.amountPaid)} / ',
+                  '${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 0).format(s.amountPaid)} / ',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: s.amountPaid < s.totalAmount ? Colors.red : Colors.green,
                   ),
                 ),
                 Text(
-                  NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount),
+                  NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 0).format(s.totalAmount),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
@@ -615,7 +628,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                     Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 16),
                     const SizedBox(width: 4),
                     Text(
-                      'Eksik Ödeme: ${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 2).format(s.totalAmount - s.amountPaid)}',
+                      'Eksik Ödeme: ${NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 0).format(s.totalAmount - s.amountPaid)}',
                       style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ],
@@ -686,7 +699,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                     }).toList(),
                   ),
                 
-                // Show more button if >5 visible appointments OR has other statuses (burned/canceled/postponed)
+                // Show more button if >5 visible appointments OR has other statuses (burned/postponed)
                 if (showMoreButton) ...[
                   const SizedBox(height: 4),
                   TextButton(
@@ -723,7 +736,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     });
   }
 
-  Future<void> _showEditSubscriptionDialog(BuildContext context, SubscriptionModel s) async {
+  Future<void> _showEditSubscriptionDialog(SubscriptionModel s) async {
     try {
       if (!mounted) return;
       await showDialog(
@@ -742,7 +755,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
     }
   }
 
-  Future<void> _showDeleteConfirmationDialog(BuildContext context, SubscriptionModel s) async {
+  Future<void> _showDeleteConfirmationDialog(SubscriptionModel s) async {
     try {
       final confirmed = await DialogUtils.openConfirm(
         context,
@@ -792,7 +805,8 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   }
   
   void _showAllAppointments(BuildContext context, SubscriptionModel subscription, List<AppointmentModel> appointments) {
-    if (appointments.isEmpty || !mounted) return;
+    if (appointments.isEmpty) return;
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

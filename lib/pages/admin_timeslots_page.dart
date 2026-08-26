@@ -12,6 +12,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/time_picker_utils.dart';
 import '../models/time_range_config.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(AdminTimeSlotsPage);
 
@@ -558,7 +559,8 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
 
                 final existingSlots = newTimeSlots.where((s) => storedTimes.contains(s)).toList();
                 if (existingSlots.isNotEmpty) {
-                  if (!mounted) return;
+                  // The dialog builder's own context, not the State's.
+                  if (!context.mounted) return;
                   await DialogUtils.openError(
                     context,
                     title: 'Hata',
@@ -572,7 +574,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                 }).toList();
 
                 if (bookedSlots.isNotEmpty) {
-                  if (!mounted) return;
+                  if (!context.mounted) return;
                   await DialogUtils.openError(
                     context,
                     title: 'Hata',
@@ -592,7 +594,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                   Navigator.of(context).pop();
                 } catch (e) {
                   logger.err('Error in saving timeslots. {}', [e]);
-                  if (!mounted) return;
+                  if (!context.mounted) return;
                   await DialogUtils.openError(
                     context,
                     title: 'Hata',
@@ -668,7 +670,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                   updated[idx] = newTime;
                   _sortSlotsChronologically(updated);
                   final success = await _saveTimeSlotsWithErrorHandling(updated);
-                  if (success && mounted) Navigator.pop(context);
+                  if (success && context.mounted) Navigator.pop(context);
                 } else {
                   await _showErrorDialog(
                     'Hata',
@@ -711,7 +713,9 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                   return;
                 }
 
-                // Close the confirmation dialog first
+                // Close the confirmation dialog first. Guarded on the
+                // dialog's own context, which is the one being popped.
+                if (!dialogContext.mounted) return;
                 Navigator.pop(dialogContext);
 
                 final updated = List<String>.from(storedTimes)..remove(time);
@@ -928,9 +932,9 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
             children: [
-              IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: 'Seçimi İptal',
+              LabeledActionButton(
+                icon: Icons.close,
+                label: 'Seçimi İptal',
                 onPressed: _toggleBulkSelectMode,
               ),
               Expanded(
@@ -1623,7 +1627,8 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
       );
 
       // User cancelled date picker
-      if (sourceDate == null || !mounted) return;
+      if (sourceDate == null) return;
+      if (!mounted) return;
 
       // Don't allow copying from the same day
       if (_sameYMD(sourceDate, _selectedDate)) {
@@ -1878,10 +1883,10 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                 ),
               ],
             ),
-            trailing: IconButton(
-              icon: Icon(_showCalendar ? Icons.expand_less : Icons.expand_more, size: 32),
+            trailing: LabeledActionButton(
+              icon: _showCalendar ? Icons.expand_less : Icons.expand_more,
+              label: _showCalendar ? 'Takvimi Gizle' : 'Takvimi Göster',
               onPressed: () => setState(() => _showCalendar = !_showCalendar),
-              tooltip: _showCalendar ? 'Takvimi Gizle' : 'Takvimi Göster',
             ),
           ),
           if (_showCalendar)

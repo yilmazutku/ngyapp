@@ -13,15 +13,19 @@ final Logger logger = Logger.forClass(CustomerSummaryProvider);
 
 /// Aggregates, for every non-admin customer that owns a subscription with a
 /// given status (e.g. Aktif/Haftalık, Aktif/Kilo Takip, Donduruldu), the data
-/// needed by the "Danışanlar Özet" overview page: last payment (date / amount
-/// / type), the package name, and up to [CustomerSummaryRow.maxSeans] session
-/// (appointment) dates.
+/// needed by the "Danışanlar Özet" overview page: the last payment of that
+/// package (date / amount / type), the package name, and up to
+/// [CustomerSummaryRow.maxSeans] session (appointment) dates.
+///
+/// Every cell in a row describes the *same* subscription — payments included —
+/// so the overview cannot disagree with the package's own detail view.
 ///
 /// All Firestore access lives here (per project provider convention); the UI
 /// only renders the returned [CustomerSummaryRow]s.
 class CustomerSummaryProvider extends ChangeNotifier {
   final DateFormat _dateFormat = DateFormat('dd.MM.yyyy');
-  final NumberFormat _amountFormat = NumberFormat('#,##0.##', 'tr_TR');
+  // Whole lira: payment amounts are never entered with a decimal part.
+  final NumberFormat _amountFormat = NumberFormat('#,##0', 'tr_TR');
 
   CollectionReference<Map<String, dynamic>> get _usersRef =>
       FirebaseFirestore.instance.collection('users');
@@ -60,11 +64,21 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Returns a row for [user] if they have a subscription with [status],
-  /// otherwise null. Per-section failures degrade to "Hata" cells rather than
-  /// dropping the whole customer.
+  /// Returns a row for [user] when they own a package with [status], otherwise
+  /// null — the customer is then simply not listed on that tab.
+  ///
+  /// İş kuralı: bir danışanın aynı anda yalnızca **bir** aktif paketi olur.
+  /// Sayfanın mantığı bunun üzerine kurulur: önce o tek paket bulunur, satırın
+  /// geri kalanı yalnızca ondan türetilir — ödeme, seans, ertelenen randevular,
+  /// kalan erteleme hakkı, dondurulma tarihi. Danışana ait olup **bu pakete ait
+  /// olmayan** hiçbir veri satıra giremez; paketten bağımsız tek alanlar
+  /// danışanın kimliğidir (dosya no, ad-soyad).
+  ///
+  /// Per-section failures degrade to "Hata" cells rather than dropping the
+  /// whole customer.
   Future<CustomerSummaryRow?> _buildRowForCustomer(
       UserModel user, SubActiveStatus status) async {
+    // Satırın var olma koşulu: bu durumda bir paket olmalı.
     final SubscriptionModel? activeSub =
         await _findSubscriptionByStatus(user.userId, status);
     if (activeSub == null) return null;
@@ -106,9 +120,14 @@ class CustomerSummaryProvider extends ChangeNotifier {
       freezeDateCell = const SummaryCell.empty();
     }
 
-    final payment = await _resolveLastPayment(user.userId);
-    final appts =
-        await _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
+    // Payments and appointments are unrelated queries, so they are issued
+    // together instead of costing two sequential round trips per customer.
+    final paymentFuture =
+        _resolveLastPayment(user.userId, activeSub.subscriptionId);
+    final apptFuture =
+        _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
+    final payment = await paymentFuture;
+    final appts = await apptFuture;
 
     // Remaining postponement rights for the active subscription. Computed from
     // user-originated postponements only (admin postponements do not reduce the
@@ -133,8 +152,12 @@ class CustomerSummaryProvider extends ChangeNotifier {
     );
   }
 
-  /// Finds the customer's subscription with [status] (most recent by start date
-  /// when several match). Returns null when none matches.
+  /// The customer's single package with [status], or null when they have none.
+  ///
+  /// İş kuralı gereği bu sorgu en fazla bir paket döndürmeli
+  /// ([SubActiveStatus.isActive] belgesine bakın). Birden fazla çıkıyorsa veri
+  /// bozuktur: durum uyarı olarak loglanır ve sayfanın kararlı kalması için
+  /// başlangıç tarihi en yeni olan paket kullanılır.
   Future<SubscriptionModel?> _findSubscriptionByStatus(
       String userId, SubActiveStatus status) async {
     try {
@@ -158,6 +181,23 @@ class CustomerSummaryProvider extends ChangeNotifier {
       if (subs.isEmpty) return null;
 
       subs.sort((a, b) => b.startDate.compareTo(a.startDate));
+
+      if (subs.length > 1) {
+        // Tek aktif paket kuralı bozulmuş: hangi paketlerin çakıştığını yaz ki
+        // veri düzeltilebilsin. Satır en yeni paketle kurulmaya devam eder.
+        logger.warn(
+          'Tek paket kuralı bozuldu: user={} durum={} paket sayısı={} ({}). '
+          'En yenisi kullanılıyor: {}',
+          [
+            userId,
+            status.label,
+            subs.length,
+            subs.map((s) => s.subscriptionId).join(', '),
+            subs.first.subscriptionId,
+          ],
+        );
+      }
+
       return subs.first;
     } catch (e) {
       logger.err('Error fetching {} subscription for user {}: {}',
@@ -166,19 +206,35 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Resolves the most recent completed payment into display cells.
-  /// - No completed payment => empty cells (nothing to show yet).
+  /// Resolves the most recent completed payment *of the row's package* into
+  /// display cells.
+  ///
+  /// The lookup is deliberately scoped to [subscriptionId]: a payment made for
+  /// an earlier package — or a "Paketsiz" one — is not this package's payment,
+  /// and showing it here made an unpaid package look paid while its own detail
+  /// still (correctly) reported "Eksik Ödeme".
+  /// - No completed payment on this package => empty cells (nothing paid yet).
   /// - Completed payment with no payment date => "Hata" for the date cell.
-  Future<_PaymentCells> _resolveLastPayment(String userId) async {
+  Future<_PaymentCells> _resolveLastPayment(
+      String userId, String subscriptionId) async {
     try {
-      final snap =
-          await _usersRef.doc(userId).collection('payments').get();
+      // A single equality filter needs no composite index, and a package only
+      // ever carries a handful of payments, so the status narrowing is done
+      // here instead of as a second server-side filter.
+      final snap = await _usersRef
+          .doc(userId)
+          .collection('payments')
+          .where('subscriptionId', isEqualTo: subscriptionId)
+          .get();
 
       final completed = <PaymentModel>[];
       for (final doc in snap.docs) {
         try {
-          final p = PaymentModel.fromDocument(doc);
-          if (p.status == PaymentStatus.completed) completed.add(p);
+          final payment = PaymentModel.fromDocument(doc);
+          // Planned ("Planlandı") payments are money that has not arrived yet.
+          if (payment.status == PaymentStatus.completed) {
+            completed.add(payment);
+          }
         } catch (e) {
           logger.warn('Skipping malformed payment {} for user {}: {}',
               [doc.id, userId, e]);
@@ -204,7 +260,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       return _PaymentCells(date: dateCell, amount: amountCell, type: typeCell);
     } catch (e) {
-      logger.err('Error resolving last payment for user {}: {}', [userId, e]);
+      logger.err('Error resolving last payment for user {} sub {}: {}',
+          [userId, subscriptionId, e]);
       return const _PaymentCells.error();
     }
   }

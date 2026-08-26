@@ -7,79 +7,113 @@ import '../models/filter_params.dart';
 import '../providers/sub_provider.dart'; // << make sure this path matches your project
 
 class AppointmentManager extends ChangeNotifier {
+  static const String _fieldMeetingsCompleted = 'meetingsCompleted';
+  static const String _fieldMeetingsBurned = 'meetingsBurned';
+
   final Logger logger = Logger.forClass(AppointmentManager);
   final SubProvider subProvider;
 
   AppointmentManager({required this.subProvider});
 
-  AppointmentStatus _statusFromLabelSafe(String? label) {
-    if (label == null) return AppointmentStatus.scheduled;
-    try {
-      return AppointmentStatus.fromLabel(label);
-    } catch (_) {
-      return AppointmentStatus.scheduled;
-    }
-  }
+  /// AppointmentStatus.fromLabel already falls back to "Planlandı" for an
+  /// unknown label; this only adds the null case for a document with no status.
+  AppointmentStatus _statusFromLabelSafe(String? label) =>
+      label == null
+          ? AppointmentStatus.scheduled
+          : AppointmentStatus.fromLabel(label);
 
   // ---------------------- CREATE ----------------------
 
+  /// The subscription counter a status feeds, or null when the status moves no
+  /// counter at all. Keeps the counter field names in one place.
+  static String? _meetingCounterField(AppointmentStatus status) {
+    switch (status) {
+      case AppointmentStatus.completed:
+        return _fieldMeetingsCompleted;
+      case AppointmentStatus.burned:
+        return _fieldMeetingsBurned;
+      default:
+        return null;
+    }
+  }
+
+  /// The counter [data] (a raw appointment document) feeds, or null.
+  /// Tartım visits never move a counter, on either side of an edit.
+  String? _meetingCounterFieldOfDoc(Map<String, dynamic> data) {
+    final counts = AppointmentType
+        .fromLabel(data['appointmentType'] as String? ?? '')
+        .countsTowardMeetings;
+    if (!counts) return null;
+    return _meetingCounterField(_statusFromLabelSafe(data['status'] as String?));
+  }
+
+  /// The counter [appointment] feeds, or null (Tartım visits move none).
+  String? _meetingCounterFieldOf(AppointmentModel appointment) =>
+      appointment.countsTowardMeetings
+          ? _meetingCounterField(appointment.status)
+          : null;
+
+  DocumentReference<Map<String, dynamic>> _subRef(String userId, String subId) =>
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('subscriptions')
+          .doc(subId);
+
+  DocumentReference<Map<String, dynamic>> _apptRef(
+          String userId, String appointmentId) =>
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('appointments')
+          .doc(appointmentId);
+
+  /// Whether [subId] points at a subscription that still exists.
+  /// `update()` fails on a missing document, so a counter is only queued once
+  /// its subscription is known to be there.
+  Future<bool> _subscriptionExists(String userId, String? subId) async {
+    if (subId == null || subId.isEmpty) return false;
+    final snap = await _subRef(userId, subId).get();
+    return snap.exists;
+  }
+
   /// Adds a new appointment; if created as "Yapıldı" or "Yakıldı", increments the subscription counter.
+  ///
+  /// The appointment and its counter are committed in a single batch: a partial
+  /// write would leave meetingsCompleted/meetingsBurned drifting from reality.
   Future<void> addAppointment(AppointmentModel appointment) async {
     try {
       final db = FirebaseFirestore.instance;
-  // önceki hali runTransaction
-      final apptRef = db
-          .collection('users')
-          .doc(appointment.userId)
-          .collection('appointments')
-          .doc(appointment.appointmentId);
+      final apptRef = _apptRef(appointment.userId, appointment.appointmentId);
 
       final String? subId = appointment.subscriptionId;
-      bool subUpdated = false;
+      // Only a status that actually moves a counter is worth a subscription
+      // read; plain "Planlandı" adds now go straight to the write.
+      final String? counterField = _meetingCounterFieldOf(appointment);
+      final bool touchesSub = counterField != null &&
+          await _subscriptionExists(appointment.userId, subId);
 
-// 1) Write the appointment itself
-      await apptRef.set(appointment.toMap());
-
-// 2) If appointment is completed or burned and has a subscription, update subscription
-      if (subId != null && subId.isNotEmpty) {
-        final subRef = db
-            .collection('users')
-            .doc(appointment.userId)
-            .collection('subscriptions')
-            .doc(subId);
-
-        final subSnap = await subRef.get();
-
-        if (!subSnap.exists) {
-          logger.warn(
-            'Sub missing during add (non-tx): user={}, sub={}',
-            [appointment.userId, subId],
-          );
-        } else {
-          // Increment meetingsCompleted if completed (Tartım visits excluded).
-          if (appointment.status == AppointmentStatus.completed &&
-              appointment.countsTowardMeetings) {
-            await subRef.update(<String, Object?>{
-              'meetingsCompleted': FieldValue.increment(1),
-            });
-            subUpdated = true;
-          }
-          // Increment meetingsBurned if burned (Tartım visits excluded).
-          if (appointment.status == AppointmentStatus.burned &&
-              appointment.countsTowardMeetings) {
-            await subRef.update(<String, Object?>{
-              'meetingsBurned': FieldValue.increment(1),
-            });
-            subUpdated = true;
-          }
-        }
-
-        // 3) Notify provider so UI can react
-        if (subUpdated) {
-          subProvider.markChanged();
-        }
+      // An appointment without a subscription is normal; only a named-but-gone
+      // subscription is worth warning about.
+      if (counterField != null && (subId?.isNotEmpty ?? false) && !touchesSub) {
+        logger.warn(
+          'Sub missing during add: user={}, sub={}',
+          [appointment.userId, subId],
+        );
       }
 
+      final batch = db.batch();
+      batch.set(apptRef, appointment.toMap());
+      if (touchesSub) {
+        batch.update(_subRef(appointment.userId, subId!), <String, Object?>{
+          counterField: FieldValue.increment(1),
+        });
+      }
+      await batch.commit();
+
+      if (touchesSub) {
+        subProvider.markChanged();
+      }
 
       logger.info('Appointment added: {}', [appointment]);
     } catch (e) {
@@ -89,274 +123,138 @@ class AppointmentManager extends ChangeNotifier {
   }
 
   // ---------------------- UPDATE ----------------------
+
+  /// Rewrites an appointment and re-balances the subscription counters it
+  /// affects.
+  ///
+  /// Counter deltas are accumulated per subscription first, so moving an
+  /// appointment between two statuses of the same package costs one write
+  /// instead of two, and everything (appointment + counters) lands in a single
+  /// batch.
   Future<void> updateAppointment(AppointmentModel updated) async {
     try {
       final db = FirebaseFirestore.instance;
-      final apptRef = db
-          .collection('users')
-          .doc(updated.userId)
-          .collection('appointments')
-          .doc(updated.appointmentId);
+      final apptRef = _apptRef(updated.userId, updated.appointmentId);
 
-      bool subChanged = false;
+      // subId -> counter field -> net delta
+      final deltas = <String, Map<String, int>>{};
+      void addDelta(String? subId, String? field, int delta) {
+        if (subId == null || subId.isEmpty || field == null) return;
+        final perSub = deltas.putIfAbsent(subId, () => <String, int>{});
+        perSub[field] = (perSub[field] ?? 0) + delta;
+      }
 
-      // ---------- READ CURRENT APPOINTMENT ----------
       final prevSnap = await apptRef.get();
+      final Map<String, dynamic>? prev =
+          prevSnap.exists ? prevSnap.data() as Map<String, dynamic> : null;
 
-      if (!prevSnap.exists) {
-        // Treat as add edge-case: read new sub if needed and then write
-        logger.info('updateAppointment: previous appointment not found, treating as add. apptId={}', [updated.appointmentId]);
-
-        // Tartım visits are never counted against the package's meetings.
-        final bool newDone = updated.status == AppointmentStatus.completed &&
-            updated.countsTowardMeetings;
-        final bool newBurned = updated.status == AppointmentStatus.burned &&
-            updated.countsTowardMeetings;
-        final String? newSubId = updated.subscriptionId;
-
-        Map<String, dynamic>? newSubData;
-
-        if ((newDone || newBurned) && newSubId != null && newSubId.isNotEmpty) {
-          final newSubRef = db
-              .collection('users')
-              .doc(updated.userId)
-              .collection('subscriptions')
-              .doc(newSubId);
-          final newSubSnap = await newSubRef.get();
-          if (newSubSnap.exists) {
-            newSubData = newSubSnap.data();
-          } else {
-            logger.warn(
-              'Sub missing during update(add): user={}, sub={}',
-              [updated.userId, newSubId],
-            );
-          }
-        }
-
-        // ---------- WRITE APPOINTMENT ----------
-        await apptRef.set(updated.toMap());
-
-        // Increment subscription counter if subscription exists and is valid
-        if (newSubData != null && (updated.subscriptionId?.isNotEmpty ?? false)) {
-          final newSubRef = db
-              .collection('users')
-              .doc(updated.userId)
-              .collection('subscriptions')
-              .doc(updated.subscriptionId!);
-
-          if (newDone) {
-            logger.info(
-              'updateAppointment(add): increment meetingsCompleted for user={}, sub={}, delta=1',
-              [updated.userId, updated.subscriptionId],
-            );
-            await newSubRef.update(<String, Object?>{
-              'meetingsCompleted': FieldValue.increment(1),
-            });
-            subChanged = true;
-          }
-
-          if (newBurned) {
-            logger.info(
-              'updateAppointment(add): increment meetingsBurned for user={}, sub={}, delta=1',
-              [updated.userId, updated.subscriptionId],
-            );
-            await newSubRef.update(<String, Object?>{
-              'meetingsBurned': FieldValue.increment(1),
-            });
-            subChanged = true;
-          }
-        }
-
-        if (subChanged) {
-          subProvider.markChanged();
-        }
-
-        logger.info('Appointment updated (add edge-case): {}', [updated]);
-        //subProvider.markChanged(); // Always notify SubProvider so sub_tab refreshes
-        return;
+      if (prev == null) {
+        logger.info(
+            'updateAppointment: previous appointment not found, treating as add. apptId={}',
+            [updated.appointmentId]);
       }
 
-      // ---------- NORMAL UPDATE CASE ----------
-      final prev = prevSnap.data() as Map<String, dynamic>;
-
-      final AppointmentStatus prevStatus =
-      _statusFromLabelSafe(prev['status'] as String?);
-      final String? prevSubId = prev['subscriptionId'] as String?;
-
-      // Tartım visits are never counted against the package's meetings, so the
-      // counters must skip them on both the previous and the new side (the type
-      // can change across an edit, so each side is checked independently).
-      final bool prevCounts = AppointmentType
-          .fromLabel(prev['appointmentType'] as String? ?? '')
-          .countsTowardMeetings;
-      final bool prevDone =
-          prevStatus == AppointmentStatus.completed && prevCounts;
-      final bool prevBurned =
-          prevStatus == AppointmentStatus.burned && prevCounts;
-      final bool newDone = updated.status == AppointmentStatus.completed &&
-          updated.countsTowardMeetings;
-      final bool newBurned = updated.status == AppointmentStatus.burned &&
-          updated.countsTowardMeetings;
+      final String? prevSubId =
+          prev == null ? null : prev['subscriptionId'] as String?;
+      final String? prevField =
+          prev == null ? null : _meetingCounterFieldOfDoc(prev);
       final String? newSubId = updated.subscriptionId;
+      final String? newField = _meetingCounterFieldOf(updated);
 
-      // Pre-read any sub docs we might touch
-      Map<String, dynamic>? prevSubData;
-      Map<String, dynamic>? newSubData;
+      // A counter only moves when the (subscription, field) pair actually
+      // changes; an untouched pair keeps its current value. An appointment
+      // without a subscription moves nothing on either side.
+      final bool samePair = prevSubId == newSubId && prevField == newField;
+      final bool releasesPrev =
+          prevField != null && (prevSubId?.isNotEmpty ?? false) && !samePair;
+      final bool claimsNew =
+          newField != null && (newSubId?.isNotEmpty ?? false) && !samePair;
 
-      if ((prevDone || prevBurned) && (prevSubId?.isNotEmpty ?? false)) {
-        final prevSubRef = db
-            .collection('users')
-            .doc(updated.userId)
-            .collection('subscriptions')
-            .doc(prevSubId!);
-        final prevSubSnap = await prevSubRef.get();
-        if (prevSubSnap.exists) {
-          prevSubData = prevSubSnap.data();
-        }
-      }
+      // Both subscription documents are checked at once instead of one after
+      // the other.
+      final existence = await Future.wait([
+        releasesPrev
+            ? _subscriptionExists(updated.userId, prevSubId)
+            : Future<bool>.value(false),
+        claimsNew
+            ? _subscriptionExists(updated.userId, newSubId)
+            : Future<bool>.value(false),
+      ]);
+      final bool prevExists = existence[0];
+      final bool newExists = existence[1];
 
-      if ((newDone || newBurned) && (newSubId?.isNotEmpty ?? false)) {
-        final newSubRef = db
-            .collection('users')
-            .doc(updated.userId)
-            .collection('subscriptions')
-            .doc(newSubId!);
-        final newSubSnap = await newSubRef.get();
-        if (newSubSnap.exists) {
-          newSubData = newSubSnap.data();
-        }
-      }
-
-      // ---------- UPDATE APPOINTMENT ----------
-      await apptRef.update(updated.toMap());
-
-      // Decrement meetingsCompleted from previous if needed
-      if (prevDone &&
-          (prevSubId?.isNotEmpty ?? false) &&
-          (!newDone || prevSubId != newSubId)) {
-        if (prevSubData != null) {
-          final prevSubRef = db
-              .collection('users')
-              .doc(updated.userId)
-              .collection('subscriptions')
-              .doc(prevSubId!);
-
-          logger.info(
-            'updateAppointment: decrement meetingsCompleted for user={}, sub={}, delta=-1',
-            [updated.userId, prevSubId],
-          );
-
-          await prevSubRef.update(<String, Object?>{
-            'meetingsCompleted': FieldValue.increment(-1),
-          });
-
-          subChanged = true;
+      if (releasesPrev) {
+        if (prevExists) {
+          addDelta(prevSubId, prevField, -1);
         } else {
           logger.warn(
-            'Prev sub missing during update decrement (completed): userId={}, prevSubId={}',
-            [updated.userId, prevSubId],
+            'Prev sub missing during update decrement ({}): user={}, sub={}',
+            [prevField, updated.userId, prevSubId],
           );
         }
       }
-
-      // Decrement meetingsBurned from previous if needed
-      if (prevBurned &&
-          (prevSubId?.isNotEmpty ?? false) &&
-          (!newBurned || prevSubId != newSubId)) {
-        if (prevSubData != null) {
-          final prevSubRef = db
-              .collection('users')
-              .doc(updated.userId)
-              .collection('subscriptions')
-              .doc(prevSubId!);
-
-          logger.info(
-            'updateAppointment: decrement meetingsBurned for user={}, sub={}, delta=-1',
-            [updated.userId, prevSubId],
-          );
-
-          await prevSubRef.update(<String, Object?>{
-            'meetingsBurned': FieldValue.increment(-1),
-          });
-
-          subChanged = true;
+      if (claimsNew) {
+        if (newExists) {
+          addDelta(newSubId, newField, 1);
         } else {
           logger.warn(
-            'Prev sub missing during update decrement (burned): userId={}, prevSubId={}',
-            [updated.userId, prevSubId],
+            'New sub missing during update increment ({}): user={}, sub={}',
+            [newField, updated.userId, newSubId],
           );
         }
       }
 
-      // Increment meetingsCompleted on new if needed
-      if (newDone &&
-          (newSubId?.isNotEmpty ?? false) &&
-          (!prevDone || prevSubId != newSubId)) {
-        if (newSubData != null) {
-          final newSubRef = db
-              .collection('users')
-              .doc(updated.userId)
-              .collection('subscriptions')
-              .doc(newSubId!);
-
-          logger.info(
-            'updateAppointment: increment meetingsCompleted for user={}, sub={}, delta=1',
-            [updated.userId, newSubId],
-          );
-
-          await newSubRef.update(<String, Object?>{
-            'meetingsCompleted': FieldValue.increment(1),
-          });
-
-          subChanged = true;
-        } else {
-          logger.warn(
-            'New sub missing during update increment (completed): user={}, sub={}',
-            [updated.userId, newSubId],
-          );
-        }
+      final batch = db.batch();
+      // A missing previous document is an add, so set() (not update()) is used.
+      if (prev == null) {
+        batch.set(apptRef, updated.toMap());
+      } else {
+        batch.update(apptRef, updated.toMap());
       }
-
-      // Increment meetingsBurned on new if needed
-      if (newBurned &&
-          (newSubId?.isNotEmpty ?? false) &&
-          (!prevBurned || prevSubId != newSubId)) {
-        if (newSubData != null) {
-          final newSubRef = db
-              .collection('users')
-              .doc(updated.userId)
-              .collection('subscriptions')
-              .doc(newSubId!);
-
-          logger.info(
-            'updateAppointment: increment meetingsBurned for user={}, sub={}, delta=1',
-            [updated.userId, newSubId],
-          );
-
-          await newSubRef.update(<String, Object?>{
-            'meetingsBurned': FieldValue.increment(1),
-          });
-
-          subChanged = true;
-        } else {
-          logger.warn(
-            'New sub missing during update increment (burned): user={}, sub={}',
-            [updated.userId, newSubId],
-          );
-        }
-      }
+      final bool subChanged = _queueCounterUpdates(batch, updated.userId, deltas);
+      await batch.commit();
 
       if (subChanged) {
         subProvider.markChanged();
       }
 
       logger.info('Appointment updated: {}', [updated]);
-      //subProvider.markChanged(); // Always notify SubProvider so sub_tab refreshes
     } catch (e) {
       logger.err('Error updating appointment: {}', [e]);
       rethrow;
     }
   }
+
+  /// Queues one update per subscription for the accumulated [deltas].
+  /// Returns whether anything was queued, i.e. whether SubProvider must be
+  /// notified after the commit.
+  bool _queueCounterUpdates(
+    WriteBatch batch,
+    String userId,
+    Map<String, Map<String, int>> deltas,
+  ) {
+    bool queued = false;
+    for (final entry in deltas.entries) {
+      final updates = <String, Object?>{
+        for (final counter in entry.value.entries)
+          if (counter.value != 0) counter.key: FieldValue.increment(counter.value),
+      };
+      if (updates.isEmpty) continue;
+      logger.info(
+        'Subscription counters user={}, sub={}, deltas={}',
+        [userId, entry.key, entry.value],
+      );
+      batch.update(_subRef(userId, entry.key), updates);
+      queued = true;
+    }
+    return queued;
+  }
+
+  // ---------------------- DELETE ----------------------
+
+  /// Removes an appointment and gives back the subscription meeting it had
+  /// consumed. Both writes land in one batch, so the counters can never drift
+  /// away from the appointments that are actually stored.
   Future<bool> deleteAppointment(
       String appointmentId,
       String userId, {
@@ -364,15 +262,8 @@ class AppointmentManager extends ChangeNotifier {
       }) async {
     try {
       final db = FirebaseFirestore.instance;
-      final apptRef = db
-          .collection('users')
-          .doc(userId)
-          .collection('appointments')
-          .doc(appointmentId);
+      final apptRef = _apptRef(userId, appointmentId);
 
-      bool subChanged = false;
-
-      // ---------- READ APPOINTMENT ----------
       final snap = await apptRef.get();
       if (!snap.exists) {
         logger.warn(
@@ -383,191 +274,35 @@ class AppointmentManager extends ChangeNotifier {
       }
 
       final data = snap.data() as Map<String, dynamic>;
-      final AppointmentStatus status =
-      _statusFromLabelSafe(data['status'] as String?);
       final String? subId = data['subscriptionId'] as String?;
-
       // Tartım visits never incremented the counters, so they must not be
       // decremented here either.
-      final bool counts = AppointmentType
-          .fromLabel(data['appointmentType'] as String? ?? '')
-          .countsTowardMeetings;
-      final bool wasDone = status == AppointmentStatus.completed && counts;
-      final bool wasBurned = status == AppointmentStatus.burned && counts;
+      final String? counterField = _meetingCounterFieldOfDoc(data);
+      final bool touchesSub = counterField != null &&
+          await _subscriptionExists(userId, subId);
 
-      Map<String, dynamic>? subData;
-
-      if ((wasDone || wasBurned) && (subId?.isNotEmpty ?? false)) {
-        final subRef = db
-            .collection('users')
-            .doc(userId)
-            .collection('subscriptions')
-            .doc(subId!);
-        final subSnap = await subRef.get();
-        if (subSnap.exists) {
-          subData = subSnap.data();
-        }
+      final batch = db.batch();
+      batch.delete(apptRef);
+      if (touchesSub) {
+        logger.info(
+          'deleteAppointment: decrement {} for user={}, sub={}',
+          [counterField, userId, subId],
+        );
+        batch.update(_subRef(userId, subId!), <String, Object?>{
+          counterField: FieldValue.increment(-1),
+        });
       }
+      await batch.commit();
 
-      // ---------- DELETE APPOINTMENT ----------
-      await apptRef.delete();
-
-      // ---------- UPDATE SUBSCRIPTION COUNTER ----------
-      if ((subId?.isNotEmpty ?? false) && subData != null) {
-        final subRef = db
-            .collection('users')
-            .doc(userId)
-            .collection('subscriptions')
-            .doc(subId!);
-
-        if (wasDone) {
-          logger.info(
-            'deleteAppointment: decrement meetingsCompleted for user={}, sub={}, delta=-1',
-            [userId, subId],
-          );
-
-          await subRef.update(<String, Object?>{
-            'meetingsCompleted': FieldValue.increment(-1),
-          });
-
-          subChanged = true;
-        }
-
-        if (wasBurned) {
-          logger.info(
-            'deleteAppointment: decrement meetingsBurned for user={}, sub={}, delta=-1',
-            [userId, subId],
-          );
-
-          await subRef.update(<String, Object?>{
-            'meetingsBurned': FieldValue.increment(-1),
-          });
-
-          subChanged = true;
-        }
-      }
-
-      if (subChanged) {
+      if (touchesSub) {
         subProvider.markChanged();
       }
 
-      logger.info(
-        'Appointment deletedBy={}: appointmentId={}',
-        [deletedBy, appointmentId],
-      );
+      logger.info('Appointment deletedBy={}: appointmentId={}',
+          [deletedBy, appointmentId]);
       return true;
     } catch (e) {
       logger.err('Error deleting appointment: {}', [e]);
-      rethrow;
-    }
-  }
-  Future<bool> cancelAppointment(
-      String appointmentId,
-      String userId, {
-        required String canceledBy,
-      }) async {
-    try {
-      final db = FirebaseFirestore.instance;
-      final apptRef = db
-          .collection('users')
-          .doc(userId)
-          .collection('appointments')
-          .doc(appointmentId);
-
-      bool subChanged = false;
-
-      // ---------- READ APPOINTMENT ----------
-      final snap = await apptRef.get();
-      if (!snap.exists) {
-        logger.warn(
-          'cancelAppointment: appointment not found, user={}, appt={}',
-          [userId, appointmentId],
-        );
-        return false;
-      }
-
-      final data = snap.data() as Map<String, dynamic>;
-      final AppointmentStatus prevStatus =
-      _statusFromLabelSafe(data['status'] as String?);
-      final String? subId = data['subscriptionId'] as String?;
-
-      Map<String, dynamic>? subData;
-      // Tartım visits never incremented the counters, so they must not be
-      // decremented here either.
-      final bool counts = AppointmentType
-          .fromLabel(data['appointmentType'] as String? ?? '')
-          .countsTowardMeetings;
-      final bool wasDone = prevStatus == AppointmentStatus.completed && counts;
-      final bool wasBurned = prevStatus == AppointmentStatus.burned && counts;
-
-      if ((wasDone || wasBurned) && (subId?.isNotEmpty ?? false)) {
-        final subRef = db
-            .collection('users')
-            .doc(userId)
-            .collection('subscriptions')
-            .doc(subId!);
-        final subSnap = await subRef.get();
-        if (subSnap.exists) {
-          subData = subSnap.data();
-        }
-      }
-
-      // ---------- UPDATE APPOINTMENT STATUS ----------
-      final now = Timestamp.now();
-      await apptRef.update({
-        'status': AppointmentStatus.canceled.label,
-        'canceledBy': canceledBy,
-        'canceledAt': now,
-        'updateDate': now,
-        'updateUser': canceledBy,
-      });
-
-      // ---------- UPDATE SUBSCRIPTION COUNTER ----------
-      if ((subId?.isNotEmpty ?? false) && subData != null) {
-        final subRef = db
-            .collection('users')
-            .doc(userId)
-            .collection('subscriptions')
-            .doc(subId!);
-
-        if (wasDone) {
-          logger.info(
-            'cancelAppointment: decrement meetingsCompleted for user={}, sub={}, delta=-1',
-            [userId, subId],
-          );
-
-          await subRef.update(<String, Object?>{
-            'meetingsCompleted': FieldValue.increment(-1),
-          });
-
-          subChanged = true;
-        }
-
-        if (wasBurned) {
-          logger.info(
-            'cancelAppointment: decrement meetingsBurned for user={}, sub={}, delta=-1',
-            [userId, subId],
-          );
-
-          await subRef.update(<String, Object?>{
-            'meetingsBurned': FieldValue.increment(-1),
-          });
-
-          subChanged = true;
-        }
-      }
-
-      if (subChanged) {
-        subProvider.markChanged();
-      }
-
-      logger.info(
-        'Appointment canceledBy={}, appointmentId={}',
-        [canceledBy, appointmentId],
-      );
-      return true;
-    } catch (e) {
-      logger.err('Error canceling appointment: {}', [e]);
       rethrow;
     }
   }
@@ -692,7 +427,6 @@ class AppointmentManager extends ChangeNotifier {
     Set<AppointmentStatus>? statusesFilter,
   }) async {
     try {
-      final usersCollection = FirebaseFirestore.instance.collection('users');
       final Map<String, AppointmentModel> appointmentsMap = {};
 
       // Query 1: Fetch appointments by appointmentDateTime
@@ -744,14 +478,16 @@ class AppointmentManager extends ChangeNotifier {
         }
       }
 
-      // Fetch user data for all appointments
-      final fetchedAppointments = await Future.wait(appointmentsMap.values.map((appointment) async {
-        final userDoc = await usersCollection.doc(appointment.userId).get();
-        if (userDoc.exists) {
-          appointment.user = UserModel.fromDocument(userDoc);
-        }
-        return appointment;
-      }).toList());
+      // Fetch user data for all appointments. One read per *client*, not per
+      // appointment: a client usually has several appointments in the range, so
+      // the ids are de-duplicated first and the remaining reads run in parallel.
+      final fetchedAppointments = appointmentsMap.values.toList();
+      final userById = await _fetchUsersByIds(
+        fetchedAppointments.map((a) => a.userId).toSet(),
+      );
+      for (final appointment in fetchedAppointments) {
+        appointment.user = userById[appointment.userId];
+      }
 
       // Apply multiple status filter client-side (Firestore doesn't support WHERE IN with multiple range queries)
       var filtered = fetchedAppointments;
@@ -767,7 +503,28 @@ class AppointmentManager extends ChangeNotifier {
     }
   }
 
-  /// Returns the non-canceled appointments on the same day whose time interval
+  /// Reads the given users once each, in parallel, and returns them by id.
+  /// Missing users are simply absent from the map.
+  Future<Map<String, UserModel>> _fetchUsersByIds(Set<String> userIds) async {
+    if (userIds.isEmpty) return const {};
+
+    final usersCollection = FirebaseFirestore.instance.collection('users');
+    final ids = userIds.toList();
+    final snapshots = await Future.wait(
+      ids.map((id) => usersCollection.doc(id).get()),
+    );
+
+    final result = <String, UserModel>{};
+    for (int i = 0; i < ids.length; i++) {
+      final doc = snapshots[i];
+      if (doc.exists) {
+        result[ids[i]] = UserModel.fromDocument(doc);
+      }
+    }
+    return result;
+  }
+
+  /// Returns the appointments on the same day whose time interval
   /// overlaps `[start, start + durationMinutes)`. Used to warn the admin
   /// (without blocking) when a new appointment or event clashes with an
   /// existing meeting. Each returned appointment has its [AppointmentModel.user]
@@ -790,7 +547,6 @@ class AppointmentManager extends ChangeNotifier {
     );
 
     final overlapping = dayAppointments.where((a) {
-      if (a.status == AppointmentStatus.canceled) return false;
       final effStart = effectiveStart(a);
       final effEnd = effStart.add(Duration(minutes: a.durationMinutes));
       // Half-open interval overlap test.

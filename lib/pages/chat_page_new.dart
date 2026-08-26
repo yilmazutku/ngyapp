@@ -19,6 +19,7 @@ import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 
 import '../constants/app_constants.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// ChatPage displays the chat interface for both regular users and admins.
 /// 
@@ -156,6 +157,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final chat = context.read<ChatManager>();
 
     bool loadingOpen = false;
@@ -327,6 +330,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final chat = context.read<ChatManager>();
     logger.info('Gallery image picker opened. chatId={}', [_chatId]);
 
@@ -351,6 +356,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       if (meal != null) {
         logger.info('Starting meal image upload (gallery). meal={} userId={}', [meal.name, _currentUid]);
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
         final downloadUrl = await mealStateManager.uploadMealImg(
           meal: meal,
@@ -412,6 +419,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
+    // Re-checked after the await: the widget may be gone by now.
+    if (!mounted) return;
     final chat = context.read<ChatManager>();
     logger.info('Camera capture opened. chatId={}', [_chatId]);
 
@@ -439,6 +448,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       if (meal != null) {
         logger.info('Starting meal image upload (camera). meal={} userId={}', [meal.name, _currentUid]);
+        // Re-checked after the await: the widget may be gone by now.
+        if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
         final downloadUrl = await mealStateManager.uploadMealImg(
           meal: meal,
@@ -638,9 +649,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         actions: [
           // Admins can permanently delete the chat (and its uploaded photos)
           if (_isAdminUser)
-            IconButton(
-              tooltip: 'Sohbeti Sil',
-              icon: const Icon(Icons.delete_outline),
+            LabeledActionButton(
+              icon: Icons.delete_outline,
+              label: 'Sohbeti Sil',
               onPressed: _confirmAndDeleteChat,
             ),
         ],

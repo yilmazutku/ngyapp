@@ -71,6 +71,7 @@ import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
 import 'pages/testing_page.dart';
+import 'widgets/labeled_action_button.dart';
 
 /// Global platform configuration instance
 late final PlatformConfig platformConfig;
@@ -215,6 +216,14 @@ class MyApp extends StatelessWidget {
         child: MaterialApp(
           navigatorKey: navKey, // <-- IMPORTANT for notification tap navigation
           debugShowCheckedModeBanner: false,
+          // Tapping anywhere outside a text field closes the keyboard, on every
+          // screen. Done once here rather than per page: a field that forgets it
+          // leaves the on-screen keyboard covering the page with no way back.
+          builder: (context, child) => GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+            child: child,
+          ),
           theme: ThemeData(
             primarySwatch: Colors.purple,
             primaryColor: const Color(0xFFA16AEC),
@@ -768,10 +777,22 @@ class _HomePageState extends State<HomePage> {
                   )
                 : null,
             actions: [
-              IconButton(
-                icon: const Icon(Icons.logout),
-                tooltip: 'Çıkış Yap',
-                onPressed: () async {
+              // Version and logout share one horizontally scrollable slot, so a
+              // narrow phone scrolls them instead of overflowing the app bar.
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.6,
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  reverse: true,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      LabeledActionButton(
+                        icon: Icons.logout,
+                        label: 'Çıkış Yap',
+                        onPressed: () async {
                   // Show confirmation dialog before logging out
                   final shouldLogout = await showDialog<bool>(
                     context: context,
@@ -807,7 +828,11 @@ class _HomePageState extends State<HomePage> {
                       );
                     }
                   }
-                },
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           );

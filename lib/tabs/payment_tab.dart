@@ -1,7 +1,4 @@
 // payments_tab.dart
-import 'dart:io';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -9,14 +6,13 @@ import 'package:provider/provider.dart';
 import '../dialogs/edit_payment_dialog.dart';
 import '../dialogs/add_payment_dialog.dart';
 import '../models/payment_model.dart';
-import '../models/user_model.dart';
 import '../models/filter_params.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
-import '../utils/payment_import_util.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
+import '../widgets/labeled_action_button.dart';
 
 class PaymentsTab extends BaseTab<PaymentProvider> {
   const PaymentsTab({super.key, required super.userId})
@@ -39,12 +35,16 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   PaymentStatus? _tempStatus;
 
   // Cache formatters once (reduces jank)
-  final NumberFormat _currencyFormat = NumberFormat('#,##0.00 ₺', 'tr_TR');
+  // Whole lira, no kuruş: payment amounts are never entered with a decimal
+  // part, so showing ",00" on every card is noise.
+  final NumberFormat _currencyFormat = NumberFormat('#,##0 ₺', 'tr_TR');
   final DateFormat _dateFormat = DateFormat('d MMMM y', 'tr_TR');
 
-  final Map<String, UserModel> _userCache = {};
   final Map<String, String> _subscriptionCache = {}; // Cache for subscription names
-  late final PaymentProvider _paymentProvider;
+  // Nullable and set from a post-frame callback: the tab can be disposed before
+  // that callback runs, and dispose() must not touch a field that was never
+  // assigned.
+  PaymentProvider? _paymentProvider;
   final ScrollController _listCtrl = ScrollController();
 
   @override
@@ -55,8 +55,10 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   }
 
   void _setupPaymentListener() {
-    _paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
-    _paymentProvider.addListener(_onPaymentProviderChanged);
+    if (!mounted) return;
+    final provider = Provider.of<PaymentProvider>(context, listen: false);
+    _paymentProvider = provider;
+    provider.addListener(_onPaymentProviderChanged);
   }
   
   Future<String> _getSubscriptionName(String subscriptionId) async {
@@ -75,16 +77,20 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   }
 
   void _onPaymentProviderChanged() {
-    if (_paymentProvider.paymentChanged) {
-      _paymentProvider.resetPaymentChanged();
-      refreshData();
-    }
+    final provider = _paymentProvider;
+    if (provider == null || !provider.paymentChanged) return;
+    provider.resetPaymentChanged();
+    // Deferred: this runs inside notifyListeners(), which a write can fire
+    // while a build is in progress or while its own Firestore work is still
+    // settling. Refetching right here refetched twice per write and could
+    // setState during build.
+    scheduleRefresh();
   }
 
   @override
   void dispose() {
     _listCtrl.dispose();
-    _paymentProvider.removeListener(_onPaymentProviderChanged);
+    _paymentProvider?.removeListener(_onPaymentProviderChanged);
     super.dispose();
   }
 
@@ -113,16 +119,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
 
   @override
   bool hasAdditionalActiveFilters() => _selectedStatus != null;
-
-  bool _isPaymentAmountMatch(PaymentModel payment, String searchText) {
-    try {
-      double searchAmount = double.parse(searchText.replaceAll(',', '.'));
-      searchAmount = (searchAmount * 100).roundToDouble() / 100;
-      return (payment.amount - searchAmount).abs() < 0.01;
-    } catch (_) {
-      return false;
-    }
-  }
 
   @override
   FilterParams? buildFilterParams() {
@@ -224,18 +220,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
       ),
     );
 
-    final importBtn = ElevatedButton.icon(
-      icon: const Icon(Icons.upload_file),
-      label: const Text('Ödeme Takip Cetveli İçe Aktar'),
-      onPressed: () => _importPaymentTrackingData(context),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.blue.shade100,
-        foregroundColor: Colors.blue.shade800,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        visualDensity: VisualDensity.compact,
-      ),
-    );
-
     return LayoutBuilder(
       builder: (context, constraints) {
         // Tune threshold if you like
@@ -252,7 +236,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
                 children: [
                   filterBtn,
                   addBtn,
-                  importBtn,
                 ],
               ),
               const SizedBox(height: 12),
@@ -267,8 +250,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
               filterBtn,
               const SizedBox(width: 12),
               addBtn,
-              const SizedBox(width: 12),
-              importBtn,
               const SizedBox(width: 12),
               Expanded(child: summary),
             ],
@@ -496,20 +477,19 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
               Text(payment.notes!, maxLines: 2, overflow: TextOverflow.ellipsis),
             ],
             const SizedBox(height: 12),
-            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              IconButton(
-                icon: const Icon(Icons.edit, size: 20),
+            Wrap(alignment: WrapAlignment.end, children: [
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.edit,
+                label: 'Düzenle',
                 onPressed: () => _showEditPaymentDialog(context, payment),
-                tooltip: 'Düzenle',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
               ),
-              IconButton(
-                icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                onPressed: () => _showDeletePaymentDialog(context, payment),
-                tooltip: 'Sil',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.delete,
+                label: 'Sil',
+                foregroundColor: Colors.red,
+                onPressed: () => _showDeletePaymentDialog(payment),
               ),
             ]),
           ]),
@@ -517,55 +497,6 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
       ),
     );
   }
-
-  void _showPaymentDetails(BuildContext context, PaymentModel payment) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Ödeme Detayı'),
-          content: SingleChildScrollView(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              _detailRow('Tutar:', _currencyFormat.format(payment.amount)),
-              _detailRow('Durum:', payment.status.label),
-              if (payment.paymentDate != null)
-                _detailRow('Ödeme Tarihi:', _dateFormat.format(payment.paymentDate!)),
-              if (payment.dueDate != null)
-                _detailRow('Vade Tarihi:', _dateFormat.format(payment.dueDate!)),
-              if (payment.notes?.isNotEmpty == true) _detailRow('Notlar:', payment.notes!),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Kapat')),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _showEditPaymentDialog(context, payment);
-              },
-              child: const Text('Düzenle'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _showDeletePaymentDialog(context, payment);
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Sil'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _detailRow(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-      const SizedBox(height: 4),
-      Text(value),
-    ]),
-  );
 
   void _showEditPaymentDialog(BuildContext context, PaymentModel payment) {
     showDialog(
@@ -581,7 +512,7 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   }
 
   // RESTORED: Delete flow with dialog feedback + refresh
-  Future<void> _showDeletePaymentDialog(BuildContext context, PaymentModel payment) async {
+  Future<void> _showDeletePaymentDialog(PaymentModel payment) async {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Ödeme Sil',
@@ -589,7 +520,8 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed) return;
+    if (!mounted) return;
 
     try {
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
@@ -619,39 +551,4 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
     );
   }
 
-  Future<void> _importPaymentTrackingData(BuildContext context) async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-        withData: true,
-      );
-      if (result == null) return;
-
-      final picked = result.files.single;
-      final bytes = picked.bytes ?? await File(picked.path!).readAsBytes();
-
-      final proceed = await DialogUtils.openConfirm(
-        context,
-        title: 'Ödeme Takip Cetveli İçe Aktarma',
-        message: 'Ödeme takip cetveli içe aktarıldığında ödemelerle birlikte tarihi belli randevular da okunacaktır.',
-        confirmText: 'Devam Et',
-        cancelText: 'İptal',
-      );
-      if (!proceed || !mounted) return;
-
-      final resultText = await PaymentImportUtil.importPaymentTrackingDataFromBytes(
-        context, widget.userId, bytes, showConfirmation: true,
-      );
-
-      if (!mounted) return;
-      await DialogUtils.openInfo(context, title: 'Sonuç', message: resultText);
-      if (!mounted) return;
-      // Provider listener will handle refresh via notifyListeners()
-      // No need to manually call refreshData() to avoid double-refresh
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(context, title: 'Hata', message: 'İçe aktarma hatası: $e');
-    }
-  }
 }

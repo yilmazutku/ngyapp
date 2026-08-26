@@ -9,8 +9,10 @@ import '../providers/sub_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/add_appointment_dialog.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/postponement_notices.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Extension to add color and icon getters to AppointmentStatus
 extension AppointmentStatusExtension on AppointmentStatus {
@@ -22,8 +24,6 @@ extension AppointmentStatusExtension on AppointmentStatus {
         return Colors.blue;
       case AppointmentStatus.burned:
         return Colors.orange;
-      case AppointmentStatus.canceled:
-        return Colors.red;
       case AppointmentStatus.postponed:
         return Colors.purple;
     }
@@ -37,8 +37,6 @@ extension AppointmentStatusExtension on AppointmentStatus {
         return Icons.event;
       case AppointmentStatus.burned:
         return Icons.local_fire_department;
-      case AppointmentStatus.canceled:
-        return Icons.cancel;
       case AppointmentStatus.postponed:
         return Icons.update;
     }
@@ -106,18 +104,24 @@ class _AppointmentsTabState
     extends FilterableTabState<AppointmentManager, AppointmentsTab> {
   AppointmentStatus? _selectedStatus;
   MeetingType? _selectedType;
-  AppointmentSortOption _sortOption = AppointmentSortOption.closestToToday;
+  // Newest first by default: the most recent appointment is the one the
+  // admin usually looks for.
+  AppointmentSortOption _sortOption = AppointmentSortOption.dateDescending;
 
   // temp filters (for the modal)
   AppointmentStatus? _tempStatus;
   MeetingType? _tempType;
-  AppointmentSortOption _tempSortOption = AppointmentSortOption.closestToToday;
+  AppointmentSortOption _tempSortOption = AppointmentSortOption.dateDescending;
 
   // final DateFormat _longDateFormat = DateFormat('dd MMMM yyyy, HH:mm');
   // final DateFormat _shortDateFormat = DateFormat('dd.MM.yyyy');
   final DateFormat _shortDf = DateFormat('HH:mm', 'tr_TR');
 // if you still want the short one:
   final DateFormat _longDf = DateFormat('d MMMM yyyy', 'tr_TR');
+  // Same date with the weekday appended. Kept separate from [_longDf] because
+  // that one is also parsed back to sort the day groups; only the displayed
+  // text carries the day name.
+  final DateFormat _longDayDf = DateFormat('d MMMM yyyy EEEE', 'tr_TR');
 
   // ---- SCROLL IMPROVEMENTS ----
   // Explicit controller for the main list to avoid PrimaryScrollController mismatches
@@ -190,7 +194,7 @@ class _AppointmentsTabState
   void resetAdditionalFilters() {
     _selectedStatus = null;
     _selectedType = null;
-    _sortOption = AppointmentSortOption.closestToToday;
+    _sortOption = AppointmentSortOption.dateDescending;
     resetTempFiltersToDefaults();
   }
 
@@ -198,14 +202,14 @@ class _AppointmentsTabState
   void resetTempFiltersToDefaults() {
     _tempStatus = null;
     _tempType = null;
-    _tempSortOption = AppointmentSortOption.closestToToday;
+    _tempSortOption = AppointmentSortOption.dateDescending;
   }
 
   @override
   bool hasAdditionalActiveFilters() {
     return _selectedStatus != null ||
         _selectedType != null ||
-        _sortOption != AppointmentSortOption.closestToToday;
+        _sortOption != AppointmentSortOption.dateDescending;
   }
 
   @override
@@ -233,11 +237,13 @@ class _AppointmentsTabState
       ) {
     // Inline stats (no setState)
     final appts = filteredItems.cast<AppointmentModel>();
-    int upcoming = 0, completed = 0, cancelled = 0;
+    int upcoming = 0, completed = 0;
     for (final a in appts) {
-      if (a.status == AppointmentStatus.scheduled) upcoming++;
-      else if (a.status == AppointmentStatus.completed) completed++;
-      else if (a.status == AppointmentStatus.canceled) cancelled++;
+      if (a.status == AppointmentStatus.scheduled) {
+        upcoming++;
+      } else if (a.status == AppointmentStatus.completed) {
+        completed++;
+      }
     }
 
     final statusOptions = {for (var s in AppointmentStatus.values) s: s.label};
@@ -272,17 +278,6 @@ class _AppointmentsTabState
                     label: 'Tamamlanan',
                     icon: Icons.check_circle_outline,
                     color: Colors.green,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  fit: FlexFit.tight,
-                  child: _buildStatCard(
-                    context,
-                    count: cancelled,
-                    label: 'İptal Edilen',
-                    icon: Icons.cancel_outlined,
-                    color: Colors.red,
                   ),
                 ),
               ],
@@ -491,7 +486,7 @@ class _AppointmentsTabState
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  dateKey,
+                  _longDayDf.format(_longDf.parse(dateKey)),
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -751,11 +746,15 @@ class _AppointmentsTabState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Orijinal: ${_longDf.format(appointment.appointmentDateTime)} ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
+                            'Orijinal: ${_longDayDf.format(appointment.appointmentDateTime)} ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
+                          // The postponed date is optional, so it may still be
+                          // unset while the new date is being agreed on.
                           Text(
-                            'Ertelenen: ${_longDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}',
+                            appointment.postponedDate != null
+                                ? 'Ertelenen: ${_longDayDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}'
+                                : 'Ertelenen: tarih seçilmedi',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
                         ],
@@ -765,23 +764,23 @@ class _AppointmentsTabState
                     const Spacer(),
                   
                   // Right side: Action buttons
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  Wrap(
+                    alignment: WrapAlignment.end,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, size: 20),
-                        onPressed: () => _showEditAppointmentDialog(context, appointment),
-                        tooltip: 'Düzenle',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                      LabeledActionButton(
+                        dense: true,
+                        icon: Icons.edit,
+                        label: 'Düzenle',
+                        onPressed: () =>
+                            _showEditAppointmentDialog(context, appointment),
                       ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                        onPressed: () => _confirmDeleteAppointment(context, appointment),
-                        tooltip: 'Sil',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                      LabeledActionButton(
+                        dense: true,
+                        icon: Icons.delete,
+                        label: 'Sil',
+                        foregroundColor: Colors.red,
+                        onPressed: () =>
+                            _confirmDeleteAppointment(context, appointment),
                       ),
                     ],
                   ),
@@ -908,11 +907,14 @@ class _AppointmentsTabState
       if (!mounted) return;
       refreshData(); // instead of setState(fetchData())
 
-      DialogUtils.openInfo(
+      await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
         message: 'Randevu başarıyla silindi.',
       );
+      if (!mounted) return;
+      // A spent postponement right is not given back by a delete.
+      await PostponementNotices.warnRightKept(context, appointment);
     } catch (e) {
       if (!mounted) return;
       DialogUtils.openError(

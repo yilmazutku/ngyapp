@@ -59,8 +59,10 @@ class PaymentProvider extends ChangeNotifier {
         query = query.where('status', isEqualTo: statusFilter.label);
       }
 
-      // Note: We can only apply one date range filter in Firebase
-      // We'll filter by paymentDate primarily, handle dueDate client-side
+      // Note: Firestore only supports a range filter on one field, so the range
+      // is applied to paymentDate. Be aware that this also drops documents that
+      // have no paymentDate at all (planned payments): the client-side dueDate
+      // fallback below can only narrow what the query already returned.
       if (startDate != null) {
         query = query.where('paymentDate', isGreaterThanOrEqualTo: startDate);
       }
@@ -437,37 +439,57 @@ class PaymentProvider extends ChangeNotifier {
 
   /// Deletes a payment record and cancels any associated notifications
   /// 
+  /// A deleted *completed* payment is also taken back off its package's
+  /// `amountPaid`; otherwise the package would keep showing money that no
+  /// longer has a payment record behind it. Planned payments never counted
+  /// towards the total, so deleting one changes no package figure.
+  ///
   /// @param paymentId The ID of the payment to delete
   /// @param userId The ID of the user who made the payment
-  Future<void> deletePayment(String paymentId, String userId) async {
+  /// @param adjustSubscriptionTotal Pass false when the caller has already
+  ///        written the package's `amountPaid` itself (the package edit dialog
+  ///        does), so the amount is not subtracted twice.
+  Future<void> deletePayment(
+    String paymentId,
+    String userId, {
+    bool adjustSubscriptionTotal = true,
+  }) async {
     try {
-      // First fetch the payment to check if it has notifications
-      final paymentDoc = await FirebaseFirestore.instance
+      final paymentRef = FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
           .collection('payments')
-          .doc(paymentId)
-          .get();
-      
-      final paymentData = paymentDoc.data();
-      
-      // Delete the payment from Firestore
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('payments')
-          .doc(paymentId)
-          .delete();
+          .doc(paymentId);
 
-      // If the payment had notification times set, we should cancel those notifications
-      if (paymentData != null && paymentData['notificationTimes'] != null) {
-        // In a real implementation, you would cancel scheduled notifications here
-        // For example, using a unique ID based on the payment ID
-        logger.info('Canceled notifications for payment $paymentId');
-        
-        // If you have a notification service, you could use it like this:
-        // final notificationService = NotificationService();
-        // await notificationService.cancelPaymentNotifications(paymentId);
+      // Read before deleting: the stored record is the only place the amount,
+      // the status and the linked package are known for sure.
+      PaymentModel? deleted;
+      if (adjustSubscriptionTotal) {
+        final snap = await paymentRef.get();
+        if (snap.exists) {
+          deleted = PaymentModel.fromDocument(snap);
+        }
+      }
+
+      await paymentRef.delete();
+
+      // TODO: cancel this payment's scheduled notifications. They are keyed by
+      // paymentId, so no read of the document is needed to do it:
+      //   await notificationService.cancelPaymentNotifications(paymentId);
+
+      final subscriptionId = deleted?.subscriptionId;
+      if (deleted != null &&
+          deleted.status == PaymentStatus.completed &&
+          subscriptionId != null &&
+          subscriptionId.isNotEmpty) {
+        await subProvider.adjustAmountPaid(
+          userId: userId,
+          subscriptionId: subscriptionId,
+          delta: -deleted.amount,
+        );
+        logger.info(
+          'Reverted ${deleted.amount} from subscription $subscriptionId after deleting payment $paymentId',
+        );
       }
 
       logger.info('Payment $paymentId deleted successfully for user $userId');

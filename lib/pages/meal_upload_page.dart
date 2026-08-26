@@ -23,7 +23,6 @@ import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/chat_image_preview.dart';
 import '../widgets/loading_overlay.dart';
-import 'daily_uploads_page.dart';
 import 'dart:async';
 
 final Logger logger = Logger.forClass(MealUploadPage);
@@ -197,6 +196,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
       }
 
       // Fetch the latest diet document (weekday + optional weekend menus).
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
       final diet = await dietProvider.fetchLatestDietDocument(widget.userId);
 
@@ -219,6 +220,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
       });
 
       // Fetch meal states using provider
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final mealManager = Provider.of<MealManager>(context, listen: false);
       final fetchedStates =
           await mealManager.fetchMealStates(widget.userId, date: now);
@@ -231,6 +234,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
       await _refreshMealImages();
 
       // Fetch daily data using provider
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final dailyDataProvider =
           Provider.of<DailyDataProvider>(context, listen: false);
       final dailyData =
@@ -490,6 +495,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
     });
 
     try {
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
       final mealManager = Provider.of<MealManager>(context, listen: false);
 
       // Pre-check: see if the meal already has max images
@@ -574,6 +581,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   Future<void> _saveDailyData() async {
     // Validate steps input first
+    // The keyboard has no business staying up over the result of the save.
+    FocusManager.instance.primaryFocus?.unfocus();
+
     int? steps = int.tryParse(_stepsController.text);
     if (steps == null && _stepsController.text.isNotEmpty) {
       if (!mounted) return;
@@ -662,10 +672,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
                         // Combined Daily Tracking Card (Water + Steps)
                         _buildDailyTrackingCard(),
                         
-                        const SizedBox(height: 8),
-
-                        _buildDailyUploadsPageButton(),
-
                         const SizedBox(height: 8),
 
                         _buildViewUploadsButton(),
@@ -922,6 +928,11 @@ class _MealUploadPageState extends State<MealUploadPage> {
                       controller: _stepsController,
                       focusNode: _stepsFocusNode,
                       keyboardType: TextInputType.number,
+                      // A number keyboard has no return key on iOS, so the
+                      // field also has to offer a way out of itself.
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _stepsFocusNode.unfocus(),
+                      onTapOutside: (_) => _stepsFocusNode.unfocus(),
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13),
                       decoration: InputDecoration(
@@ -1348,37 +1359,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
     );
   }
 
-  /// Full-width button that opens the day's uploaded photos (grouped by meal)
-  /// on a dedicated page. Always visible; the page shows an empty state when
-  /// nothing has been uploaded yet.
-  Widget _buildDailyUploadsPageButton() {
-    final effectiveDate = kDebugMode ? _debugSelectedDate ?? now : now;
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => DailyUploadsPage(
-                userId: widget.userId,
-                date: effectiveDate,
-              ),
-            ),
-          );
-        },
-        icon: const Icon(Icons.photo_library, size: 18),
-        label: const Text('Bugün Yüklediğim Fotoğraflar'),
-        style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-      ),
-    );
-  }
-
+  /// Full-width button that opens the day's uploaded photos, grouped by meal,
+  /// in a bottom sheet. Hidden while nothing has been uploaded today.
   Widget _buildViewUploadsButton() {
     final totalImages =
         _mealImages.values.fold<int>(0, (sum, list) => sum + list.length);
@@ -1571,7 +1553,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
                                                       logger.err(
                                                           'Error deleting meal image: {}',
                                                           [e]);
-                                                      if (mounted) {
+                                                      // Guarded on ctx, the
+                                                      // sheet's own context.
+                                                      if (ctx.mounted) {
                                                         await DialogUtils
                                                             .openError(
                                                           ctx,

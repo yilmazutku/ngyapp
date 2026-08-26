@@ -220,7 +220,7 @@ class NotificationService {
       await _notifications.zonedSchedule(
         notificationId,
         NotificationConstants.paymentReminderTitle,
-        NotificationConstants.getPaymentReminderBody(amount.toStringAsFixed(2), minutesBefore),
+        NotificationConstants.getPaymentReminderBody(amount.toStringAsFixed(0), minutesBefore),
         tz.TZDateTime.from(notificationTime, tz.local),
         details,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,//androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
