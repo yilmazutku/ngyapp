@@ -64,11 +64,21 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Returns a row for [user] if they have a subscription with [status],
-  /// otherwise null. Per-section failures degrade to "Hata" cells rather than
-  /// dropping the whole customer.
+  /// Returns a row for [user] when they own a package with [status], otherwise
+  /// null — the customer is then simply not listed on that tab.
+  ///
+  /// İş kuralı: bir danışanın aynı anda yalnızca **bir** aktif paketi olur.
+  /// Sayfanın mantığı bunun üzerine kurulur: önce o tek paket bulunur, satırın
+  /// geri kalanı yalnızca ondan türetilir — ödeme, seans, ertelenen randevular,
+  /// kalan erteleme hakkı, dondurulma tarihi. Danışana ait olup **bu pakete ait
+  /// olmayan** hiçbir veri satıra giremez; paketten bağımsız tek alanlar
+  /// danışanın kimliğidir (dosya no, ad-soyad).
+  ///
+  /// Per-section failures degrade to "Hata" cells rather than dropping the
+  /// whole customer.
   Future<CustomerSummaryRow?> _buildRowForCustomer(
       UserModel user, SubActiveStatus status) async {
+    // Satırın var olma koşulu: bu durumda bir paket olmalı.
     final SubscriptionModel? activeSub =
         await _findSubscriptionByStatus(user.userId, status);
     if (activeSub == null) return null;
@@ -142,8 +152,12 @@ class CustomerSummaryProvider extends ChangeNotifier {
     );
   }
 
-  /// Finds the customer's subscription with [status] (most recent by start date
-  /// when several match). Returns null when none matches.
+  /// The customer's single package with [status], or null when they have none.
+  ///
+  /// İş kuralı gereği bu sorgu en fazla bir paket döndürmeli
+  /// ([SubActiveStatus.isActive] belgesine bakın). Birden fazla çıkıyorsa veri
+  /// bozuktur: durum uyarı olarak loglanır ve sayfanın kararlı kalması için
+  /// başlangıç tarihi en yeni olan paket kullanılır.
   Future<SubscriptionModel?> _findSubscriptionByStatus(
       String userId, SubActiveStatus status) async {
     try {
@@ -167,6 +181,23 @@ class CustomerSummaryProvider extends ChangeNotifier {
       if (subs.isEmpty) return null;
 
       subs.sort((a, b) => b.startDate.compareTo(a.startDate));
+
+      if (subs.length > 1) {
+        // Tek aktif paket kuralı bozulmuş: hangi paketlerin çakıştığını yaz ki
+        // veri düzeltilebilsin. Satır en yeni paketle kurulmaya devam eder.
+        logger.warn(
+          'Tek paket kuralı bozuldu: user={} durum={} paket sayısı={} ({}). '
+          'En yenisi kullanılıyor: {}',
+          [
+            userId,
+            status.label,
+            subs.length,
+            subs.map((s) => s.subscriptionId).join(', '),
+            subs.first.subscriptionId,
+          ],
+        );
+      }
+
       return subs.first;
     } catch (e) {
       logger.err('Error fetching {} subscription for user {}: {}',

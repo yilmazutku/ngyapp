@@ -34,3 +34,29 @@ double? parseAmountOrNull(String text) {
 final List<TextInputFormatter> amountInputFormatters = [
   FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
 ];
+
+/// Input formatter restricting a text field to **whole lira**: digits only, so
+/// no separator (and therefore no kuruş) can be typed at all.
+///
+/// Package fees are always entered as whole lira. A subscription's
+/// `totalAmount` / `amountPaid` stay `double` in Firestore for backwards
+/// compatibility, but every read, write and display of them goes through the
+/// whole-lira helpers here.
+final List<TextInputFormatter> wholeLiraInputFormatters = [
+  FilteringTextInputFormatter.digitsOnly,
+];
+
+/// Parses a whole-lira text field into an [int]. Returns null when the text is
+/// empty or holds anything other than digits — a decimal part is rejected
+/// rather than silently rounded.
+int? parseWholeLiraOrNull(String text) {
+  final s = text.trim().replaceAll(' ', '');
+  if (s.isEmpty) return null;
+  if (!RegExp(r'^\d+$').hasMatch(s)) return null;
+  return int.tryParse(s);
+}
+
+/// Renders a stored amount for an *editable* whole-lira field: `7200.0` becomes
+/// `"7200"`, never `"7200.0"`. Grouping separators are intentionally left out —
+/// the text goes straight back into [parseWholeLiraOrNull] on save.
+String formatWholeLira(num amount) => amount.round().toString();
