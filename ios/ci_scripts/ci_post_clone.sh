@@ -55,8 +55,35 @@ flutter pub get
 echo "=== Precaching iOS artifacts ==="
 flutter precache --ios
 
+# ---------------------------------------------------------------------------
+# Build numarası
+# ---------------------------------------------------------------------------
+# Xcode Cloud her koşuda CI_BUILD_NUMBER'i bir artirir. Bunu pubspec'teki
+# numaranin uzerine eklersek her kosu, hem bir oncekinden hem de pubspec'teki
+# degerden kesinlikle buyuk bir numara uretir. Boylece App Store Connect'in
+# "build numarasi daha yuksek olmali" kurali kendiliginden saglanir ve her
+# yukleme oncesi pubspec.yaml'a dokunmak gerekmez.
+#
+# Xcode Cloud disinda (yerel build) CI_BUILD_NUMBER tanimsizdir; o durumda
+# surum oldugu gibi pubspec.yaml'dan gelir.
+BUILD_NUMBER_ARG=""
+if [ -n "$CI_BUILD_NUMBER" ]; then
+    PUBSPEC_BUILD_NUMBER=$(grep '^version:' pubspec.yaml | sed 's/.*+//' | tr -d '[:space:]')
+    case "$PUBSPEC_BUILD_NUMBER" in
+        ''|*[!0-9]*)
+            echo "ERROR: pubspec.yaml icindeki build numarasi okunamadi: '$PUBSPEC_BUILD_NUMBER'"
+            exit 1
+            ;;
+    esac
+    RESOLVED_BUILD_NUMBER=$((PUBSPEC_BUILD_NUMBER + CI_BUILD_NUMBER))
+    echo "Build numarasi: pubspec $PUBSPEC_BUILD_NUMBER + CI_BUILD_NUMBER $CI_BUILD_NUMBER = $RESOLVED_BUILD_NUMBER"
+    BUILD_NUMBER_ARG="--build-number=$RESOLVED_BUILD_NUMBER"
+else
+    echo "CI_BUILD_NUMBER tanimsiz (yerel build): surum pubspec.yaml'dan alinacak"
+fi
+
 echo "=== Generating iOS build configuration ==="
-flutter build ios --config-only --release --no-codesign
+flutter build ios --config-only --release --no-codesign $BUILD_NUMBER_ARG
 
 # Verify Generated.xcconfig
 if [ -f "ios/Flutter/Generated.xcconfig" ]; then
