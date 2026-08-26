@@ -22,7 +22,7 @@ class SummaryCell {
 }
 
 /// One row of the customer overview: a customer with an active subscription
-/// plus their latest payment info and their session (seans) dates.
+/// plus that subscription's latest payment info and its session (seans) dates.
 class CustomerSummaryRow {
   /// Max number of session (seans) columns displayed per the requirement.
   static const int maxSeans = 12;
@@ -30,6 +30,10 @@ class CustomerSummaryRow {
   final String userId;
   final SummaryCell dosyaNo;
   final String fullName;
+
+  /// Latest *completed* payment of the row's subscription. Empty cells when the
+  /// package has not been paid yet — a payment belonging to another package (or
+  /// a "Paketsiz" one) is never shown here.
   final SummaryCell paymentDate;
   final SummaryCell paymentAmount;
   final SummaryCell paymentType;

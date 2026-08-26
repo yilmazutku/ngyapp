@@ -13,9 +13,12 @@ final Logger logger = Logger.forClass(CustomerSummaryProvider);
 
 /// Aggregates, for every non-admin customer that owns a subscription with a
 /// given status (e.g. Aktif/Haftalık, Aktif/Kilo Takip, Donduruldu), the data
-/// needed by the "Danışanlar Özet" overview page: last payment (date / amount
-/// / type), the package name, and up to [CustomerSummaryRow.maxSeans] session
-/// (appointment) dates.
+/// needed by the "Danışanlar Özet" overview page: the last payment of that
+/// package (date / amount / type), the package name, and up to
+/// [CustomerSummaryRow.maxSeans] session (appointment) dates.
+///
+/// Every cell in a row describes the *same* subscription — payments included —
+/// so the overview cannot disagree with the package's own detail view.
 ///
 /// All Firestore access lives here (per project provider convention); the UI
 /// only renders the returned [CustomerSummaryRow]s.
@@ -109,7 +112,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
     // Payments and appointments are unrelated queries, so they are issued
     // together instead of costing two sequential round trips per customer.
-    final paymentFuture = _resolveLastPayment(user.userId);
+    final paymentFuture =
+        _resolveLastPayment(user.userId, activeSub.subscriptionId);
     final apptFuture =
         _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
     final payment = await paymentFuture;
@@ -171,23 +175,35 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Resolves the most recent completed payment into display cells.
-  /// - No completed payment => empty cells (nothing to show yet).
+  /// Resolves the most recent completed payment *of the row's package* into
+  /// display cells.
+  ///
+  /// The lookup is deliberately scoped to [subscriptionId]: a payment made for
+  /// an earlier package — or a "Paketsiz" one — is not this package's payment,
+  /// and showing it here made an unpaid package look paid while its own detail
+  /// still (correctly) reported "Eksik Ödeme".
+  /// - No completed payment on this package => empty cells (nothing paid yet).
   /// - Completed payment with no payment date => "Hata" for the date cell.
-  Future<_PaymentCells> _resolveLastPayment(String userId) async {
+  Future<_PaymentCells> _resolveLastPayment(
+      String userId, String subscriptionId) async {
     try {
-      // Only the completed ones are ever used, so planned payments are dropped
-      // server-side rather than downloaded and filtered here.
+      // A single equality filter needs no composite index, and a package only
+      // ever carries a handful of payments, so the status narrowing is done
+      // here instead of as a second server-side filter.
       final snap = await _usersRef
           .doc(userId)
           .collection('payments')
-          .where('status', isEqualTo: PaymentStatus.completed.label)
+          .where('subscriptionId', isEqualTo: subscriptionId)
           .get();
 
       final completed = <PaymentModel>[];
       for (final doc in snap.docs) {
         try {
-          completed.add(PaymentModel.fromDocument(doc));
+          final payment = PaymentModel.fromDocument(doc);
+          // Planned ("Planlandı") payments are money that has not arrived yet.
+          if (payment.status == PaymentStatus.completed) {
+            completed.add(payment);
+          }
         } catch (e) {
           logger.warn('Skipping malformed payment {} for user {}: {}',
               [doc.id, userId, e]);
@@ -213,7 +229,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       return _PaymentCells(date: dateCell, amount: amountCell, type: typeCell);
     } catch (e) {
-      logger.err('Error resolving last payment for user {}: {}', [userId, e]);
+      logger.err('Error resolving last payment for user {} sub {}: {}',
+          [userId, subscriptionId, e]);
       return const _PaymentCells.error();
     }
   }

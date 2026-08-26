@@ -14,9 +14,9 @@ final Logger logger = Logger.forClass(DanisanlarOzetPage);
 
 /// Admin overview: customers grouped by subscription status. The first tab
 /// lists everyone with an *active* subscription; the second lists everyone
-/// with a *frozen* (Donduruldu) subscription. Each row shows the latest
-/// payment (date / amount / type), the package, and up to
-/// [CustomerSummaryRow.maxSeans] session (seans) dates.
+/// with a *frozen* (Donduruldu) subscription. Each row shows that
+/// subscription's latest payment (date / amount / type), the package, and up
+/// to [CustomerSummaryRow.maxSeans] session (seans) dates.
 class DanisanlarOzetPage extends StatefulWidget {
   const DanisanlarOzetPage({super.key});
 
