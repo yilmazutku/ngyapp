@@ -24,11 +24,72 @@ class AppConstants {
   static const String appName = 'Dyt. Nilay Göktepe Yılmaz';
 
   /// Version shown to the user (top-right of the home page).
-  /// Keep in step with the `version:` field in pubspec.yaml.
+  ///
+  /// Keep in step with the `version:` field in pubspec.yaml. This is also the
+  /// version the startup update check compares against the store, so a build
+  /// that forgets to bump it here keeps asking its users to update to a
+  /// version they already have.
   static const String appVersion = '1.0.1';
-  
+
   /// The app description shown in various places
   static const String appDescription = 'A new Flutter project.';
+}
+
+/// Configuration for the startup "is there a newer version?" check.
+///
+/// The values below are the fallbacks used when the Firestore document at
+/// `admininput/appVersion` does not override them; that document's fields are
+/// documented on `AppUpdateInfo` in lib/models/app_update_info.dart.
+class AppUpdateConstants {
+  AppUpdateConstants._();
+
+  /// Firestore location of the admin-managed version document.
+  static const String collection = 'admininput';
+  static const String docId = 'appVersion';
+
+  /// Play Store listing id. Must match `applicationId` in
+  /// android/app/build.gradle.
+  static const String androidPackageName = 'com.utkuyilmaz.ngy_app';
+
+  /// App Store numeric id (the digits in `apps.apple.com/app/id...`).
+  ///
+  /// Empty until the app has an App Store listing. While it is empty the
+  /// check stays silent on iOS rather than showing a button that leads
+  /// nowhere; set it here or in the Firestore document to switch iOS on.
+  static const String iosAppId = '';
+
+  /// Store names as users know them.
+  static const String androidStoreName = 'Google Play';
+  static const String iosStoreName = 'App Store';
+
+  /// How long the check may take before the app carries on without it. Kept
+  /// short: the app is already usable underneath while this runs, and a slow
+  /// network must never turn into a stuck launch.
+  static const Duration checkTimeout = Duration(seconds: 6);
+
+  // ============================================================
+  // USER-FACING TEXT
+  // ============================================================
+
+  static const String optionalTitle = 'Güncelleme Mevcut';
+  static const String forcedTitle = 'Güncelleme Gerekli';
+  static const String updateButton = 'Güncelle';
+  static const String laterButton = 'Daha Sonra';
+
+  /// Shown when the user may keep using the current version.
+  static String optionalMessage(String version, String storeName) =>
+      'Uygulamanın yeni sürümü ($version) yayınlandı. $storeName üzerinden '
+      'güncelleyerek en son iyileştirmeleri kullanabilirsiniz.';
+
+  /// Shown when the current version is no longer supported.
+  static String forcedMessage(String version, String storeName) =>
+      'Uygulamayı kullanmaya devam edebilmek için $storeName üzerinden en son '
+      'sürüme ($version) güncellemeniz gerekiyor.';
+
+  static const String storeErrorTitle = 'Mağaza Açılamadı';
+  static const String storeErrorMessage =
+      'Uygulama mağazası açılamadı. Lütfen mağaza uygulamasını elle açıp '
+      'güncellemeyi tamamlayın.';
 }
 
 /// Notification constants for local notifications (Flutter).
