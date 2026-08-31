@@ -30,14 +30,17 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace "com.utkuyilmaz.ngy_app"
-    compileSdkVersion 35
-    ndkVersion flutter.ndkVersion
+    namespace = "com.utkuyilmaz.ngy_app"
+    // Google Play, 31 Agustos 2026'dan itibaren yeni surumlerin en az Android 16'yi
+    // (API 36) hedeflemesini sart kosuyor. targetSdk compileSdk'yi asamayacagi icin
+    // ikisi de 36. Flutter surumunden bagimsiz olsun diye acikca yaziliyor.
+    compileSdk = 36
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -49,28 +52,29 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.utkuyilmaz.ngy_app"
-        minSdkVersion 23
-        targetSdkVersion flutter.targetSdkVersion
-        versionCode flutterVersionCode.toInteger()
-        versionName flutterVersionName
-        multiDexEnabled true
+        applicationId = "com.utkuyilmaz.ngy_app"
+        // Flutter 3.41 (CI'da kullanilan surum) en az API 24 istiyor.
+        minSdk = 24
+        targetSdk = 36
+        versionCode = flutterVersionCode.toInteger()
+        versionName = flutterVersionName
+        multiDexEnabled = true
     }
 
     signingConfigs {
         release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
+            keyAlias = keystoreProperties['keyAlias']
+            keyPassword = keystoreProperties['keyPassword']
+            storeFile = keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+            storePassword = keystoreProperties['storePassword']
         }
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release
-            minifyEnabled true
-            shrinkResources true
+            signingConfig = signingConfigs.release
+            minifyEnabled = true
+            shrinkResources = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -81,6 +85,10 @@ flutter {
 }
 
 dependencies {
-    implementation platform('com.google.firebase:firebase-bom:32.7.2')
+    // Firebase surumleri elle sabitlenmiyor: FlutterFire eklentileri kendi
+    // firebase-bom'unu uyguluyor (firebase_core -> FirebaseSDKVersion, su an
+    // 33.16.0). Buraya eski bir bom yazmak eklentilerin bekledigi surumlerle
+    // catisiyordu. Gerekirse android/build.gradle icinde
+    // ext.FlutterFire = [FirebaseSDKVersion: "<surum>"] ile ezilebilir.
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
