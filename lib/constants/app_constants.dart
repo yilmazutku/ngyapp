@@ -138,9 +138,13 @@ class NotificationConstants {
   // ============================================================
   
   /// The icon resource name for Android local notifications.
-  /// To change: update the icon files in android/app/src/main/res/mipmap-*/ folders
-  /// and update this constant to match the filename (without extension).
-  static const String androidNotificationIcon = '@mipmap/ngy';
+  ///
+  /// Must match a real resource under android/app/src/main/res/. `@mipmap/ngy`
+  /// did not exist, so flutter_local_notifications could not resolve the icon
+  /// and local notifications failed on Android.
+  /// To change: add the icon under android/app/src/main/res/drawable-*/ and
+  /// update this constant to match the filename (without extension).
+  static const String androidNotificationIcon = '@mipmap/ic_launcher';
 }
 
 /// Constants for Push Notification configuration (Cloud Functions).
