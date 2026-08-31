@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_app_badger/flutter_app_badger.dart';
+import 'package:app_badge_plus/app_badge_plus.dart';
 
 import '../constants/app_constants.dart';
 import '../models/logger.dart';
@@ -167,13 +167,14 @@ class FcmService {
     
     try {
       // Check if badge is supported on this device
-      final isSupported = await FlutterAppBadger.isAppBadgeSupported();
+      final isSupported = await AppBadgePlus.isSupported();
       if (!isSupported) {
         _logger.debug('App badge is not supported on this device');
         return;
       }
-      
-      await FlutterAppBadger.removeBadge();
+
+      // A count of 0 clears the badge.
+      await AppBadgePlus.updateBadge(0);
       _logger.info('App badge cleared');
     } catch (e) {
       _logger.err('Error clearing app badge: $e');
