@@ -61,6 +61,7 @@ import 'providers/appointment_colors_provider.dart';
 import 'providers/appointment_durations_provider.dart';
 import 'providers/special_lines_provider.dart';
 import 'providers/sub_provider.dart';
+import 'providers/summary_colors_provider.dart';
 import 'providers/test_provider.dart';
 import 'providers/user_provider.dart';
 import 'services/fcm_service.dart';
@@ -211,6 +212,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AppointmentDurationsProvider()),
         ChangeNotifierProvider(create: (_) => NewsProvider()),
         ChangeNotifierProvider(create: (_) => CustomerSummaryProvider()),
+        ChangeNotifierProvider(create: (_) => SummaryColorsProvider()),
       ],
       child: AppLifecycleManager(
         child: MaterialApp(

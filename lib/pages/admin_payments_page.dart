@@ -601,7 +601,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     }).toList();
 
     final totalPaid = payments.fold<double>(0, (sum, p) => sum + p.amount);
-    final totalsByType = _totalsByPaymentType(payments);
+    final statsByType = _statsByPaymentType(payments);
 
     // Still-planned payments of the same period, matched by their due date.
     // Null on the tabs that do not ask for the planned/collected contrast.
@@ -687,10 +687,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                   AnimatedCrossFade(
                     firstChild: _buildMonthStatsCard(
                       title: statsTitle,
-                      count: payments.length,
-                      totalPaid: totalPaid,
-                      plannedTotal: plannedTotal,
-                      totalsByType: totalsByType,
+                      statsByType: statsByType,
                       start: start,
                       end: range.end,
                     ),
@@ -727,17 +724,21 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     );
   }
 
-  /// Money collected per payment type, keyed in [PaymentType] declaration order
-  /// and skipping the types that did not occur.
-  Map<PaymentType, double> _totalsByPaymentType(List<PaymentModel> payments) {
-    final totals = <PaymentType, double>{};
+  /// Money collected and how many payments it took, per payment type, keyed in
+  /// [PaymentType] declaration order and skipping the types that did not occur.
+  Map<PaymentType, ({double total, int count})> _statsByPaymentType(
+      List<PaymentModel> payments) {
+    final stats = <PaymentType, ({double total, int count})>{};
     for (final payment in payments) {
-      totals[payment.paymentType] =
-          (totals[payment.paymentType] ?? 0) + payment.amount;
+      final current = stats[payment.paymentType];
+      stats[payment.paymentType] = (
+        total: (current?.total ?? 0) + payment.amount,
+        count: (current?.count ?? 0) + 1,
+      );
     }
     return {
       for (final type in PaymentType.values)
-        if (totals.containsKey(type)) type: totals[type]!,
+        if (stats.containsKey(type)) type: stats[type]!,
     };
   }
 
@@ -918,14 +919,13 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     }
   }
 
+  /// Stats card of the month tabs. Deliberately limited to the per payment type
+  /// breakdown: the completed/planned totals are already on the chips above it.
   Widget _buildMonthStatsCard({
     required String title,
-    required int count,
-    required double totalPaid,
-    required Map<PaymentType, double> totalsByType,
+    required Map<PaymentType, ({double total, int count})> statsByType,
     required DateTime start,
     required DateTime end,
-    double? plannedTotal,
   }) {
     final rangeText = '${kDateFormat.format(start)} - ${kDateFormat.format(end)}';
 
@@ -945,26 +945,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
               ],
             ),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 24,
-              runSpacing: 16,
-              alignment: WrapAlignment.spaceAround,
-              children: [
-                _statItem('Tamamlanan Ödemeler', count.toString(),
-                    Icons.check_circle, Colors.green),
-                _statItem('Tamamlanan Toplam',
-                    '${totalPaid.toStringAsFixed(0)} ₺', Icons.paid, Colors.green),
-                if (plannedTotal != null)
-                  _statItem('Planlanan Toplam',
-                      '${plannedTotal.toStringAsFixed(0)} ₺', Icons.event,
-                      Colors.orange),
-              ],
-            ),
-            const Divider(height: 32),
             const Text('Ödeme Tipine Göre Tahsilat',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            if (totalsByType.isEmpty)
+            if (statsByType.isEmpty)
               const Text('Bu dönemde tamamlanan ödeme yok.',
                   style: TextStyle(fontSize: 12, color: Colors.grey))
             else
@@ -972,10 +956,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                 spacing: 24,
                 runSpacing: 16,
                 alignment: WrapAlignment.spaceAround,
-                children: totalsByType.entries
+                children: statsByType.entries
                     .map((entry) => _statItem(
-                          entry.key.label,
-                          '${entry.value.toStringAsFixed(0)} ₺',
+                          '${entry.key.label} · ${entry.value.count} ödeme',
+                          '${entry.value.total.toStringAsFixed(0)} ₺',
                           _paymentTypeIcon(entry.key),
                           Colors.teal,
                         ))

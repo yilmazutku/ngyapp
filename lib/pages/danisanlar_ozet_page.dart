@@ -4,13 +4,19 @@ import 'package:provider/provider.dart';
 import '../models/customer_summary_row.dart';
 import '../models/logger.dart';
 import '../models/subs_model.dart';
+import '../models/summary_color_config.dart';
 import '../providers/customer_summary_provider.dart';
+import '../providers/summary_colors_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import 'customer_sum.dart';
 import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(DanisanlarOzetPage);
+
+/// Tahsil edilmemiş ödemelerde tutarın solunda gösterilen işaret. Sayfanın en
+/// üstündeki not da bu işareti açıklar.
+const String _plannedMark = '(P)';
 
 /// Admin overview: customers grouped by subscription status. The first tab
 /// lists everyone with an *active* subscription; the second lists everyone
@@ -79,27 +85,63 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _CustomerSummaryTab(
-            key: _weeklyKey,
-            status: SubActiveStatus.activeWeekly,
-            emptyMessage: 'Aktif/Haftalık paketi olan danışan bulunamadı.',
-          ),
-          _CustomerSummaryTab(
-            key: _weightTrackingKey,
-            status: SubActiveStatus.activeWeightTracking,
-            emptyMessage: 'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
-            // Weight-tracking packages have no payment; hide payment columns.
-            showPayment: false,
-          ),
-          _CustomerSummaryTab(
-            key: _frozenKey,
-            status: SubActiveStatus.frozen,
-            emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
+          _buildLegend(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _CustomerSummaryTab(
+                  key: _weeklyKey,
+                  status: SubActiveStatus.activeWeekly,
+                  emptyMessage:
+                      'Aktif/Haftalık paketi olan danışan bulunamadı.',
+                ),
+                _CustomerSummaryTab(
+                  key: _weightTrackingKey,
+                  status: SubActiveStatus.activeWeightTracking,
+                  emptyMessage:
+                      'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
+                  // Weight-tracking packages have no payment; hide payment
+                  // columns.
+                  showPayment: false,
+                ),
+                _CustomerSummaryTab(
+                  key: _frozenKey,
+                  status: SubActiveStatus.frozen,
+                  emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
+                ),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Explains the "(P)" marker used inside the tables. Sits at the very top of
+  /// the page so it is visible on every tab.
+  Widget _buildLegend() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.info_outline, size: 16, color: Colors.grey.shade700),
+            const SizedBox(width: 6),
+            Text(
+              '$_plannedMark = Planlandı',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -126,9 +168,6 @@ class _CustomerSummaryTab extends StatefulWidget {
 
 class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     with AutomaticKeepAliveClientMixin {
-  /// Tahsil edilmemiş ödemelerde tutarın solunda gösterilen işaret.
-  static const String _plannedPaymentMark = '(P)';
-
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
 
@@ -165,6 +204,11 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     try {
       final provider =
           Provider.of<CustomerSummaryProvider>(context, listen: false);
+      // Cached after the first tab loads it; the table reads the resolved
+      // color synchronously through SummaryColorsRegistry while building.
+      await Provider.of<SummaryColorsProvider>(context, listen: false)
+          .fetchColors();
+      if (!mounted) return;
       final rows =
           await provider.fetchCustomerSummariesByStatus(widget.status);
       if (!mounted) return;
@@ -349,7 +393,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         ],
         _cell(row.packageType),
         if (widget.status == SubActiveStatus.frozen) _cell(row.freezeDate),
-        for (final seans in row.seans) _cell(seans),
+        for (final seans in row.seans) _seansCell(seans),
         for (int i = 0; i < postponedColumns; i++)
           _cell(i < row.postponedDates.length
               ? row.postponedDates[i]
@@ -423,6 +467,34 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
   DataCell _cell(SummaryCell cell) =>
       DataCell(Text(cell.text, style: _cellStyle(cell)));
 
+  /// Seans hücresi: yapılmış randevunun tarihi, admin'in Ayarlar'dan seçtiği
+  /// arkaplan rengiyle vurgulanır. Yazı rengi arkaplanın parlaklığına göre
+  /// belirlendiği için tarih her renkte okunabilir kalır.
+  ///
+  /// Boş (randevusu olmayan) ve "Hata" hücreleri vurgulanmaz: ilki gösterecek
+  /// bir randevu taşımaz, ikincisi kendi kırmızı hata biçimini korur.
+  DataCell _seansCell(SummaryCell cell) {
+    if (cell.isEmpty || cell.isError) return _cell(cell);
+
+    final background = SummaryColorsRegistry.completedAppointmentColor;
+    return DataCell(
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          cell.text,
+          style: TextStyle(
+            color: SummaryColorsRegistry.readableTextColor(background),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
   TextStyle _cellStyle(SummaryCell cell) => TextStyle(
         color: cell.isError ? Colors.red.shade700 : null,
         fontWeight: cell.isError ? FontWeight.bold : null,
@@ -438,7 +510,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         TextSpan(
           children: [
             TextSpan(
-              text: '$_plannedPaymentMark ',
+              text: '$_plannedMark ',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             TextSpan(text: cell.text),
