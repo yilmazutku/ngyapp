@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 // TextPainter) is unambiguous.
 import 'package:intl/intl.dart' hide TextDirection;
 
+import 'app_bar_with_back.dart';
+
+part 'measurement_chart_full_screen.dart';
+
 /// A single data point on a [MeasurementLineChart].
 class ChartPoint {
   final DateTime date;
@@ -13,13 +17,56 @@ class ChartPoint {
   const ChartPoint(this.date, this.value);
 }
 
+/// Tunable layout values for the measurement charts.
+///
+/// Kept in one place so the chart density can be tried out without hunting
+/// through the painting code.
+class MeasurementChartConfig {
+  MeasurementChartConfig._();
+
+  /// How many data points the compact (in-card) chart may draw at once.
+  ///
+  /// Only the most recent [maxCompactPoints] measurements are plotted there;
+  /// beyond that the line and the date labels get too crowded to read on a
+  /// phone. The full-screen chart ignores this limit and shows every point.
+  static const int maxCompactPoints = 8;
+
+  /// Height of the compact (in-card) chart's drawing area.
+  static const double compactHeight = 180;
+
+  /// Horizontal space reserved per data point in the full-screen chart.
+  ///
+  /// The content is as wide as it needs to be to give every point this much
+  /// room, which is what makes the full-screen chart scrollable in time.
+  static const double fullScreenPointSpacing = 76;
+
+  /// Minimum horizontal gap kept between two neighbouring x-axis date labels.
+  /// Labels that would come closer than this are skipped instead of drawn on
+  /// top of each other.
+  static const double minDateLabelGap = 10;
+
+  /// Width of the fixed value-axis strip of the full-screen chart.
+  static const double fullScreenAxisWidth = 46;
+}
+
+/// How x (date) positions are mapped to pixels.
+enum _XAxisMode {
+  /// Positions are proportional to the actual dates: gaps in time show up as
+  /// gaps in the chart. Used by the compact chart, whose width is fixed.
+  time,
+
+  /// Every point gets the same slot width. Used by the scrollable full-screen
+  /// chart so points never pile up, no matter how close their dates are.
+  evenlySpaced,
+}
+
 /// A lightweight, dependency-free line chart used to visualise a single
 /// measurement metric over time (y = value, x = date).
 ///
-/// The widget is self-contained: it computes a "nice" value range, draws
-/// grid lines, axis labels and the value line, and lets the user tap/drag
-/// across the chart to inspect the value at a given date.
-class MeasurementLineChart extends StatefulWidget {
+/// Only the most recent [maxPoints] points are drawn so the date labels stay
+/// readable; a "Büyüt" button opens [MeasurementChartFullScreenPage], which
+/// shows the whole history and can be scrolled along the date axis.
+class MeasurementLineChart extends StatelessWidget {
   /// Points to plot. Should be sorted ascending by [ChartPoint.date].
   final List<ChartPoint> points;
 
@@ -29,27 +76,160 @@ class MeasurementLineChart extends StatefulWidget {
   /// Unit label shown in the inspection tooltip (e.g. "kg", "cm").
   final String unit;
 
+  /// Metric name, shown as the title of the full-screen chart.
+  final String title;
+
   /// Fixed drawing height of the chart area.
   final double height;
+
+  /// Maximum number of (most recent) points drawn here.
+  final int maxPoints;
 
   const MeasurementLineChart({
     super.key,
     required this.points,
     required this.color,
     required this.unit,
-    this.height = 180,
+    required this.title,
+    this.height = MeasurementChartConfig.compactHeight,
+    this.maxPoints = MeasurementChartConfig.maxCompactPoints,
+  });
+
+  static const String _expandLabel = 'Büyüt';
+  static const EdgeInsets _padding =
+      EdgeInsets.fromLTRB(46, 16, 14, 30);
+
+  /// The tail of [points] that actually fits into the compact chart.
+  List<ChartPoint> get _visiblePoints => points.length > maxPoints
+      ? points.sublist(points.length - maxPoints)
+      : points;
+
+  void _openFullScreen(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MeasurementChartFullScreenPage(
+          points: points,
+          color: color,
+          unit: unit,
+          title: title,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _visiblePoints;
+    final isTruncated = visible.length < points.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: isTruncated
+                  ? Text(
+                      'Son ${visible.length} ölçüm',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            TextButton.icon(
+              onPressed: () => _openFullScreen(context),
+              icon: const Icon(Icons.open_in_full, size: 16),
+              label: const Text(_expandLabel),
+              style: TextButton.styleFrom(
+                foregroundColor: color,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return _ChartSurface(
+              points: visible,
+              color: color,
+              unit: unit,
+              size: Size(constraints.maxWidth, height),
+              xMode: _XAxisMode.time,
+              padding: _padding,
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// Paints a chart of [points] and lets the user inspect a single value by
+/// tapping (and, when [enableDragInspect] is set, dragging) across it.
+///
+/// Shared by the compact and the full-screen chart; the caller decides the
+/// canvas size, the x mapping and the paddings.
+class _ChartSurface extends StatefulWidget {
+  final List<ChartPoint> points;
+  final Color color;
+  final String unit;
+  final Size size;
+  final _XAxisMode xMode;
+  final EdgeInsets padding;
+
+  /// Whether the value labels are drawn here. The full-screen chart draws them
+  /// in a fixed strip instead, so they stay visible while scrolling.
+  final bool showValueLabels;
+
+  /// Horizontal dragging inspects points. Must stay off inside a horizontal
+  /// scroll view, where dragging means scrolling.
+  final bool enableDragInspect;
+
+  const _ChartSurface({
+    required this.points,
+    required this.color,
+    required this.unit,
+    required this.size,
+    required this.xMode,
+    required this.padding,
+    this.showValueLabels = true,
+    this.enableDragInspect = true,
   });
 
   @override
-  State<MeasurementLineChart> createState() => _MeasurementLineChartState();
+  State<_ChartSurface> createState() => _ChartSurfaceState();
 }
 
-class _MeasurementLineChartState extends State<MeasurementLineChart> {
+class _ChartSurfaceState extends State<_ChartSurface> {
   int? _selectedIndex;
 
-  void _handlePointer(Offset localPosition, Size size) {
+  @override
+  void didUpdateWidget(covariant _ChartSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Keep the selection inside the (possibly shorter) new series.
+    final index = _selectedIndex;
+    if (index != null && index >= widget.points.length) {
+      _selectedIndex = null;
+    }
+  }
+
+  void _handlePointer(Offset localPosition) {
     if (widget.points.isEmpty) return;
-    final geometry = _ChartGeometry.compute(size, widget.points);
+    final geometry = _ChartGeometry.compute(
+      widget.size,
+      widget.points,
+      xMode: widget.xMode,
+      padding: widget.padding,
+    );
     if (geometry.offsets.isEmpty) return;
 
     // Find the point whose x is closest to the pointer's x.
@@ -69,26 +249,74 @@ class _MeasurementLineChartState extends State<MeasurementLineChart> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, widget.height);
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (d) => _handlePointer(d.localPosition, size),
-          onHorizontalDragStart: (d) => _handlePointer(d.localPosition, size),
-          onHorizontalDragUpdate: (d) => _handlePointer(d.localPosition, size),
-          child: CustomPaint(
-            size: size,
-            painter: _LineChartPainter(
-              points: widget.points,
-              color: widget.color,
-              unit: widget.unit,
-              selectedIndex: _selectedIndex,
-            ),
-          ),
-        );
-      },
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (d) => _handlePointer(d.localPosition),
+      onHorizontalDragStart: widget.enableDragInspect
+          ? (d) => _handlePointer(d.localPosition)
+          : null,
+      onHorizontalDragUpdate: widget.enableDragInspect
+          ? (d) => _handlePointer(d.localPosition)
+          : null,
+      child: CustomPaint(
+        size: widget.size,
+        painter: _LineChartPainter(
+          points: widget.points,
+          color: widget.color,
+          unit: widget.unit,
+          selectedIndex: _selectedIndex,
+          xMode: widget.xMode,
+          padding: widget.padding,
+          showValueLabels: widget.showValueLabels,
+        ),
+      ),
     );
+  }
+}
+
+/// The value (y) axis: a "nice" range plus the pixel mapping for it.
+///
+/// Split out so the full-screen chart's fixed axis strip and its scrolling
+/// plot can share one scale and line their ticks up.
+class _VerticalScale {
+  final double top;
+  final double bottom;
+  final double min;
+  final double max;
+  final List<double> ticks;
+
+  const _VerticalScale({
+    required this.top,
+    required this.bottom,
+    required this.min,
+    required this.max,
+    required this.ticks,
+  });
+
+  factory _VerticalScale.forPoints(
+    List<ChartPoint> points, {
+    required double top,
+    required double bottom,
+  }) {
+    double rawMin = points.isEmpty ? 0 : points.first.value;
+    double rawMax = rawMin;
+    for (final p in points) {
+      rawMin = math.min(rawMin, p.value);
+      rawMax = math.max(rawMax, p.value);
+    }
+    final nice = _niceRange(rawMin, rawMax, 4);
+    return _VerticalScale(
+      top: top,
+      bottom: bottom,
+      min: nice.min,
+      max: nice.max,
+      ticks: nice.ticks,
+    );
+  }
+
+  double yFor(double value) {
+    if (max == min) return (top + bottom) / 2;
+    return bottom - (value - min) / (max - min) * (bottom - top);
   }
 }
 
@@ -97,73 +325,69 @@ class _MeasurementLineChartState extends State<MeasurementLineChart> {
 class _ChartGeometry {
   final Rect plot;
   final List<Offset> offsets;
-  final double minValue;
-  final double maxValue;
-  final List<double> yTicks;
+  final _VerticalScale scale;
   final DateTime minDate;
   final DateTime maxDate;
 
   const _ChartGeometry({
     required this.plot,
     required this.offsets,
-    required this.minValue,
-    required this.maxValue,
-    required this.yTicks,
+    required this.scale,
     required this.minDate,
     required this.maxDate,
   });
 
-  static const double _leftPad = 46;
-  static const double _rightPad = 14;
-  static const double _topPad = 16;
-  static const double _bottomPad = 30;
-
-  static _ChartGeometry compute(Size size, List<ChartPoint> points) {
+  static _ChartGeometry compute(
+    Size size,
+    List<ChartPoint> points, {
+    required _XAxisMode xMode,
+    required EdgeInsets padding,
+  }) {
     final plot = Rect.fromLTRB(
-      _leftPad,
-      _topPad,
-      math.max(_leftPad + 1, size.width - _rightPad),
-      math.max(_topPad + 1, size.height - _bottomPad),
+      padding.left,
+      padding.top,
+      math.max(padding.left + 1, size.width - padding.right),
+      math.max(padding.top + 1, size.height - padding.bottom),
     );
 
-    double rawMin = points.first.value;
-    double rawMax = points.first.value;
+    final scale = _VerticalScale.forPoints(
+      points,
+      top: plot.top,
+      bottom: plot.bottom,
+    );
+
     DateTime minDate = points.first.date;
     DateTime maxDate = points.first.date;
     for (final p in points) {
-      rawMin = math.min(rawMin, p.value);
-      rawMax = math.max(rawMax, p.value);
       if (p.date.isBefore(minDate)) minDate = p.date;
       if (p.date.isAfter(maxDate)) maxDate = p.date;
     }
 
-    final nice = _niceRange(rawMin, rawMax, 4);
-
     final minMs = minDate.millisecondsSinceEpoch;
     final maxMs = maxDate.millisecondsSinceEpoch;
 
-    double xForDate(DateTime d) {
-      if (maxMs == minMs) return plot.center.dx;
-      final t = (d.millisecondsSinceEpoch - minMs) / (maxMs - minMs);
-      return plot.left + t * plot.width;
+    double xForIndex(int i) {
+      if (points.length == 1) return plot.center.dx;
+      switch (xMode) {
+        case _XAxisMode.time:
+          if (maxMs == minMs) return plot.center.dx;
+          final t =
+              (points[i].date.millisecondsSinceEpoch - minMs) / (maxMs - minMs);
+          return plot.left + t * plot.width;
+        case _XAxisMode.evenlySpaced:
+          return plot.left + i * plot.width / (points.length - 1);
+      }
     }
 
-    double yForValue(double v) {
-      if (nice.max == nice.min) return plot.center.dy;
-      final t = (v - nice.min) / (nice.max - nice.min);
-      return plot.bottom - t * plot.height;
-    }
-
-    final offsets = points
-        .map((p) => Offset(xForDate(p.date), yForValue(p.value)))
-        .toList(growable: false);
+    final offsets = [
+      for (int i = 0; i < points.length; i++)
+        Offset(xForIndex(i), scale.yFor(points[i].value)),
+    ];
 
     return _ChartGeometry(
       plot: plot,
       offsets: offsets,
-      minValue: nice.min,
-      maxValue: nice.max,
-      yTicks: nice.ticks,
+      scale: scale,
       minDate: minDate,
       maxDate: maxDate,
     );
@@ -218,30 +442,42 @@ _NiceRange _niceRange(double rawMin, double rawMax, int targetSteps) {
   return _NiceRange(niceMin, niceMax, ticks);
 }
 
+const Color _gridColor = Color(0xFFE2E8F0);
+const Color _labelColor = Color(0xFF64748B);
+const Color _tooltipColor = Color(0xFF1E293B);
+const TextStyle _axisLabelStyle = TextStyle(color: _labelColor, fontSize: 10);
+
 class _LineChartPainter extends CustomPainter {
   final List<ChartPoint> points;
   final Color color;
   final String unit;
   final int? selectedIndex;
+  final _XAxisMode xMode;
+  final EdgeInsets padding;
+  final bool showValueLabels;
 
   _LineChartPainter({
     required this.points,
     required this.color,
     required this.unit,
     required this.selectedIndex,
+    required this.xMode,
+    required this.padding,
+    required this.showValueLabels,
   });
-
-  static const Color _gridColor = Color(0xFFE2E8F0);
-  static const Color _labelColor = Color(0xFF64748B);
-  static const Color _tooltipColor = Color(0xFF1E293B);
 
   @override
   void paint(Canvas canvas, Size size) {
     if (points.isEmpty) return;
 
-    final geo = _ChartGeometry.compute(size, points);
-    _drawGridAndYLabels(canvas, geo);
-    _drawXLabels(canvas, geo);
+    final geo = _ChartGeometry.compute(
+      size,
+      points,
+      xMode: xMode,
+      padding: padding,
+    );
+    _drawGridAndValueLabels(canvas, geo);
+    _drawDateLabels(canvas, geo, size);
     if (points.length > 1) {
       _drawAreaAndLine(canvas, geo);
     }
@@ -249,18 +485,13 @@ class _LineChartPainter extends CustomPainter {
     _drawSelection(canvas, geo, size);
   }
 
-  void _drawGridAndYLabels(Canvas canvas, _ChartGeometry geo) {
+  void _drawGridAndValueLabels(Canvas canvas, _ChartGeometry geo) {
     final gridPaint = Paint()
       ..color = _gridColor
       ..strokeWidth = 1;
 
-    for (final tick in geo.yTicks) {
-      final y = geo.plot.bottom -
-          (geo.maxValue == geo.minValue
-              ? 0
-              : (tick - geo.minValue) /
-                  (geo.maxValue - geo.minValue) *
-                  geo.plot.height);
+    for (final tick in geo.scale.ticks) {
+      final y = geo.scale.yFor(tick);
       if (y < geo.plot.top - 0.5 || y > geo.plot.bottom + 0.5) continue;
 
       canvas.drawLine(
@@ -269,45 +500,37 @@ class _LineChartPainter extends CustomPainter {
         gridPaint,
       );
 
-      _paintText(
+      if (!showValueLabels) continue;
+      final label = _layoutText(_formatValue(tick), _axisLabelStyle);
+      label.paint(
         canvas,
-        _formatValue(tick),
-        Offset(geo.plot.left - 6, y),
-        const TextStyle(color: _labelColor, fontSize: 10),
-        anchor: _TextAnchor.centerRight,
+        Offset(geo.plot.left - 6 - label.width, y - label.height / 2),
       );
     }
   }
 
-  void _drawXLabels(Canvas canvas, _ChartGeometry geo) {
-    final n = points.length;
+  /// Draws the date labels under the plot, newest first, skipping any label
+  /// that would collide with an already drawn one. That keeps the axis
+  /// readable at any point density instead of overlapping the dates.
+  void _drawDateLabels(Canvas canvas, _ChartGeometry geo, Size size) {
     final spansYears = geo.minDate.year != geo.maxDate.year;
     final format = DateFormat(spansYears ? 'd MMM yy' : 'd MMM', 'tr_TR');
+    final dy = geo.plot.bottom + 6;
 
-    final List<int> indices;
-    if (n == 1) {
-      indices = [0];
-    } else {
-      const desired = 4;
-      final count = math.min(desired, n);
-      final set = <int>{};
-      for (int i = 0; i < count; i++) {
-        set.add((i * (n - 1) / (count - 1)).round());
+    double? leftmostDrawnEdge;
+    for (int i = points.length - 1; i >= 0; i--) {
+      final label = _layoutText(format.format(points[i].date), _axisLabelStyle);
+      // Centre on the point, but keep the label inside the canvas.
+      final maxDx = math.max(0.0, size.width - label.width);
+      final dx = (geo.offsets[i].dx - label.width / 2).clamp(0.0, maxDx);
+      final right = dx + label.width;
+
+      if (leftmostDrawnEdge != null &&
+          right + MeasurementChartConfig.minDateLabelGap > leftmostDrawnEdge) {
+        continue;
       }
-      indices = set.toList()..sort();
-    }
-
-    for (final i in indices) {
-      final dx = geo.offsets[i].dx;
-      _paintText(
-        canvas,
-        format.format(points[i].date),
-        Offset(dx, geo.plot.bottom + 6),
-        const TextStyle(color: _labelColor, fontSize: 10),
-        anchor: _TextAnchor.topCenter,
-        minX: 0,
-        maxX: geo.plot.right + _ChartGeometry._rightPad,
-      );
+      label.paint(canvas, Offset(dx, dy));
+      leftmostDrawnEdge = dx;
     }
   }
 
@@ -380,12 +603,11 @@ class _LineChartPainter extends CustomPainter {
     canvas.drawCircle(target, 4.5, Paint()..color = Colors.white);
     canvas.drawCircle(target, 3, Paint()..color = color);
 
-    _drawTooltip(canvas, geo, size, target, points[index]);
+    _drawTooltip(canvas, size, target, points[index]);
   }
 
   void _drawTooltip(
     Canvas canvas,
-    _ChartGeometry geo,
     Size size,
     Offset target,
     ChartPoint point,
@@ -448,54 +670,26 @@ class _LineChartPainter extends CustomPainter {
     }
   }
 
-  TextPainter _layoutText(String text, TextStyle style) {
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    return painter;
-  }
-
-  void _paintText(
-    Canvas canvas,
-    String text,
-    Offset anchorPoint,
-    TextStyle style, {
-    required _TextAnchor anchor,
-    double? minX,
-    double? maxX,
-  }) {
-    final painter = _layoutText(text, style);
-    double dx;
-    double dy;
-    switch (anchor) {
-      case _TextAnchor.centerRight:
-        dx = anchorPoint.dx - painter.width;
-        dy = anchorPoint.dy - painter.height / 2;
-        break;
-      case _TextAnchor.topCenter:
-        dx = anchorPoint.dx - painter.width / 2;
-        dy = anchorPoint.dy;
-        break;
-    }
-    if (minX != null && maxX != null) {
-      dx = dx.clamp(minX, math.max(minX, maxX - painter.width));
-    }
-    painter.paint(canvas, Offset(dx, dy));
-  }
-
-  String _formatValue(double v) {
-    if ((v - v.roundToDouble()).abs() < 1e-6) return v.round().toString();
-    return v.toStringAsFixed(1);
-  }
-
   @override
   bool shouldRepaint(covariant _LineChartPainter old) {
     return old.points != points ||
         old.color != color ||
         old.unit != unit ||
-        old.selectedIndex != selectedIndex;
+        old.selectedIndex != selectedIndex ||
+        old.xMode != xMode ||
+        old.padding != padding ||
+        old.showValueLabels != showValueLabels;
   }
 }
 
-enum _TextAnchor { centerRight, topCenter }
+TextPainter _layoutText(String text, TextStyle style) {
+  return TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+  )..layout();
+}
+
+String _formatValue(double v) {
+  if ((v - v.roundToDouble()).abs() < 1e-6) return v.round().toString();
+  return v.toStringAsFixed(1);
+}

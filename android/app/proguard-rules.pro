@@ -17,9 +17,28 @@
 # Multidex
 -keep class androidx.multidex.** { *; }
 
+# Google Play Core (deferred components / split install)
+# Flutter'in embedding'i bu siniflara referans veriyor, ama uygulama deferred
+# component kullanmiyor ve kutuphane bagimlilik olarak eklenmiyor. Kural
+# olmayinca R8 "Missing class com.google.android.play.core..." diyip
+# minifyReleaseWithR8 asamasinda build'i durduruyordu.
+-dontwarn com.google.android.play.core.**
+
+# flutter_local_notifications: zamanlanmis bildirimleri Gson ile
+# serilestiriyor. Eklenti kendi consumer proguard kurallarini gondermedigi
+# icin R8 bu siniflari kirpinca zamanlanmis bildirimler calismiyor.
+-keep class com.dexterous.** { *; }
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keep class * extends com.google.gson.reflect.TypeToken
+-keepclassmembers,allowobfuscation class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
+-dontwarn com.google.gson.**
+
 # Keep annotations
 -keepattributes *Annotation*
 -keepattributes Signature
+-keepattributes InnerClasses,EnclosingMethod
 -keepattributes SourceFile,LineNumberTable
 
 # OkHttp / networking (used by Firebase)
