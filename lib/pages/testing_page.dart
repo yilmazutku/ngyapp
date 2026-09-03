@@ -11,6 +11,7 @@ import '../providers/appointment_durations_provider.dart';
 import '../providers/special_lines_provider.dart';
 import '../providers/summary_colors_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/appointment_color_picker.dart';
 import '../widgets/labeled_action_button.dart';
 
 final Logger _specialLinesLogger = Logger.forClass(_SpecialLinesSection);
@@ -764,7 +765,7 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
-          _ColorSwatch(color: effectiveColor),
+          PaletteSwatch(color: effectiveColor),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -802,42 +803,7 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               ),
-              items: [
-                DropdownMenuItem<String?>(
-                  value: null,
-                  child: Row(
-                    children: [
-                      _ColorSwatch(
-                        color: slot.defaultOption.color,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Varsayılan (${slot.defaultOption.label})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                for (final opt in AppointmentColorPalette.options)
-                  DropdownMenuItem<String?>(
-                    value: opt.id,
-                    child: Row(
-                      children: [
-                        _ColorSwatch(color: opt.color, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            opt.label,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
+              items: appointmentColorDropdownItems(slot.defaultOption),
               onChanged: _saving
                   ? null
                   : (value) {
@@ -848,26 +814,6 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ColorSwatch extends StatelessWidget {
-  const _ColorSwatch({required this.color, this.size = 24});
-
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.black26),
       ),
     );
   }
@@ -1070,7 +1016,7 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
   ) {
     return Row(
       children: [
-        _ColorSwatch(color: effectiveColor),
+        PaletteSwatch(color: effectiveColor),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -1102,39 +1048,7 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
               contentPadding:
                   EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),
-            items: [
-              DropdownMenuItem<String?>(
-                value: null,
-                child: Row(
-                  children: [
-                    _ColorSwatch(color: defaultOption.color, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Varsayılan (${defaultOption.label})',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              for (final opt in AppointmentColorPalette.options)
-                DropdownMenuItem<String?>(
-                  value: opt.id,
-                  child: Row(
-                    children: [
-                      _ColorSwatch(color: opt.color, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          opt.label,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
+            items: appointmentColorDropdownItems(defaultOption),
             onChanged: _saving
                 ? null
                 : (value) => setState(() => _draft = value),
