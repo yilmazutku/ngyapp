@@ -148,8 +148,10 @@ class CustomerSummaryProvider extends ChangeNotifier {
       notes: notes,
       freezeDate: freezeDateCell,
       seans: appts.seans,
+      totalMeetings: activeSub.totalMeetings,
       postponedDates: appts.postponedDates,
       remainingPostponements: remainingCell,
+      postponementUseDates: appts.postponementUseDates,
     );
   }
 
@@ -302,6 +304,11 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// - Postponed dates: appointments with status "Ertelendi" ordered by
   ///   [postponedDate]; a postponed appointment with no postponedDate becomes
   ///   "Hata". Variable length (only the postponed ones).
+  /// - Postponement-use dates: the date of each postponed appointment whose
+  ///   postponement was user-originated ([PostponeSource.user]) — only those
+  ///   consume a postponement right, so this is when the customer spent one.
+  ///   Always [CustomerSummaryRow.maxPostponementUses] entries; when more
+  ///   rights were spent, the most recent ones are kept.
   Future<_AppointmentCells> _resolveAppointmentCells(
       String userId, String subscriptionId) async {
     const int max = CustomerSummaryRow.maxSeans;
@@ -317,6 +324,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       final postponedDates = <DateTime>[];
       int postponedNullCount = 0;
+
+      final postponementUseDates = <DateTime>[];
+      int postponementUseNullCount = 0;
 
       for (final doc in snap.docs) {
         final data = doc.data();
@@ -352,6 +362,17 @@ class CustomerSummaryProvider extends ChangeNotifier {
             // Postponed but the new date is missing => error.
             postponedNullCount++;
           }
+
+          // A postponement right is only spent when the customer asked for the
+          // postponement; the appointment's own date is when it was spent.
+          if (data['postponedBy'] == PostponeSource.user.value) {
+            final rawDate = data['appointmentDateTime'];
+            if (rawDate is Timestamp) {
+              postponementUseDates.add(rawDate.toDate());
+            } else {
+              postponementUseNullCount++;
+            }
+          }
         }
       }
 
@@ -368,6 +389,12 @@ class CustomerSummaryProvider extends ChangeNotifier {
           cap: null,
           padToCap: false,
         ),
+        postponementUseDates: _buildDateCells(
+          dates: postponementUseDates,
+          nullCount: postponementUseNullCount,
+          cap: CustomerSummaryRow.maxPostponementUses,
+          padToCap: true,
+        ),
       );
     } catch (e) {
       logger.err('Error resolving appointments for user {} sub {}: {}',
@@ -375,15 +402,15 @@ class CustomerSummaryProvider extends ChangeNotifier {
       return _AppointmentCells(
         seans: List<SummaryCell>.filled(max, const SummaryCell.error()),
         postponedDates: const [SummaryCell.error()],
+        postponementUseDates: List<SummaryCell>.filled(
+            CustomerSummaryRow.maxPostponementUses,
+            const SummaryCell.error()),
       );
     }
   }
 
-  /// Turns sorted dates (+ a count of broken/null dates) into display cells.
-  /// When [cap] is set, keeps the most recent [cap] dates; when [padToCap] is
-  /// true the result is padded with empty cells up to [cap].
-  /// Short meeting-type label for the summary's "Paket Tipi" column:
-  /// Online, Yüzyüze, or Y+O (hybrid = Yüzyüze + Online).
+  /// Short meeting-type label for the summary's "Paket Süresi / Görüşme Türü"
+  /// column: Online, Yüzyüze, or Y+O (hybrid = Yüzyüze + Online).
   String _meetingTypeLabel(SubsMeetingType type) {
     switch (type) {
       case SubsMeetingType.online:
@@ -395,6 +422,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
+  /// Turns sorted dates (+ a count of broken/null dates) into display cells.
+  /// When [cap] is set, keeps the most recent [cap] dates; when [padToCap] is
+  /// true the result is padded with empty cells up to [cap].
   List<SummaryCell> _buildDateCells({
     required List<DateTime> dates,
     required int nullCount,
@@ -431,10 +461,12 @@ class CustomerSummaryProvider extends ChangeNotifier {
 class _AppointmentCells {
   final List<SummaryCell> seans;
   final List<SummaryCell> postponedDates;
+  final List<SummaryCell> postponementUseDates;
 
   const _AppointmentCells({
     required this.seans,
     required this.postponedDates,
+    required this.postponementUseDates,
   });
 }
 
