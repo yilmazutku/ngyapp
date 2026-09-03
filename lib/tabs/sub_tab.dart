@@ -538,7 +538,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
 
           const SizedBox(height: 8),
           Row(children: [
-            const Text('Paket Tipi: ', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Paket Süresi: ', style: TextStyle(fontWeight: FontWeight.bold)),
             Text(s.packageType?.label ?? 'Belirtilmemiş'),
           ]),
           const SizedBox(height: 8),

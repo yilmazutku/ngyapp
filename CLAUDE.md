@@ -3,7 +3,7 @@
 ## Git akışı
 - Geliştirme her zaman bir feature branch üzerinde yapılır, `master`'a doğrudan commit atılmaz.
 - İş bitince branch `master`'a merge edilir ve `master` push edilir.
-- **Merge'den sonra feature branch hem yerelde hem `origin`'de silinir.** Merge edilmiş `claude/*` dalları repoda bırakılmaz.
+- **Merge + push bittikten sonra feature branch silinmeye çalışılmaz; olduğu gibi bırakılır** (ne yerelde ne `origin`'de silme denenir).
 - Commit notları Türkçe, maddeler hâlinde ve açıklayıcı yazılır; kullanıcının isteği de commit notuna eklenir.
 - **Merge/push yapmadan önce `master`'ın değişip değişmediğine bakılır** (`git fetch origin master`). Merge yapan başka bir agent varsa karışılmaz; onun işi bitene kadar beklenir, sonra güncel `master` üzerinden merge edilir.
 

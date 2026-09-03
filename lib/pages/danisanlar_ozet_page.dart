@@ -18,6 +18,10 @@ final Logger logger = Logger.forClass(DanisanlarOzetPage);
 /// üstündeki not da bu işareti açıklar.
 const String _plannedMark = '(P)';
 
+/// Pakette karşılığı olmayan seans kutusunun genişliğini tarih hücreleriyle
+/// eşitleyen görünmez yer tutucu.
+const String _disabledSeansPlaceholder = '00.00.0000';
+
 /// Admin overview: customers grouped by subscription status. The first tab
 /// lists everyone with an *active* subscription; the second lists everyone
 /// with a *frozen* (Donduruldu) subscription. Each row shows that
@@ -120,29 +124,55 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     );
   }
 
-  /// Explains the "(P)" marker used inside the tables. Sits at the very top of
-  /// the page so it is visible on every tab.
+  /// Explains the markers used inside the tables: the "(P)" planned-payment
+  /// mark and the black seans box. Sits at the very top of the page so it is
+  /// visible on every tab; wraps instead of overflowing on narrow screens.
   Widget _buildLegend() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Wrap(
+          spacing: 16,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Icon(Icons.info_outline, size: 16, color: Colors.grey.shade700),
-            const SizedBox(width: 6),
-            Text(
+            _legendEntry(
+              Icon(Icons.info_outline, size: 16, color: Colors.grey.shade700),
               '$_plannedMark = Planlandı',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey.shade700,
+            ),
+            _legendEntry(
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(3),
+                ),
               ),
+              '= Paketin görüşme sayısı dışındaki seans',
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _legendEntry(Widget marker, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        marker,
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -360,7 +390,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         const DataColumn(label: Text('Ödeme Tutarı'), numeric: true),
         const DataColumn(label: Text('Ödeme Şekli')),
       ],
-      const DataColumn(label: Text('Paket Tipi')),
+      const DataColumn(label: Text('Paket Süresi / Görüşme Türü')),
       if (widget.status == SubActiveStatus.frozen)
         const DataColumn(label: Text('Dondurulma Tarihi')),
       for (int i = 1; i <= CustomerSummaryRow.maxSeans; i++)
@@ -368,6 +398,8 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       for (int i = 1; i <= postponedColumns; i++)
         DataColumn(label: Text('$i. Ertelenen Randevu')),
       const DataColumn(label: Text('Kalan Erteleme Hakkı'), numeric: true),
+      for (int i = 1; i <= CustomerSummaryRow.maxPostponementUses; i++)
+        DataColumn(label: Text('$i. Erteleme Hakkı Kullanımı')),
     ];
   }
 
@@ -393,12 +425,17 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         ],
         _cell(row.packageType),
         if (widget.status == SubActiveStatus.frozen) _cell(row.freezeDate),
-        for (final seans in row.seans) _seansCell(seans),
+        for (int i = 0; i < row.seans.length; i++)
+          _seansCell(row.seans[i], isBeyondPackage: i >= row.totalMeetings),
         for (int i = 0; i < postponedColumns; i++)
           _cell(i < row.postponedDates.length
               ? row.postponedDates[i]
               : const SummaryCell.empty()),
         _cell(row.remainingPostponements),
+        for (int i = 0; i < CustomerSummaryRow.maxPostponementUses; i++)
+          _cell(i < row.postponementUseDates.length
+              ? row.postponementUseDates[i]
+              : const SummaryCell.empty()),
       ],
     );
   }
@@ -473,7 +510,11 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
   ///
   /// Boş (randevusu olmayan) ve "Hata" hücreleri vurgulanmaz: ilki gösterecek
   /// bir randevu taşımaz, ikincisi kendi kırmızı hata biçimini korur.
-  DataCell _seansCell(SummaryCell cell) {
+  ///
+  /// [isBeyondPackage] ise kutu paketin görüşme sayısının dışındadır ve
+  /// [_beyondPackageSeansCell] ile pasif (siyah) gösterilir.
+  DataCell _seansCell(SummaryCell cell, {required bool isBeyondPackage}) {
+    if (isBeyondPackage) return _beyondPackageSeansCell(cell);
     if (cell.isEmpty || cell.isError) return _cell(cell);
 
     final background = SummaryColorsRegistry.completedAppointmentColor;
@@ -491,6 +532,36 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
             fontWeight: FontWeight.w600,
           ),
         ),
+      ),
+    );
+  }
+
+  /// Paketin görüşme sayısını aşan seans kutusu: bu paket için hiç
+  /// doldurulmayacağından siyah zeminle pasif gösterilir. Kutunun eni, boşken
+  /// de komşu tarih hücreleriyle aynı kalsın diye görünmez bir tarih
+  /// yer tutucusuyla verilir.
+  DataCell _beyondPackageSeansCell(SummaryCell cell) {
+    const Color background = Colors.black87;
+    final Color foreground = SummaryColorsRegistry.readableTextColor(background);
+    return DataCell(
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: cell.isEmpty
+            ? const Text(
+                _disabledSeansPlaceholder,
+                style: TextStyle(color: Colors.transparent),
+              )
+            : Text(
+                cell.text,
+                style: TextStyle(
+                  color: foreground,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
       ),
     );
   }

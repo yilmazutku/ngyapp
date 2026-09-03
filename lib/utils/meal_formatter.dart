@@ -40,16 +40,49 @@ class RecipeMarkerParts {
 }
 
 /// Splits [line] around the recipe marker, or returns null when the line has no
-/// recipe reference.
+/// recipe reference. The "before" part is normalized so the marker always has
+/// exactly one space in front of it (see [normalizeRecipeMarkerSpacing]).
 RecipeMarkerParts? splitRecipeMarker(String line) {
   final m = kRecipeMarkerRegex.firstMatch(line);
   if (m == null) return null;
   return RecipeMarkerParts(
-    line.substring(0, m.start),
+    _spacedBeforeMarker(line.substring(0, m.start)),
     line.substring(m.start, m.end),
     line.substring(m.end),
   );
 }
+
+/// Gösterim düzeltmesi: "*tarifi ektedir" ifadesi kendisinden önceki metne
+/// yapışık gelirse araya tek boşluk konur, birden fazla boşluk varsa tek
+/// boşluğa indirilir. İfade parantez içindeyse boşluk parantezin soluna gider
+/// ("Kek(*tarifi ektedir)" -> "Kek (*tarifi ektedir)"). Satır doğrudan ifadeyle
+/// başlıyorsa başa boşluk eklenmez. İşlem tekrar uygulanabilir (idempotent).
+String normalizeRecipeMarkerSpacing(String line) {
+  final m = kRecipeMarkerRegex.firstMatch(line);
+  if (m == null) return line;
+  return _spacedBeforeMarker(line.substring(0, m.start)) +
+      line.substring(m.start);
+}
+
+/// Marker'ın solundaki metni tek boşlukla biter hâle getirir. Marker'a bitişik
+/// açılış parantezleri ifadenin parçası sayılır, boşluk onların da soluna
+/// konur.
+String _spacedBeforeMarker(String before) {
+  if (before.isEmpty) return before;
+
+  int end = before.length;
+  while (end > 0 && _isOpeningBracket(before[end - 1])) {
+    end--;
+  }
+
+  final String head = before.substring(0, end).trimRight();
+  final String brackets = before.substring(end);
+  if (head.isEmpty) return brackets;
+  return '$head $brackets';
+}
+
+bool _isOpeningBracket(String char) =>
+    char == '(' || char == '[' || char == '{';
 
 // ---------------------------------------------------------------------------
 // Legacy constants (kept for backward compatibility with files that already
@@ -196,16 +229,8 @@ class MealFormatter {
           : contentList.length;
 
       for (int i = startIdx; i < endIdx; i++) {
-        final item = contentList[i];
-        String displayContent =
-            (item is Map) ? (item['content'] ?? '').toString() : item.toString();
-
-        // Strict skip — original was `SPECIAL_MARKERS.contains(t.trim())`.
-        if (isExactStandaloneMarker(displayContent)) {
-          continue;
-        } else if (isSpecialMarkerSeparator(displayContent)) {
-          displayContent = extractContentAfterMarker(displayContent);
-        }
+        final String? displayContent = _displayContentFor(contentList[i]);
+        if (displayContent == null) continue;
 
         formatted.add(_contentLineWidget(displayContent, fontSize, onRecipeTap));
       }
@@ -271,15 +296,8 @@ class MealFormatter {
           : contentList.length;
 
       for (int i = startIdx; i < endIdx; i++) {
-        final item = contentList[i];
-        String displayContent =
-            (item is Map) ? (item['content'] ?? '').toString() : item.toString();
-
-        if (isExactStandaloneMarker(displayContent)) {
-          continue;
-        } else if (isSpecialMarkerSeparator(displayContent)) {
-          displayContent = extractContentAfterMarker(displayContent);
-        }
+        final String? displayContent = _displayContentFor(contentList[i]);
+        if (displayContent == null) continue;
 
         spans.add(TextSpan(
           text: '$displayContent\n',
@@ -321,21 +339,29 @@ class MealFormatter {
           : contentList.length;
 
       for (int i = startIdx; i < endIdx; i++) {
-        final item = contentList[i];
-        String displayContent =
-            (item is Map) ? (item['content'] ?? '').toString() : item.toString();
-
-        if (isExactStandaloneMarker(displayContent)) {
-          continue;
-        } else if (isSpecialMarkerSeparator(displayContent)) {
-          displayContent = extractContentAfterMarker(displayContent);
-        }
+        final String? displayContent = _displayContentFor(contentList[i]);
+        if (displayContent == null) continue;
 
         buffer.writeln(displayContent);
       }
     }
 
     return buffer.toString();
+  }
+
+  /// Bir içerik satırının ekranda görünecek hâli; tamamen atlanması gereken
+  /// satırlarda null döner (özel işaretin tek başına olduğu satırlar). Ayıklama
+  /// sonrası "*tarifi ektedir" ifadesinin solunda tek boşluk bırakılır.
+  static String? _displayContentFor(dynamic item) {
+    String content =
+        (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+
+    // Strict skip — original was `SPECIAL_MARKERS.contains(t.trim())`.
+    if (isExactStandaloneMarker(content)) return null;
+    if (isSpecialMarkerSeparator(content)) {
+      content = extractContentAfterMarker(content);
+    }
+    return normalizeRecipeMarkerSpacing(content);
   }
 
   /// Identifies the indices in [contentList] that begin a new option block.

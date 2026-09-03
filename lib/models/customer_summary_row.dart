@@ -27,6 +27,9 @@ class CustomerSummaryRow {
   /// Max number of session (seans) columns displayed per the requirement.
   static const int maxSeans = 12;
 
+  /// Max number of "erteleme hakkı kullanım tarihi" columns displayed.
+  static const int maxPostponementUses = 3;
+
   final String userId;
   final SummaryCell dosyaNo;
   final String fullName;
@@ -59,6 +62,11 @@ class CustomerSummaryRow {
   /// Always [maxSeans] entries; unused trailing slots are empty cells.
   final List<SummaryCell> seans;
 
+  /// Number of meetings the active package actually carries
+  /// (SubscriptionModel.totalMeetings). Seans slots at or beyond this index can
+  /// never be filled by this package, so the table greys (blacks) them out.
+  final int totalMeetings;
+
   /// Dates of postponed ("Ertelendi") appointments for the active subscription.
   /// Variable length; the table pads shorter rows to a common width.
   final List<SummaryCell> postponedDates;
@@ -67,6 +75,12 @@ class CustomerSummaryRow {
   /// (admin postponements do not reduce it). See
   /// SubscriptionModel.remainingPostponements.
   final SummaryCell remainingPostponements;
+
+  /// Dates on which the customer spent a postponement right: the date of each
+  /// user-originated postponed appointment. Only these consume a right, so
+  /// admin-originated postponements are not listed. Always
+  /// [maxPostponementUses] entries; unused trailing slots are empty cells.
+  final List<SummaryCell> postponementUseDates;
 
   const CustomerSummaryRow({
     required this.userId,
@@ -81,7 +95,9 @@ class CustomerSummaryRow {
     required this.notes,
     this.freezeDate = const SummaryCell.empty(),
     required this.seans,
+    this.totalMeetings = maxSeans,
     required this.postponedDates,
     required this.remainingPostponements,
+    required this.postponementUseDates,
   });
 }
