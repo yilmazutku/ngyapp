@@ -10,6 +10,7 @@ import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/subs_model.dart';
 import '../pages/admin_diet_edit_page.dart';
+import '../pages/diet_user_view_page.dart';
 import '../providers/diet_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
@@ -230,6 +231,12 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
       key: key,
       dietDoc: dietDoc,
       matchCount: matchCount,
+      onUserView: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => DietUserViewPage(dietDoc: dietDoc)),
+        );
+      },
       onView: () {
         navigateAndRefresh(
           context,
@@ -300,12 +307,11 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
                   children: [
                     ElevatedButton.icon(
                       onPressed: () async {
-                        final selectedSub = await _selectSubscription(context, widget.userId);
-                        if (selectedSub == null) return;
-                        if (!context.mounted) return;
+                        // The package is resolved inside the dialog (and shown
+                        // in the preview), so importing never stops to ask.
                         await showDialog(
                           context: context,
-                          builder: (context) => AddDietDialog(userId: widget.userId, selectedSubscription: selectedSub),
+                          builder: (context) => AddDietDialog(userId: widget.userId),
                         );
                         if (mounted) refreshData();
                       },
@@ -376,10 +382,13 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
 }
 
 class DietCard extends StatelessWidget {
+  static const String userViewLabel = 'Kullanıcı Nasıl Görüyor?';
+
   final DietDocument dietDoc;
   final VoidCallback onView;
   final VoidCallback onDelete;
   final VoidCallback onEdit;
+  final VoidCallback onUserView;
   final int? matchCount;
 
   const DietCard({
@@ -388,6 +397,7 @@ class DietCard extends StatelessWidget {
     required this.onView,
     required this.onDelete,
     required this.onEdit,
+    required this.onUserView,
     this.matchCount,
   });
 
@@ -522,6 +532,22 @@ class DietCard extends StatelessWidget {
               const SizedBox(height: 12),
               _buildRecipeRow(context),
             ],
+            const SizedBox(height: 12),
+            // Full width so the long label never pushes the row into a scroll.
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onUserView,
+                icon: const Icon(Icons.phone_iphone, size: 18),
+                label: const Text(userViewLabel),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.deepPurple,
+                  side: BorderSide(color: Colors.deepPurple.shade200),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             const Divider(height: 1),
             const SizedBox(height: 16),

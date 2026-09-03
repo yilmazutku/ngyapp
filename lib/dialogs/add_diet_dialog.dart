@@ -15,9 +15,11 @@ import '../providers/sub_provider.dart';
 // Add user provider import
 import '../providers/diet_provider.dart'; // Add diet provider import
 import '../providers/special_lines_provider.dart';
+import '../utils/diet_menu_parser.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
 import '../utils/storage_upload.dart';
+import '../widgets/diet_plan_view.dart';
 
 /// We'll create a logger for this dialog
 final Logger log = Logger.forClass(AddDietDialog);
@@ -46,6 +48,11 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   // Set true once a "HAFTASONU" marker splits the document into two menus.
   bool _hasWeekend = false;
+
+  // Parsed menus in the same shape the user's plan is rendered from, so the
+  // preview matches the "Planım" page one-to-one.
+  DietMenu _weekdayMenu = const DietMenu.empty();
+  DietMenu _weekendMenu = const DietMenu.empty();
 
   // Local file path where docx is saved
   String? _localFilePath;
@@ -187,11 +194,17 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final Size screen = MediaQuery.of(context).size;
+    // AlertDialog keeps a 40px inset on each side; stay inside it on phones and
+    // cap the width on desktop so the preview keeps a readable measure.
+    final double dialogWidth = (screen.width - 80).clamp(240.0, 520.0);
+    final double dialogHeight = (screen.height * 0.7).clamp(280.0, 640.0);
+
     return AlertDialog(
       title: const Text('Diyet Yükle'),
       content: SizedBox(
-        width: 400,
-        height: 400,
+        width: dialogWidth,
+        height: dialogHeight,
         child:
             _hasParsedPreview ? _buildParsedContent() : _buildInitialContent(),
       ),
@@ -205,58 +218,20 @@ class _AddDietDialogState extends State<AddDietDialog> {
     );
   }
   
-  /// Initial content with subscription dropdown and pick file button
+  /// Initial content: the package the diet will be attached to (auto-resolved,
+  /// selectable only when the user has more than one) and the file picker.
   Widget _buildInitialContent() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Subscription display/selection
         if (_isLoadingSubscriptions)
           const Center(child: CircularProgressIndicator())
-        else if (widget.selectedSubscription != null)
-          // Display pre-selected subscription as non-editable
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue.shade200),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.blue),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Seçili Paket:',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _selectedSubscription?.packageName ?? '',
-                        style: const TextStyle(fontSize: 16),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          )
-        else
-          // Show dropdown only if no pre-selected subscription
+        else if (_subscriptions.length > 1)
           DropdownButtonFormField<SubscriptionModel>(
             value: _selectedSubscription,
             decoration: const InputDecoration(
-              labelText: 'Paket *',
+              labelText: 'Paket',
               border: OutlineInputBorder(),
-              hintText: 'Paket seçin',
             ),
             items: _subscriptions.map((sub) {
               return DropdownMenuItem<SubscriptionModel>(
@@ -268,67 +243,159 @@ class _AddDietDialogState extends State<AddDietDialog> {
               );
             }).toList(),
             onChanged: (value) {
+              if (value == null) return;
               setState(() {
                 _selectedSubscription = value;
               });
             },
-          ),
+          )
+        else
+          _buildSelectedSubscriptionBox(),
         const SizedBox(height: 20),
         ElevatedButton(
-          onPressed: _pickAndSaveFile,
+          onPressed: _selectedSubscription == null ? null : _pickAndSaveFile,
           child: const Text('Dosya Seç ve İşle'),
         ),
       ],
     );
   }
 
-  /// 2) Show a preview of parsed subtitles if we have them
+  /// Read-only package box shown when the diet's package needs no choice: the
+  /// user has exactly one package, or none at all.
+  Widget _buildSelectedSubscriptionBox() {
+    final sub = _selectedSubscription;
+    final hasSub = sub != null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: hasSub ? Colors.blue.shade50 : Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: hasSub ? Colors.blue.shade200 : Colors.orange.shade300,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            hasSub ? Icons.check_circle : Icons.warning_amber_rounded,
+            color: hasSub ? Colors.blue : Colors.orange.shade800,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hasSub ? 'Seçili Paket:' : 'Aktif Paket Yok',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  hasSub
+                      ? sub.packageName
+                      : 'Diyet listesi eklemek için önce bir paket eklemelisiniz.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 2) Preview of the parsed diet, rendered exactly the way the user sees it
+  /// on their "Planım" page: one collapsible tile per meal.
   Widget _buildParsedContent() {
     if (_localFilePath == null) {
       return const Center(child: Text('Dosya seçilmedi.'));
     }
 
-    // A scrollable ListView of subtitles
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Text('Dosya kaydedildi: $_localFilePath'),
-        ),
-        // Show selected subscription
-        if (_selectedSubscription != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Text(
-              'Seçili paket: ${_selectedSubscription!.packageName}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        // Recipe attach prompt, shown only when the diet references a recipe.
+        _buildPreviewInfoBar(),
         if (_hasRecipeMarker) _buildRecipeAttachSection(),
+        const SizedBox(height: 8),
         Expanded(
-          // Use ScrollConfiguration to handle overflow properly
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              scrollbars: false,
-              overscroll: false,
-            ),
-            child: ListView(
+          child: Scrollbar(
+            controller: _scrollController,
+            child: SingleChildScrollView(
               controller: _scrollController,
-              children: [
-                // Only label the sections when there are actually two menus.
-                if (_weekendHasContent)
-                  _buildPreviewSectionHeader(DietSection.weekday.label),
-                ...weekdaySubtitles.map(_buildMealPreviewTile),
-                if (_weekendHasContent) ...[
-                  _buildPreviewSectionHeader(DietSection.weekend.label),
-                  ...weekendSubtitles.map(_buildMealPreviewTile),
-                ],
-              ],
+              child: DietPlanView(
+                weekday: _weekdayMenu,
+                weekend: _weekendMenu,
+                onRecipeTap: _showRecipeLinkInfo,
+                emptyMessage: 'Bu dosyadan öğün içeriği çıkarılamadı.',
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  /// Tells the admin what they are looking at, which file was parsed and which
+  /// package the diet will be attached to.
+  Widget _buildPreviewInfoBar() {
+    final fileName = _localFilePath!.split(RegExp(r'[\\/]')).last;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.phone_iphone, size: 18, color: Colors.blue.shade700),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Kullanıcıya görünecek hâli',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Öğüne dokunarak içeriğini kontrol edebilirsiniz.',
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _selectedSubscription == null
+                ? fileName
+                : '$fileName  •  ${_selectedSubscription!.packageName}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The recipe phrase is a live link on the user's plan; in the preview the
+  /// PDF is not uploaded yet, so tapping it explains what will happen instead.
+  Future<void> _showRecipeLinkInfo() async {
+    await DialogUtils.openInfo(
+      context,
+      title: 'Tarif Bağlantısı',
+      message: 'Kullanıcı bu bağlantıya dokunduğunda eklediğiniz tarif '
+          'PDF\'i açılır.',
     );
   }
 
@@ -390,69 +457,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
                 ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  /// Section divider used in the preview to separate the weekday and weekend
-  /// menus (shown only when a weekend menu was detected).
-  Widget _buildPreviewSectionHeader(String label) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-      child: Row(
-        children: [
-          const Expanded(child: Divider()),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.blue.shade700,
-              ),
-            ),
-          ),
-          const Expanded(child: Divider()),
-        ],
-      ),
-    );
-  }
-
-  /// Renders a single meal (name + time + content) in the parse preview.
-  Widget _buildMealPreviewTile(Map<String, dynamic> subtitle) {
-    final content = subtitle['content'] as List;
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${subtitle['name']} \t ${subtitle['time']}',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          const SizedBox(height: 8.0),
-          if (content.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Text(
-                'İçerik bulunmamaktadır',
-                style: TextStyle(
-                  color: Colors.grey[500],
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children:
-                    MealFormatter.formatMealContentWithOptions(content),
-              ),
-            ),
-          const SizedBox(height: 16.0),
         ],
       ),
     );
@@ -552,8 +556,18 @@ class _AddDietDialogState extends State<AddDietDialog> {
     log.info('Recipe marker detected in parsed diet: {}', [_hasRecipeMarker]);
     // Show the preview
     setState(() {
+      _rebuildPreviewMenus();
       _hasParsedPreview = true;
     });
+  }
+
+  /// Converts the freshly parsed meal lists into the same [DietMenu] shape the
+  /// user's plan is rendered from, so the preview and "Planım" stay identical.
+  void _rebuildPreviewMenus() {
+    _weekdayMenu = DietMenu.fromSubtitles(_buildSubtitlesMap(weekdaySubtitles));
+    _weekendMenu = _weekendHasContent
+        ? DietMenu.fromSubtitles(_buildSubtitlesMap(weekendSubtitles))
+        : const DietMenu.empty();
   }
 
   /// Scans the parsed weekday + weekend menus for the "*tarifi ektedir"

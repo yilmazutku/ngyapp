@@ -10,9 +10,9 @@ import '../models/subs_model.dart';
 import '../providers/appointment_durations_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
+import '../utils/diet_menu_parser.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
-import 'meal_upload_page.dart';
 
 final Logger logger = Logger.forClass(AppointmentsPage);
 
@@ -589,7 +589,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                       children: availableTimes.map((time) {
                         return ChoiceChip(
                           label: Text(
-                            MealUploadPage.formatTimeOfDay24(time),
+                            formatTimeOfDay24(time),
                             style: TextStyle(
                               color: _selectedTime == time
                                   ? Colors.white
