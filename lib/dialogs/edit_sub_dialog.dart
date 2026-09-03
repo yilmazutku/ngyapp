@@ -57,6 +57,10 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   // allowed postponements. Once true, we stop auto-updating that field.
   bool _allowedPostponementsEditedManually = false;
 
+  // Tracks whether the admin has typed a custom package name. Until then the
+  // name follows the package duration + start date, like the add dialog.
+  bool _packageNameEditedManually = false;
+
   // Weight-tracking packages have no payment; payment widgets are hidden.
   bool get _isWeightTracking =>
       _status == SubActiveStatus.activeWeightTracking;
@@ -193,6 +197,18 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     });
   }
 
+  /// Keeps the package name in sync with the selected duration and start date
+  /// ("3Aylık_3EylülBaşlangıç"), unless the admin typed a custom name.
+  void _updatePackageName() {
+    if (_packageNameEditedManually) return;
+    final startDate = _startDate;
+    if (startDate == null) return;
+    _packageNameController.text = SubscriptionModel.buildPackageName(
+      packageType: _packageType,
+      startDate: startDate,
+    );
+  }
+
   void _updateState() {
     // Keep the allowed-postponements field in sync with the auto-calculated
     // value while the admin has not manually edited it.
@@ -243,11 +259,12 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                         _totalMeetingsController.text =
                             _packageType!.defaultMeetings.toString();
                       }
+                      _updatePackageName();
                     }
                   });
                 },
                 decoration: const InputDecoration(
-                  labelText: 'Paket Durumu',
+                  labelText: 'Paket Tipi',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -286,12 +303,13 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                             _totalMeetingsController.text =
                                 newValue.defaultMeetings.toString();
                           }
+                          _updatePackageName();
                         });
                       },
                 decoration: InputDecoration(
                   labelText: _status == SubActiveStatus.activeWeightTracking
-                      ? 'Paket Tipi (Kilo Takip: değiştirilemez)'
-                      : 'Paket Tipi',
+                      ? 'Paket Süresi (Kilo Takip: değiştirilemez)'
+                      : 'Paket Süresi',
                   hintText: 'Paket süresini seçin',
                   border: const OutlineInputBorder(),
                 ),
@@ -331,7 +349,12 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Paket İsmi',
                   border: OutlineInputBorder(),
+                  helperText:
+                      'Paket süresi ve başlangıç tarihine göre otomatik güncellenir; elle değiştirebilirsiniz.',
+                  helperMaxLines: 2,
+                  helperStyle: TextStyle(fontStyle: FontStyle.italic),
                 ),
+                onChanged: (_) => _packageNameEditedManually = true,
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Lütfen paket ismini giriniz./n(ör: 1 ay,ekim-kasım)';
@@ -588,6 +611,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   if (pickedDate != null) {
                     setState(() {
                       _startDate = pickedDate;
+                      _updatePackageName();
                     });
                   }
                 },

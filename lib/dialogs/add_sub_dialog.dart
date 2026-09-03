@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/logger.dart';
@@ -83,21 +82,17 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   /// Builds the read-only package name from the selected package duration and
   /// the start date, e.g. "3 Aylık" + 5 Haziran -> "3Aylık_5HaziranBaşlangıç".
   /// The admin cannot edit it; it refreshes whenever the start date or the
-  /// package type changes.
+  /// package duration changes.
   void _updatePackageName() {
     final start = _startDate;
     if (start == null) {
       _packageNameController.text = '';
       return;
     }
-    // Turkish month name (e.g. "Haziran"), no space before it: "5Haziran".
-    final monthName = DateFormat('MMMM', 'tr_TR').format(start);
-    final datePart = '${start.day}$monthName';
-    // "3 Aylık" -> "3Aylık"; empty when no package type is chosen yet.
-    final durationPart = _selectedPackageType?.label.replaceAll(' ', '') ?? '';
-    _packageNameController.text = durationPart.isEmpty
-        ? '${datePart}Başlangıç'
-        : '${durationPart}_${datePart}Başlangıç';
+    _packageNameController.text = SubscriptionModel.buildPackageName(
+      packageType: _selectedPackageType,
+      startDate: start,
+    );
   }
 
   /// Keeps the allowed-postponements field in sync with the auto-calculated
@@ -158,7 +153,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     }
                   }),
                   decoration: const InputDecoration(
-                    labelText: 'Paket Durumu',
+                    labelText: 'Paket Tipi',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -188,12 +183,12 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                         _totalMeetingsController.text =
                             newValue.defaultMeetings.toString();
                       }
-                      // "X Aylık" prefix of the package name comes from the type.
+                      // "X Aylık" prefix of the package name comes from the duration.
                       _updatePackageName();
                     });
                   },
                   decoration: const InputDecoration(
-                    labelText: 'Paket Tipi',
+                    labelText: 'Paket Süresi',
                     hintText: 'Paket süresini seçin',
                     border: OutlineInputBorder(),
                   ),
@@ -338,7 +333,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     labelText: 'Paket Adı (otomatik oluşturulur)',
                     border: OutlineInputBorder(),
                     helperText:
-                        'Paket tipi ve başlangıç tarihine göre otomatik oluşur.',
+                        'Paket süresi ve başlangıç tarihine göre otomatik oluşur.',
                     helperStyle: TextStyle(fontStyle: FontStyle.italic),
                   ),
                 ),

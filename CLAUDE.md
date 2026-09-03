@@ -5,6 +5,7 @@
 - İş bitince branch `master`'a merge edilir ve `master` push edilir.
 - **Merge'den sonra feature branch hem yerelde hem `origin`'de silinir.** Merge edilmiş `claude/*` dalları repoda bırakılmaz.
 - Commit notları Türkçe, maddeler hâlinde ve açıklayıcı yazılır; kullanıcının isteği de commit notuna eklenir.
+- **Merge/push yapmadan önce `master`'ın değişip değişmediğine bakılır** (`git fetch origin master`). Merge yapan başka bir agent varsa karışılmaz; onun işi bitene kadar beklenir, sonra güncel `master` üzerinden merge edilir.
 
 ## Kod
 - **Her görevin en başında `.cursor/rules/` altındaki kural dosyaları okunur; kodlama bu kurallara göre yapılır.** Kurallar okunmadan koda başlanmaz.
