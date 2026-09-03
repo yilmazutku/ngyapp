@@ -15,7 +15,7 @@ final Logger dietUserViewLogger = Logger.forClass(DietUserViewPage);
 /// Shows a diet exactly the way the user sees it on their "Planım" page:
 /// collapsible meal tiles that reveal the formatted content when tapped.
 class DietUserViewPage extends StatefulWidget {
-  static const String pageTitle = 'Kullanıcı Nasıl Görüyor?';
+  static const String pageTitle = 'Danışan Nasıl Görüyor?';
 
   final DietDocument dietDoc;
 
@@ -118,7 +118,7 @@ class _DietUserViewPageState extends State<DietUserViewPage> {
           ],
           const SizedBox(height: 6),
           Text(
-            'Bu sayfa diyetin kullanıcının "Planım" ekranındaki görünümüdür. '
+            'Bu sayfa diyetin danışanın "Planım" ekranındaki görünümüdür. '
             'Öğüne dokunarak içeriğini açabilirsiniz.',
             style: TextStyle(fontSize: 12, color: Colors.grey[700]),
           ),

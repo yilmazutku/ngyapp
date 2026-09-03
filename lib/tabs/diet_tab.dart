@@ -382,7 +382,7 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
 }
 
 class DietCard extends StatelessWidget {
-  static const String userViewLabel = 'Kullanıcı Nasıl Görüyor?';
+  static const String userViewLabel = 'Danışan Nasıl Görüyor?';
 
   final DietDocument dietDoc;
   final VoidCallback onView;
