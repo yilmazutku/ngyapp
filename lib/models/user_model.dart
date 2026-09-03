@@ -1,6 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class UserModel {
+  /// "Kullanılan İlaçlar ve Hastalıklar" alanının ekranlarda kullanılan ortak
+  /// etiketi; oluşturma ve düzenleme ekranları aynı yazımı paylaşsın diye.
+  static const String medicationsLabel = 'Kullanılan İlaçlar ve Hastalıklar';
+
   final String userId;
   final String name;
   final String email;
@@ -18,6 +22,9 @@ class UserModel {
   final String? tcNo;
   final String? phone;
   final DateTime? birthDate;
+
+  /// Danışanın kullandığı ilaçlar ve sahip olduğu hastalıklar (serbest metin).
+  final String? medicationsAndConditions;
 
   UserModel({
     required this.userId,
@@ -37,6 +44,7 @@ class UserModel {
     this.tcNo,
     this.phone,
     this.birthDate,
+    this.medicationsAndConditions,
   }) : createDate = createDate ?? DateTime.now(); // Use provided or current time
 
   factory UserModel.fromDocument(DocumentSnapshot doc) {
@@ -66,6 +74,7 @@ class UserModel {
       birthDate: data['birthDate'] != null
           ? (data['birthDate'] as Timestamp).toDate()
           : null,
+      medicationsAndConditions: data['medicationsAndConditions'],
     );
   }
 
@@ -87,6 +96,9 @@ class UserModel {
       if (tcNo != null) 'tcNo': tcNo,
       if (phone != null) 'phone': phone,
       if (birthDate != null) 'birthDate': Timestamp.fromDate(birthDate!),
+      // Diğer alanların aksine null olsa da yazılır: alan boşaltıldığında
+      // update() onu atlarsa Firestore'daki eski değer silinemezdi.
+      'medicationsAndConditions': medicationsAndConditions,
     };
   }
 
@@ -96,6 +108,6 @@ class UserModel {
 
   @override
   String toString() {
-    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, phone: $phone, birthDate: $birthDate}';
+    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, phone: $phone, birthDate: $birthDate, medicationsAndConditions: $medicationsAndConditions}';
   }
 }

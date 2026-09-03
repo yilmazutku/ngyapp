@@ -29,6 +29,7 @@ class _DetailsTabState extends State<DetailsTab>
   final _ageController = TextEditingController();
   final _referenceController = TextEditingController();
   final _notesController = TextEditingController();
+  final _medicationsController = TextEditingController();
   final _dosyaNoController = TextEditingController();
   final _tcNoController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -70,6 +71,7 @@ class _DetailsTabState extends State<DetailsTab>
     _ageController.dispose();
     _referenceController.dispose();
     _notesController.dispose();
+    _medicationsController.dispose();
     _dosyaNoController.dispose();
     _tcNoController.dispose();
     _phoneController.dispose();
@@ -84,6 +86,7 @@ class _DetailsTabState extends State<DetailsTab>
     _ageController.text = user.age?.toString() ?? '';
     _referenceController.text = user.reference ?? '';
     _notesController.text = user.notes ?? '';
+    _medicationsController.text = user.medicationsAndConditions ?? '';
     _dosyaNoController.text = user.dosyaNo ?? '';
     _tcNoController.text = user.tcNo ?? '';
     _phoneController.text = user.phone ?? '';
@@ -136,6 +139,9 @@ class _DetailsTabState extends State<DetailsTab>
       age: _ageController.text.isEmpty ? null : int.tryParse(_ageController.text),
       reference: _referenceController.text.isEmpty ? null : _referenceController.text,
       notes: _notesController.text.isEmpty ? null : _notesController.text,
+      medicationsAndConditions: _medicationsController.text.trim().isEmpty
+          ? null
+          : _medicationsController.text.trim(),
       dosyaNo: _dosyaNoController.text.trim().isEmpty ? null : _dosyaNoController.text.trim(),
       tcNo: _tcNoController.text.trim().isEmpty ? null : _tcNoController.text.trim(),
       phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
@@ -339,29 +345,16 @@ class _DetailsTabState extends State<DetailsTab>
                           _buildReadOnlyField('E-posta', user.email),
                           _buildReadOnlyField('Yaş', user.age?.toString() ?? ''),
                           _buildReadOnlyField('Referans', user.reference ?? ''),
-                          Text('Notlar',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: Colors.grey[700],
-                              )),
-                          const SizedBox(height: 4),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[100],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey.shade300),
-                            ),
-                            constraints: const BoxConstraints(minHeight: 100),
-                            child: Text(
-                              user.notes?.isEmpty ?? true ? 'Not bulunmamaktadır' : user.notes!,
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: user.notes?.isEmpty ?? true ? Colors.grey[500] : Colors.grey[800],
-                              ),
-                            ),
+                          _buildReadOnlyMultilineField(
+                            UserModel.medicationsLabel,
+                            user.medicationsAndConditions ?? '',
+                            emptyText: 'Bilgi girilmemiş',
+                          ),
+                          const SizedBox(height: 16),
+                          _buildReadOnlyMultilineField(
+                            'Notlar',
+                            user.notes ?? '',
+                            emptyText: 'Not bulunmamaktadır',
                           ),
                         ],
                       ),
@@ -422,6 +415,10 @@ class _DetailsTabState extends State<DetailsTab>
                               keyboardType: TextInputType.emailAddress, required: true),
                           _buildEditableField('Yaş', _ageController, keyboardType: TextInputType.number),
                           _buildEditableField('Referans', _referenceController),
+                          _buildEditableField(
+                              UserModel.medicationsLabel,
+                              _medicationsController,
+                              maxLines: 4),
                           _buildEditableField('Notlar', _notesController, maxLines: 5),
                           const SizedBox(height: 16),
                           Row(
@@ -578,6 +575,45 @@ class _DetailsTabState extends State<DetailsTab>
           ),
         ],
       ),
+    );
+  }
+
+  /// Read-only box for free-text fields (notes, medications): same styling as
+  /// [_buildReadOnlyField] but taller, so multi-line content stays readable.
+  Widget _buildReadOnlyMultilineField(
+    String label,
+    String value, {
+    required String emptyText,
+  }) {
+    final isEmpty = value.trim().isEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Colors.grey[700],
+            )),
+        const SizedBox(height: 4),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          constraints: const BoxConstraints(minHeight: 100),
+          child: Text(
+            isEmpty ? emptyText : value,
+            style: TextStyle(
+              fontSize: 16,
+              color: isEmpty ? Colors.grey[500] : Colors.grey[800],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
