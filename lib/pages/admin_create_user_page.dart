@@ -7,14 +7,15 @@ import '../firebase_options.dart';
 import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../utils/date_formatter.dart';
+import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
 class _CapitalizeWordsFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue,
-      TextEditingValue newValue,
-      ) {
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
     final text = newValue.text;
     if (text.isEmpty) return newValue;
 
@@ -45,16 +46,21 @@ final Logger logger = Logger.forClass(CreateUserPage);
 class CreateUserPage extends StatefulWidget {
   const CreateUserPage({super.key});
   static const String tempPw = '123456';
+
   @override
   createState() => _CreateUserPageState();
 }
 
 class _CreateUserPageState extends State<CreateUserPage> {
+  /// İki sütunlu düzene geçilecek en küçük genişlik.
+  static const double _wideBreakpoint = 620;
+
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _surnameController = TextEditingController();
   final TextEditingController _ageController = TextEditingController();
   final TextEditingController _referenceController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
+  final TextEditingController _medicationsController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _tcNoController = TextEditingController();
@@ -62,6 +68,10 @@ class _CreateUserPageState extends State<CreateUserPage> {
   DateTime? _birthDate;
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _dosyaNoController = TextEditingController();
+
+  final ScrollController _scrollController = ScrollController();
+
+  bool _isCreating = false;
 
   Future<void> createUser({
     required String name,
@@ -71,18 +81,21 @@ class _CreateUserPageState extends State<CreateUserPage> {
     int? age,
     String? reference,
     String? notes,
+    String? medicationsAndConditions,
     String? dosyaNo,
     String? phone,
     String? tcNo,
     DateTime? birthDate,
   }) async {
     if (name.isEmpty) {
-      _showMessageDialog('Hata', 'Lütfen isim alanını doldurunuz.');
+      await DialogUtils.openError(context,
+          title: 'Hata', message: 'Lütfen isim alanını doldurunuz.');
       return;
     }
 
     if (surname.isEmpty) {
-      _showMessageDialog('Hata', 'Lütfen soyisim alanını doldurunuz.');
+      await DialogUtils.openError(context,
+          title: 'Hata', message: 'Lütfen soyisim alanını doldurunuz.');
       return;
     }
 
@@ -94,6 +107,8 @@ class _CreateUserPageState extends State<CreateUserPage> {
 
     password ??= CreateUserPage.tempPw;
 
+    setState(() => _isCreating = true);
+
     try {
       // Check if a user with the same email already exists
       final existingUserQuery = await FirebaseFirestore.instance
@@ -102,9 +117,12 @@ class _CreateUserPageState extends State<CreateUserPage> {
           .get();
 
       if (existingUserQuery.docs.isNotEmpty) {
-        _showMessageDialog(
-          'Hata',
-          'Bu e-posta adresiyle bir kullanıcı zaten mevcut. Lütfen farklı bir e-posta giriniz.',
+        if (!mounted) return;
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message:
+              'Bu e-posta adresiyle bir kullanıcı zaten mevcut. Lütfen farklı bir e-posta giriniz.',
         );
         return;
       }
@@ -125,7 +143,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
       try {
         final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
         final userCredential =
-        await secondaryAuth.createUserWithEmailAndPassword(
+            await secondaryAuth.createUserWithEmailAndPassword(
           email: email,
           password: password,
         );
@@ -154,6 +172,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
         age: age,
         reference: reference,
         notes: notes,
+        medicationsAndConditions: medicationsAndConditions,
         dosyaNo: dosyaNo,
         phone: phone,
         tcNo: tcNo,
@@ -166,11 +185,43 @@ class _CreateUserPageState extends State<CreateUserPage> {
           .doc(userId)
           .set(newUser.toMap());
 
-      _showMessageDialog('Başarılı', 'Kullanıcı $name başarıyla oluşturuldu.');
       logger.info('User created: {}', [newUser]);
+
+      if (!mounted) return;
+      _resetForm();
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Kullanıcı $name $surname başarıyla oluşturuldu.\n\n'
+            'Giriş e-postası: $email\nŞifre: $password',
+      );
     } catch (e) {
       logger.err('Kullanıcı oluşturulamadı: {}', [e.toString()]);
-      _showMessageDialog('Hata', 'Kullanıcı oluşturulamadı. Hata: $e');
+      if (!mounted) return;
+      await DialogUtils.openError(context,
+          title: 'Hata', message: 'Kullanıcı oluşturulamadı. Hata: $e');
+    } finally {
+      if (mounted) setState(() => _isCreating = false);
+    }
+  }
+
+  /// Kayıt başarılı olduğunda formu boşaltır: aksi hâlde dolu kalan form,
+  /// e-posta otomatik üretildiği için aynı kişiyi ikinci kez oluşturabilirdi.
+  void _resetForm() {
+    _nameController.clear();
+    _surnameController.clear();
+    _ageController.clear();
+    _referenceController.clear();
+    _notesController.clear();
+    _medicationsController.clear();
+    _emailController.clear();
+    _phoneController.clear();
+    _tcNoController.clear();
+    _passwordController.clear();
+    _dosyaNoController.clear();
+    setState(() => _birthDate = null);
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
     }
   }
 
@@ -208,172 +259,299 @@ class _CreateUserPageState extends State<CreateUserPage> {
       buffer.write(turkishReplacements[char] ?? char);
     }
 
-    return buffer
-        .toString()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    return buffer.toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
-  void _showMessageDialog(String title, String message) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('Tamam'),
-            ),
-          ],
-        );
-      },
+  void _submit() {
+    final reference = _referenceController.text.trim();
+    final notes = _notesController.text.trim();
+    final medications = _medicationsController.text.trim();
+    final phone = _phoneController.text.trim();
+    final tcNo = _tcNoController.text.trim();
+    final dosyaNo = _dosyaNoController.text.trim();
+    final password = _passwordController.text.trim();
+
+    createUser(
+      name: _nameController.text.trim(),
+      email: _emailController.text.trim(),
+      password: password.isNotEmpty ? password : null,
+      surname: _surnameController.text.trim(),
+      age: int.tryParse(_ageController.text.trim()),
+      reference: reference.isNotEmpty ? reference : null,
+      notes: notes.isNotEmpty ? notes : null,
+      medicationsAndConditions: medications.isNotEmpty ? medications : null,
+      dosyaNo: dosyaNo.isNotEmpty ? dosyaNo : null,
+      phone: phone.isNotEmpty ? phone : null,
+      tcNo: tcNo.isNotEmpty ? tcNo : null,
+      birthDate: _birthDate,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppBarWithBack(
-        title: 'Kullanıcı Ekle',
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _dosyaNoController,
-                decoration: const InputDecoration(
-                  labelText: 'Dosya NO (Opsiyonel)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _tcNoController,
-                decoration: const InputDecoration(
-                  labelText: 'Tc No (Opsiyonel)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 10),
-              _buildBirthDateField(),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _phoneController,
-                decoration: const InputDecoration(
-                  labelText: 'Telefon Numarası (Opsiyonel)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'İsim Giriniz',
-                  border: OutlineInputBorder(),
-                ),
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: [_CapitalizeWordsFormatter()],
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _surnameController,
-                decoration: const InputDecoration(
-                  labelText: 'Soyisim Giriniz',
-                  border: OutlineInputBorder(),
-                ),
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: [_CapitalizeWordsFormatter()],
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Şifre Giriniz',
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: false,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'E-posta (Opsiyonel)',
-                  helperText:
-                      'Girilmezse sistem otomatik bir mail girer, değiştirilebilir.',
-                  helperMaxLines: 2,
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _ageController,
-                decoration: const InputDecoration(
-                  labelText: 'Yaş Giriniz (Opsiyonel)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _referenceController,
-                decoration: const InputDecoration(
-                  labelText: 'Referans Giriniz (Opsiyonel)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _notesController,
-                decoration: const InputDecoration(
-                  labelText: 'Notlar (Opsiyonel)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: () {
-                  final name = _nameController.text.trim();
-                  final surname = _surnameController.text.trim();
-                  final age = int.tryParse(_ageController.text.trim());
-                  final reference = _referenceController.text.trim();
-                  final notes = _notesController.text.trim();
-                  final email = _emailController.text.trim();
-                  final phone = _phoneController.text.trim();
-                  final tcNo = _tcNoController.text.trim();
-                  final dosyaNo = _dosyaNoController.text.trim();
-                  final password = _passwordController.text.trim().isNotEmpty
-                      ? _passwordController.text.trim()
-                      : null;
+      appBar: const AppBarWithBack(title: 'Kullanıcı Ekle'),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final bool wide = constraints.maxWidth >= _wideBreakpoint;
 
-                  createUser(
-                    name: name,
-                    email: email,
-                    password: password,
-                    surname: surname,
-                    age: age,
-                    reference: reference.isNotEmpty ? reference : null,
-                    notes: notes.isNotEmpty ? notes : null,
-                    dosyaNo: dosyaNo.isNotEmpty ? dosyaNo : null,
-                    phone: phone.isNotEmpty ? phone : null,
-                    tcNo: tcNo.isNotEmpty ? tcNo : null,
-                    birthDate: _birthDate,
-                  );
-                },
-                child: const Text('Kullanıcı Oluştur'),
+            return Scrollbar(
+              controller: _scrollController,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 840),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildIntroBanner(),
+                        const SizedBox(height: 16),
+                        _buildSection(
+                          icon: Icons.badge_outlined,
+                          title: 'Kimlik Bilgileri',
+                          children: [
+                            _twoColumn(
+                              wide,
+                              _buildField(
+                                controller: _dosyaNoController,
+                                label: 'Dosya No',
+                              ),
+                              _buildField(
+                                controller: _tcNoController,
+                                label: 'TC No',
+                                keyboardType: TextInputType.number,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _twoColumn(
+                              wide,
+                              _buildBirthDateField(),
+                              _buildField(
+                                controller: _phoneController,
+                                label: 'Telefon Numarası',
+                                keyboardType: TextInputType.phone,
+                                icon: Icons.phone_outlined,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _buildSection(
+                          icon: Icons.person_outline,
+                          title: 'Kişisel Bilgiler',
+                          children: [
+                            _twoColumn(
+                              wide,
+                              _buildField(
+                                controller: _nameController,
+                                label: 'İsim',
+                                isRequired: true,
+                                textCapitalization: TextCapitalization.words,
+                                inputFormatters: [_CapitalizeWordsFormatter()],
+                              ),
+                              _buildField(
+                                controller: _surnameController,
+                                label: 'Soyisim',
+                                isRequired: true,
+                                textCapitalization: TextCapitalization.words,
+                                inputFormatters: [_CapitalizeWordsFormatter()],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _twoColumn(
+                              wide,
+                              _buildField(
+                                controller: _ageController,
+                                label: 'Yaş',
+                                keyboardType: TextInputType.number,
+                                icon: Icons.cake_outlined,
+                              ),
+                              _buildField(
+                                controller: _referenceController,
+                                label: 'Referans',
+                                icon: Icons.group_outlined,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _buildSection(
+                          icon: Icons.lock_outline,
+                          title: 'Giriş Bilgileri',
+                          children: [
+                            _buildField(
+                              controller: _emailController,
+                              label: 'E-posta',
+                              keyboardType: TextInputType.emailAddress,
+                              icon: Icons.alternate_email,
+                              helperText:
+                                  'Girilmezse sistem otomatik bir mail üretir, sonradan değiştirilebilir.',
+                            ),
+                            const SizedBox(height: 12),
+                            _buildField(
+                              controller: _passwordController,
+                              label: 'Şifre',
+                              icon: Icons.key_outlined,
+                              helperText:
+                                  'Girilmezse şifre ${CreateUserPage.tempPw} olarak atanır.',
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _buildSection(
+                          icon: Icons.medical_information_outlined,
+                          title: 'Sağlık ve Notlar',
+                          children: [
+                            _buildField(
+                              controller: _medicationsController,
+                              label: UserModel.medicationsLabel,
+                              maxLines: 4,
+                              hintText:
+                                  'Örn: Tiroid (Euthyrox 50 mcg), demir eksikliği',
+                            ),
+                            const SizedBox(height: 12),
+                            _buildField(
+                              controller: _notesController,
+                              label: 'Notlar',
+                              maxLines: 4,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        _buildSubmitButton(),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ],
-          ),
+            );
+          },
         ),
+      ),
+    );
+  }
+
+  Widget _buildIntroBanner() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 20, color: Colors.blue.shade700),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Yıldızlı (*) alanlar zorunludur. E-posta ve şifre boş bırakılırsa '
+              'sistem otomatik atar; ikisi de sonradan değiştirilebilir.',
+              style: TextStyle(fontSize: 12, color: Colors.grey[800]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Card(
+      elevation: 2,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 20, color: Colors.deepPurple.shade400),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+            ...children,
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Dar ekranda alt alta, geniş ekranda yan yana iki alan.
+  Widget _twoColumn(bool wide, Widget left, Widget right) {
+    if (!wide) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [left, const SizedBox(height: 12), right],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(child: left),
+        const SizedBox(width: 12),
+        Expanded(child: right),
+      ],
+    );
+  }
+
+  Widget _buildField({
+    required TextEditingController controller,
+    required String label,
+    bool isRequired = false,
+    String? hintText,
+    String? helperText,
+    IconData? icon,
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    List<TextInputFormatter>? inputFormatters,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      maxLines: maxLines,
+      textCapitalization: textCapitalization,
+      inputFormatters: inputFormatters,
+      decoration: InputDecoration(
+        labelText: isRequired ? '$label *' : label,
+        hintText: hintText,
+        helperText: helperText,
+        helperMaxLines: 2,
+        prefixIcon: icon == null ? null : Icon(icon, size: 20),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.deepPurple.shade300, width: 2),
+        ),
+        alignLabelWithHint: maxLines > 1,
       ),
     );
   }
@@ -383,12 +561,19 @@ class _CreateUserPageState extends State<CreateUserPage> {
   Widget _buildBirthDateField() {
     return InkWell(
       onTap: _pickBirthDate,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(8),
       child: InputDecorator(
-        decoration: const InputDecoration(
-          labelText: 'Doğum Tarihi (Opsiyonel)',
-          border: OutlineInputBorder(),
-          suffixIcon: Icon(Icons.calendar_today),
+        decoration: InputDecoration(
+          labelText: 'Doğum Tarihi',
+          filled: true,
+          fillColor: Colors.grey.shade50,
+          prefixIcon: const Icon(Icons.event_outlined, size: 20),
+          suffixIcon: const Icon(Icons.calendar_today, size: 18),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
         ),
         child: Text(
           _birthDate != null
@@ -396,6 +581,34 @@ class _CreateUserPageState extends State<CreateUserPage> {
               : 'Tarih seçiniz',
           style: TextStyle(
             color: _birthDate != null ? null : Theme.of(context).hintColor,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    return SizedBox(
+      height: 50,
+      child: ElevatedButton.icon(
+        onPressed: _isCreating ? null : _submit,
+        icon: _isCreating
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
+              )
+            : const Icon(Icons.person_add_alt_1),
+        label: Text(
+          _isCreating ? 'Oluşturuluyor...' : 'Kullanıcı Oluştur',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        style: ElevatedButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.green.shade600,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
           ),
         ),
       ),
@@ -426,11 +639,13 @@ class _CreateUserPageState extends State<CreateUserPage> {
     _ageController.dispose();
     _referenceController.dispose();
     _notesController.dispose();
+    _medicationsController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _tcNoController.dispose();
     _passwordController.dispose();
     _dosyaNoController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 }
