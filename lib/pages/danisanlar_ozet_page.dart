@@ -10,17 +10,22 @@ import '../providers/summary_colors_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import 'customer_sum.dart';
+import '../widgets/appointment_color_picker.dart';
 import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(DanisanlarOzetPage);
+
+/// Sayfanın app bar mavisi. Sayfa içindeki "Yenile" butonu da aynı tonu
+/// kullanır.
+final Color _appBarColor = Colors.blue.shade800;
 
 /// Tahsil edilmemiş ödemelerde tutarın solunda gösterilen işaret. Sayfanın en
 /// üstündeki not da bu işareti açıklar.
 const String _plannedMark = '(P)';
 
-/// Pakette karşılığı olmayan seans kutusunun genişliğini tarih hücreleriyle
-/// eşitleyen görünmez yer tutucu.
-const String _disabledSeansPlaceholder = '00.00.0000';
+/// Boş bir hücrenin genişliğini tarih hücreleriyle eşitleyen görünmez yer
+/// tutucu: pasif seans kutuları ve erteleme sütunları boşken de daralmaz.
+const String _dateWidthPlaceholder = '00.00.0000';
 
 /// Admin overview: customers grouped by subscription status. The first tab
 /// lists everyone with an *active* subscription; the second lists everyone
@@ -37,14 +42,19 @@ class DanisanlarOzetPage extends StatefulWidget {
 class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  final GlobalKey<_CustomerSummaryTabState> _weeklyKey = GlobalKey();
-  final GlobalKey<_CustomerSummaryTabState> _weightTrackingKey = GlobalKey();
-  final GlobalKey<_CustomerSummaryTabState> _frozenKey = GlobalKey();
+
+  /// Yapılmış randevu (seans) hücrelerinin arkaplan rengi. Ayarlar sayfasıyla
+  /// aynı kaydı (`admininput/summaryColors`) kullanır; buradan yapılan seçim de
+  /// aynı yere yazılır. Null = varsayılan renk.
+  String? _colorOptionId;
+  bool _colorLoading = true;
+  bool _colorSaving = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadColor());
   }
 
   @override
@@ -53,13 +63,55 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     super.dispose();
   }
 
-  void _refreshCurrent() {
-    final key = switch (_tabController.index) {
-      0 => _weeklyKey,
-      1 => _weightTrackingKey,
-      _ => _frozenKey,
-    };
-    key.currentState?.reload();
+  /// Tabloya geçirilen seans rengi. Değer registry'de tutulur (provider onu
+  /// hem okurken hem yazarken günceller); [_colorOptionId] ise değişikliğin
+  /// yeniden çizimi tetiklemesini sağlar.
+  Color get _completedAppointmentColor =>
+      SummaryColorsRegistry.completedAppointmentColor;
+
+  /// Kayıtlı rengi okur. Sayfa her açıldığında zorlanır ki renk Ayarlar'dan
+  /// başka bir cihazda değiştirilmişse burada da güncel görünsün.
+  Future<void> _loadColor() async {
+    if (!mounted) return;
+    final provider = Provider.of<SummaryColorsProvider>(context, listen: false);
+    try {
+      final optionId = await provider.fetchColors(force: true);
+      if (!mounted) return;
+      setState(() {
+        _colorOptionId = optionId;
+        _colorLoading = false;
+      });
+    } catch (e) {
+      logger.err('Failed to load summary colors: {}', [e]);
+      if (!mounted) return;
+      // Renk okunamazsa tablo varsayılan renkle çizilir; seçim yine denenebilir.
+      setState(() => _colorLoading = false);
+    }
+  }
+
+  /// Seçilen rengi Ayarlar sayfasıyla aynı Firestore alanına yazar ve tabloyu
+  /// yeni renkle yeniden çizer.
+  Future<void> _saveColor(String? optionId) async {
+    if (_colorSaving) return;
+    final provider = Provider.of<SummaryColorsProvider>(context, listen: false);
+    setState(() => _colorSaving = true);
+    try {
+      await provider.saveCompletedAppointmentColor(optionId);
+      if (!mounted) return;
+      setState(() {
+        _colorOptionId = optionId;
+        _colorSaving = false;
+      });
+    } catch (e) {
+      logger.err('Failed to save summary colors: {}', [e]);
+      if (!mounted) return;
+      setState(() => _colorSaving = false);
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Seans rengi kaydedilirken bir hata oluştu.',
+      );
+    }
   }
 
   @override
@@ -67,15 +119,8 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Danışanlar Özet'),
-        backgroundColor: Colors.blue.shade800,
+        backgroundColor: _appBarColor,
         foregroundColor: Colors.white,
-        actions: [
-          LabeledActionButton(
-            icon: Icons.refresh,
-            label: 'Yenile',
-            onPressed: _refreshCurrent,
-          ),
-        ],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
@@ -91,30 +136,30 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
       ),
       body: Column(
         children: [
-          _buildLegend(),
+          _buildTopBar(),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
                 _CustomerSummaryTab(
-                  key: _weeklyKey,
                   status: SubActiveStatus.activeWeekly,
                   emptyMessage:
                       'Aktif/Haftalık paketi olan danışan bulunamadı.',
+                  completedAppointmentColor: _completedAppointmentColor,
                 ),
                 _CustomerSummaryTab(
-                  key: _weightTrackingKey,
                   status: SubActiveStatus.activeWeightTracking,
                   emptyMessage:
                       'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
+                  completedAppointmentColor: _completedAppointmentColor,
                   // Weight-tracking packages have no payment; hide payment
                   // columns.
                   showPayment: false,
                 ),
                 _CustomerSummaryTab(
-                  key: _frozenKey,
                   status: SubActiveStatus.frozen,
                   emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
+                  completedAppointmentColor: _completedAppointmentColor,
                 ),
               ],
             ),
@@ -124,17 +169,17 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     );
   }
 
-  /// Explains the markers used inside the tables: the "(P)" planned-payment
-  /// mark and the black seans box. Sits at the very top of the page so it is
-  /// visible on every tab; wraps instead of overflowing on narrow screens.
-  Widget _buildLegend() {
+  /// Tabloların üstündeki bilgi/ayar şeridi: "(P)" işareti ile siyah seans
+  /// kutusunun açıklaması ve yapılmış randevu renginin seçimi. Her sekmede
+  /// görünür; dar ekranda taşmak yerine alt satıra kayar.
+  Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
       child: Align(
         alignment: Alignment.centerLeft,
         child: Wrap(
           spacing: 16,
-          runSpacing: 6,
+          runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             _legendEntry(
@@ -152,9 +197,52 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
               ),
               '= Paketin görüşme sayısı dışındaki seans',
             ),
+            _buildColorPicker(),
           ],
         ),
       ),
+    );
+  }
+
+  /// Yapılmış randevu (seans) hücrelerinin rengini seçtiren kutu. Seçim anında
+  /// kaydedilir; Ayarlar sayfasındaki seçimle aynı kaydı günceller.
+  Widget _buildColorPicker() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Yapılmış randevu rengi:',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 210,
+          child: DropdownButtonFormField<String?>(
+            isExpanded: true,
+            value: _colorOptionId,
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            ),
+            items: appointmentColorDropdownItems(
+                SummaryColorsRegistry.defaultCompletedAppointmentOption),
+            onChanged: (_colorLoading || _colorSaving) ? null : _saveColor,
+          ),
+        ),
+        if (_colorSaving) ...[
+          const SizedBox(width: 8),
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ],
+      ],
     );
   }
 
@@ -185,10 +273,14 @@ class _CustomerSummaryTab extends StatefulWidget {
   final String emptyMessage;
   final bool showPayment;
 
+  /// Yapılmış randevu hücrelerinin arkaplan rengi. Sayfa sahibi olduğu için
+  /// yukarıdan geçirilir: renk değiştiğinde tablo yeniden çizilir.
+  final Color completedAppointmentColor;
+
   const _CustomerSummaryTab({
-    super.key,
     required this.status,
     required this.emptyMessage,
+    required this.completedAppointmentColor,
     this.showPayment = true,
   });
 
@@ -221,9 +313,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     super.dispose();
   }
 
-  /// Public entry point so the parent page can trigger a refresh.
-  Future<void> reload() => _load();
-
   Future<void> _load() async {
     if (!mounted) return;
     setState(() {
@@ -234,11 +323,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     try {
       final provider =
           Provider.of<CustomerSummaryProvider>(context, listen: false);
-      // Cached after the first tab loads it; the table reads the resolved
-      // color synchronously through SummaryColorsRegistry while building.
-      await Provider.of<SummaryColorsProvider>(context, listen: false)
-          .fetchColors();
-      if (!mounted) return;
       final rows =
           await provider.fetchCustomerSummariesByStatus(widget.status);
       if (!mounted) return;
@@ -286,50 +370,66 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       );
     }
 
-    if (_rows.isEmpty) {
-      return Center(child: Text(widget.emptyMessage));
-    }
-
-    // Total-count banner (top-left) above the table, showing how many customers
-    // are currently listed in this tab.
+    // Total-count banner + "Yenile" (top-left) above the table, showing how
+    // many customers are currently listed in this tab. Boş sekmede de görünür
+    // ki yenileme her zaman elin altında olsun.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildTotalCountHeader(),
-        Expanded(child: _buildTable()),
+        Expanded(
+          child: _rows.isEmpty
+              ? Center(child: Text(widget.emptyMessage))
+              : _buildTable(),
+        ),
       ],
     );
   }
 
   /// A small banner in the top-left showing the number of customers listed in
-  /// this tab (`Toplam Danışan Sayısı`).
+  /// this tab (`Toplam Danışan Sayısı`), with the "Yenile" button right next to
+  /// it. Dar ekranda buton alt satıra kayar.
   Widget _buildTotalCountHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.blue.shade50,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.blue.shade200),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.people, size: 18, color: Colors.blue.shade800),
-              const SizedBox(width: 6),
-              Text(
-                'Toplam Danışan Sayısı: ${_rows.length}',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue.shade900,
-                ),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
               ),
-            ],
-          ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.people, size: 18, color: _appBarColor),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Toplam Danışan Sayısı: ${_rows.length}',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            LabeledActionButton(
+              icon: Icons.refresh,
+              label: 'Yenile',
+              onPressed: _loading ? null : _load,
+              backgroundColor: _appBarColor,
+              foregroundColor: Colors.white,
+            ),
+          ],
         ),
       ),
     );
@@ -399,7 +499,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         DataColumn(label: Text('$i. Ertelenen Randevu')),
       const DataColumn(label: Text('Kalan Erteleme Hakkı'), numeric: true),
       for (int i = 1; i <= CustomerSummaryRow.maxPostponementUses; i++)
-        DataColumn(label: Text('$i. Erteleme Hakkı Kullanımı')),
+        DataColumn(label: Text('$i. Erteleme')),
     ];
   }
 
@@ -433,7 +533,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
               : const SummaryCell.empty()),
         _cell(row.remainingPostponements),
         for (int i = 0; i < CustomerSummaryRow.maxPostponementUses; i++)
-          _cell(i < row.postponementUseDates.length
+          _dateCell(i < row.postponementUseDates.length
               ? row.postponementUseDates[i]
               : const SummaryCell.empty()),
       ],
@@ -504,6 +604,17 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
   DataCell _cell(SummaryCell cell) =>
       DataCell(Text(cell.text, style: _cellStyle(cell)));
 
+  /// Tarih taşıyan dar sütunlar için hücre: boşken bile sütun bir tarih
+  /// sığdıracak kadar geniş kalsın diye görünmez yer tutucu kullanılır.
+  DataCell _dateCell(SummaryCell cell) => DataCell(
+        cell.isEmpty
+            ? const Text(
+                _dateWidthPlaceholder,
+                style: TextStyle(color: Colors.transparent),
+              )
+            : Text(cell.text, style: _cellStyle(cell)),
+      );
+
   /// Seans hücresi: yapılmış randevunun tarihi, admin'in Ayarlar'dan seçtiği
   /// arkaplan rengiyle vurgulanır. Yazı rengi arkaplanın parlaklığına göre
   /// belirlendiği için tarih her renkte okunabilir kalır.
@@ -517,7 +628,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     if (isBeyondPackage) return _beyondPackageSeansCell(cell);
     if (cell.isEmpty || cell.isError) return _cell(cell);
 
-    final background = SummaryColorsRegistry.completedAppointmentColor;
+    final background = widget.completedAppointmentColor;
     return DataCell(
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -552,7 +663,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         ),
         child: cell.isEmpty
             ? const Text(
-                _disabledSeansPlaceholder,
+                _dateWidthPlaceholder,
                 style: TextStyle(color: Colors.transparent),
               )
             : Text(
