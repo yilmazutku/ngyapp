@@ -383,6 +383,9 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
 
 class DietCard extends StatelessWidget {
   static const String userViewLabel = 'Danışan Nasıl Görüyor?';
+  static const String recipeLabel = 'Ekli Tarif';
+  static const String sourceFileLabel = 'Kaynak Word Dosyası';
+  static const String openAttachmentHint = 'Görüntülemek için dokunun';
 
   final DietDocument dietDoc;
   final VoidCallback onView;
@@ -530,7 +533,27 @@ class DietCard extends StatelessWidget {
             // clearly associated with this diet.
             if (dietDoc.hasRecipe) ...[
               const SizedBox(height: 12),
-              _buildRecipeRow(context),
+              _buildAttachmentRow(
+                icon: Icons.picture_as_pdf,
+                color: Colors.red,
+                title: recipeLabel,
+                fileName: dietDoc.recipePdfName,
+                onTap: () => openPdfUrl(context, dietDoc.recipePdfUrl),
+              ),
+            ],
+            if (dietDoc.hasSourceFile) ...[
+              const SizedBox(height: 8),
+              _buildAttachmentRow(
+                icon: Icons.description,
+                color: Colors.indigo,
+                title: sourceFileLabel,
+                fileName: dietDoc.sourceFileName,
+                onTap: () => openFileUrl(
+                  context,
+                  dietDoc.sourceFileUrl,
+                  fileLabel: 'Word dosyası',
+                ),
+              ),
             ],
             const SizedBox(height: 12),
             // Full width so the long label never pushes the row into a scroll.
@@ -599,34 +622,39 @@ class DietCard extends StatelessWidget {
     );
   }
 
-  /// Tappable row showing the diet's attached recipe PDF. Opens the PDF in the
-  /// device's external viewer. Only rendered when [dietDoc.hasRecipe] is true.
-  Widget _buildRecipeRow(BuildContext context) {
-    final label = (dietDoc.recipePdfName?.trim().isNotEmpty ?? false)
-        ? dietDoc.recipePdfName!.trim()
-        : 'Görüntülemek için dokunun';
+  Widget _buildAttachmentRow({
+    required IconData icon,
+    required MaterialColor color,
+    required String title,
+    required String? fileName,
+    required VoidCallback onTap,
+  }) {
+    final trimmed = fileName?.trim();
+    final label = (trimmed != null && trimmed.isNotEmpty)
+        ? trimmed
+        : openAttachmentHint;
 
     return InkWell(
-      onTap: () => openPdfUrl(context, dietDoc.recipePdfUrl),
+      onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.red.shade50,
+          color: color.shade50,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.red.shade200),
+          border: Border.all(color: color.shade200),
         ),
         child: Row(
           children: [
-            Icon(Icons.picture_as_pdf, color: Colors.red.shade600, size: 20),
+            Icon(icon, color: color.shade600, size: 20),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Ekli Tarif',
-                    style: TextStyle(
+                  Text(
+                    title,
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -641,7 +669,7 @@ class DietCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Icon(Icons.open_in_new, color: Colors.red.shade400, size: 18),
+            Icon(Icons.open_in_new, color: color.shade400, size: 18),
           ],
         ),
       ),

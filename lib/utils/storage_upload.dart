@@ -21,6 +21,9 @@ const int kMaxUploadBytes = 50 * 1024 * 1024;
 /// Human-readable form of [kMaxUploadBytes] for user-facing messages.
 const String kMaxUploadSizeLabel = '50 MB';
 
+const String kDocxContentType =
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
 /// Ceiling for a single upload. If an upload does not finish within this window
 /// it is cancelled and an [UploadTimeoutException] is thrown, so the user is
 /// told it did not complete and can retry instead of the UI spinning forever.

@@ -35,6 +35,12 @@ class DietDocument {
   /// Original file name of the attached recipe PDF (for display).
   final String? recipePdfName;
 
+  final String? sourceFileUrl;
+
+  final String? sourceFilePath;
+
+  final String? sourceFileName;
+
   DietDocument({
     required this.docId,
     required this.userId,
@@ -50,6 +56,9 @@ class DietDocument {
     this.recipePdfUrl,
     this.recipePdfPath,
     this.recipePdfName,
+    this.sourceFileUrl,
+    this.sourceFilePath,
+    this.sourceFileName,
   }) : createDate = createDate ?? DateTime.now();
 
   /// Whether this diet defines a distinct weekend (Hafta Sonu) menu.
@@ -58,6 +67,8 @@ class DietDocument {
 
   /// Whether this diet has an attached recipe PDF.
   bool get hasRecipe => (recipePdfUrl ?? '').isNotEmpty;
+
+  bool get hasSourceFile => (sourceFileUrl ?? '').isNotEmpty;
 
   factory DietDocument.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>?;
@@ -76,6 +87,9 @@ class DietDocument {
       recipePdfUrl: data?['recipePdfUrl'] as String?,
       recipePdfPath: data?['recipePdfPath'] as String?,
       recipePdfName: data?['recipePdfName'] as String?,
+      sourceFileUrl: data?['sourceFileUrl'] as String?,
+      sourceFilePath: data?['sourceFilePath'] as String?,
+      sourceFileName: data?['sourceFileName'] as String?,
     );
   }
 
@@ -94,6 +108,9 @@ class DietDocument {
       if (recipePdfUrl != null) 'recipePdfUrl': recipePdfUrl,
       if (recipePdfPath != null) 'recipePdfPath': recipePdfPath,
       if (recipePdfName != null) 'recipePdfName': recipePdfName,
+      if (sourceFileUrl != null) 'sourceFileUrl': sourceFileUrl,
+      if (sourceFilePath != null) 'sourceFilePath': sourceFilePath,
+      if (sourceFileName != null) 'sourceFileName': sourceFileName,
     };
   }
 
