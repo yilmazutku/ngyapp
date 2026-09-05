@@ -285,13 +285,19 @@ class DietProvider extends ChangeNotifier {
     Uint8List? fileBytes,
   }) async {
     try {
+      // Keep the admin's own file name (see [uploadSourceFile]); the recipe is
+      // opened for reading, so it stays inline instead of forcing a download.
+      final safeName = sanitizeStorageFileName(fileName, fallback: 'tarif.pdf');
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final storagePath = 'users/$userId/dietRecipes/recipe_$ts.pdf';
+      final storagePath = 'users/$userId/dietRecipes/$ts/$safeName';
 
       final ref = FirebaseStorage.instance.ref().child(storagePath);
       await uploadFileToStorage(
         ref: ref,
-        metadata: SettableMetadata(contentType: 'application/pdf'),
+        metadata: SettableMetadata(
+          contentType: 'application/pdf',
+          contentDisposition: inlineContentDisposition(safeName),
+        ),
         filePath: filePath,
         bytes: fileBytes,
       );
@@ -301,7 +307,7 @@ class DietProvider extends ChangeNotifier {
       return {
         'url': downloadUrl,
         'path': storagePath,
-        'name': fileName,
+        'name': safeName,
       };
     } catch (e, s) {
       logger.err('Error uploading recipe PDF: $e', [s]);

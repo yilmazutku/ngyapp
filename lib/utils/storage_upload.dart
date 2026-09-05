@@ -41,12 +41,22 @@ String sanitizeStorageFileName(String fileName, {String fallback = 'dosya'}) {
 /// `Content-Disposition` value that makes a download save the file as
 /// [fileName] instead of the generated object name.
 ///
-/// Carries both the plain `filename` (ASCII fallback for old clients) and the
-/// RFC 5987 `filename*`, so Turkish characters survive.
-String attachmentContentDisposition(String fileName) {
-  final ascii = fileName.replaceAll(RegExp(r'[^\x20-\x7E]'), '_')
-      .replaceAll('"', '');
-  return 'attachment; filename="$ascii"; '
+/// Use for files that are always saved rather than viewed (e.g. a .docx).
+String attachmentContentDisposition(String fileName) =>
+    _contentDisposition('attachment', fileName);
+
+/// Same as [attachmentContentDisposition] but keeps the file viewable in place
+/// (browser / PDF viewer preview) while still naming it [fileName] when saved.
+String inlineContentDisposition(String fileName) =>
+    _contentDisposition('inline', fileName);
+
+/// Builds a `Content-Disposition` header value carrying both the plain
+/// `filename` (ASCII fallback for old clients) and the RFC 5987 `filename*`,
+/// so Turkish characters survive.
+String _contentDisposition(String type, String fileName) {
+  final ascii =
+      fileName.replaceAll(RegExp(r'[^\x20-\x7E]'), '_').replaceAll('"', '');
+  return '$type; filename="$ascii"; '
       "filename*=UTF-8''${_encodeRfc5987(fileName)}";
 }
 
