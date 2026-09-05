@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/diet_goals.dart';
 import '../models/diet_section.dart';
 import '../models/meal_model.dart';
 import '../utils/diet_menu_parser.dart';
@@ -13,6 +14,81 @@ const double kDietMealContentFontSize = 13.0;
 /// [active] is today's still-pending meal, [completed] one the user ticked off
 /// and [reference] a meal from the menu that is not today's (shown read-only).
 enum DietMealTone { active, completed, reference }
+
+/// The diet's goal lines ("Su Hedefi: ...", "Spor Hedefi: ...") shown above the
+/// first meal, each on its own row and kept exactly as written in the imported
+/// document. Renders nothing when the diet has no goal lines.
+class DietGoalsCard extends StatelessWidget {
+  final DietGoals goals;
+
+  const DietGoalsCard({super.key, required this.goals});
+
+  IconData _iconFor(DietGoalType type) {
+    switch (type) {
+      case DietGoalType.water:
+        return Icons.water_drop;
+      case DietGoalType.sport:
+        return Icons.directions_run;
+    }
+  }
+
+  Color _colorFor(DietGoalType type) {
+    switch (type) {
+      case DietGoalType.water:
+        return Colors.blue.shade600;
+      case DietGoalType.sport:
+        return Colors.teal.shade600;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = goals.entries;
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.indigo.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.indigo.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < entries.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Icon(
+                    _iconFor(entries[i].type),
+                    size: 18,
+                    color: _colorFor(entries[i].type),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    entries[i].line,
+                    style: const TextStyle(
+                      fontSize: kDietMealContentFontSize,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 class DietSectionHeader extends StatelessWidget {
   final DietSection section;
@@ -235,6 +311,9 @@ class DietPlanView extends StatefulWidget {
   /// Date used to decide which section is marked as "Bugün".
   final DateTime? referenceDate;
 
+  /// Goal lines rendered above the first meal. Empty by default.
+  final DietGoals goals;
+
   final String emptyMessage;
 
   const DietPlanView({
@@ -243,6 +322,7 @@ class DietPlanView extends StatefulWidget {
     this.weekend = const DietMenu.empty(),
     this.onRecipeTap,
     this.referenceDate,
+    this.goals = const DietGoals.empty(),
     this.emptyMessage = 'Henüz öğün planı oluşturulmamış',
   });
 
@@ -258,10 +338,20 @@ class _DietPlanViewState extends State<DietPlanView> {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.goals.hasAny) DietGoalsCard(goals: widget.goals),
+        _buildPlan(),
+      ],
+    );
+  }
+
+  Widget _buildPlan() {
     final bool hasWeekend = widget.weekend.hasContent;
 
     if (!hasWeekend && !widget.weekday.hasContent) {
-      return _buildEmptyState();
+      return SizedBox(width: double.infinity, child: _buildEmptyState());
     }
 
     if (!hasWeekend) {

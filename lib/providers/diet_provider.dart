@@ -533,6 +533,8 @@ class DietProvider extends ChangeNotifier {
     String? sourceFileUrl,
     String? sourceFilePath,
     String? sourceFileName,
+    String? waterGoal,
+    String? sportGoal,
   }) async {
     try {
       final now=DateTime.now();
@@ -558,6 +560,8 @@ class DietProvider extends ChangeNotifier {
           'sourceFilePath': sourceFilePath,
         if (sourceFileName != null && sourceFileName.isNotEmpty)
           'sourceFileName': sourceFileName,
+        if (waterGoal != null && waterGoal.isNotEmpty) 'waterGoal': waterGoal,
+        if (sportGoal != null && sportGoal.isNotEmpty) 'sportGoal': sportGoal,
       };
 
       final docRef = await _firestore
