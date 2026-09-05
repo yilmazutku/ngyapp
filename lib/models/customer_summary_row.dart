@@ -8,15 +8,22 @@ class SummaryCell {
   final String text;
   final bool isError;
 
-  const SummaryCell(this.text) : isError = false;
+  /// Seans hücrelerinde randevunun "Yakıldı" (burned) olup olmadığı. Tablo
+  /// yakılmış ve yapılmış seansları ayrı arkaplan renkleriyle gösterir; diğer
+  /// sütunlarda bu bayrak her zaman false'tur.
+  final bool isBurned;
+
+  const SummaryCell(this.text, {this.isBurned = false}) : isError = false;
 
   const SummaryCell.empty()
       : text = '',
-        isError = false;
+        isError = false,
+        isBurned = false;
 
   const SummaryCell.error()
       : text = 'Hata',
-        isError = true;
+        isError = true,
+        isBurned = false;
 
   bool get isEmpty => !isError && text.isEmpty;
 }
