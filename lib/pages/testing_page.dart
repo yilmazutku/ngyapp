@@ -821,8 +821,9 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
 
 // ---------------------------------------------------------------------------
 // "Danışanlar Özet" table colors section.
-// Lets the admin pick the background color of the seans cells (the already
-// held appointments) from the same curated palette as the appointment cards.
+// Lets the admin pick the background color of the seans cells — separately for
+// the appointments that were held ("Yapıldı") and the ones that were burned
+// ("Yakıldı") — from the same curated palette as the appointment cards.
 // Stored at `admininput/summaryColors`; the summary table reads it through
 // `SummaryColorsRegistry`.
 // ---------------------------------------------------------------------------
@@ -834,22 +835,24 @@ class _SummaryColorsSection extends StatefulWidget {
 }
 
 class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
-  static const String _slotLabel = 'Yapılmış Randevu (Seans)';
   static const String _sampleDate = '01.09.2026';
 
   bool _loading = true;
   bool _saving = false;
 
-  /// Working copy of the selected palette option id. Null means "use the
-  /// built-in default" (i.e. no override saved yet).
-  String? _draft;
+  /// Working copy of the selected palette option id per slot. A null value
+  /// means "use the built-in default" (i.e. no override saved for that slot).
+  final Map<SummaryColorSlot, String?> _draft = {};
 
-  /// Currently saved option id, used to enable/disable the Save button.
-  String? _saved;
+  /// Snapshot of the saved selections, used to enable/disable the Save button.
+  Map<SummaryColorSlot, String?> _saved = const {};
 
   @override
   void initState() {
     super.initState();
+    for (final slot in SummaryColorSlot.values) {
+      _draft[slot] = null;
+    }
     _refresh();
   }
 
@@ -859,11 +862,13 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
     try {
       final provider =
           Provider.of<SummaryColorsProvider>(context, listen: false);
-      final optionId = await provider.fetchColors(force: true);
+      final overrides = await provider.fetchColors(force: true);
       if (!mounted) return;
       setState(() {
-        _saved = optionId;
-        _draft = optionId;
+        _saved = _asFullMap(overrides);
+        _draft
+          ..clear()
+          ..addAll(_saved);
         _loading = false;
       });
     } catch (e) {
@@ -879,29 +884,45 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
     }
   }
 
-  bool get _hasUnsavedChanges => _draft != _saved;
+  /// Kaydedilmemiş slotları da null ile doldurur: draft ile saved aynı
+  /// anahtarları taşısın ki karşılaştırma güvenilir olsun.
+  Map<SummaryColorSlot, String?> _asFullMap(
+      Map<SummaryColorSlot, String> overrides) {
+    final full = <SummaryColorSlot, String?>{};
+    for (final slot in SummaryColorSlot.values) {
+      full[slot] = overrides[slot];
+    }
+    return full;
+  }
+
+  bool get _hasUnsavedChanges {
+    for (final slot in SummaryColorSlot.values) {
+      if (_draft[slot] != _saved[slot]) return true;
+    }
+    return false;
+  }
 
   Future<void> _save() async {
     setState(() => _saving = true);
     bool loadingOpen = false;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Renk kaydediliyor...');
+      DialogUtils.openLoading(context, message: 'Renkler kaydediliyor...');
       loadingOpen = true;
     }
     try {
       final provider =
           Provider.of<SummaryColorsProvider>(context, listen: false);
-      await provider.saveCompletedAppointmentColor(_draft);
+      await provider.saveColors(_draft);
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
       }
       if (!mounted) return;
-      setState(() => _saved = _draft);
+      setState(() => _saved = Map<SummaryColorSlot, String?>.from(_draft));
       await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
-        message: 'Danışanlar Özet rengi güncellendi.',
+        message: 'Danışanlar Özet renkleri güncellendi.',
       );
     } catch (e) {
       _summaryColorsLogger
@@ -914,33 +935,33 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'Danışanlar Özet rengi kaydedilirken bir hata oluştu.',
+        message: 'Danışanlar Özet renkleri kaydedilirken bir hata oluştu.',
       );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<void> _resetToDefault() async {
+  Future<void> _resetToDefaults() async {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Varsayılana Döndür',
-      message: 'Yapılmış randevu rengi varsayılana döndürülecek. '
+      message: 'Seans renkleri varsayılana döndürülecek. '
           'Devam etmek istiyor musunuz?',
       confirmText: 'Sıfırla',
       cancelText: 'İptal',
     );
     if (!confirmed) return;
     if (!mounted) return;
-    setState(() => _draft = null);
+    setState(() {
+      for (final slot in SummaryColorSlot.values) {
+        _draft[slot] = null;
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final defaultOption = SummaryColorsRegistry.defaultCompletedAppointmentOption;
-    final selectedOption = AppointmentColorPalette.findById(_draft);
-    final effectiveColor = selectedOption?.color ?? defaultOption.color;
-
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
@@ -968,9 +989,10 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Danışanlar Özet tablosunda yapılmış randevuların (seans '
-              'sütunları) arkaplan rengini buradan seçebilirsiniz. Tarih yazısı '
-              'seçilen renge göre otomatik olarak okunabilir kalır.',
+              'Danışanlar Özet tablosundaki seans sütunlarının arkaplan rengini '
+              'buradan seçebilirsiniz: yapılmış ve yakılmış randevular için ayrı '
+              'ayrı. Tarih yazısı seçilen renge göre otomatik olarak okunabilir '
+              'kalır.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),
@@ -979,17 +1001,22 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
                 padding: EdgeInsets.symmetric(vertical: 16),
                 child: Center(child: CircularProgressIndicator()),
               )
-            else ...[
-              _buildSlotRow(defaultOption, selectedOption, effectiveColor),
-              const SizedBox(height: 12),
-              _buildPreview(effectiveColor),
-            ],
+            else
+              Column(
+                children: [
+                  for (final slot in SummaryColorSlot.values) ...[
+                    _buildSlotRow(slot),
+                    if (slot != SummaryColorSlot.values.last)
+                      const Divider(height: 1),
+                  ],
+                ],
+              ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton.icon(
-                  onPressed: (_loading || _saving) ? null : _resetToDefault,
+                  onPressed: (_loading || _saving) ? null : _resetToDefaults,
                   icon: const Icon(Icons.restore),
                   label: const Text('Varsayılana Döndür'),
                 ),
@@ -1009,52 +1036,68 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
     );
   }
 
-  Widget _buildSlotRow(
-    AppointmentColorOption defaultOption,
-    AppointmentColorOption? selectedOption,
-    Color effectiveColor,
-  ) {
-    return Row(
-      children: [
-        PaletteSwatch(color: effectiveColor),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildSlotRow(SummaryColorSlot slot) {
+    final selectedId = _draft[slot];
+    final selectedOption = AppointmentColorPalette.findById(selectedId);
+    final effectiveColor = selectedOption?.color ?? slot.defaultOption.color;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              const Text(
-                _slotLabel,
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              PaletteSwatch(color: effectiveColor),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      slot.label,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      selectedId == null
+                          ? 'Varsayılan: ${slot.defaultOption.label}'
+                          : 'Seçili: ${selectedOption?.label ?? '—'}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                _draft == null
-                    ? 'Varsayılan: ${defaultOption.label}'
-                    : 'Seçili: ${selectedOption?.label ?? '—'}',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 200,
+                child: DropdownButtonFormField<String?>(
+                  isExpanded: true,
+                  value: selectedId,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  items: appointmentColorDropdownItems(slot.defaultOption),
+                  onChanged: _saving
+                      ? null
+                      : (value) => setState(() => _draft[slot] = value),
+                ),
               ),
             ],
           ),
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 200,
-          child: DropdownButtonFormField<String?>(
-            isExpanded: true,
-            value: _draft,
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
-              contentPadding:
-                  EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            ),
-            items: appointmentColorDropdownItems(defaultOption),
-            onChanged: _saving
-                ? null
-                : (value) => setState(() => _draft = value),
-          ),
-        ),
-      ],
+          const SizedBox(height: 8),
+          _buildPreview(effectiveColor),
+        ],
+      ),
     );
   }
 

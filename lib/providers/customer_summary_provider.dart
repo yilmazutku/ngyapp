@@ -300,7 +300,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
   ///   missing dates become "Hata". Always [CustomerSummaryRow.maxSeans]
   ///   entries. Postponed ("Ertelendi"), still-scheduled and cancelled
   ///   appointments are intentionally excluded here; a postponed appointment
-  ///   reappears once it is re-marked "Yapıldı" on its new date.
+  ///   reappears once it is re-marked "Yapıldı" on its new date. Burned ones
+  ///   are flagged with [SummaryCell.isBurned] so the table can color them
+  ///   apart from the completed ones.
   /// - Postponed dates: appointments with status "Ertelendi" ordered by
   ///   [postponedDate]; a postponed appointment with no postponedDate becomes
   ///   "Hata". Variable length (only the postponed ones).
@@ -319,13 +321,13 @@ class CustomerSummaryProvider extends ChangeNotifier {
           .where('subscriptionId', isEqualTo: subscriptionId)
           .get();
 
-      final seansDates = <DateTime>[];
+      final seansDates = <_SummaryDate>[];
       int seansNullCount = 0;
 
-      final postponedDates = <DateTime>[];
+      final postponedDates = <_SummaryDate>[];
       int postponedNullCount = 0;
 
-      final postponementUseDates = <DateTime>[];
+      final postponementUseDates = <_SummaryDate>[];
       int postponementUseNullCount = 0;
 
       for (final doc in snap.docs) {
@@ -340,12 +342,13 @@ class CustomerSummaryProvider extends ChangeNotifier {
         // still-scheduled and cancelled ones are excluded on purpose; a
         // postponed appointment shows up here once it is re-marked "Yapıldı" on
         // its new date.
-        final countsAsSeans = status == AppointmentStatus.completed.label ||
-            status == AppointmentStatus.burned.label;
+        final isBurned = status == AppointmentStatus.burned.label;
+        final countsAsSeans =
+            status == AppointmentStatus.completed.label || isBurned;
         if (countsAsSeans) {
           final rawDate = data['appointmentDateTime'];
           if (rawDate is Timestamp) {
-            seansDates.add(rawDate.toDate());
+            seansDates.add(_SummaryDate(rawDate.toDate(), isBurned: isBurned));
           } else {
             // Field expected but missing/null => surface as an error cell.
             seansNullCount++;
@@ -357,7 +360,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
         if (status == AppointmentStatus.postponed.label) {
           final rawPostponed = data['postponedDate'];
           if (rawPostponed is Timestamp) {
-            postponedDates.add(rawPostponed.toDate());
+            postponedDates.add(_SummaryDate(rawPostponed.toDate()));
           } else {
             // Postponed but the new date is missing => error.
             postponedNullCount++;
@@ -368,7 +371,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
           if (data['postponedBy'] == PostponeSource.user.value) {
             final rawDate = data['appointmentDateTime'];
             if (rawDate is Timestamp) {
-              postponementUseDates.add(rawDate.toDate());
+              postponementUseDates.add(_SummaryDate(rawDate.toDate()));
             } else {
               postponementUseNullCount++;
             }
@@ -426,12 +429,12 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// When [cap] is set, keeps the most recent [cap] dates; when [padToCap] is
   /// true the result is padded with empty cells up to [cap].
   List<SummaryCell> _buildDateCells({
-    required List<DateTime> dates,
+    required List<_SummaryDate> dates,
     required int nullCount,
     required int? cap,
     required bool padToCap,
   }) {
-    dates.sort((a, b) => a.compareTo(b));
+    dates.sort((a, b) => a.date.compareTo(b.date));
 
     var trimmed = dates;
     if (cap != null && dates.length > cap) {
@@ -439,7 +442,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
 
     final cells = <SummaryCell>[
-      ...trimmed.map((d) => SummaryCell(_dateFormat.format(d))),
+      ...trimmed.map((d) =>
+          SummaryCell(_dateFormat.format(d.date), isBurned: d.isBurned)),
     ];
 
     for (int i = 0; i < nullCount; i++) {
@@ -455,6 +459,16 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
     return cells;
   }
+}
+
+/// Tabloda tarih hücresine dönüşecek tek bir tarih. Seans sütunlarında
+/// [isBurned], randevunun "Yakıldı" olduğunu ve hücrenin farklı bir arkaplan
+/// rengiyle çizileceğini belirtir; diğer sütunlarda her zaman false kalır.
+class _SummaryDate {
+  final DateTime date;
+  final bool isBurned;
+
+  const _SummaryDate(this.date, {this.isBurned = false});
 }
 
 /// Internal holder for the appointment-derived cells (seans + postponed dates).

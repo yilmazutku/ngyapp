@@ -10,7 +10,6 @@ import '../providers/summary_colors_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import 'customer_sum.dart';
-import '../widgets/appointment_color_picker.dart';
 import '../widgets/labeled_action_button.dart';
 
 final Logger logger = Logger.forClass(DanisanlarOzetPage);
@@ -43,18 +42,11 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
 
-  /// Yapılmış randevu (seans) hücrelerinin arkaplan rengi. Ayarlar sayfasıyla
-  /// aynı kaydı (`admininput/summaryColors`) kullanır; buradan yapılan seçim de
-  /// aynı yere yazılır. Null = varsayılan renk.
-  String? _colorOptionId;
-  bool _colorLoading = true;
-  bool _colorSaving = false;
-
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadColor());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadColors());
   }
 
   @override
@@ -63,55 +55,28 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     super.dispose();
   }
 
-  /// Tabloya geçirilen seans rengi. Değer registry'de tutulur (provider onu
-  /// hem okurken hem yazarken günceller); [_colorOptionId] ise değişikliğin
-  /// yeniden çizimi tetiklemesini sağlar.
   Color get _completedAppointmentColor =>
-      SummaryColorsRegistry.completedAppointmentColor;
+      SummaryColorsRegistry.colorFor(SummaryColorSlot.completedAppointment);
 
-  /// Kayıtlı rengi okur. Sayfa her açıldığında zorlanır ki renk Ayarlar'dan
-  /// başka bir cihazda değiştirilmişse burada da güncel görünsün.
-  Future<void> _loadColor() async {
+  Color get _burnedAppointmentColor =>
+      SummaryColorsRegistry.colorFor(SummaryColorSlot.burnedAppointment);
+
+  /// Kayıtlı renkleri okur. Sayfa her açıldığında zorlanır ki renkler
+  /// Ayarlar'dan (ya da başka bir cihazdan) değiştirilmişse burada da güncel
+  /// görünsün. Okunamazsa tablo varsayılan renklerle çizilir.
+  ///
+  /// Değerler [SummaryColorsRegistry]'de tutulduğu için burada saklanacak bir
+  /// state yok; setState yalnızca tabloyu yeni renklerle yeniden çizdirir.
+  Future<void> _loadColors() async {
     if (!mounted) return;
     final provider = Provider.of<SummaryColorsProvider>(context, listen: false);
     try {
-      final optionId = await provider.fetchColors(force: true);
-      if (!mounted) return;
-      setState(() {
-        _colorOptionId = optionId;
-        _colorLoading = false;
-      });
+      await provider.fetchColors(force: true);
     } catch (e) {
       logger.err('Failed to load summary colors: {}', [e]);
-      if (!mounted) return;
-      // Renk okunamazsa tablo varsayılan renkle çizilir; seçim yine denenebilir.
-      setState(() => _colorLoading = false);
     }
-  }
-
-  /// Seçilen rengi Ayarlar sayfasıyla aynı Firestore alanına yazar ve tabloyu
-  /// yeni renkle yeniden çizer.
-  Future<void> _saveColor(String? optionId) async {
-    if (_colorSaving) return;
-    final provider = Provider.of<SummaryColorsProvider>(context, listen: false);
-    setState(() => _colorSaving = true);
-    try {
-      await provider.saveCompletedAppointmentColor(optionId);
-      if (!mounted) return;
-      setState(() {
-        _colorOptionId = optionId;
-        _colorSaving = false;
-      });
-    } catch (e) {
-      logger.err('Failed to save summary colors: {}', [e]);
-      if (!mounted) return;
-      setState(() => _colorSaving = false);
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Seans rengi kaydedilirken bir hata oluştu.',
-      );
-    }
+    if (!mounted) return;
+    setState(() {});
   }
 
   @override
@@ -146,12 +111,14 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
                   emptyMessage:
                       'Aktif/Haftalık paketi olan danışan bulunamadı.',
                   completedAppointmentColor: _completedAppointmentColor,
+                  burnedAppointmentColor: _burnedAppointmentColor,
                 ),
                 _CustomerSummaryTab(
                   status: SubActiveStatus.activeWeightTracking,
                   emptyMessage:
                       'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
                   completedAppointmentColor: _completedAppointmentColor,
+                  burnedAppointmentColor: _burnedAppointmentColor,
                   // Weight-tracking packages have no payment; hide payment
                   // columns.
                   showPayment: false,
@@ -160,6 +127,7 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
                   status: SubActiveStatus.frozen,
                   emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
                   completedAppointmentColor: _completedAppointmentColor,
+                  burnedAppointmentColor: _burnedAppointmentColor,
                 ),
               ],
             ),
@@ -169,8 +137,9 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     );
   }
 
-  /// Tabloların üstündeki bilgi/ayar şeridi: "(P)" işareti ile siyah seans
-  /// kutusunun açıklaması ve yapılmış randevu renginin seçimi. Her sekmede
+  /// Tabloların üstündeki açıklama şeridi: "(P)" işareti, siyah seans kutusu ve
+  /// seans hücrelerinin renkleri. Renklerin kendisi Ayarlar sayfasından seçilir;
+  /// burada yalnızca hangi rengin neyi gösterdiği açıklanır. Her sekmede
   /// görünür; dar ekranda taşmak yerine alt satıra kayar.
   Widget _buildTopBar() {
     return Padding(
@@ -187,62 +156,32 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
               '$_plannedMark = Planlandı',
             ),
             _legendEntry(
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
+              _legendSwatch(Colors.black87),
               '= Paketin görüşme sayısı dışındaki seans',
             ),
-            _buildColorPicker(),
+            _legendEntry(
+              _legendSwatch(_completedAppointmentColor),
+              '= Yapılmış randevu',
+            ),
+            _legendEntry(
+              _legendSwatch(_burnedAppointmentColor),
+              '= Yakılmış randevu',
+            ),
           ],
         ),
       ),
     );
   }
 
-  /// Yapılmış randevu (seans) hücrelerinin rengini seçtiren kutu. Seçim anında
-  /// kaydedilir; Ayarlar sayfasındaki seçimle aynı kaydı günceller.
-  Widget _buildColorPicker() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'Yapılmış randevu rengi:',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade700,
-          ),
-        ),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 210,
-          child: DropdownButtonFormField<String?>(
-            isExpanded: true,
-            value: _colorOptionId,
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            ),
-            items: appointmentColorDropdownItems(
-                SummaryColorsRegistry.defaultCompletedAppointmentOption),
-            onChanged: (_colorLoading || _colorSaving) ? null : _saveColor,
-          ),
-        ),
-        if (_colorSaving) ...[
-          const SizedBox(width: 8),
-          const SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ],
-      ],
+  Widget _legendSwatch(Color color) {
+    return Container(
+      width: 14,
+      height: 14,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: Colors.black26),
+      ),
     );
   }
 
@@ -273,14 +212,17 @@ class _CustomerSummaryTab extends StatefulWidget {
   final String emptyMessage;
   final bool showPayment;
 
-  /// Yapılmış randevu hücrelerinin arkaplan rengi. Sayfa sahibi olduğu için
-  /// yukarıdan geçirilir: renk değiştiğinde tablo yeniden çizilir.
+  /// Seans hücrelerinin arkaplan renkleri: "Yapıldı" ve "Yakıldı" randevular
+  /// için ayrı ayrı. Sayfa sahibi olduğu için yukarıdan geçirilir: renk
+  /// değiştiğinde tablo yeniden çizilir.
   final Color completedAppointmentColor;
+  final Color burnedAppointmentColor;
 
   const _CustomerSummaryTab({
     required this.status,
     required this.emptyMessage,
     required this.completedAppointmentColor,
+    required this.burnedAppointmentColor,
     this.showPayment = true,
   });
 
@@ -615,9 +557,10 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
             : Text(cell.text, style: _cellStyle(cell)),
       );
 
-  /// Seans hücresi: yapılmış randevunun tarihi, admin'in Ayarlar'dan seçtiği
-  /// arkaplan rengiyle vurgulanır. Yazı rengi arkaplanın parlaklığına göre
-  /// belirlendiği için tarih her renkte okunabilir kalır.
+  /// Seans hücresi: randevunun tarihi, admin'in Ayarlar'dan seçtiği arkaplan
+  /// rengiyle vurgulanır. "Yakıldı" randevular ayrı bir renkle gösterilir.
+  /// Yazı rengi arkaplanın parlaklığına göre belirlendiği için tarih her renkte
+  /// okunabilir kalır.
   ///
   /// Boş (randevusu olmayan) ve "Hata" hücreleri vurgulanmaz: ilki gösterecek
   /// bir randevu taşımaz, ikincisi kendi kırmızı hata biçimini korur.
@@ -628,7 +571,9 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     if (isBeyondPackage) return _beyondPackageSeansCell(cell);
     if (cell.isEmpty || cell.isError) return _cell(cell);
 
-    final background = widget.completedAppointmentColor;
+    final background = cell.isBurned
+        ? widget.burnedAppointmentColor
+        : widget.completedAppointmentColor;
     return DataCell(
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
