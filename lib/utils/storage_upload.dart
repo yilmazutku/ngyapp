@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show File;
 import 'dart:typed_data';
 
@@ -23,6 +24,53 @@ const String kMaxUploadSizeLabel = '50 MB';
 
 const String kDocxContentType =
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+/// Cleans [fileName] so it can be used as the last segment of a Cloud Storage
+/// object name, keeping the name the user recognises (Turkish letters and
+/// spaces included) and only replacing characters that are problematic in an
+/// object path or in a `Content-Disposition` header.
+String sanitizeStorageFileName(String fileName, {String fallback = 'dosya'}) {
+  final leaf = fileName.split(RegExp(r'[\\/]')).last;
+  final cleaned = leaf
+      .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '')
+      .replaceAll(RegExp(r'[#\[\]*?"\\]'), '_')
+      .trim();
+  return cleaned.isEmpty ? fallback : cleaned;
+}
+
+/// `Content-Disposition` value that makes a download save the file as
+/// [fileName] instead of the generated object name.
+///
+/// Carries both the plain `filename` (ASCII fallback for old clients) and the
+/// RFC 5987 `filename*`, so Turkish characters survive.
+String attachmentContentDisposition(String fileName) {
+  final ascii = fileName.replaceAll(RegExp(r'[^\x20-\x7E]'), '_')
+      .replaceAll('"', '');
+  return 'attachment; filename="$ascii"; '
+      "filename*=UTF-8''${_encodeRfc5987(fileName)}";
+}
+
+/// Percent-encodes [value] leaving only RFC 3986 unreserved characters, as the
+/// RFC 5987 `ext-value` grammar requires (`Uri.encodeComponent` is too lax: it
+/// leaves `'`, `!`, `*`, `(`, `)` unescaped, which would break the header).
+String _encodeRfc5987(String value) {
+  final buffer = StringBuffer();
+  for (final byte in utf8.encode(value)) {
+    final bool unreserved = (byte >= 0x41 && byte <= 0x5A) ||
+        (byte >= 0x61 && byte <= 0x7A) ||
+        (byte >= 0x30 && byte <= 0x39) ||
+        byte == 0x2D ||
+        byte == 0x2E ||
+        byte == 0x5F ||
+        byte == 0x7E;
+    if (unreserved) {
+      buffer.writeCharCode(byte);
+    } else {
+      buffer.write('%${byte.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+    }
+  }
+  return buffer.toString();
+}
 
 /// Ceiling for a single upload. If an upload does not finish within this window
 /// it is cancelled and an [UploadTimeoutException] is thrown, so the user is
