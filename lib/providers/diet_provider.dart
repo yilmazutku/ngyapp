@@ -316,17 +316,20 @@ class DietProvider extends ChangeNotifier {
     Uint8List? fileBytes,
   }) async {
     try {
+      // The uploaded document keeps its original name so it downloads under
+      // that name; the timestamp is a folder segment, which keeps object names
+      // unique without touching the file name itself.
+      final safeName = sanitizeStorageFileName(fileName, fallback: 'diyet.docx');
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final dotIndex = fileName.lastIndexOf('.');
-      final extension = dotIndex > 0 && dotIndex < fileName.length - 1
-          ? fileName.substring(dotIndex + 1).toLowerCase()
-          : 'docx';
-      final storagePath = 'users/$userId/dietSources/diet_$ts.$extension';
+      final storagePath = 'users/$userId/dietSources/$ts/$safeName';
 
       final ref = FirebaseStorage.instance.ref().child(storagePath);
       await uploadFileToStorage(
         ref: ref,
-        metadata: SettableMetadata(contentType: kDocxContentType),
+        metadata: SettableMetadata(
+          contentType: kDocxContentType,
+          contentDisposition: attachmentContentDisposition(safeName),
+        ),
         filePath: filePath,
         bytes: fileBytes,
       );
@@ -336,7 +339,7 @@ class DietProvider extends ChangeNotifier {
       return {
         'url': downloadUrl,
         'path': storagePath,
-        'name': fileName,
+        'name': safeName,
       };
     } catch (e, s) {
       logger.err('Error uploading diet source file: $e', [s]);
