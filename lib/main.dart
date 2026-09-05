@@ -207,7 +207,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MeasProvider()),
         ChangeNotifierProvider(create: (_) => TestProvider()),
         ChangeNotifierProvider(create: (_) => DietProvider()),
-        ChangeNotifierProvider(create: (_) => SpecialLinesProvider()),
+        ChangeNotifierProvider(
+            create: (_) => SpecialLinesProvider()..startListening()),
         ChangeNotifierProvider(create: (_) => AppointmentColorsProvider()),
         ChangeNotifierProvider(create: (_) => AppointmentDurationsProvider()),
         ChangeNotifierProvider(create: (_) => NewsProvider()),
