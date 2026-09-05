@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 // Replace with your actual imports
+import '../models/diet_goals.dart'; // Su / Spor hedefi satırları
 import '../models/diet_section.dart'; // Hafta İçi / Hafta Sonu split
 import '../models/logger.dart';
 import '../models/meal_model.dart'; // For Meals enum
@@ -74,6 +75,10 @@ class _AddDietDialogState extends State<AddDietDialog> {
   String? _recipePdfName;
   String? _sourceFileName;
 
+  // "Su Hedefi:" / "Spor Hedefi:" lines captured verbatim from the document.
+  String? _waterGoal;
+  String? _sportGoal;
+
   // Add ScrollController to manage scrolling
   late final ScrollController _scrollController;
 
@@ -132,6 +137,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   /// Whether the parsed weekend menu actually has any content (as opposed to a
   /// stray "HAFTASONU" marker with nothing usable after it).
+  /// Goal lines parsed from the document, in the shape the plan renders them.
+  DietGoals get _goals => DietGoals(water: _waterGoal, sport: _sportGoal);
+
   bool get _weekendHasContent =>
       weekendSubtitles.any((s) => (s['content'] as List).isNotEmpty);
 
@@ -294,6 +302,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
               child: DietPlanView(
                 weekday: _weekdayMenu,
                 weekend: _weekendMenu,
+                goals: _goals,
                 onRecipeTap: _showRecipeLinkInfo,
                 emptyMessage: 'Bu dosyadan öğün içeriği çıkarılamadı.',
               ),
@@ -470,6 +479,8 @@ class _AddDietDialogState extends State<AddDietDialog> {
     _recipePdfBytes = null;
     _recipePdfName = null;
     _sourceFileName = null;
+    _waterGoal = null;
+    _sportGoal = null;
 
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -761,6 +772,19 @@ class _AddDietDialogState extends State<AddDietDialog> {
         }
         currentSubtitle = null;
         mealSequence = 0;
+        continue;
+      }
+
+      // "Su Hedefi: ..." / "Spor Hedefi: ..." belong to the whole diet, not to
+      // a meal: capture the line verbatim and keep it out of the meal content.
+      final goalType = detectDietGoalLine(line);
+      if (goalType != null) {
+        if (goalType == DietGoalType.water) {
+          _waterGoal ??= line;
+        } else {
+          _sportGoal ??= line;
+        }
+        log.info('Captured diet goal line ({}): {}', [goalType.name, line]);
         continue;
       }
 
@@ -1062,6 +1086,8 @@ class _AddDietDialogState extends State<AddDietDialog> {
         sourceFileUrl: sourceUrl,
         sourceFilePath: sourcePath,
         sourceFileName: sourceName,
+        waterGoal: _waterGoal,
+        sportGoal: _sportGoal,
       );
 
       if (docId == null) {

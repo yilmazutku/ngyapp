@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/diet_goals.dart';
 import '../models/diet_section.dart';
 import '../models/logger.dart';
 import '../models/meal_model.dart';
@@ -64,6 +65,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
   /// Download URL of the active diet's attached recipe PDF, if any. Drives the
   /// tappable "*tarifi ektedir" link inside the meal content.
   String? _recipePdfUrl;
+
+  /// Goal lines of the active diet, shown above the first meal.
+  DietGoals _goals = const DietGoals.empty();
 
   /// Today's uploaded images per meal type.
   Map<Meals, List<String>> _mealImages = {};
@@ -195,6 +199,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
         _weekdayMenu = DietMenu.fromSubtitles(diet?.subtitles);
         _weekendMenu = DietMenu.fromSubtitles(diet?.weekendSubtitles);
         _recipePdfUrl = diet?.recipePdfUrl;
+        _goals = diet?.goals ?? const DietGoals.empty();
       });
 
       // Fetch meal states using provider
@@ -603,6 +608,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
                         _buildViewUploadsButton(),
 
                         const SizedBox(height: 8),
+
+                        // Diet-wide goal lines, above the first meal.
+                        if (_goals.hasAny) DietGoalsCard(goals: _goals),
 
                         // Meals Section with collapsible tiles (split into
                         // weekday/weekend sections when the diet has both).

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'diet_goals.dart';
+
 class DietDocument {
   final String docId;
   final String userId;
@@ -41,6 +43,12 @@ class DietDocument {
 
   final String? sourceFileName;
 
+  /// "Su Hedefi: ..." line captured verbatim from the imported document.
+  final String? waterGoal;
+
+  /// "Spor Hedefi: ..." line captured verbatim from the imported document.
+  final String? sportGoal;
+
   DietDocument({
     required this.docId,
     required this.userId,
@@ -59,6 +67,8 @@ class DietDocument {
     this.sourceFileUrl,
     this.sourceFilePath,
     this.sourceFileName,
+    this.waterGoal,
+    this.sportGoal,
   }) : createDate = createDate ?? DateTime.now();
 
   /// Whether this diet defines a distinct weekend (Hafta Sonu) menu.
@@ -69,6 +79,9 @@ class DietDocument {
   bool get hasRecipe => (recipePdfUrl ?? '').isNotEmpty;
 
   bool get hasSourceFile => (sourceFileUrl ?? '').isNotEmpty;
+
+  /// Goal lines shown above the first meal of this diet.
+  DietGoals get goals => DietGoals(water: waterGoal, sport: sportGoal);
 
   factory DietDocument.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>?;
@@ -90,6 +103,8 @@ class DietDocument {
       sourceFileUrl: data?['sourceFileUrl'] as String?,
       sourceFilePath: data?['sourceFilePath'] as String?,
       sourceFileName: data?['sourceFileName'] as String?,
+      waterGoal: data?['waterGoal'] as String?,
+      sportGoal: data?['sportGoal'] as String?,
     );
   }
 
@@ -111,6 +126,8 @@ class DietDocument {
       if (sourceFileUrl != null) 'sourceFileUrl': sourceFileUrl,
       if (sourceFilePath != null) 'sourceFilePath': sourceFilePath,
       if (sourceFileName != null) 'sourceFileName': sourceFileName,
+      if (waterGoal != null) 'waterGoal': waterGoal,
+      if (sportGoal != null) 'sportGoal': sportGoal,
     };
   }
 
