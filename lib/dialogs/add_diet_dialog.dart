@@ -776,15 +776,20 @@ class _AddDietDialogState extends State<AddDietDialog> {
       }
 
       // "Su Hedefi: ..." / "Spor Hedefi: ..." belong to the whole diet, not to
-      // a meal: capture the line verbatim and keep it out of the meal content.
-      final goalType = detectDietGoalLine(line);
-      if (goalType != null) {
-        if (goalType == DietGoalType.water) {
-          _waterGoal ??= line;
-        } else {
-          _sportGoal ??= line;
+      // a meal: capture them verbatim and keep them out of the meal content.
+      // Bir satır iki hedefi birden ("Su Hedefi: ...Spor Hedefi: ...") ve
+      // tekrarlanmış hâlde taşıyabildiği için satır parçalara ayrılır; her
+      // hedefin ilk parçası saklanır, tekrarları yok sayılır.
+      final goals = extractDietGoals(line);
+      if (goals.isNotEmpty) {
+        for (final goal in goals) {
+          if (goal.type == DietGoalType.water) {
+            _waterGoal ??= goal.line;
+          } else {
+            _sportGoal ??= goal.line;
+          }
+          log.info('Captured diet goal ({}): {}', [goal.type.name, goal.line]);
         }
-        log.info('Captured diet goal line ({}): {}', [goalType.name, line]);
         continue;
       }
 
