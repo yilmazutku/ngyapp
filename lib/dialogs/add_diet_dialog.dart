@@ -60,7 +60,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
   bool _hasParsedPreview = false;
   
   // Subscription related variables
-  List<SubscriptionModel> _subscriptions = [];
   SubscriptionModel? _selectedSubscription;
   bool _isLoadingSubscriptions = false;
   
@@ -73,6 +72,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
   bool _hasRecipeMarker = false;
   Uint8List? _recipePdfBytes;
   String? _recipePdfName;
+  String? _sourceFileName;
 
   // Add ScrollController to manage scrolling
   late final ScrollController _scrollController;
@@ -90,7 +90,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     // Use pre-selected subscription if provided
     if (widget.selectedSubscription != null) {
       _selectedSubscription = widget.selectedSubscription;
-      _subscriptions = [widget.selectedSubscription!];
     } else {
       // Fetch subscriptions for this user
       _fetchSubscriptions();
@@ -153,28 +152,15 @@ class _AddDietDialogState extends State<AddDietDialog> {
       if (!mounted) return;
 
       setState(() {
-        _subscriptions = activeSubscriptions;
         _isLoadingSubscriptions = false;
-        
-        // Select the first subscription if available
-        if (_subscriptions.isNotEmpty) {
-          _selectedSubscription = _subscriptions.first;
-        } else {
-          _selectedSubscription = null;
-        }
+        _selectedSubscription =
+            activeSubscriptions.isNotEmpty ? activeSubscriptions.first : null;
       });
-      
-      // Show error if no active subscriptions found
+
       if (activeSubscriptions.isEmpty) {
-        log.err('No active subscriptions found for user: {}', [widget.userId]);
-        if (mounted) {
-          await DialogUtils.openError(
-            context,
-            title: 'Uyarı',
-            message:
-                'Bu kullanıcının aktif paketi bulunmamaktadır. Diyet listesi eklemek için önce bir paket eklemelisiniz.',
-          );
-        }
+        log.warn(
+            'No active subscription for user {}; diet will be imported without one.',
+            [widget.userId]);
       }
     } catch (e) {
       log.err('Error fetching subscriptions: {}', [e]);
@@ -218,50 +204,27 @@ class _AddDietDialogState extends State<AddDietDialog> {
     );
   }
   
-  /// Initial content: the package the diet will be attached to (auto-resolved,
-  /// selectable only when the user has more than one) and the file picker.
+  /// Initial content: the package the diet will be attached to (always
+  /// auto-resolved, never asked for) and the file picker.
   Widget _buildInitialContent() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         if (_isLoadingSubscriptions)
           const Center(child: CircularProgressIndicator())
-        else if (_subscriptions.length > 1)
-          DropdownButtonFormField<SubscriptionModel>(
-            value: _selectedSubscription,
-            decoration: const InputDecoration(
-              labelText: 'Paket',
-              border: OutlineInputBorder(),
-            ),
-            items: _subscriptions.map((sub) {
-              return DropdownMenuItem<SubscriptionModel>(
-                value: sub,
-                child: Text(
-                  sub.packageName,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              );
-            }).toList(),
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() {
-                _selectedSubscription = value;
-              });
-            },
-          )
         else
           _buildSelectedSubscriptionBox(),
         const SizedBox(height: 20),
         ElevatedButton(
-          onPressed: _selectedSubscription == null ? null : _pickAndSaveFile,
+          onPressed: _isLoadingSubscriptions ? null : _pickAndSaveFile,
           child: const Text('Dosya Seç ve İşle'),
         ),
       ],
     );
   }
 
-  /// Read-only package box shown when the diet's package needs no choice: the
-  /// user has exactly one package, or none at all.
+  /// Read-only box showing the package the diet is attached to, or that there
+  /// is none. Informational only: the import never stops to ask.
   Widget _buildSelectedSubscriptionBox() {
     final sub = _selectedSubscription;
     final hasSub = sub != null;
@@ -297,7 +260,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
                 Text(
                   hasSub
                       ? sub.packageName
-                      : 'Diyet listesi eklemek için önce bir paket eklemelisiniz.',
+                      : 'Diyet listesi pakete bağlanmadan yüklenecek.',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 15),
@@ -472,9 +435,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
       _isUploading
           ? const CircularProgressIndicator()
           : ElevatedButton(
-              onPressed: _selectedSubscription == null 
-                  ? null // Disable if no subscription selected
-                  : _uploadContentToFirestore,
+              onPressed: _uploadContentToFirestore,
               child: const Text('Onayla'),
             ),
     ];
@@ -508,6 +469,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
     _hasRecipeMarker = false;
     _recipePdfBytes = null;
     _recipePdfName = null;
+    _sourceFileName = null;
 
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -519,6 +481,20 @@ class _AddDietDialogState extends State<AddDietDialog> {
       try {
         Uint8List? fileBytes = result.files.single.bytes;
         String fileName = result.files.single.name;
+        if (result.files.single.size > kMaxUploadBytes) {
+          log.warn('Diet source file too large: {} ({} bytes)',
+              [fileName, result.files.single.size]);
+          if (mounted) {
+            await DialogUtils.openError(
+              context,
+              title: 'Hata',
+              message:
+                  'Seçilen dosya çok büyük (en fazla $kMaxUploadSizeLabel).',
+            );
+          }
+          return;
+        }
+        _sourceFileName = fileName;
         // handleFile is from your file_handler.dart
         if (fileBytes != null) {
           await handleFile(
@@ -1007,15 +983,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   /// Modified to use DietProvider instead of direct Firestore operations
   Future<void> _uploadContentToFirestore() async {
-    if (_selectedSubscription == null) {
-      await DialogUtils.openError(
-        context,
-        title: 'Uyarı',
-        message: 'Lütfen bir paket seçiniz.',
-      );
-      return;
-    }
-
     // If the diet references a recipe but no PDF was attached, confirm before
     // continuing so the admin has a chance to add it.
     if (_hasRecipeMarker && _recipePdfBytes == null) {
@@ -1066,15 +1033,41 @@ class _AddDietDialogState extends State<AddDietDialog> {
         }
       }
 
+      String? sourceUrl;
+      String? sourcePath;
+      String? sourceName;
+      if ((_localFilePath ?? '').isNotEmpty) {
+        final info = await dietProvider.uploadSourceFile(
+          userId: widget.userId,
+          fileName: _sourceFileName ?? 'diyet.docx',
+          filePath: _localFilePath,
+        );
+        if (info != null) {
+          sourceUrl = info['url'];
+          sourcePath = info['path'];
+          sourceName = info['name'];
+        } else {
+          log.warn('Source docx upload failed; diet will be saved without it.');
+        }
+      }
+
       final String? docId = await dietProvider.uploadDiet(
         userId: widget.userId,
         subtitles: subtitlesMap,
         weekendSubtitles: weekendMap,
-        subscriptionId: _selectedSubscription!.subscriptionId,
+        subscriptionId: _selectedSubscription?.subscriptionId,
         recipePdfUrl: recipeUrl,
         recipePdfPath: recipePath,
         recipePdfName: recipeName,
+        sourceFileUrl: sourceUrl,
+        sourceFilePath: sourcePath,
+        sourceFileName: sourceName,
       );
+
+      if (docId == null) {
+        await dietProvider.deleteStorageFile(recipePath);
+        await dietProvider.deleteStorageFile(sourcePath);
+      }
 
       // Check if widget is still mounted before updating state
       if (!mounted) return;

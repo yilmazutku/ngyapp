@@ -3,12 +3,17 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'dialog_utils.dart';
 
-/// Opens [url] (typically a recipe / attachment PDF) in the device's external
-/// browser or PDF viewer, matching how other PDFs in the app are opened.
+/// Opens [url] (typically an attachment such as a recipe PDF or the imported
+/// Word document) in the device's external browser or default viewer.
 ///
-/// Shows an error dialog when the URL is empty, malformed, or cannot be
-/// launched. Safe to call from any widget with a valid [context].
-Future<void> openPdfUrl(BuildContext context, String? url) async {
+/// [fileLabel] names the kind of file in the error messages. Shows an error
+/// dialog when the URL is empty, malformed, or cannot be launched. Safe to
+/// call from any widget with a valid [context].
+Future<void> openFileUrl(
+  BuildContext context,
+  String? url, {
+  String fileLabel = 'Dosya',
+}) async {
   final trimmed = (url ?? '').trim();
   if (trimmed.isEmpty) {
     await DialogUtils.openError(
@@ -37,7 +42,7 @@ Future<void> openPdfUrl(BuildContext context, String? url) async {
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'PDF açılamadı.',
+        message: '$fileLabel açılamadı.',
       );
     }
   } catch (_) {
@@ -45,8 +50,12 @@ Future<void> openPdfUrl(BuildContext context, String? url) async {
       await DialogUtils.openError(
         context,
         title: 'Hata',
-        message: 'PDF açılırken bir hata oluştu.',
+        message: '$fileLabel açılırken bir hata oluştu.',
       );
     }
   }
 }
+
+/// Opens a recipe / attachment PDF. Thin wrapper over [openFileUrl].
+Future<void> openPdfUrl(BuildContext context, String? url) =>
+    openFileUrl(context, url, fileLabel: 'PDF');

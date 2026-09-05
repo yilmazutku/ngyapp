@@ -169,8 +169,13 @@ SpecialLineConfig? _matchingConfig(String content) =>
 /// behavior is preserved when no marker matches.
 String _dividerLabelFor(String markerContent) {
   final cfg = _matchingConfig(markerContent);
-  if (cfg != null) return cfg.extractMarkerLabel(markerContent);
-  return VEYA_MARKER;
+  if (cfg == null) return VEYA_MARKER;
+  // docx import glues markers to tabs, so collapse any inner whitespace run to
+  // a single space ("Haftada 4 gün\t\t2" -> "Haftada 4 gün 2").
+  return cfg
+      .extractMarkerLabel(markerContent)
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 }
 
 /// Utility class for formatting meal content for display.
@@ -197,11 +202,10 @@ class MealFormatter {
     for (int optionIndex = 0;
         optionIndex < optionStartIndices.length;
         optionIndex++) {
-      if (optionIndex > 0) {
-        final markerItem = contentList[optionStartIndices[optionIndex]];
-        final markerContent =
-            (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
-        final dividerText = _dividerLabelFor(markerContent.toString());
+      final String markerContent =
+          _rawContentOf(contentList[optionStartIndices[optionIndex]]);
+      if (_isOptionMarkerLine(markerContent)) {
+        final dividerText = _dividerLabelFor(markerContent);
 
         formatted.add(const SizedBox(height: 8));
         formatted.add(Row(
@@ -272,11 +276,10 @@ class MealFormatter {
     for (int optionIndex = 0;
         optionIndex < optionStartIndices.length;
         optionIndex++) {
-      if (optionIndex > 0) {
-        final markerItem = contentList[optionStartIndices[optionIndex]];
-        final markerContent =
-            (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
-        final dividerText = _dividerLabelFor(markerContent.toString());
+      final String markerContent =
+          _rawContentOf(contentList[optionStartIndices[optionIndex]]);
+      if (_isOptionMarkerLine(markerContent)) {
+        final dividerText = _dividerLabelFor(markerContent);
 
         spans.add(const TextSpan(text: '\n'));
         spans.add(TextSpan(
@@ -322,11 +325,10 @@ class MealFormatter {
     for (int optionIndex = 0;
         optionIndex < optionStartIndices.length;
         optionIndex++) {
-      if (optionIndex > 0) {
-        final markerItem = contentList[optionStartIndices[optionIndex]];
-        final markerContent =
-            (markerItem is Map) ? (markerItem['content'] ?? '') : markerItem.toString();
-        final dividerText = _dividerLabelFor(markerContent.toString());
+      final String markerContent =
+          _rawContentOf(contentList[optionStartIndices[optionIndex]]);
+      if (_isOptionMarkerLine(markerContent)) {
+        final dividerText = _dividerLabelFor(markerContent);
 
         buffer.writeln();
         buffer.writeln(dividerText);
@@ -353,16 +355,29 @@ class MealFormatter {
   /// satırlarda null döner (özel işaretin tek başına olduğu satırlar). Ayıklama
   /// sonrası "*tarifi ektedir" ifadesinin solunda tek boşluk bırakılır.
   static String? _displayContentFor(dynamic item) {
-    String content =
-        (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+    String content = _rawContentOf(item);
 
     // Strict skip — original was `SPECIAL_MARKERS.contains(t.trim())`.
     if (isExactStandaloneMarker(content)) return null;
     if (isSpecialMarkerSeparator(content)) {
       content = extractContentAfterMarker(content);
     }
+    // A row that was nothing but its marker ("Haftada 4 gün") is already shown
+    // as the option divider; rendering the empty remainder would leave a blank
+    // line in the meal content.
+    if (content.trim().isEmpty) return null;
     return normalizeRecipeMarkerSpacing(content);
   }
+
+  /// Raw text of a content row, which may be stored either as a
+  /// `{'content': ...}` map or as a bare value.
+  static String _rawContentOf(dynamic item) =>
+      (item is Map) ? (item['content'] ?? '').toString() : item.toString();
+
+  /// Whether [content] is a special-line marker row ("Veya", "Haftada 4 gün",
+  /// any admin-defined template) that introduces a new option block.
+  static bool _isOptionMarkerLine(String content) =>
+      isStandaloneMarker(content) || isSpecialMarkerSeparator(content);
 
   /// Identifies the indices in [contentList] that begin a new option block.
   /// The first item is always treated as an option start; subsequent option
@@ -371,13 +386,7 @@ class MealFormatter {
   static List<int> _collectOptionStarts(List<dynamic> contentList) {
     final List<int> starts = [];
     for (int i = 0; i < contentList.length; i++) {
-      final item = contentList[i];
-      final content =
-          (item is Map) ? (item['content'] ?? '').toString() : item.toString();
-
-      if (i == 0) {
-        starts.add(i);
-      } else if (isStandaloneMarker(content) || isSpecialMarkerSeparator(content)) {
+      if (i == 0 || _isOptionMarkerLine(_rawContentOf(contentList[i]))) {
         starts.add(i);
       }
     }

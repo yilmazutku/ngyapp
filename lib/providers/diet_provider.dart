@@ -309,6 +309,54 @@ class DietProvider extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, String>?> uploadSourceFile({
+    required String userId,
+    required String fileName,
+    String? filePath,
+    Uint8List? fileBytes,
+  }) async {
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final dotIndex = fileName.lastIndexOf('.');
+      final extension = dotIndex > 0 && dotIndex < fileName.length - 1
+          ? fileName.substring(dotIndex + 1).toLowerCase()
+          : 'docx';
+      final storagePath = 'users/$userId/dietSources/diet_$ts.$extension';
+
+      final ref = FirebaseStorage.instance.ref().child(storagePath);
+      await uploadFileToStorage(
+        ref: ref,
+        metadata: SettableMetadata(contentType: kDocxContentType),
+        filePath: filePath,
+        bytes: fileBytes,
+      );
+      final downloadUrl = await ref.getDownloadURL();
+
+      logger.info('Diet source file uploaded. userId=$userId path=$storagePath');
+      return {
+        'url': downloadUrl,
+        'path': storagePath,
+        'name': fileName,
+      };
+    } catch (e, s) {
+      logger.err('Error uploading diet source file: $e', [s]);
+      return null;
+    }
+  }
+
+  /// Best-effort removal of a Cloud Storage object by its full path. Never
+  /// throws: a failed cleanup must not break the calling flow.
+  Future<void> deleteStorageFile(String? storagePath) async {
+    final path = (storagePath ?? '').trim();
+    if (path.isEmpty) return;
+    try {
+      await FirebaseStorage.instance.ref().child(path).delete();
+      logger.info('Deleted storage file at $path');
+    } catch (e) {
+      logger.warn('Could not delete storage file at $path: $e');
+    }
+  }
+
   /// Deletes a diet document
   ///
   /// @param userId The ID of the user who owns the diet document
@@ -324,18 +372,17 @@ class DietProvider extends ChangeNotifier {
           .collection('dietLists')
           .doc(docId);
 
-      // Best-effort: remove the attached recipe PDF from Storage first so it
-      // doesn't get orphaned. A missing/failed delete never blocks removing
-      // the diet document itself.
+      // Best-effort: remove the attached files (recipe PDF, imported Word
+      // document) from Storage first so they don't get orphaned. A
+      // missing/failed delete never blocks removing the diet document itself.
       try {
         final snap = await docRef.get();
-        final recipePath = (snap.data()?['recipePdfPath'] as String?)?.trim();
-        if (recipePath != null && recipePath.isNotEmpty) {
-          await FirebaseStorage.instance.ref().child(recipePath).delete();
-          logger.info('Deleted recipe PDF for diet $docId at $recipePath');
+        final data = snap.data();
+        for (final field in const ['recipePdfPath', 'sourceFilePath']) {
+          await deleteStorageFile(data?[field] as String?);
         }
       } catch (e) {
-        logger.warn('Could not delete recipe PDF for diet $docId: $e');
+        logger.warn('Could not read attachments of diet $docId: $e');
       }
 
       await docRef.delete();
@@ -461,24 +508,29 @@ class DietProvider extends ChangeNotifier {
   /// @param subtitles The weekday meal data to store
   /// @param weekendSubtitles Optional weekend (Hafta Sonu) menu; stored only
   ///   when non-null and non-empty
-  /// @param subscriptionId The ID of the subscription associated with this diet
+  /// @param subscriptionId Optional ID of the subscription associated with this
+  ///   diet; omitted from the document when null or empty
   /// 
   /// @return The ID of the newly created diet document
   Future<String?> uploadDiet({
     required String userId,
     required Map<String, dynamic> subtitles,
-    required String subscriptionId,
+    String? subscriptionId,
     Map<String, dynamic>? weekendSubtitles,
     String? displayName, //optional TODO ileride dialogtan belki girilir
     String? recipePdfUrl,
     String? recipePdfPath,
     String? recipePdfName,
+    String? sourceFileUrl,
+    String? sourceFilePath,
+    String? sourceFileName,
   }) async {
     try {
       final now=DateTime.now();
       final Map<String, dynamic> dietData = {
         'uploadTime': FieldValue.serverTimestamp(),
-        'subscriptionId': subscriptionId,
+        if (subscriptionId != null && subscriptionId.isNotEmpty)
+          'subscriptionId': subscriptionId,
         'subtitles': subtitles,
         if (weekendSubtitles != null && weekendSubtitles.isNotEmpty)
           'weekendSubtitles': weekendSubtitles,
@@ -491,6 +543,12 @@ class DietProvider extends ChangeNotifier {
           'recipePdfPath': recipePdfPath,
         if (recipePdfName != null && recipePdfName.isNotEmpty)
           'recipePdfName': recipePdfName,
+        if (sourceFileUrl != null && sourceFileUrl.isNotEmpty)
+          'sourceFileUrl': sourceFileUrl,
+        if (sourceFilePath != null && sourceFilePath.isNotEmpty)
+          'sourceFilePath': sourceFilePath,
+        if (sourceFileName != null && sourceFileName.isNotEmpty)
+          'sourceFileName': sourceFileName,
       };
 
       final docRef = await _firestore
