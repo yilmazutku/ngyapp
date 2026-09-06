@@ -186,7 +186,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
       }
 
       // Fetch the latest diet document (weekday + optional weekend menus).
-      // Re-checked after the await: the widget may be gone by now.
+      // Checked before the await so `context` is safe to read, and again after
+      // it so setState never runs on a disposed widget.
       if (!mounted) return;
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
       final diet = await dietProvider.fetchLatestDietDocument(widget.userId);
@@ -195,6 +196,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
         logger.warn('No diet lists found for the user.');
       }
 
+      if (!mounted) return;
       setState(() {
         _weekdayMenu = DietMenu.fromSubtitles(diet?.subtitles);
         _weekendMenu = DietMenu.fromSubtitles(diet?.weekendSubtitles);
@@ -203,12 +205,14 @@ class _MealUploadPageState extends State<MealUploadPage> {
       });
 
       // Fetch meal states using provider
-      // Re-checked after the await: the widget may be gone by now.
+      // Checked before the await so `context` is safe to read, and again after
+      // it so setState never runs on a disposed widget.
       if (!mounted) return;
       final mealManager = Provider.of<MealManager>(context, listen: false);
       final fetchedStates =
           await mealManager.fetchMealStates(widget.userId, date: now);
 
+      if (!mounted) return;
       setState(() {
         checkedStates = fetchedStates;
       });
@@ -217,18 +221,20 @@ class _MealUploadPageState extends State<MealUploadPage> {
       await _refreshMealImages();
 
       // Fetch daily data using provider
-      // Re-checked after the await: the widget may be gone by now.
+      // Checked before the await so `context` is safe to read, and again after
+      // it so setState never runs on a disposed widget.
       if (!mounted) return;
       final dailyDataProvider =
           Provider.of<DailyDataProvider>(context, listen: false);
       final dailyData =
-          await dailyDataProvider.fetchDailyDataForDate(widget.userId, date:now);
+          await dailyDataProvider.fetchDailyDataForDate(widget.userId, date: now);
 
+      if (!mounted) return;
       setState(() {
         _stepsController.text = dailyData.steps.toString();
-              _waterIntakeLiters = (dailyData.waterIntake as num).toDouble();
-            });
-        } catch (e) {
+        _waterIntakeLiters = (dailyData.waterIntake as num).toDouble();
+      });
+    } catch (e) {
       logger.err('Error fetching meal states or contents: {}', [e.toString()]);
     }
   }

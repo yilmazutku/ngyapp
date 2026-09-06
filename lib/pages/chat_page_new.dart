@@ -27,16 +27,17 @@ import '../widgets/labeled_action_button.dart';
 /// - Send text messages
 /// - Send images from gallery or camera
 /// - Upload meal photos
+/// - React to the other party's messages (WhatsApp-style, one per person)
 /// - View message history with timestamps
 /// - Real-time updates via Firestore streams
-/// 
+///
 /// Admin behavior:
 /// - Admins can view any user's chat by passing overrideChatId
 /// - All features are available
-/// 
+///
 /// User behavior:
 /// - Regular users always view their own chat (overrideChatId is null)
-/// - All features including meal upload are available
+/// - All features including meal upload and reactions are available
 class ChatPage extends StatefulWidget {
   /// Optional chat ID override for admin users.
   /// - If null: Opens the current user's own chat
@@ -65,10 +66,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   
   /// Whether the current user is an admin
   late final bool _isAdminUser;
-  
-  /// Whether meal upload should be enabled for this chat view
-  late final bool _canUploadMeals;
-  
+
   /// Cached messages stream to prevent recreation on rebuilds
   Stream<List<MessageData>>? _messagesStream;
 
@@ -86,10 +84,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     
     // Determine if current user is an admin
     _isAdminUser = ChatManager.isAdminUid(_currentUid);
-    
-    // Meal upload is available for all users
-    _canUploadMeals = true;
-    
+
     // Set active chat ID to suppress notifications for this chat
     FcmService().setActiveChatId(_chatId);
     
@@ -101,8 +96,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     
     logger.info(
-      'ChatPage initialized. currentUid={} isAdmin={} chatId={} canUploadMeals={}',
-      [_currentUid, _isAdminUser, _chatId, _canUploadMeals]
+      'ChatPage initialized. currentUid={} isAdmin={} chatId={}',
+      [_currentUid, _isAdminUser, _chatId]
     );
   }
 
@@ -505,14 +500,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 2. User selects image source (gallery or camera)
   /// 3. Delegates to [_pickAndSendImage] or [_captureAndSendImage]
   Future<void> _startMealUploadFlow() async {
-    if (!_canUploadMeals) {
-      logger.warn(
-        'Meal upload blocked. currentUid={} overrideChatId={} canUpload={}',
-        [_currentUid, widget.overrideChatId ?? 'null', _canUploadMeals],
-      );
-      return;
-    }
-
     logger.info('Meal upload flow started. currentUid={}', [_currentUid]);
 
     final Meals? meal = await _chooseMeal();
@@ -605,11 +592,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return _messagesStream!;
   }
 
-  /// Toggle the current (admin) user's reaction on [message].
+  /// Toggle the current viewer's reaction on [message].
   ///
-  /// Tapping the same reaction the user already left removes it; otherwise the
-  /// reaction is set/replaced. The Cloud Function then notifies the user that a
-  /// reaction was left on their message.
+  /// Tapping the same reaction the viewer already left removes it; otherwise
+  /// the reaction is set/replaced. A Cloud Function then notifies the other
+  /// party that a reaction was left on their message: the office is notified
+  /// for a client's reaction, the client for the office's.
   Future<void> _handleToggleReaction(MessageData message, String emoji) async {
     final chat = context.read<ChatManager>();
     final current = message.reactions[_currentUid];
@@ -706,10 +694,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   itemCount: items.length,
                   itemBuilder: (context, i) {
                     final msg = items[i];
-                    // Admins can react (WhatsApp-style) to messages the *user*
-                    // sent. `_chatId` equals the chat owner's (user's) UID, so
-                    // `senderId == _chatId` means the message came from the user.
-                    final canReact = _isAdminUser && msg.senderId == _chatId;
+                    // Both sides can react (WhatsApp-style) to messages the
+                    // *other* party sent. `_chatId` equals the chat owner's
+                    // (user's) UID, so `senderId == _chatId` means the message
+                    // came from the user; an admin UID means it came from the
+                    // office. Reacting to your own message stays disabled on
+                    // both sides.
+                    final canReact = _isAdminUser
+                        ? msg.senderId == _chatId
+                        : ChatManager.isAdminUid(msg.senderId);
                     return _MessageBubble(
                       message: msg,
                       isMe: msg.senderId == _currentUid,
@@ -727,7 +720,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           // Input row - only rebuilds when sending/uploading state changes
           _ChatInputRow(
             chatId: _chatId,
-            canUploadMeals: _canUploadMeals,
             onMealUpload: _startMealUploadFlow,
             logger: logger,
           ),
@@ -995,7 +987,7 @@ class _MessageBubble extends StatelessWidget {
       ],
     );
 
-    // Long-press to react (admins, on the user's messages). HitTestBehavior
+    // Long-press to react (on the other party's messages). HitTestBehavior
     // .deferToChild keeps taps on the image working (opens the full-screen
     // viewer) while still recognizing a long-press on the bubble.
     final body = canReact
@@ -1246,13 +1238,11 @@ class _ReactionPickerButton extends StatelessWidget {
 /// Extracted input row widget - uses Selector for targeted rebuilds
 class _ChatInputRow extends StatefulWidget {
   final String chatId;
-  final bool canUploadMeals;
   final VoidCallback onMealUpload;
   final Logger logger;
 
   const _ChatInputRow({
     required this.chatId,
-    required this.canUploadMeals,
     required this.onMealUpload,
     required this.logger,
   });
@@ -1337,13 +1327,12 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              if (widget.canUploadMeals)
-                                _AttachmentOption(
-                                  icon: Icons.restaurant_rounded,
-                                  label: 'Öğün Yükle',
-                                  color: Colors.orange,
-                                  onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onMealUpload),
-                                ),
+                              _AttachmentOption(
+                                icon: Icons.restaurant_rounded,
+                                label: 'Öğün Yükle',
+                                color: Colors.orange,
+                                onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onMealUpload),
+                              ),
                             ],
                           ),
                         )

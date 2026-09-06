@@ -77,9 +77,6 @@ import 'widgets/labeled_action_button.dart';
 /// Global platform configuration instance
 late final PlatformConfig platformConfig;
 
-/// Global theme provider instance for early initialization
-//late final ThemeProvider themeProvider;
-
 // === LOGGING FLAGS ===
 // DEBUG: Set to true to enable debug-level messages (log.debug calls)
 // Set to false to suppress debug-level messages in console and file
@@ -119,11 +116,6 @@ void main() async {
   if (AUTO_LOGIN) {
     await signInAutomatically();
   }
-
-  // Initialize theme provider and load saved color preference
-  // themeProvider = ThemeProvider();
-  // await themeProvider.initialize();
-  // logger.info('Theme provider initialized with color: ${themeProvider.primaryColorHex}');
 
   // Initialize platform-specific configuration (notifications, etc.)
   // This uses the Strategy Pattern to handle platform differences
@@ -556,13 +548,7 @@ class _HomePageState extends State<HomePage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AppointmentsPage(
-          userId: userId,
-          subscriptionId: 'default',
-          onAppointmentAdded: () {
-            // Refresh the UI if needed
-          },
-        ),
+        builder: (_) => AppointmentsPage(userId: userId),
       ),
     );
   }

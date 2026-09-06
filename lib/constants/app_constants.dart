@@ -173,7 +173,8 @@ class PushNotificationReference {
   /// Location: functions/index.js lines ~141, ~227
   static const String chatImageBody = 'Fotoğraf';
 
-  /// Body template for admin reaction notifications ({emoji} is the reaction).
+  /// Body template for reaction notifications ({emoji} is the reaction), used
+  /// in both directions (admin -> user and user -> admin).
   /// Rendered as e.g. "bir mesajınıza 👍 ifadesi bıraktı".
   /// Location: functions/index.js (CHAT_REACTION_BODY_TEMPLATE)
   static const String chatReactionBodyTemplate =

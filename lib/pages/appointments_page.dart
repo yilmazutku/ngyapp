@@ -18,14 +18,10 @@ final Logger logger = Logger.forClass(AppointmentsPage);
 
 class AppointmentsPage extends StatefulWidget {
   final String userId;
-  final String subscriptionId;
-  final VoidCallback onAppointmentAdded;
 
   const AppointmentsPage({
     super.key,
     required this.userId,
-    required this.subscriptionId,
-    required this.onAppointmentAdded,
   });
 
   @override

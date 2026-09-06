@@ -35,7 +35,8 @@ const CHAT_DEFAULT_BODY = 'Yeni mesaj';
 const CHAT_IMAGE_BODY = 'Fotoğraf';
 
 /**
- * Body template for admin reaction notifications.
+ * Body template for reaction notifications, used in both directions
+ * (admin -> user and user -> admin).
  * {emoji} is replaced with the reaction that was left (e.g. '👍').
  * Rendered as e.g. "bir mesajınıza 👍 ifadesi bıraktı".
  */
@@ -428,6 +429,127 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
               .doc(chatId)
               .update({fcmToken: admin.firestore.FieldValue.delete()});
           logger.info(`Removed invalid token for user ${chatId}`);
+        }
+      }
+    },
+);
+
+/**
+ * Sends a push notification to the admins when a user leaves (or changes) a
+ * reaction on one of the admin's messages.
+ *
+ * Mirror of notifyUserOnAdminReaction: same message-update trigger and same
+ * "newly added or changed reaction" detection, but the reactor must be the
+ * chat's own user and the reacted-to message must have been sent by an admin.
+ * Removing a reaction does not notify.
+ *
+ * Path: chats/{chatId}/messages/{messageId}. In our model chatId == user UID
+ * (the reactor).
+ */
+exports.notifyAdminsOnUserReaction = onDocumentUpdated(
+    'chats/{chatId}/messages/{messageId}',
+    async (event) => {
+      const before = event.data && event.data.before ?
+          event.data.before.data() || {} : {};
+      const after = event.data && event.data.after ?
+          event.data.after.data() || {} : {};
+      const chatId = event.params.chatId;
+
+      // Never act on an admin-owned chat (chatId is the user's UID).
+      if (ADMIN_UIDS.has(chatId)) return;
+
+      // Only notify for reactions left on an ADMIN's message, so the
+      // "bir mesajınıza …" wording is always accurate.
+      if (!ADMIN_UIDS.has(after.senderId || '')) return;
+
+      const beforeReactions =
+          (before.reactions && typeof before.reactions === 'object') ?
+              before.reactions : {};
+      const afterReactions =
+          (after.reactions && typeof after.reactions === 'object') ?
+              after.reactions : {};
+
+      // Only the chat's own user can notify the admins here; a reaction from
+      // any other UID (e.g. a second admin) is ignored.
+      const emoji = afterReactions[chatId];
+      if (!emoji) return; // no reaction, or it was removed
+      if (beforeReactions[chatId] === emoji) return; // unchanged
+
+      // Collect admin tokens (single token per admin)
+      const tokens = [];
+      const notifiedAdminUids = [];
+      for (const adminUid of ADMIN_UIDS) {
+        const adminDoc = await admin.firestore()
+            .collection('users')
+            .doc(adminUid)
+            .get();
+
+        const adminData = adminDoc.exists ? adminDoc.data() : null;
+        if (adminData?.fcmToken) {
+          tokens.push(adminData.fcmToken);
+          notifiedAdminUids.push(adminUid);
+        }
+      }
+
+      if (tokens.length === 0) return;
+
+      // Try to get the reacting user's name for a better notification title
+      let title = CHAT_USER_TO_ADMIN_DEFAULT_TITLE;
+      try {
+        const userDoc = await admin.firestore()
+            .collection('users')
+            .doc(chatId)
+            .get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          const name = userData.name || '';
+          const surname = userData.surname || '';
+          if (name) {
+            title = surname ? `${name} ${surname}` : name;
+          }
+        }
+      } catch (e) {
+        logger.warn('Could not fetch reactor name', {error: e.message});
+      }
+
+      const body = CHAT_REACTION_BODY_TEMPLATE.replace('{emoji}', emoji);
+
+      const res = await admin.messaging().sendEachForMulticast({
+        tokens: tokens,
+        notification: {
+          title: title,
+          body: body,
+        },
+        data: {
+          type: 'chat_admin',
+          chatId: chatId, // admin -> ChatPage(overrideChatId: chatId)
+          senderId: chatId,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+        android: buildAndroidConfig(title, body),
+        apns: buildApnsConfig(),
+      });
+
+      // Clean up invalid tokens from admin docs
+      for (let i = 0; i < res.responses.length; i++) {
+        const response = res.responses[i];
+        if (response.success) continue;
+
+        const code = (response.error && response.error.code) ?
+            response.error.code : '';
+        const isInvalid =
+            code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-registration-token';
+
+        logger.warn('FCM reaction send failed', {code: code});
+
+        if (isInvalid && notifiedAdminUids[i]) {
+          await admin.firestore()
+              .collection('users')
+              .doc(notifiedAdminUids[i])
+              .update({fcmToken: admin.firestore.FieldValue.delete()});
+          logger.info(
+              `Removed invalid token for admin ${notifiedAdminUids[i]}`);
         }
       }
     },
