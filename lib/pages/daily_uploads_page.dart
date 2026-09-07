@@ -6,6 +6,7 @@ import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../providers/meal_state_and_upload_manager.dart';
 import '../widgets/meal_image_card.dart';
+import '../widgets/status_note.dart';
 
 /// Shows the photos a user uploaded on a specific day, grouped by meal.
 ///
@@ -73,7 +74,7 @@ class _DailyUploadsPageState extends State<DailyUploadsPage> {
 
           if (snap.hasError) {
             logger.err('DailyUploadsPage load error: {}', [snap.error]);
-            return const _Note(
+            return const StatusNote(
               icon: Icons.error_outline,
               text: 'Fotoğraflar yüklenemedi. Lütfen tekrar deneyin.',
               isError: true,
@@ -87,7 +88,7 @@ class _DailyUploadsPageState extends State<DailyUploadsPage> {
             ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
           if (meals.isEmpty) {
-            return _Note(
+            return StatusNote(
               icon: Icons.photo_library_outlined,
               text: 'Bu gün ($dateStr) için henüz fotoğraf yüklemediniz.',
             );
@@ -145,33 +146,6 @@ class _DailyUploadsPageState extends State<DailyUploadsPage> {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-/// Centered icon + message for empty / error states.
-class _Note extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  final bool isError;
-
-  const _Note({required this.icon, required this.text, this.isError = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isError ? Colors.red.shade700 : Colors.grey.shade600;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 56, color: color),
-            const SizedBox(height: 16),
-            Text(text, textAlign: TextAlign.center, style: TextStyle(color: color)),
-          ],
-        ),
       ),
     );
   }

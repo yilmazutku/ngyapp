@@ -9,6 +9,10 @@ final Logger logger = Logger.forClass(SubProvider);
 /// Provides subscription management functionality, including CRUD operations
 /// for user subscription packages. Implements ChangeNotifier pattern for state management.
 class SubProvider extends ChangeNotifier {
+  /// Toplu (çok danışanlı) sorgularda aynı anda açılan Firestore
+  /// isteği sayısı. Bkz. [fetchActiveSubscriptionsOfUsers].
+  static const int USER_BATCH_SIZE = 10;
+
   bool _subChanged = false;
 
   bool get subChanged => _subChanged;
@@ -130,6 +134,92 @@ class SubProvider extends ChangeNotifier {
     } catch (e) {
       logger.err('Error fetching subscriptions for userId={}: {}', [userId, e]);
       rethrow;
+    }
+  }
+
+  /// Verilen danışanlardan **aktif paketi olanları** döner: `userId -> paket`.
+  ///
+  /// Aktif paket tanımı [SubActiveStatus.isActive] ile aynıdır (Aktif/Haftalık
+  /// veya Aktif/Kilo Takip); yani Danışanlar Özet sayfasının danışanı listeye
+  /// alma koşuluyla birebir aynı kural kullanılır. Aktif paketi olmayan
+  /// danışan dönen map'te bulunmaz.
+  ///
+  /// İş kuralı gereği bir danışanın aynı anda en fazla bir aktif paketi olur;
+  /// veri bozuksa durum loglanır ve başlangıç tarihi en yeni olan paket
+  /// kullanılır. Tek bir danışanın sorgusu hata verirse o danışan atlanır,
+  /// çağrı bütünüyle düşmez.
+  Future<Map<String, SubscriptionModel>> fetchActiveSubscriptionsOfUsers(
+      List<String> userIds) async {
+    final List<String> activeLabels = SubActiveStatus.values
+        .where((status) => status.isActive)
+        .map((status) => status.label)
+        .toList();
+
+    final Map<String, SubscriptionModel> activeByUser = {};
+
+    // Danışan sayısı büyüdükçe tüm sorguları aynı anda açmamak için
+    // USER_BATCH_SIZE'lık paralel gruplar hâlinde ilerlenir.
+    for (int start = 0; start < userIds.length; start += USER_BATCH_SIZE) {
+      final int end = start + USER_BATCH_SIZE < userIds.length
+          ? start + USER_BATCH_SIZE
+          : userIds.length;
+      final List<String> batch = userIds.sublist(start, end);
+
+      final List<SubscriptionModel?> results = await Future.wait(
+        batch.map((userId) => _findActiveSubscription(userId, activeLabels)),
+      );
+
+      for (int i = 0; i < batch.length; i++) {
+        final SubscriptionModel? active = results[i];
+        if (active != null) activeByUser[batch[i]] = active;
+      }
+    }
+
+    logger.info('Active subscriptions resolved. users={} ofRequested={}',
+        [activeByUser.length, userIds.length]);
+    return activeByUser;
+  }
+
+  /// Tek danışanın aktif paketi; yoksa (ya da sorgu hata verirse) null.
+  Future<SubscriptionModel?> _findActiveSubscription(
+      String userId, List<String> activeLabels) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('subscriptions')
+          .where('status', whereIn: activeLabels)
+          .get();
+
+      final List<SubscriptionModel> subs = [];
+      for (final doc in snapshot.docs) {
+        try {
+          subs.add(SubscriptionModel.fromDocument(doc));
+        } catch (e) {
+          logger.warn('Skipping malformed subscription {} for user {}: {}',
+              [doc.id, userId, e]);
+        }
+      }
+      if (subs.isEmpty) return null;
+
+      subs.sort((a, b) => b.startDate.compareTo(a.startDate));
+      if (subs.length > 1) {
+        logger.warn(
+          'Tek aktif paket kuralı bozuldu: user={} paket sayısı={} ({}). '
+          'En yenisi kullanılıyor: {}',
+          [
+            userId,
+            subs.length,
+            subs.map((s) => s.subscriptionId).join(', '),
+            subs.first.subscriptionId,
+          ],
+        );
+      }
+      return subs.first;
+    } catch (e) {
+      logger.err('Error fetching active subscription for user {}: {}',
+          [userId, e]);
+      return null;
     }
   }
 
