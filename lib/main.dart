@@ -38,6 +38,7 @@ import 'pages/admin_appointments_page.dart';
 import 'platform/platform_config.dart';
 import 'platform/platform_config_factory.dart';
 import 'pages/admin_create_user_page.dart';
+import 'pages/admin_meal_photos_page.dart';
 import 'pages/admin_payments_page.dart';
 import 'pages/admin_timeslots_page.dart';
 import 'pages/appointments_page.dart';
@@ -572,6 +573,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _navigateToMealPhotos(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AdminMealPhotosPage(),
+      ),
+    );
+  }
+
   void _navigateToCustomerSummary(BuildContext context) {
     Navigator.push(
       context,
@@ -715,6 +725,11 @@ class _HomePageState extends State<HomePage> {
               'icon': Icons.table_chart,
               'label': 'Danışanlar Özet',
               'onTap': () => _navigateToCustomerSummary(context),
+            },
+            {
+              'icon': Icons.photo_library,
+              'label': 'Öğün Fotoğrafları',
+              'onTap': () => _navigateToMealPhotos(context),
             },
             {
               'icon': Icons.image,
