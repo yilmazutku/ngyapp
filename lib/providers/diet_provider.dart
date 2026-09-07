@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../models/diet_model.dart';
 import '../models/logger.dart';
 import '../models/filter_params.dart';
+import '../models/mock_test_run.dart';
 import '../utils/storage_upload.dart';
 
 /// Manages diet data for users
@@ -401,6 +402,56 @@ class DietProvider extends ChangeNotifier {
       logger.err('Error deleting diet document: $e', [s]);
       rethrow;
     }
+  }
+
+  /// Bir danışanın [kMockTestDataField] işaretli (yani test aracının
+  /// oluşturduğu) diyetlerinin id'leri.
+  ///
+  /// Temizleme adımının güvenlik ağı: defter kaydı eksik kalsa bile işaretli
+  /// diyet danışanın üstünde unutulmaz.
+  Future<List<String>> fetchMockTestDietIds(String userId) async {
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('dietLists')
+        .where(kMockTestDataField, isEqualTo: true)
+        .get();
+
+    return snapshot.docs.map((doc) => doc.id).toList();
+  }
+
+  /// Mock test aracının oluşturduğu geçici diyeti siler.
+  ///
+  /// Emniyet kilidi: doküman [kMockTestDataField] işaretini taşımıyorsa
+  /// DOKUNULMAZ ve `false` döner. Böylece kayıt bozulsa bile danışanın gerçek
+  /// diyeti bu yoldan silinemez.
+  ///
+  /// Doküman zaten yoksa da `false` döner (silinecek bir şey kalmamıştır).
+  Future<bool> deleteMockTestDiet({
+    required String userId,
+    required String docId,
+  }) async {
+    final docRef = _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('dietLists')
+        .doc(docId);
+
+    final snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      logger.info('Mock diet {} of user {} already gone', [docId, userId]);
+      return false;
+    }
+
+    if (snapshot.data()?[kMockTestDataField] != true) {
+      logger.warn(
+          'Refusing to delete diet {} of user {}: not marked as test data',
+          [docId, userId]);
+      return false;
+    }
+
+    await deleteDiet(userId: userId, docId: docId);
+    return true;
   }
 
   /// Creates a new diet document in Firestore

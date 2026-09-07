@@ -57,6 +57,7 @@ import 'providers/diet_provider.dart';
 import 'providers/login_manager.dart';
 import 'providers/meal_state_and_upload_manager.dart';
 import 'providers/meas_provider.dart';
+import 'providers/mock_test_data_provider.dart';
 import 'providers/payment_provider.dart';
 import 'providers/appointment_colors_provider.dart';
 import 'providers/appointment_durations_provider.dart';
@@ -200,6 +201,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MeasProvider()),
         ChangeNotifierProvider(create: (_) => TestProvider()),
         ChangeNotifierProvider(create: (_) => DietProvider()),
+        ChangeNotifierProvider(create: (_) => MockTestDataProvider()),
         ChangeNotifierProvider(
             create: (_) => SpecialLinesProvider()..startListening()),
         ChangeNotifierProvider(create: (_) => AppointmentColorsProvider()),
