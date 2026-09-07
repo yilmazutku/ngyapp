@@ -382,6 +382,68 @@ Future<void> deleteMealImage({
   }
 }
 
+  /// Bir danışanın [date] gününe ait TÜM öğün fotoğraflarını siler ve o günün
+  /// öğün işaretlerini sıfırlar. Silinen fotoğraf sayısını döner.
+  ///
+  /// Test verisi üreten ekranın (mock yükleme sayfası) aynı gün için tekrar
+  /// tekrar çalışabilmesi için var: bir öğün en fazla [MealModel.maxImages]
+  /// görsel taşıdığından, önce temizlenmezse ikinci deneme sessizce boşa
+  /// giderdi.
+  ///
+  /// Storage'daki dosya silinemezse (ör. dosya zaten yok) o dosya atlanır;
+  /// Firestore kaydının silinmesi yine de sürer.
+  Future<int> deleteMealsForDate({
+    required String userId,
+    required DateTime date,
+  }) async {
+    final String dateKey = DateFormat('yyyy-MM-dd').format(date);
+    int deletedPhotos = 0;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('meals')
+          .doc(dateKey)
+          .collection('mealEntries')
+          .get();
+
+      for (final doc in snapshot.docs) {
+        MealModel? meal;
+        try {
+          meal = MealModel.fromDocument(doc);
+        } catch (e) {
+          logger.err('Error parsing meal document {} while deleting: {}',
+              [doc.id, e]);
+        }
+
+        for (final String url in meal?.imageUrls ?? const <String>[]) {
+          try {
+            await deleteFile(url);
+            deletedPhotos++;
+          } catch (e) {
+            logger.warn('Could not delete storage file {}: {}', [url, e]);
+          }
+        }
+
+        await doc.reference.delete();
+        if (meal != null) {
+          await updateMealState(userId, date, meal.mealType, false);
+        }
+      }
+
+      notifyListeners();
+      logger.info('Deleted meals for user {} date {}. photos={} entries={}',
+          [userId, dateKey, deletedPhotos, snapshot.docs.length]);
+    } catch (e) {
+      logger.err('Error deleting meals for user {} date {}: {}',
+          [userId, dateKey, e]);
+      rethrow;
+    }
+
+    return deletedPhotos;
+  }
+
 Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isChecked) async {
     try {
     final currentDate = DateFormat('yyyy-MM-dd').format(date);
