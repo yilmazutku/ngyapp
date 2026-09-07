@@ -16,6 +16,10 @@ final Logger logger = Logger.forClass(MealManager);
 class MealManager extends ChangeNotifier {
 static const MEAL_RANGE_DAYS=7;
 
+  /// Toplu (çok danışanlı) sorgularda aynı anda açılan Firestore
+  /// isteği sayısı. Bkz. [fetchMealsOfUsersForDate].
+  static const int USER_BATCH_SIZE = 10;
+
   /// ADMIN CAGIRIR: SON 7 GÜNLÜK MEALLARI ÇEKER
   /// 
   /// Optimized to fetch all meals in a date range with a single batch operation
@@ -154,6 +158,52 @@ static const MEAL_RANGE_DAYS=7;
     }
     
     return meals;
+  }
+
+  /// ADMIN ÇAĞIRIR: Verilen danışanların TEK bir güne ait öğün fotoğraflarını
+  /// toplu hâlde çeker.
+  ///
+  /// Öğünler `users/{userId}/meals/{yyyy-MM-dd}/mealEntries` altında tutulur.
+  /// Danışan fotoğrafı ister "Planım" sayfasından ister sohbetten yüklesin
+  /// [uploadMealImg] hep bu dokümanı yazdığı için iki yol da bu tek kaynaktan
+  /// okunur.
+  ///
+  /// Dönen map yalnızca o gün en az bir fotoğrafı olan danışanları içerir;
+  /// listelerdeki öğünler saatine göre eskiden yeniye sıralıdır.
+  Future<Map<String, List<MealModel>>> fetchMealsOfUsersForDate({
+    required List<String> userIds,
+    required DateTime date,
+  }) async {
+    final String dateKey = DateFormat('yyyy-MM-dd').format(date);
+    final Map<String, List<MealModel>> mealsByUser = {};
+
+    // Danışan sayısı büyüdükçe tüm sorguları aynı anda açmamak için
+    // USER_BATCH_SIZE'lık paralel gruplar hâlinde ilerlenir.
+    for (int start = 0; start < userIds.length; start += USER_BATCH_SIZE) {
+      final int end = start + USER_BATCH_SIZE < userIds.length
+          ? start + USER_BATCH_SIZE
+          : userIds.length;
+      final List<String> batch = userIds.sublist(start, end);
+
+      final List<List<MealModel>> batchResults = await Future.wait(
+        batch.map((userId) => _fetchMealImages(userId, date: dateKey)),
+      );
+
+      for (int i = 0; i < batch.length; i++) {
+        final List<MealModel> withPhotos = batchResults[i]
+            .where((meal) => meal.imageUrls.isNotEmpty)
+            .toList()
+          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+        if (withPhotos.isNotEmpty) {
+          mealsByUser[batch[i]] = withPhotos;
+        }
+      }
+    }
+
+    logger.info('Fetched meal photos for date {}. users={} ofRequested={}',
+        [dateKey, mealsByUser.length, userIds.length]);
+    return mealsByUser;
   }
 
   /// Fetches meal images for a specific date
