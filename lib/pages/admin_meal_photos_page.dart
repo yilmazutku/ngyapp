@@ -5,9 +5,11 @@ import 'package:provider/provider.dart';
 
 import '../models/logger.dart';
 import '../models/meal_model.dart';
+import '../models/mock_test_run.dart';
 import '../models/subs_model.dart';
 import '../models/user_model.dart';
 import '../providers/meal_state_and_upload_manager.dart';
+import '../providers/mock_test_data_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -99,6 +101,10 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   String _searchQuery = '';
   Meals? _mealFilter;
 
+  /// Sistemde duran (silinmemiş) test verisi kayıtları. Boş değilse sayfanın
+  /// üstünde uyarı şeridi çıkar: test verisi danışanların üstünde unutulmasın.
+  List<MockTestRun> _testRuns = const [];
+
   static DateTime _todayStart() {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
@@ -134,6 +140,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final subProvider = Provider.of<SubProvider>(context, listen: false);
     final mealManager = Provider.of<MealManager>(context, listen: false);
+    final mockProvider =
+        Provider.of<MockTestDataProvider>(context, listen: false);
     final DateTime day = _todayStart();
 
     setState(() {
@@ -168,9 +176,19 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           .toList()
         ..sort(_compareGroups);
 
+      // Test verisi uyarısı sayfanın asıl işi değil: okunamazsa sayfa yine
+      // normal çalışır, sadece uyarı gösterilmez.
+      List<MockTestRun> testRuns = const [];
+      try {
+        testRuns = await mockProvider.fetchRuns();
+      } catch (e) {
+        logger.err('Could not read mock test runs: {}', [e]);
+      }
+
       if (!mounted) return;
       setState(() {
         _groups = groups;
+        _testRuns = testRuns;
         _isLoading = false;
       });
       logger.info(
@@ -295,6 +313,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       body: Column(
         children: [
           _buildHeader(context, visible),
+          if (_testRuns.isNotEmpty) _buildTestDataWarning(context),
           _buildFilters(context),
           const Divider(height: 1),
           Expanded(child: _buildBody(context, visible)),
@@ -348,6 +367,45 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
             _sourceHint,
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Sistemde silinmemiş test verisi varsa gösterilen uyarı şeridi. Amaç, test
+  /// fotoğraflarının gerçek veri sanılmasını ve danışanların üstünde
+  /// unutulmasını önlemek.
+  Widget _buildTestDataWarning(BuildContext context) {
+    final int photoCount =
+        _testRuns.fold<int>(0, (sum, run) => sum + run.photos.length);
+    final int dietCount =
+        _testRuns.fold<int>(0, (sum, run) => sum + run.diets.length);
+
+    return Container(
+      width: double.infinity,
+      color: Colors.amber.shade100,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+      child: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded,
+              size: 20, color: Colors.orange.shade900),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Sistemde silinmemiş test verisi var: $photoCount fotoğraf, '
+              '$dietCount geçici diyet. Bu sayfadaki bazı fotoğraflar test '
+              'verisi olabilir.',
+              style: TextStyle(color: Colors.orange.shade900),
+            ),
+          ),
+          const SizedBox(width: 8),
+          LabeledActionButton(
+            icon: Icons.cleaning_services_outlined,
+            label: 'Test Verilerini Sil',
+            dense: true,
+            foregroundColor: Colors.orange.shade900,
+            onPressed: _isLoading ? null : _openMockPage,
           ),
         ],
       ),

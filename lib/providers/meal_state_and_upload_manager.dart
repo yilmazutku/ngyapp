@@ -326,11 +326,16 @@ Future<String?> uploadMealImg({
 
 /// Deletes a single image from a meal entry.
 /// If no images remain, the meal is marked as unchecked.
+///
+/// [ignoreStorageFailure] true iken Storage'daki dosya silinemese de (ör.
+/// dosya zaten yok) Firestore kaydı temizlenmeye devam eder. Test verisini
+/// temizleyen akış bunu kullanır: kayıt sistemde asılı kalmamalı.
 Future<void> deleteMealImage({
   required String userId,
   required Meals meal,
   required String imageUrlToDelete,
   DateTime? overrideDate,
+  bool ignoreStorageFailure = false,
 }) async {
   try {
     final referenceDate = overrideDate ?? DateTime.now();
@@ -351,7 +356,13 @@ Future<void> deleteMealImage({
       ..remove(imageUrlToDelete);
 
     // Delete the file from Storage
-    await deleteFile(imageUrlToDelete);
+    try {
+      await deleteFile(imageUrlToDelete);
+    } catch (e) {
+      if (!ignoreStorageFailure) rethrow;
+      logger.warn('Ignoring storage delete failure for {}: {}',
+          [imageUrlToDelete, e]);
+    }
 
     if (updatedUrls.isEmpty) {
       // No images left — remove the document and uncheck
@@ -381,68 +392,6 @@ Future<void> deleteMealImage({
     rethrow;
   }
 }
-
-  /// Bir danışanın [date] gününe ait TÜM öğün fotoğraflarını siler ve o günün
-  /// öğün işaretlerini sıfırlar. Silinen fotoğraf sayısını döner.
-  ///
-  /// Test verisi üreten ekranın (mock yükleme sayfası) aynı gün için tekrar
-  /// tekrar çalışabilmesi için var: bir öğün en fazla [MealModel.maxImages]
-  /// görsel taşıdığından, önce temizlenmezse ikinci deneme sessizce boşa
-  /// giderdi.
-  ///
-  /// Storage'daki dosya silinemezse (ör. dosya zaten yok) o dosya atlanır;
-  /// Firestore kaydının silinmesi yine de sürer.
-  Future<int> deleteMealsForDate({
-    required String userId,
-    required DateTime date,
-  }) async {
-    final String dateKey = DateFormat('yyyy-MM-dd').format(date);
-    int deletedPhotos = 0;
-
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('meals')
-          .doc(dateKey)
-          .collection('mealEntries')
-          .get();
-
-      for (final doc in snapshot.docs) {
-        MealModel? meal;
-        try {
-          meal = MealModel.fromDocument(doc);
-        } catch (e) {
-          logger.err('Error parsing meal document {} while deleting: {}',
-              [doc.id, e]);
-        }
-
-        for (final String url in meal?.imageUrls ?? const <String>[]) {
-          try {
-            await deleteFile(url);
-            deletedPhotos++;
-          } catch (e) {
-            logger.warn('Could not delete storage file {}: {}', [url, e]);
-          }
-        }
-
-        await doc.reference.delete();
-        if (meal != null) {
-          await updateMealState(userId, date, meal.mealType, false);
-        }
-      }
-
-      notifyListeners();
-      logger.info('Deleted meals for user {} date {}. photos={} entries={}',
-          [userId, dateKey, deletedPhotos, snapshot.docs.length]);
-    } catch (e) {
-      logger.err('Error deleting meals for user {} date {}: {}',
-          [userId, dateKey, e]);
-      rethrow;
-    }
-
-    return deletedPhotos;
-  }
 
 Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isChecked) async {
     try {
