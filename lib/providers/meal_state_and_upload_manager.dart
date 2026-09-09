@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/filter_params.dart';
+import '../utils/storage_upload.dart';
 import '../providers/chat_manager_new.dart';
 
 final Logger logger = Logger.forClass(MealManager);
@@ -529,32 +530,32 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     }
 
     try {
-      String fileName = imageFile.name;
       final effectiveDate = overrideDate ?? DateTime.now();
       String date = DateFormat('yyyy-MM-dd').format(effectiveDate);
-      String path;
 
+      // Yüklemeden önce küçültülür: telefondan gelen tam çözünürlüklü fotoğraf
+      // (4-6 MB) yönetici tarafındaki toplu görünümleri yavaşlatıyordu.
+      // Sıkıştırma yapılamayan platformda orijinal yüklenir, akış değişmez.
+      final PreparedUploadImage prepared = await prepareImageForUpload(
+        bytes: await imageFile.readAsBytes(),
+        fileName: imageFile.name,
+        mimeType: imageFile.mimeType,
+      );
+
+      String path;
       if (meal != null) {
-        path = 'users/$userId/mealPhotos/$date/${meal.name}/$fileName';
+        path =
+            'users/$userId/mealPhotos/$date/${meal.name}/${prepared.fileName}';
       } else {
-        path = 'users/$userId/chatPhotos/$date/$fileName';
+        path = 'users/$userId/chatPhotos/$date/${prepared.fileName}';
       }
 
       Reference ref = FirebaseStorage.instance.ref(path);
-     // logger.debug('Uploading file to path: $path');
 
-      // Read the file as bytes
-      Uint8List imageData = await imageFile.readAsBytes();
-
-      // Determine the content type
-      String? mimeType = imageFile.mimeType;
-
-      SettableMetadata metadata = SettableMetadata(contentType: mimeType);
-
-      // UploadTask uploadTask = ref.putData(imageData, metadata);
-      await ref.putData(imageData, metadata);
-
-      // await uploadTask;
+      await ref.putData(
+        prepared.bytes,
+        SettableMetadata(contentType: prepared.contentType),
+      );
 
       // After uploading, get the download URL
       String downloadUrl = await ref.getDownloadURL();
