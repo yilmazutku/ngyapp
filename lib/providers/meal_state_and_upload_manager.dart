@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/filter_params.dart';
+import '../utils/image_thumbnail.dart';
 import '../utils/storage_upload.dart';
 import '../providers/chat_manager_new.dart';
 
@@ -301,14 +302,18 @@ Future<String?> uploadMealImg({
       return null;
     }
 
-    // Append the new URL to existing list
+    // Append the new URL to existing list (küçük görsel listesi de aynı
+    // sırayla büyür; eski kayıtta eksikse boş dizeyle hizalanır).
     final existingUrls = previousMealModel?.imageUrls ?? [];
     final updatedUrls = [...existingUrls, result.downloadUrl!];
+    final existingThumbs = previousMealModel?.alignedThumbUrls() ?? <String>[];
+    final updatedThumbs = [...existingThumbs, result.thumbUrl ?? ''];
 
     final mergedMealModel = MealModel(
       mealId: previousMealModel?.mealId ?? mealDocRef.id,
       mealType: meal,
       imageUrls: updatedUrls,
+      thumbUrls: updatedThumbs,
       subscriptionId: subscriptionId,
       timestamp: referenceDate,
       description: previousMealModel?.description,
@@ -365,8 +370,13 @@ Future<void> deleteMealImage({
     if (!mealDoc.exists) return;
 
     final mealModel = MealModel.fromDocument(mealDoc);
+    final int index = mealModel.imageUrls.indexOf(imageUrlToDelete);
     final updatedUrls = List<String>.from(mealModel.imageUrls)
       ..remove(imageUrlToDelete);
+    final updatedThumbs = mealModel.alignedThumbUrls();
+    final String? thumbUrlToDelete =
+        index >= 0 ? mealModel.thumbUrlAt(index) : null;
+    if (index >= 0) updatedThumbs.removeAt(index);
 
     // Delete the file from Storage
     try {
@@ -375,6 +385,16 @@ Future<void> deleteMealImage({
       if (!ignoreStorageFailure) rethrow;
       logger.warn('Ignoring storage delete failure for {}: {}',
           [imageUrlToDelete, e]);
+    }
+
+    // Küçük görsel yardımcı bir dosya: silinemese de kayıt temizlenir.
+    if (thumbUrlToDelete != null) {
+      try {
+        await deleteFile(thumbUrlToDelete);
+      } catch (e) {
+        logger.warn('Ignoring thumbnail delete failure for {}: {}',
+            [thumbUrlToDelete, e]);
+      }
     }
 
     if (updatedUrls.isEmpty) {
@@ -387,6 +407,7 @@ Future<void> deleteMealImage({
           mealId: mealModel.mealId,
           mealType: meal,
           imageUrls: updatedUrls,
+          thumbUrls: updatedThumbs,
           subscriptionId: mealModel.subscriptionId,
           timestamp: mealModel.timestamp,
           description: mealModel.description,
@@ -560,7 +581,11 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       // After uploading, get the download URL
       String downloadUrl = await ref.getDownloadURL();
       logger.info('Uploaded file to path: $path, downloadUrl: $downloadUrl');
-      return UploadResult(downloadUrl: downloadUrl);
+
+      // Küçük görsel: liste ekranları orijinal yerine bunu indirir. Üretilemez
+      // ya da yüklenemezse fotoğraf küçük görselsiz kalır, yükleme bozulmaz.
+      final String? thumbUrl = await _uploadThumbnail(ref, prepared.bytes);
+      return UploadResult(downloadUrl: downloadUrl, thumbUrl: thumbUrl);
     } on FirebaseException catch (e) {
       logger.err('FirebaseException Error during file upload: {}',
           [e.message ?? 'exception does not have message.']);
@@ -569,6 +594,104 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       logger.err('Unexpected error during file upload: {}', [e2.toString()]);
       rethrow;
     }
+  }
+
+  /// Küçük görseli orijinalin yanına `<ad>_thumb.<uzantı>` adıyla yükler;
+  /// başarısız olursa null döner.
+  Future<String?> _uploadThumbnail(Reference original, Uint8List bytes) async {
+    try {
+      final ThumbnailData? thumb = await generateThumbnail(bytes);
+      if (thumb == null) return null;
+
+      final Reference thumbRef = _thumbnailRefFor(original, thumb.extension);
+      await thumbRef.putData(
+        thumb.bytes,
+        SettableMetadata(contentType: thumb.contentType),
+      );
+      final String url = await thumbRef.getDownloadURL();
+      logger.info('Thumbnail uploaded. path={} bytes={}',
+          [thumbRef.fullPath, thumb.bytes.length]);
+      return url;
+    } catch (e) {
+      logger.warn('Thumbnail upload skipped: {}', [e]);
+      return null;
+    }
+  }
+
+  /// Orijinal dosyanın klasöründe, aynı ad + `_thumb` son ekiyle küçük görsel
+  /// yolu. Hem yüklemede hem sonradan üretimde aynı kural kullanılır.
+  Reference _thumbnailRefFor(Reference original, String extension) {
+    final String name = original.name;
+    final int dot = name.lastIndexOf('.');
+    final String base = dot > 0 ? name.substring(0, dot) : name;
+    final Reference? parent = original.parent;
+    final String thumbName = '${base}_thumb$extension';
+    return parent == null
+        ? FirebaseStorage.instance.ref(thumbName)
+        : parent.child(thumbName);
+  }
+
+  /// Küçük görseli olmayan eski bir fotoğraf için küçük görseli üretip
+  /// kaydeder.
+  ///
+  /// Liste ekranı böyle bir fotoğrafı göstermek için orijinali indirmek
+  /// zorunda kalır; indirdiği baytları buraya verir, küçük görsel bir kez
+  /// üretilip yüklenir ve öğün kaydına yazılır. Sonraki her açılışta (ve diğer
+  /// tüm cihazlarda) yalnızca küçük görsel iner.
+  ///
+  /// Kayıt bir işlem (transaction) içinde güncellenir: fotoğraf o arada
+  /// silinmiş ya da listedeki yeri değişmişse yanlış yere yazılmaz.
+  Future<void> backfillThumbnail({
+    required String userId,
+    required Meals meal,
+    required DateTime date,
+    required String imageUrl,
+    required Uint8List originalBytes,
+  }) async {
+    final String dateKey = DateFormat('yyyy-MM-dd').format(date);
+    final DocumentReference<Map<String, dynamic>> mealDocRef =
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .collection('meals')
+            .doc(dateKey)
+            .collection('mealEntries')
+            .doc(meal.name);
+
+    // Aynı fotoğrafı iki cihaz aynı anda açtıysa ikinci üretim boşa gitmesin.
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await mealDocRef.get();
+    if (!snapshot.exists) return;
+    final MealModel current = MealModel.fromDocument(snapshot);
+    final int index = current.imageUrls.indexOf(imageUrl);
+    if (index < 0 || current.thumbUrlAt(index) != null) return;
+
+    final ThumbnailData? thumb = await generateThumbnail(originalBytes);
+    if (thumb == null) return;
+
+    final Reference originalRef = FirebaseStorage.instance.refFromURL(imageUrl);
+    final Reference thumbRef = _thumbnailRefFor(originalRef, thumb.extension);
+    await thumbRef.putData(
+      thumb.bytes,
+      SettableMetadata(contentType: thumb.contentType),
+    );
+    final String thumbUrl = await thumbRef.getDownloadURL();
+
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final DocumentSnapshot<Map<String, dynamic>> fresh =
+          await transaction.get(mealDocRef);
+      if (!fresh.exists) return;
+      final MealModel model = MealModel.fromDocument(fresh);
+      final int freshIndex = model.imageUrls.indexOf(imageUrl);
+      if (freshIndex < 0) return;
+      final List<String> thumbs = model.alignedThumbUrls();
+      if (thumbs[freshIndex].isNotEmpty) return;
+      thumbs[freshIndex] = thumbUrl;
+      transaction.update(mealDocRef, {'thumbUrls': thumbs});
+    });
+
+    logger.info('Thumbnail backfilled. user={} date={} meal={} index={}',
+        [userId, dateKey, meal.name, index]);
   }
 
   /// Deletes a file from Firebase Storage
@@ -588,10 +711,13 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
 /// Represents the result of an image upload operation
 class UploadResult {
   final String? downloadUrl;
+
+  /// Küçük görselin adresi; üretilemediyse null (yükleme yine başarılıdır).
+  final String? thumbUrl;
   final String? errorMessage;
 
   /// Indicates whether the upload was successful
   bool get isUploadOk => downloadUrl != null && errorMessage == null;
 
-  UploadResult({this.downloadUrl, this.errorMessage});
+  UploadResult({this.downloadUrl, this.thumbUrl, this.errorMessage});
 }
