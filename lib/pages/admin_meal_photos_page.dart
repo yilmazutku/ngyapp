@@ -281,6 +281,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
             mealId: '${meal.mealId}_$i',
             mealType: meal.mealType,
             imageUrls: [meal.imageUrls[i]],
+            thumbUrls: [meal.thumbUrlAt(i) ?? ''],
             subscriptionId: meal.subscriptionId,
             description: meal.description,
             timestamp: meal.timestamp,
@@ -743,8 +744,8 @@ class _ClientPhotoSection extends StatelessWidget {
             width: photoWidth,
             child: MealImageCard(
               meal: group.photos[index],
-              thumbSize: photoWidth,
               dialogImageHeight: dialogImageHeight,
+              backfillUserId: group.user.userId,
             ),
           ),
         ),

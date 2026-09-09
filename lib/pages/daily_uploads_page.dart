@@ -135,8 +135,8 @@ class _DailyUploadsPageState extends State<DailyUploadsPage> {
                         itemCount: meals.length,
                         itemBuilder: (context, i) => MealImageCard(
                           meal: meals[i],
-                          thumbSize: thumbSize,
                           dialogImageHeight: dialogImageHeight,
+                          backfillUserId: widget.userId,
                         ),
                       );
                     },

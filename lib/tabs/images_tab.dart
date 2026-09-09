@@ -860,8 +860,8 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                         final meal = item as MealModel;
                         return MealImageCard(
                           meal: meal,
-                          thumbSize: thumbSize,
                           dialogImageHeight: dialogImageHeight,
+                          backfillUserId: widget.userId,
                         );
                       }
                     },

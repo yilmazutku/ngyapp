@@ -182,7 +182,6 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
                         itemCount: meals.length,
                         itemBuilder: (context, i) => MealImageCard(
                           meal: meals[i],
-                          thumbSize: thumbSize,
                           dialogImageHeight: dialogImageHeight,
                         ),
                       ),

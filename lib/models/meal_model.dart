@@ -8,6 +8,12 @@ class MealModel {
   final String mealId;
   final Meals mealType;
   final List<String> imageUrls;
+
+  /// [imageUrls] ile paralel küçük görsel adresleri; küçük görseli olmayan
+  /// fotoğrafın yerinde boş dize durur. Liste ekranları tam boy fotoğraf
+  /// yerine bunu indirir. Eski kayıtlarda liste boş olabilir; hizasız bir
+  /// liste [thumbUrlAt] tarafından güvenle yok sayılır.
+  final List<String> thumbUrls;
   final String? subscriptionId;
   final String? description;
   final DateTime timestamp;
@@ -23,6 +29,7 @@ class MealModel {
     required this.mealId,
     required this.mealType,
     required this.imageUrls,
+    List<String>? thumbUrls,
     this.subscriptionId,
     this.description,
     required this.timestamp,
@@ -33,10 +40,26 @@ class MealModel {
     this.createUser,
     this.updateDate,
     this.updateUser,
-  }) : createDate = createDate ?? DateTime.now();
+  })  : thumbUrls = thumbUrls ?? const [],
+        createDate = createDate ?? DateTime.now();
 
   /// First image URL for convenience, or empty string if none.
   String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
+
+  /// [index]. fotoğrafın küçük görsel adresi; yoksa null.
+  String? thumbUrlAt(int index) {
+    if (index < 0 || index >= thumbUrls.length) return null;
+    final String url = thumbUrls[index];
+    return url.isEmpty ? null : url;
+  }
+
+  /// [thumbUrls]'i [imageUrls] ile aynı uzunluğa getirir (eksikler boş dize,
+  /// fazlalar atılır). Listeyi değiştiren her yazıcı bunu kullanır ki iki liste
+  /// hiç hizasız kalmasın.
+  List<String> alignedThumbUrls() => List<String>.generate(
+        imageUrls.length,
+        (i) => i < thumbUrls.length ? thumbUrls[i] : '',
+      );
 
   bool get canAddMoreImages => imageUrls.length < maxImages;
 
@@ -58,6 +81,10 @@ class MealModel {
       mealId: doc.id,
       mealType: Meals.values.firstWhere((e) => e.name == data['mealType']),
       imageUrls: urls,
+      thumbUrls: data['thumbUrls'] is List
+          ? List<String>.from(
+              (data['thumbUrls'] as List).map((e) => e is String ? e : ''))
+          : const [],
       subscriptionId: data['subscriptionId'],
       description: data['description'],
       timestamp: (data['timestamp'] as Timestamp).toDate(),
@@ -75,6 +102,7 @@ class MealModel {
     return {
       'mealType': mealType.name,
       'imageUrls': imageUrls,
+      'thumbUrls': alignedThumbUrls(),
       // Keep legacy field for any readers that still use it
       'imageUrl': imageUrl,
       'subscriptionId': subscriptionId,

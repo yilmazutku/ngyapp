@@ -1,9 +1,14 @@
 // lib/widgets/meal_image_card.dart
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
 import '../models/meal_model.dart';
+import '../providers/meal_state_and_upload_manager.dart';
 import 'chat_image_preview.dart';
+import 'meal_thumbnail_image.dart';
 
 /// Multiplier from a thumbnail's size to the enlarged detail-dialog image height.
 const double kMealDialogMultiplier = 2.8;
@@ -56,18 +61,20 @@ class MealImageCard extends StatelessWidget {
   /// message; in the images tab it is a real meal document.
   final MealModel meal;
 
-  /// Kartın yaklaşık genişliği. Asıl ölçü [LayoutBuilder]'dan gelir; bu değer
-  /// yalnızca genişlik sınırsızsa (ör. yatay kaydırmada) yedek olarak kullanılır.
-  final double thumbSize;
-
   /// Height of the enlarged image shown in the detail dialog.
   final double dialogImageHeight;
+
+  /// Fotoğrafın sahibi. Verilirse ve fotoğrafın küçük görseli yoksa, orijinal
+  /// bir kez indirildiğinde küçük görsel üretilip kaydedilir
+  /// ([MealManager.backfillThumbnail]); sonraki açılışlarda tam boy indirme
+  /// gerekmez. Sohbet galerisi gibi öğün kaydı olmayan yerlerde verilmez.
+  final String? backfillUserId;
 
   const MealImageCard({
     super.key,
     required this.meal,
-    required this.thumbSize,
     required this.dialogImageHeight,
+    this.backfillUserId,
   });
 
   // Card metrics (previously the kMealCard* constants in ImagesTab).
@@ -79,10 +86,19 @@ class MealImageCard extends StatelessWidget {
   static const double _timeIconSize = 12;
   static const double _timeFontSize = 11;
 
-  /// Küçük görselin çözüleceği piksel genişliğinin alt/üst sınırı: ölçü
-  /// beklenmedik biçimde küçük ya da çok büyük çıkarsa görsel yine makul kalır.
-  static const int _minCacheWidth = 120;
-  static const int _maxCacheWidth = 900;
+  /// Orijinal indirildiğinde küçük görseli üretip kaydeden geri çağrı.
+  /// Sağlayıcı build sırasında alınır; geri çağrı sonradan, context'e
+  /// dokunmadan çalışır.
+  OriginalBytesCallback _backfillCallback(
+      MealManager mealManager, String userId) {
+    return (Uint8List bytes) => mealManager.backfillThumbnail(
+          userId: userId,
+          meal: meal.mealType,
+          date: meal.timestamp,
+          imageUrl: meal.imageUrl,
+          originalBytes: bytes,
+        );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -92,150 +108,141 @@ class MealImageCard extends StatelessWidget {
         '${meal.imageUrl}_${meal.timestamp.millisecondsSinceEpoch}';
     final int imageCount = meal.imageUrls.length;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Küçük görsel, ekranda kapladığı boyutta çözülür: hem bellek hem de
-        // çözme maliyeti düşer, kayıtlar akıcı kalır.
-        //
-        // ÖNEMLİ: yalnızca genişlik verilir. Hem cacheWidth hem cacheHeight
-        // verildiğinde çözücü görseli tam o ölçülere sıkıştırır ve en-boy oranı
-        // bozulur (fotoğraflar yatık görünürdü). Tek boyut verildiğinde diğeri
-        // orandan hesaplanır.
-        final double dpr = MediaQuery.devicePixelRatioOf(context);
-        final double imageWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth - (_cardMargin + _cardPadding) * 2
-            : thumbSize;
-        final int cacheWidth =
-            (imageWidth * dpr).round().clamp(_minCacheWidth, _maxCacheWidth);
+    // Küçük görsel varsa yalnızca o indirilir; yoksa orijinal indirilir,
+    // çözülürken küçültülür ve (sahibi biliniyorsa) küçük görsel bir kez
+    // üretilip kaydedilir.
+    final String? thumbUrl = meal.thumbUrlAt(0);
+    final String? backfillUserId = this.backfillUserId;
+    final OriginalBytesCallback? onOriginalLoaded =
+        (thumbUrl == null && backfillUserId != null && meal.imageUrl.isNotEmpty)
+            ? _backfillCallback(
+                Provider.of<MealManager>(context, listen: false),
+                backfillUserId,
+              )
+            : null;
 
-        return Card(
-          elevation: 2,
-          margin: const EdgeInsets.all(_cardMargin),
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: typeColor.withValues(alpha: 0.5), width: 1),
-          ),
-          child: InkWell(
-            onTap: () => showMealImageDetailsDialog(
-              context,
-              meal,
-              dialogImageHeight: dialogImageHeight,
-              heroTag: heroTag,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.max,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(_cardPadding),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Hero(
-                          tag: heroTag,
-                          child: ChatImagePreview(
-                            imageUrl: meal.imageUrl,
-                            borderRadius: 8,
-                            cacheWidth: cacheWidth,
-                            fit: BoxFit.cover,
-                            onTap: () => showMealImageDetailsDialog(
-                              context,
-                              meal,
-                              dialogImageHeight: dialogImageHeight,
-                              heroTag: heroTag,
-                            ),
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.all(_cardMargin),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: typeColor.withValues(alpha: 0.5), width: 1),
+      ),
+      child: InkWell(
+        onTap: () => showMealImageDetailsDialog(
+          context,
+          meal,
+          dialogImageHeight: dialogImageHeight,
+          heroTag: heroTag,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.max,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(_cardPadding),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Hero(
+                      tag: heroTag,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: MealThumbnailImage(
+                          url: thumbUrl ?? meal.imageUrl,
+                          isOriginal: thumbUrl == null,
+                          onOriginalLoaded: onOriginalLoaded,
+                        ),
+                      ),
+                    ),
+                    if (imageCount > 1)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.photo_library,
+                                  size: 12, color: Colors.white),
+                              const SizedBox(width: 3),
+                              Text(
+                                '$imageCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        if (imageCount > 1)
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.photo_library,
-                                      size: 12, color: Colors.white),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '$imageCount',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(_cardPadding),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          mealTypeIcon(meal.mealType),
+                          size: _iconSize,
+                          color: typeColor,
+                        ),
+                        const SizedBox(width: _spacing),
+                        Flexible(
+                          child: Text(
+                            meal.mealType.label,
+                            style: TextStyle(
+                              fontSize: _labelFontSize,
+                              fontWeight: FontWeight.bold,
+                              color: typeColor,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
+                        ),
                       ],
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(_cardPadding),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Flexible(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              mealTypeIcon(meal.mealType),
-                              size: _iconSize,
-                              color: typeColor,
-                            ),
-                            const SizedBox(width: _spacing),
-                            Flexible(
-                              child: Text(
-                                meal.mealType.label,
-                                style: TextStyle(
-                                  fontSize: _labelFontSize,
-                                  fontWeight: FontWeight.bold,
-                                  color: typeColor,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
+                      Icon(
+                        Icons.access_time,
+                        size: _timeIconSize,
+                        color: Colors.grey[600],
                       ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.access_time,
-                            size: _timeIconSize,
-                            color: Colors.grey[600],
-                          ),
-                          const SizedBox(width: 2),
-                          Text(
-                            timeStr,
-                            style: TextStyle(
-                              fontSize: _timeFontSize,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
+                      const SizedBox(width: 2),
+                      Text(
+                        timeStr,
+                        style: TextStyle(
+                          fontSize: _timeFontSize,
+                          color: Colors.grey[600],
+                        ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 }
