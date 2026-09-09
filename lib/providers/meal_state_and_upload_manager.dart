@@ -18,7 +18,11 @@ static const MEAL_RANGE_DAYS=7;
 
   /// Toplu (çok danışanlı) sorgularda aynı anda açılan Firestore
   /// isteği sayısı. Bkz. [fetchMealsOfUsersForDate].
-  static const int USER_BATCH_SIZE = 10;
+  ///
+  /// Her parti bir gidiş-dönüş demek; parti büyüdükçe sayfa daha az turda
+  /// dolar. 20, tek seferde açılan bağlantıyı makul tutarken 100 danışanı
+  /// 5 turda bitirir.
+  static const int USER_BATCH_SIZE = 20;
 
   /// ADMIN CAGIRIR: SON 7 GÜNLÜK MEALLARI ÇEKER
   /// 
@@ -170,9 +174,13 @@ static const MEAL_RANGE_DAYS=7;
   ///
   /// Dönen map yalnızca o gün en az bir fotoğrafı olan danışanları içerir;
   /// listelerdeki öğünler saatine göre eskiden yeniye sıralıdır.
+  ///
+  /// [onBatch] verilirse her parti biter bitmez o partinin sonucuyla çağrılır:
+  /// çağıran taraf tüm danışanları beklemeden ekranı doldurmaya başlayabilir.
   Future<Map<String, List<MealModel>>> fetchMealsOfUsersForDate({
     required List<String> userIds,
     required DateTime date,
+    void Function(Map<String, List<MealModel>> batchResult)? onBatch,
   }) async {
     final String dateKey = DateFormat('yyyy-MM-dd').format(date);
     final Map<String, List<MealModel>> mealsByUser = {};
@@ -189,6 +197,7 @@ static const MEAL_RANGE_DAYS=7;
         batch.map((userId) => _fetchMealImages(userId, date: dateKey)),
       );
 
+      final Map<String, List<MealModel>> batchMeals = {};
       for (int i = 0; i < batch.length; i++) {
         final List<MealModel> withPhotos = batchResults[i]
             .where((meal) => meal.imageUrls.isNotEmpty)
@@ -196,9 +205,12 @@ static const MEAL_RANGE_DAYS=7;
           ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
         if (withPhotos.isNotEmpty) {
-          mealsByUser[batch[i]] = withPhotos;
+          batchMeals[batch[i]] = withPhotos;
         }
       }
+
+      mealsByUser.addAll(batchMeals);
+      onBatch?.call(batchMeals);
     }
 
     logger.info('Fetched meal photos for date {}. users={} ofRequested={}',

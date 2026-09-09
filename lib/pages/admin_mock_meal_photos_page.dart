@@ -21,6 +21,7 @@ import '../providers/mock_test_data_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/search_text.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
@@ -226,9 +227,13 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
   }
 
   List<_MockClient> get _visibleClients {
-    final String query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) return _clients;
-    return _clients.where((client) => client.matchesQuery(query)).toList();
+    final String rawQuery = _searchQuery.trim().toLowerCase();
+    if (rawQuery.isEmpty) return _clients;
+
+    final List<String> queryWords = searchWordsOf(_searchQuery);
+    return _clients
+        .where((client) => client.matchesQuery(queryWords, rawQuery))
+        .toList();
   }
 
   int get _pendingPhotoCount =>
@@ -1213,15 +1218,26 @@ class _MockClient {
   final UserModel user;
   final SubscriptionModel subscription;
 
-  const _MockClient({required this.user, required this.subscription});
+  _MockClient({required this.user, required this.subscription});
 
   String get displayName => user.fullName.isEmpty ? user.email : user.fullName;
 
-  /// Zaten küçük harfe çevrilmiş [query] ada, e-postaya veya uid'ye uyuyor mu.
-  bool matchesQuery(String query) =>
-      user.fullName.toLowerCase().contains(query) ||
-      user.email.toLowerCase().contains(query) ||
-      user.userId.toLowerCase().contains(query);
+  /// Ad/e-posta kelimeleri (normalize). Her tuş vuruşunda yeniden
+  /// hesaplanmaması için kurulurken bir kez üretilir.
+  late final List<String> _searchWords =
+      searchWordsOf('${user.fullName} ${user.email}');
+
+  /// Uid ile arama: uid rastgele karakterlerden oluştuğu için **içinde**
+  /// aranmaz (iki harflik sorgu alakasız danışanları getirirdi), yalnızca
+  /// baştan eşleşme kabul edilir — yapıştırılan uid yine bulunur.
+  bool matchesQuery(List<String> queryWords, String rawQuery) {
+    if (matchesSearchWords(queryWords, _searchWords)) return true;
+    return rawQuery.length >= _minUidQueryLength &&
+        user.userId.toLowerCase().startsWith(rawQuery);
+  }
+
+  /// Uid aramasının başlayacağı en küçük sorgu uzunluğu.
+  static const int _minUidQueryLength = 4;
 }
 
 /// Kaynak diyet seçiminin sonucu.
@@ -1271,13 +1287,12 @@ class _SourceDietPickerDialogState extends State<_SourceDietPickerDialog> {
   }
 
   List<UserModel> get _visibleCustomers {
-    final String query = _query.trim().toLowerCase();
-    if (query.isEmpty) return widget.customers;
+    final List<String> queryWords = searchWordsOf(_query);
+    if (queryWords.isEmpty) return widget.customers;
+
     return widget.customers
-        .where((user) =>
-            user.fullName.toLowerCase().contains(query) ||
-            user.email.toLowerCase().contains(query) ||
-            user.userId.toLowerCase().contains(query))
+        .where((user) => matchesSearchWords(
+            queryWords, searchWordsOf('${user.fullName} ${user.email}')))
         .toList();
   }
 
