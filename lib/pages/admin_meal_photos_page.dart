@@ -12,6 +12,7 @@ import '../providers/meal_state_and_upload_manager.dart';
 import '../providers/mock_test_data_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
+import '../utils/search_text.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/filter_chip_group.dart';
 import '../widgets/labeled_action_button.dart';
@@ -94,9 +95,20 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   bool _isLoading = true;
   String? _errorText;
 
+  /// Fotoğraflar hâlâ yükleniyor mu (2. aşama). Kartlar çizilmiş ama fotoğrafı
+  /// gelmemiş danışanda "yüklenmemiş" yerine "yükleniyor" gösterilir.
+  bool _photosLoading = false;
+
+  /// Aynı anda birden fazla yükleme başlarsa (hızlı arka arkaya "Yenile"),
+  /// yalnızca en sonuncusunun sonucu ekrana işlenir.
+  int _loadId = 0;
+
   /// Aktif paketi olan danışanlar; önce bugün fotoğraf yükleyenler (son
   /// yükleme saati yeniden eskiye), sonra yüklemeyenler (ada göre).
   List<_ClientPhotoGroup> _groups = const [];
+
+  /// Arama + öğün filtresi uygulanmış hâli (bkz. [_applyFilters]).
+  List<_ClientPhotoGroup> _visibleGroups = const [];
 
   String _searchQuery = '';
   Meals? _mealFilter;
@@ -131,8 +143,13 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     super.dispose();
   }
 
-  /// Aktif paketi olan danışanları ve onların bugüne ait öğün fotoğraflarını
-  /// çeker.
+  /// Sayfayı iki aşamada doldurur.
+  ///
+  /// 1. Danışan listesi (aktif paketliler) gelir gelmez kartlar çizilir.
+  /// 2. Fotoğraflar partiler hâlinde gelir ve her parti ekrana işlenir.
+  ///
+  /// Böylece tüm danışanların sorgusu bitene kadar boş ekran beklenmez; sayfa
+  /// dolarak açılır.
   ///
   /// Sağlayıcılar await'lerden önce alınır; sonrasında yalnızca `mounted`
   /// kontrolüyle state güncellenir.
@@ -144,14 +161,29 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         Provider.of<MockTestDataProvider>(context, listen: false);
     final DateTime day = _todayStart();
 
+    // Geç gelen bir yükleme, daha yeni bir yüklemenin sonucunu ezmesin.
+    final int loadId = ++_loadId;
+
     setState(() {
       _day = day;
       _isLoading = true;
+      _photosLoading = true;
       _errorText = null;
     });
 
     try {
-      final List<UserModel> customers = await userProvider.fetchAllCustomers();
+      // Danışan listesi ve test verisi uyarısı birbirinden bağımsız: aynı anda
+      // istenir, iki tur beklenmez.
+      final List<Object?> initial = await Future.wait<Object?>([
+        userProvider.fetchAllCustomers(),
+        // Uyarı sayfanın asıl işi değil: okunamazsa sayfa yine çalışır.
+        mockProvider.fetchRuns().catchError((Object e) {
+          logger.err('Could not read mock test runs: {}', [e]);
+          return <MockTestRun>[];
+        }),
+      ]);
+      final List<UserModel> customers = initial[0] as List<UserModel>;
+      final List<MockTestRun> testRuns = initial[1] as List<MockTestRun>;
 
       // Sayfanın ilk koşulu: yalnızca aktif paketi olan danışanlar.
       final Map<String, SubscriptionModel> activeSubs =
@@ -162,49 +194,67 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           .where((user) => activeSubs.containsKey(user.userId))
           .toList();
 
-      final Map<String, List<MealModel>> mealsByUser =
-          await mealManager.fetchMealsOfUsersForDate(
-        userIds: activeCustomers.map((user) => user.userId).toList(),
-        date: day,
-      );
+      if (!mounted || loadId != _loadId) return;
 
+      // 1. aşama: kartlar fotoğrafsız çizilir.
       final List<_ClientPhotoGroup> groups = activeCustomers
-          .map((customer) => _ClientPhotoGroup(
-                customer,
-                _splitIntoPhotos(mealsByUser[customer.userId]),
-              ))
+          .map((customer) => _ClientPhotoGroup(customer, const []))
           .toList()
         ..sort(_compareGroups);
-
-      // Test verisi uyarısı sayfanın asıl işi değil: okunamazsa sayfa yine
-      // normal çalışır, sadece uyarı gösterilmez.
-      List<MockTestRun> testRuns = const [];
-      try {
-        testRuns = await mockProvider.fetchRuns();
-      } catch (e) {
-        logger.err('Could not read mock test runs: {}', [e]);
-      }
-
-      if (!mounted) return;
       setState(() {
         _groups = groups;
         _testRuns = testRuns;
         _isLoading = false;
+        _photosLoading = activeCustomers.isNotEmpty;
+        _applyFilters();
       });
+
+      if (activeCustomers.isEmpty) return;
+
+      // 2. aşama: fotoğraflar parti parti gelir ve geldikçe işlenir.
+      await mealManager.fetchMealsOfUsersForDate(
+        userIds: activeCustomers.map((user) => user.userId).toList(),
+        date: day,
+        onBatch: (batch) {
+          if (!mounted || loadId != _loadId || batch.isEmpty) return;
+          setState(() {
+            _mergePhotos(batch);
+            _applyFilters();
+          });
+        },
+      );
+
+      if (!mounted || loadId != _loadId) return;
+      setState(() => _photosLoading = false);
+
       logger.info(
           'Meal photo page loaded. activeCustomers={} withPhotos={} photos={}', [
-        groups.length,
-        groups.where((group) => group.photos.isNotEmpty).length,
-        groups.fold<int>(0, (sum, group) => sum + group.photos.length),
+        _groups.length,
+        _groups.where((group) => group.photos.isNotEmpty).length,
+        _groups.fold<int>(0, (sum, group) => sum + group.photos.length),
       ]);
     } catch (e) {
       logger.err('Error loading meal photos: {}', [e]);
-      if (!mounted) return;
+      if (!mounted || loadId != _loadId) return;
       setState(() {
         _errorText = _loadErrorText;
         _isLoading = false;
+        _photosLoading = false;
       });
     }
+  }
+
+  /// Gelen parti sonucunu mevcut kartlara işler ve sırayı tazeler.
+  void _mergePhotos(Map<String, List<MealModel>> batch) {
+    final List<_ClientPhotoGroup> updated = [];
+    for (final _ClientPhotoGroup group in _groups) {
+      final List<MealModel>? meals = batch[group.user.userId];
+      updated.add(meals == null
+          ? group
+          : _ClientPhotoGroup(group.user, _splitIntoPhotos(meals)));
+    }
+    updated.sort(_compareGroups);
+    _groups = updated;
   }
 
   /// Önce bugün fotoğraf yükleyenler (en son yükleyen en üstte), sonra hiç
@@ -244,17 +294,23 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     return photos;
   }
 
-  /// Arama kutusu (ad soyad / e-posta / uid) ve öğün filtresi uygulanmış liste.
+  /// Arama ve öğün filtresini uygulayıp [_visibleGroups] sonucunu tazeler.
+  ///
+  /// Sonuç saklanır: liste her yeniden çizimde değil, yalnızca girdiler
+  /// (yükleme, arama, öğün filtresi) değişince hesaplanır.
   ///
   /// Arama danışanı listeden çıkarır; öğün filtresi ise danışanı listede
   /// bırakıp yalnızca fotoğraflarını süzer — böylece "bu öğünü kim yüklememiş"
   /// de görülebilir.
-  List<_ClientPhotoGroup> _resolveVisibleGroups() {
-    final String query = _searchQuery.trim().toLowerCase();
+  void _applyFilters() {
+    final List<String> queryWords = searchWordsOf(_searchQuery);
     final List<_ClientPhotoGroup> visible = [];
 
     for (final _ClientPhotoGroup group in _groups) {
-      if (query.isNotEmpty && !group.matchesQuery(query)) continue;
+      if (queryWords.isNotEmpty &&
+          !matchesSearchWords(queryWords, group.searchWords)) {
+        continue;
+      }
 
       if (_mealFilter == null) {
         visible.add(group);
@@ -271,7 +327,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       );
     }
 
-    return visible;
+    _visibleGroups = visible;
   }
 
   ScrollController _stripControllerFor(String userId) =>
@@ -290,7 +346,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   @override
   Widget build(BuildContext context) {
-    final List<_ClientPhotoGroup> visible = _resolveVisibleGroups();
+    final List<_ClientPhotoGroup> visible = _visibleGroups;
 
     return Scaffold(
       appBar: AppBarWithBack(
@@ -434,12 +490,18 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
                         tooltip: 'Aramayı temizle',
                         onPressed: () {
                           _searchController.clear();
-                          setState(() => _searchQuery = '');
+                          setState(() {
+                            _searchQuery = '';
+                            _applyFilters();
+                          });
                         },
                       ),
                 border: const OutlineInputBorder(),
               ),
-              onChanged: (value) => setState(() => _searchQuery = value),
+              onChanged: (value) => setState(() {
+                _searchQuery = value;
+                _applyFilters();
+              }),
             ),
           ),
           const SizedBox(width: 24),
@@ -451,7 +513,10 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
               options: {
                 for (final Meals meal in Meals.dietValues) meal: meal.label,
               },
-              onSelected: (meal) => setState(() => _mealFilter = meal),
+              onSelected: (meal) => setState(() {
+                _mealFilter = meal;
+                _applyFilters();
+              }),
             ),
           ),
         ],
@@ -508,10 +573,15 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
             itemBuilder: (context, index) {
               final _ClientPhotoGroup group = visible[index];
               return _ClientPhotoSection(
+                // Fotoğraflar geldikçe sıra değişiyor; anahtar sayesinde
+                // kartlar yeniden kurulmak yerine yer değiştirir ve her
+                // danışanın şerit kaydırma konumu kendinde kalır.
+                key: ValueKey<String>(group.user.userId),
                 group: group,
                 stripController: _stripControllerFor(group.user.userId),
                 photoWidth: photoWidth,
                 stripHeight: stripHeight,
+                isLoadingPhotos: _photosLoading,
                 emptyText: _mealFilter == null
                     ? 'Bugün fotoğraf yüklenmemiş.'
                     : '"${_mealFilter!.label}" öğünü için fotoğraf yüklenmemiş.',
@@ -538,11 +608,16 @@ class _ClientPhotoGroup {
   /// Öğün türü -> fotoğraf sayısı (yükleme sırasına göre).
   final Map<Meals, int> countsByMeal;
 
+  /// Aramada karşılaştırılan kelimeler (ad soyad + e-posta), önceden
+  /// normalize edilmiş. Her tuş vuruşunda yeniden hesaplanmaz.
+  final List<String> searchWords;
+
   const _ClientPhotoGroup._({
     required this.user,
     required this.photos,
     required this.lastUploadAt,
     required this.countsByMeal,
+    required this.searchWords,
   });
 
   factory _ClientPhotoGroup(UserModel user, List<MealModel> photos) {
@@ -561,6 +636,7 @@ class _ClientPhotoGroup {
       photos: photos,
       lastUploadAt: lastUploadAt,
       countsByMeal: countsByMeal,
+      searchWords: searchWordsOf('${user.fullName} ${user.email}'),
     );
   }
 
@@ -574,12 +650,6 @@ class _ClientPhotoGroup {
   }
 
   String get displayName => user.fullName.isEmpty ? user.email : user.fullName;
-
-  /// Zaten küçük harfe çevrilmiş [query] ada, e-postaya veya uid'ye uyuyor mu.
-  bool matchesQuery(String query) =>
-      user.fullName.toLowerCase().contains(query) ||
-      user.email.toLowerCase().contains(query) ||
-      user.userId.toLowerCase().contains(query);
 }
 
 /// Tek bir danışanın kartı: başlık (kim, kaç fotoğraf, hangi öğünler, son
@@ -597,12 +667,18 @@ class _ClientPhotoSection extends StatelessWidget {
   /// Fotoğraf yokken kartın altında yazan metin.
   final String emptyText;
 
+  /// Fotoğraflar hâlâ yükleniyorsa, fotoğrafı gelmemiş kartta "yüklenmemiş"
+  /// yerine yükleniyor satırı gösterilir.
+  final bool isLoadingPhotos;
+
   const _ClientPhotoSection({
+    super.key,
     required this.group,
     required this.stripController,
     required this.photoWidth,
     required this.stripHeight,
     required this.emptyText,
+    required this.isLoadingPhotos,
   });
 
   static const double _avatarRadius = 22.0;
@@ -683,15 +759,25 @@ class _ClientPhotoSection extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       child: Row(
         children: [
-          Icon(
-            Icons.no_photography_outlined,
-            size: 18,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+          if (isLoadingPhotos)
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            )
+          else
+            Icon(
+              Icons.no_photography_outlined,
+              size: 18,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
-              emptyText,
+              isLoadingPhotos ? 'Fotoğraflar yükleniyor...' : emptyText,
               style: theme.textTheme.bodyMedium
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),

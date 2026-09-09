@@ -56,7 +56,8 @@ class MealImageCard extends StatelessWidget {
   /// message; in the images tab it is a real meal document.
   final MealModel meal;
 
-  /// Logical thumbnail size, used to downsample the decoded image.
+  /// Kartın yaklaşık genişliği. Asıl ölçü [LayoutBuilder]'dan gelir; bu değer
+  /// yalnızca genişlik sınırsızsa (ör. yatay kaydırmada) yedek olarak kullanılır.
   final double thumbSize;
 
   /// Height of the enlarged image shown in the detail dialog.
@@ -78,6 +79,11 @@ class MealImageCard extends StatelessWidget {
   static const double _timeIconSize = 12;
   static const double _timeFontSize = 11;
 
+  /// Küçük görselin çözüleceği piksel genişliğinin alt/üst sınırı: ölçü
+  /// beklenmedik biçimde küçük ya da çok büyük çıkarsa görsel yine makul kalır.
+  static const int _minCacheWidth = 120;
+  static const int _maxCacheWidth = 900;
+
   @override
   Widget build(BuildContext context) {
     final Color typeColor = mealTypeColor(meal.mealType);
@@ -88,8 +94,19 @@ class MealImageCard extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final dpr = MediaQuery.of(context).devicePixelRatio;
-        final int cache = (thumbSize * dpr).round();
+        // Küçük görsel, ekranda kapladığı boyutta çözülür: hem bellek hem de
+        // çözme maliyeti düşer, kayıtlar akıcı kalır.
+        //
+        // ÖNEMLİ: yalnızca genişlik verilir. Hem cacheWidth hem cacheHeight
+        // verildiğinde çözücü görseli tam o ölçülere sıkıştırır ve en-boy oranı
+        // bozulur (fotoğraflar yatık görünürdü). Tek boyut verildiğinde diğeri
+        // orandan hesaplanır.
+        final double dpr = MediaQuery.devicePixelRatioOf(context);
+        final double imageWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth - (_cardMargin + _cardPadding) * 2
+            : thumbSize;
+        final int cacheWidth =
+            (imageWidth * dpr).round().clamp(_minCacheWidth, _maxCacheWidth);
 
         return Card(
           elevation: 2,
@@ -121,8 +138,7 @@ class MealImageCard extends StatelessWidget {
                           child: ChatImagePreview(
                             imageUrl: meal.imageUrl,
                             borderRadius: 8,
-                            cacheWidth: cache,
-                            cacheHeight: cache,
+                            cacheWidth: cacheWidth,
                             fit: BoxFit.cover,
                             onTap: () => showMealImageDetailsDialog(
                               context,

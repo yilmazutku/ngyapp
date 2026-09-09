@@ -11,7 +11,10 @@ final Logger logger = Logger.forClass(SubProvider);
 class SubProvider extends ChangeNotifier {
   /// Toplu (çok danışanlı) sorgularda aynı anda açılan Firestore
   /// isteği sayısı. Bkz. [fetchActiveSubscriptionsOfUsers].
-  static const int USER_BATCH_SIZE = 10;
+  ///
+  /// Her parti bir gidiş-dönüş demek; parti büyüdükçe liste daha az turda
+  /// dolar (bkz. MealManager.USER_BATCH_SIZE).
+  static const int USER_BATCH_SIZE = 20;
 
   bool _subChanged = false;
 
