@@ -4,6 +4,7 @@ import 'dart:io' show File;
 import 'dart:typed_data';
 
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 
 import '../models/logger.dart';
 
@@ -21,6 +22,112 @@ const int kMaxUploadBytes = 50 * 1024 * 1024;
 
 /// Human-readable form of [kMaxUploadBytes] for user-facing messages.
 const String kMaxUploadSizeLabel = '50 MB';
+
+/// Öğün fotoğrafı yüklenirken hedeflenen en küçük kenar (piksel).
+///
+/// Sohbet görselleriyle aynı değer kullanılır (bkz. ChatManager'daki sıkıştırma
+/// adımı): 1600 px, diyetisyenin tabağı incelemesi için fazlasıyla yeterli.
+const int kUploadImageMinSide = 1600;
+
+/// Öğün fotoğrafı sıkıştırma kalitesi (JPEG).
+const int kUploadImageQuality = 85;
+
+/// Bu boyutun altındaki görseller olduğu gibi yüklenir: kazanç, yeniden
+/// kodlamanın maliyetini ve kalite kaybını hak etmiyor.
+const int kUploadImageSkipBytes = 400 * 1024;
+
+/// Yükleme için hazırlanmış görsel.
+class PreparedUploadImage {
+  final Uint8List bytes;
+  final String fileName;
+  final String contentType;
+
+  /// Sıkıştırma gerçekten uygulandı mı (kayıt/log için).
+  final bool compressed;
+
+  const PreparedUploadImage({
+    required this.bytes,
+    required this.fileName,
+    required this.contentType,
+    required this.compressed,
+  });
+}
+
+/// Görseli yüklemeden önce küçültür.
+///
+/// Neden: fotoğraflar telefondan tam kamera çözünürlüğünde (4-6 MB) geliyordu;
+/// yönetici tarafındaki toplu görünümler bu dosyaların tamamını indirmek
+/// zorunda kaldığı için yavaş açılıyordu. En küçük kenar
+/// [kUploadImageMinSide] pikselle sınırlanınca dosya tipik olarak 5-10 kat
+/// küçülür, öğün yine net görünür.
+///
+/// Güvenli davranış: sıkıştırma yapılamazsa (eklentinin desteklemediği
+/// platform, bozuk dosya, sonuç orijinalden büyük) **orijinal baytlar** aynen
+/// döner; yükleme hiçbir koşulda bu adım yüzünden başarısız olmaz.
+///
+/// EXIF açısı piksellere işlenir (`autoCorrectionAngle`), sonra EXIF atılır:
+/// görsel her yerde aynı yönde görünür.
+Future<PreparedUploadImage> prepareImageForUpload({
+  required Uint8List bytes,
+  required String fileName,
+  String? mimeType,
+}) async {
+  final PreparedUploadImage original = PreparedUploadImage(
+    bytes: bytes,
+    fileName: fileName,
+    contentType: mimeType ?? _contentTypeOfFileName(fileName),
+    compressed: false,
+  );
+
+  if (bytes.length <= kUploadImageSkipBytes) return original;
+
+  try {
+    final Uint8List compressed = await fic.FlutterImageCompress.compressWithList(
+      bytes,
+      minWidth: kUploadImageMinSide,
+      minHeight: kUploadImageMinSide,
+      quality: kUploadImageQuality,
+      format: fic.CompressFormat.jpeg,
+      keepExif: false,
+    );
+
+    if (compressed.isEmpty || compressed.length >= bytes.length) {
+      _log.info('Compression skipped: no gain. original={} result={}',
+          [bytes.length, compressed.length]);
+      return original;
+    }
+
+    _log.info('Image compressed for upload. {} -> {} bytes ({}%)', [
+      bytes.length,
+      compressed.length,
+      (100 * compressed.length / bytes.length).round(),
+    ]);
+    return PreparedUploadImage(
+      bytes: compressed,
+      fileName: _withJpegExtension(fileName),
+      contentType: 'image/jpeg',
+      compressed: true,
+    );
+  } catch (e) {
+    // Masaüstünde eklenti yok; orijinal dosya yüklenir.
+    _log.warn('Image compression unavailable, uploading original: {}', [e]);
+    return original;
+  }
+}
+
+String _withJpegExtension(String fileName) {
+  final int dot = fileName.lastIndexOf('.');
+  final String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+  return '$base.jpg';
+}
+
+String _contentTypeOfFileName(String fileName) {
+  final String lower = fileName.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.heic')) return 'image/heic';
+  return 'image/jpeg';
+}
 
 const String kDocxContentType =
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
