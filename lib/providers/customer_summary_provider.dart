@@ -295,18 +295,23 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// cells for the active subscription from a single appointment query.
   ///
   /// - Seans: only appointments that actually took place — status "Yapıldı"
-  ///   (completed) or "Yakıldı" (burned) — ordered by [appointmentDateTime];
-  ///   missing dates become "Hata". Always [CustomerSummaryRow.maxSeans]
-  ///   entries. Postponed ("Ertelendi"), still-scheduled and cancelled
-  ///   appointments are intentionally excluded here; a postponed appointment
-  ///   reappears once it is re-marked "Yapıldı" on its new date. Burned ones
-  ///   are flagged with [SummaryCell.isBurned] so the table can color them
-  ///   apart from the completed ones.
+  ///   (completed) or "Yakıldı" (burned) — ordered by the date the session was
+  ///   actually held: [postponedDate] when the appointment was postponed,
+  ///   [appointmentDateTime] otherwise. Missing dates become "Hata". Always
+  ///   [CustomerSummaryRow.maxSeans] entries. Postponed ("Ertelendi"),
+  ///   still-scheduled and cancelled appointments are intentionally excluded
+  ///   here; a postponed appointment reappears once it is re-marked "Yapıldı",
+  ///   then under its new date. Burned ones are flagged with
+  ///   [SummaryCell.isBurned] so the table can color them apart from the
+  ///   completed ones.
   /// - Postponement-use dates: the **originally planned** date
-  ///   ([appointmentDateTime]) of each "Ertelendi" appointment whose
-  ///   postponement was user-originated ([PostponeSource.user]) — only those
-  ///   consume a postponement right, so this is when the customer spent one.
-  ///   The new date the appointment was moved to is deliberately not shown.
+  ///   ([appointmentDateTime]) of every appointment carrying a user-originated
+  ///   postponement ([PostponeSource.user]) — only those consume a
+  ///   postponement right, so this is when the customer spent one. The status
+  ///   is deliberately not filtered on: the marker survives the appointment
+  ///   being completed, and so does the spent right, so the dates listed here
+  ///   always add up to the package's `postponementsUsed`. The new date the
+  ///   appointment was moved to belongs to the seans columns, not here.
   ///   Always [CustomerSummaryRow.maxPostponementUses] entries; when more
   ///   rights were spent, the most recent ones are kept.
   Future<_AppointmentCells> _resolveAppointmentCells(
@@ -341,7 +346,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
         final countsAsSeans =
             status == AppointmentStatus.completed.label || isBurned;
         if (countsAsSeans) {
-          final rawDate = data['appointmentDateTime'];
+          // A postponed appointment took place on its new date, so that is the
+          // date the seans box shows.
+          final rawDate = data['postponedDate'] ?? data['appointmentDateTime'];
           if (rawDate is Timestamp) {
             seansDates.add(_SummaryDate(rawDate.toDate(), isBurned: isBurned));
           } else {
@@ -353,9 +360,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
         // Collect user-originated postponements separately (independent of the
         // seans filter above). A postponement right is only spent when the
         // customer asked for it, and the appointment's originally planned date
-        // is when it was spent.
-        if (status == AppointmentStatus.postponed.label &&
-            data['postponedBy'] == PostponeSource.user.value) {
+        // is when it was spent. The marker outlives the "Ertelendi" status, so
+        // an appointment that was postponed and later completed still counts.
+        if (data['postponedBy'] == PostponeSource.user.value) {
           final rawDate = data['appointmentDateTime'];
           if (rawDate is Timestamp) {
             postponementUseDates.add(_SummaryDate(rawDate.toDate()));
