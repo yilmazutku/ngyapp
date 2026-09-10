@@ -378,13 +378,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
   }
 
   Widget _buildTable() {
-    // Postponed-date columns are dynamic: use the widest row so every row lines
-    // up, then pad shorter rows with empty cells.
-    final int postponedColumns = _rows.fold<int>(
-      0,
-      (m, r) => r.postponedDates.length > m ? r.postponedDates.length : m,
-    );
-
     // Both scrollbars wrap both scroll views (canonical two-axis pattern) so
     // the vertical and horizontal thumbs are always visible and draggable,
     // even when the table is smaller than the window.
@@ -413,8 +406,8 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
                   color: Colors.black87,
                 ),
                 border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-                columns: _buildColumns(postponedColumns),
-                rows: _rows.map((r) => _buildRow(r, postponedColumns)).toList(),
+                columns: _buildColumns(),
+                rows: _rows.map(_buildRow).toList(),
               ),
             ),
           ),
@@ -423,7 +416,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     );
   }
 
-  List<DataColumn> _buildColumns(int postponedColumns) {
+  List<DataColumn> _buildColumns() {
     return <DataColumn>[
       const DataColumn(label: Text('Dosya No')),
       const DataColumn(label: Text('Ad-Soyad')),
@@ -437,15 +430,13 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         const DataColumn(label: Text('Dondurulma Tarihi')),
       for (int i = 1; i <= CustomerSummaryRow.maxSeans; i++)
         DataColumn(label: Text('$i.Seans')),
-      for (int i = 1; i <= postponedColumns; i++)
-        DataColumn(label: Text('$i. Ertelenen Randevu')),
       const DataColumn(label: Text('Kalan Erteleme Hakkı'), numeric: true),
       for (int i = 1; i <= CustomerSummaryRow.maxPostponementUses; i++)
         DataColumn(label: Text('$i. Erteleme')),
     ];
   }
 
-  DataRow _buildRow(CustomerSummaryRow row, int postponedColumns) {
+  DataRow _buildRow(CustomerSummaryRow row) {
     return DataRow(
       cells: <DataCell>[
         _cell(row.dosyaNo),
@@ -469,10 +460,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         if (widget.status == SubActiveStatus.frozen) _cell(row.freezeDate),
         for (int i = 0; i < row.seans.length; i++)
           _seansCell(row.seans[i], isBeyondPackage: i >= row.totalMeetings),
-        for (int i = 0; i < postponedColumns; i++)
-          _cell(i < row.postponedDates.length
-              ? row.postponedDates[i]
-              : const SummaryCell.empty()),
         _cell(row.remainingPostponements),
         for (int i = 0; i < CustomerSummaryRow.maxPostponementUses; i++)
           _dateCell(i < row.postponementUseDates.length

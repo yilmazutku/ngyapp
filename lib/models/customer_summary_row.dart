@@ -74,19 +74,16 @@ class CustomerSummaryRow {
   /// never be filled by this package, so the table greys (blacks) them out.
   final int totalMeetings;
 
-  /// Dates of postponed ("Ertelendi") appointments for the active subscription.
-  /// Variable length; the table pads shorter rows to a common width.
-  final List<SummaryCell> postponedDates;
-
   /// Remaining postponement rights, based on user-originated postponements only
   /// (admin postponements do not reduce it). See
   /// SubscriptionModel.remainingPostponements.
   final SummaryCell remainingPostponements;
 
-  /// Dates on which the customer spent a postponement right: the date of each
-  /// user-originated postponed appointment. Only these consume a right, so
-  /// admin-originated postponements are not listed. Always
-  /// [maxPostponementUses] entries; unused trailing slots are empty cells.
+  /// Dates on which the customer spent a postponement right: the **originally
+  /// planned** date of each user-originated postponed appointment (not the new
+  /// date it was moved to). Only user-originated postponements consume a right,
+  /// so admin-originated ones are not listed. Always [maxPostponementUses]
+  /// entries; unused trailing slots are empty cells.
   final List<SummaryCell> postponementUseDates;
 
   const CustomerSummaryRow({
@@ -103,7 +100,6 @@ class CustomerSummaryRow {
     this.freezeDate = const SummaryCell.empty(),
     required this.seans,
     this.totalMeetings = maxSeans,
-    required this.postponedDates,
     required this.remainingPostponements,
     required this.postponementUseDates,
   });
