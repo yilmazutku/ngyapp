@@ -8,6 +8,7 @@ import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/add_appointment_dialog.dart';
+import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import 'basetab.dart';
@@ -734,6 +735,40 @@ class _AppointmentsTabState
               ],
 
               const SizedBox(height: 12),
+
+              if (appointment.status == AppointmentStatus.completed &&
+                  appointment.wasPostponed) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'ERTELENEN RANDEVU TAMAMLANDI\'YA ÇEKİLDİ',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    if (appointment.postponedDate != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '${DateFormatter.formatNumericDate(appointment.appointmentDateTime)}'
+                          ' → '
+                          '${DateFormatter.formatNumericDate(appointment.postponedDate!)}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
 
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
