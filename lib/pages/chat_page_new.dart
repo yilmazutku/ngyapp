@@ -378,10 +378,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         loadingOpen = false;
         logger.debug('Loading dialog closed');
       }
-
-      if (meal != null && mounted) {
-        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Öğün fotoğrafı yüklendi.');
-      }
     } catch (e, st) {
       logger.err('Gallery image send failed. chatId={} error={}', [_chatId, e]);
       if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
@@ -469,10 +465,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
         logger.debug('Loading dialog closed');
-      }
-
-      if (meal != null && mounted) {
-        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Öğün fotoğrafı yüklendi.');
       }
     } catch (e, st) {
       logger.err('Camera image send failed. chatId={} error={}', [_chatId, e]);
