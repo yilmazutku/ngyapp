@@ -81,9 +81,11 @@ class CustomerSummaryRow {
 
   /// Dates on which the customer spent a postponement right: the **originally
   /// planned** date of each user-originated postponed appointment (not the new
-  /// date it was moved to). Only user-originated postponements consume a right,
-  /// so admin-originated ones are not listed. Always [maxPostponementUses]
-  /// entries; unused trailing slots are empty cells.
+  /// date it was moved to — that one shows up in [seans] once the appointment
+  /// takes place). Only user-originated postponements consume a right, so
+  /// admin-originated ones are not listed, and an appointment keeps its place
+  /// here after it is completed, because the right stays spent. Always
+  /// [maxPostponementUses] entries; unused trailing slots are empty cells.
   final List<SummaryCell> postponementUseDates;
 
   const CustomerSummaryRow({

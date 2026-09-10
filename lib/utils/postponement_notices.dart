@@ -6,8 +6,8 @@ import 'dialog_utils.dart';
 /// The postponement-right side of cancelling, deleting or un-postponing an
 /// appointment.
 ///
-/// `postponementsUsed` only counts user-originated postponements, so only those
-/// appointments have a right behind them to talk about. Cancelling or deleting
+/// `postponementsUsed` only counts user-originated postponements, so only
+/// appointments carrying that marker have a right behind them to talk about. Cancelling or deleting
 /// such an appointment deliberately does **not** give the right back — the
 /// customer did ask for the postponement — but the admin is told, because an
 /// admin-side mistake can then only be corrected from the package editor.
@@ -32,8 +32,11 @@ class PostponementNotices {
 
   /// Whether [appointment] consumed one of the customer's postponement rights,
   /// i.e. whether any of the notices below are relevant at all.
+  ///
+  /// The status is not part of the test: a user-originated postponement keeps
+  /// its marker (and its spent right) after the appointment is completed or
+  /// burned, so deleting it then is just as worth warning about.
   static bool consumedRight(AppointmentModel appointment) =>
-      appointment.status == AppointmentStatus.postponed &&
       appointment.postponedBy == PostponeSource.user &&
       (appointment.subscriptionId?.isNotEmpty ?? false);
 

@@ -53,11 +53,13 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
           .toList();
   
   // Track original status and who initiated the postponement.
-  late AppointmentStatus _originalStatus;
   // Source of the postponement (user vs admin). Only user-originated
   // postponements consume the customer's postponement rights. Defaults to
   // "user" since that is the common case (the client requests a new date).
-  PostponeSource _postponedBy = PostponeSource.user;
+  /// Null until the appointment actually carries a postponement. A stored
+  /// [PostponeSource.user] marks a spent postponement right, so it must never
+  /// be defaulted onto an appointment that was never postponed.
+  PostponeSource? _postponedBy;
   
   // User name display
   String? _userName;
@@ -69,14 +71,13 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     _meetingType = widget.appointment.meetingType;
     _appointmentType = widget.appointment.appointmentType;
     _appointmentStatus = widget.appointment.status;
-    _originalStatus = widget.appointment.status;
     _appointmentDateTime = widget.appointment.appointmentDateTime;
     _hourController.text =
         _appointmentDateTime.hour.toString().padLeft(2, '0');
     _minuteController.text =
         _appointmentDateTime.minute.toString().padLeft(2, '0');
     _postponedDate = widget.appointment.postponedDate;
-    _postponedBy = widget.appointment.postponedBy ?? PostponeSource.user;
+    _postponedBy = widget.appointment.postponedBy;
     _notesController.text = widget.appointment.notes ?? '';
     _durationController.text = widget.appointment.durationMinutes.toString();
     _selectedSubscriptionId = widget.appointment.subscriptionId;
@@ -178,9 +179,13 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
   
   void _handleStatusChange(AppointmentStatus newStatus) {
     // The postponement source (user vs admin) is chosen inline via the
-    // "Erteleme Kaynağı" selector shown while the status is "Ertelendi".
+    // "Erteleme Kaynağı" selector shown while the status is "Ertelendi"; it
+    // opens on "Danışan Kaynaklı" the first time that status is picked.
     setState(() {
       _appointmentStatus = newStatus;
+      if (newStatus == AppointmentStatus.postponed) {
+        _postponedBy ??= PostponeSource.user;
+      }
     });
   }
 
@@ -219,24 +224,29 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       enteredTime.minute,
     );
 
-    // A user-originated postponement that is newly applied (the appointment was
-    // not already postponed). Only these consume the customer's postponement
-    // rights; admin-originated postponements never do.
-    final bool isNewUserPostponement =
-        _appointmentStatus == AppointmentStatus.postponed &&
-        _originalStatus != AppointmentStatus.postponed &&
-        _postponedBy == PostponeSource.user;
+    // The postponement record survives the appointment being completed or
+    // burned: an appointment that was postponed and then took place still spent
+    // the right, and the summary page needs both dates. Going back to
+    // "Planlandı" is the one transition that undoes the postponement, so it is
+    // also the only one that clears the record and returns the right.
+    final bool clearsPostponement =
+        _appointmentStatus == AppointmentStatus.scheduled;
 
-    // The mirror case: a user-originated postponement is taken back and the
-    // appointment returns to "Planlandı", so the right it paid for is given
-    // back. Both the source and the package are read from the *stored*
-    // appointment, since that is where the right was taken from — the admin may
-    // have changed either field in this very edit.
+    // Whether the appointment carries a spent postponement right before and
+    // after this edit. "postponedBy == user" is the single marker for that, so
+    // the counter can only ever move when the marker itself flips.
+    final bool hadRight =
+        widget.appointment.postponedBy == PostponeSource.user;
+    final bool keepsRight =
+        !clearsPostponement && _postponedBy == PostponeSource.user;
+
+    final bool isNewUserPostponement = keepsRight && !hadRight;
+
+    // The package is read from the *stored* appointment, since that is where
+    // the right was taken from — the admin may have changed it in this edit.
     final String? originalSubscriptionId = widget.appointment.subscriptionId;
-    final bool isPostponementReverted =
-        _originalStatus == AppointmentStatus.postponed &&
-        widget.appointment.postponedBy == PostponeSource.user &&
-        _appointmentStatus == AppointmentStatus.scheduled &&
+    final bool isPostponementReverted = hadRight &&
+        !keepsRight &&
         (originalSubscriptionId?.isNotEmpty ?? false);
 
     // Warn the admin when a user-originated postponement is applied but the
@@ -279,8 +289,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         updateDate: DateTime.now(),
         createUser: widget.appointment.createUser,
         updateUser: 'admin', // Assuming admin is updating
-        postponedDate: _appointmentStatus == AppointmentStatus.postponed ? _postponedDate : null,
-        postponedBy: _appointmentStatus == AppointmentStatus.postponed ? _postponedBy : null,
+        postponedDate: clearsPostponement ? null : _postponedDate,
+        postponedBy: clearsPostponement ? null : _postponedBy,
         durationMinutes: durationMinutes,
       );
 
@@ -522,13 +532,13 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               ListTile(
                 title: const Text('Erteleme Kaynağı'),
                 subtitle: Text(
-                  _postponedBy == PostponeSource.user
+                  (_postponedBy ?? PostponeSource.user) == PostponeSource.user
                       ? 'Kullanıcının erteleme hakkından düşülür'
                           '${_remainingPostponements != null ? ' • Kalan hak: $_remainingPostponements' : ''}'
                       : 'Erteleme hakkından düşülmez',
                 ),
                 trailing: DropdownButton<PostponeSource>(
-                  value: _postponedBy,
+                  value: _postponedBy ?? PostponeSource.user,
                   onChanged: (PostponeSource? newValue) {
                     if (newValue != null) {
                       setState(() => _postponedBy = newValue);
