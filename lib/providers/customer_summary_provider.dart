@@ -69,10 +69,10 @@ class CustomerSummaryProvider extends ChangeNotifier {
   ///
   /// İş kuralı: bir danışanın aynı anda yalnızca **bir** aktif paketi olur.
   /// Sayfanın mantığı bunun üzerine kurulur: önce o tek paket bulunur, satırın
-  /// geri kalanı yalnızca ondan türetilir — ödeme, seans, ertelenen randevular,
-  /// kalan erteleme hakkı, dondurulma tarihi. Danışana ait olup **bu pakete ait
-  /// olmayan** hiçbir veri satıra giremez; paketten bağımsız tek alanlar
-  /// danışanın kimliğidir (dosya no, ad-soyad).
+  /// geri kalanı yalnızca ondan türetilir — ödeme, seans, kalan erteleme
+  /// hakkı, erteleme hakkı kullanım tarihleri, dondurulma tarihi. Danışana ait
+  /// olup **bu pakete ait olmayan** hiçbir veri satıra giremez; paketten
+  /// bağımsız tek alanlar danışanın kimliğidir (dosya no, ad-soyad).
   ///
   /// Per-section failures degrade to "Hata" cells rather than dropping the
   /// whole customer.
@@ -149,7 +149,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
       freezeDate: freezeDateCell,
       seans: appts.seans,
       totalMeetings: activeSub.totalMeetings,
-      postponedDates: appts.postponedDates,
       remainingPostponements: remainingCell,
       postponementUseDates: appts.postponementUseDates,
     );
@@ -292,8 +291,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
     );
   }
 
-  /// Resolves both the session (seans) cells and the postponed-appointment
-  /// date cells for the active subscription from a single appointment query.
+  /// Resolves both the session (seans) cells and the postponement-use date
+  /// cells for the active subscription from a single appointment query.
   ///
   /// - Seans: only appointments that actually took place — status "Yapıldı"
   ///   (completed) or "Yakıldı" (burned) — ordered by [appointmentDateTime];
@@ -303,12 +302,11 @@ class CustomerSummaryProvider extends ChangeNotifier {
   ///   reappears once it is re-marked "Yapıldı" on its new date. Burned ones
   ///   are flagged with [SummaryCell.isBurned] so the table can color them
   ///   apart from the completed ones.
-  /// - Postponed dates: appointments with status "Ertelendi" ordered by
-  ///   [postponedDate]; a postponed appointment with no postponedDate becomes
-  ///   "Hata". Variable length (only the postponed ones).
-  /// - Postponement-use dates: the date of each postponed appointment whose
+  /// - Postponement-use dates: the **originally planned** date
+  ///   ([appointmentDateTime]) of each "Ertelendi" appointment whose
   ///   postponement was user-originated ([PostponeSource.user]) — only those
   ///   consume a postponement right, so this is when the customer spent one.
+  ///   The new date the appointment was moved to is deliberately not shown.
   ///   Always [CustomerSummaryRow.maxPostponementUses] entries; when more
   ///   rights were spent, the most recent ones are kept.
   Future<_AppointmentCells> _resolveAppointmentCells(
@@ -323,9 +321,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       final seansDates = <_SummaryDate>[];
       int seansNullCount = 0;
-
-      final postponedDates = <_SummaryDate>[];
-      int postponedNullCount = 0;
 
       final postponementUseDates = <_SummaryDate>[];
       int postponementUseNullCount = 0;
@@ -355,26 +350,17 @@ class CustomerSummaryProvider extends ChangeNotifier {
           }
         }
 
-        // Collect postponed ("Ertelendi") appointments separately (independent
-        // of the seans filter above).
-        if (status == AppointmentStatus.postponed.label) {
-          final rawPostponed = data['postponedDate'];
-          if (rawPostponed is Timestamp) {
-            postponedDates.add(_SummaryDate(rawPostponed.toDate()));
+        // Collect user-originated postponements separately (independent of the
+        // seans filter above). A postponement right is only spent when the
+        // customer asked for it, and the appointment's originally planned date
+        // is when it was spent.
+        if (status == AppointmentStatus.postponed.label &&
+            data['postponedBy'] == PostponeSource.user.value) {
+          final rawDate = data['appointmentDateTime'];
+          if (rawDate is Timestamp) {
+            postponementUseDates.add(_SummaryDate(rawDate.toDate()));
           } else {
-            // Postponed but the new date is missing => error.
-            postponedNullCount++;
-          }
-
-          // A postponement right is only spent when the customer asked for the
-          // postponement; the appointment's own date is when it was spent.
-          if (data['postponedBy'] == PostponeSource.user.value) {
-            final rawDate = data['appointmentDateTime'];
-            if (rawDate is Timestamp) {
-              postponementUseDates.add(_SummaryDate(rawDate.toDate()));
-            } else {
-              postponementUseNullCount++;
-            }
+            postponementUseNullCount++;
           }
         }
       }
@@ -385,12 +371,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
           nullCount: seansNullCount,
           cap: max,
           padToCap: true,
-        ),
-        postponedDates: _buildDateCells(
-          dates: postponedDates,
-          nullCount: postponedNullCount,
-          cap: null,
-          padToCap: false,
         ),
         postponementUseDates: _buildDateCells(
           dates: postponementUseDates,
@@ -404,7 +384,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
           [userId, subscriptionId, e]);
       return _AppointmentCells(
         seans: List<SummaryCell>.filled(max, const SummaryCell.error()),
-        postponedDates: const [SummaryCell.error()],
         postponementUseDates: List<SummaryCell>.filled(
             CustomerSummaryRow.maxPostponementUses,
             const SummaryCell.error()),
@@ -471,15 +450,14 @@ class _SummaryDate {
   const _SummaryDate(this.date, {this.isBurned = false});
 }
 
-/// Internal holder for the appointment-derived cells (seans + postponed dates).
+/// Internal holder for the appointment-derived cells (seans + postponement-use
+/// dates).
 class _AppointmentCells {
   final List<SummaryCell> seans;
-  final List<SummaryCell> postponedDates;
   final List<SummaryCell> postponementUseDates;
 
   const _AppointmentCells({
     required this.seans,
-    required this.postponedDates,
     required this.postponementUseDates,
   });
 }
