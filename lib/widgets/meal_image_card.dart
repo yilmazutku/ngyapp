@@ -207,7 +207,7 @@ class MealImageCard extends StatelessWidget {
                         const SizedBox(width: _spacing),
                         Flexible(
                           child: Text(
-                            meal.mealType.label,
+                            meal.mealType.photoLabel,
                             style: TextStyle(
                               fontSize: _labelFontSize,
                               fontWeight: FontWeight.bold,
@@ -269,7 +269,7 @@ Future<void> showMealImageDetailsDialog(
       return AlertDialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
         title: Text(
-          '${meal.mealType.label} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}',
+          '${meal.mealType.photoLabel} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}',
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         content: ConstrainedBox(

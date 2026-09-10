@@ -142,6 +142,23 @@ enum Meals {
   static List<Meals> get dietValues =>
       values.where((m) => m != Meals.none).toList();
 
+  /// Ara öğün mü (numaralı üç ara öğünden biri).
+  bool get isSnack =>
+      this == Meals.firstmid ||
+      this == Meals.secondmid ||
+      this == Meals.thirdmid;
+
+  /// Fotoğraf ekranlarında gösterilen öğün adı.
+  ///
+  /// Ara öğünler numaralandırılmadan tek ad altında toplanır: fotoğrafa
+  /// bakarken "Ara Öğün 1/2/3" ayrımının bilgi değeri yok, kart etiketini
+  /// gereksiz uzatıyor. Diyet ekranları ve hatırlatmalar kendi adlarını
+  /// ([label], [displayLabel]) kullanmayı sürdürür.
+  String get photoLabel => isSnack ? snackPhotoLabel : label;
+
+  /// Ara öğünlerin fotoğraf ekranlarındaki ortak adı.
+  static const String snackPhotoLabel = 'Ara Öğün';
+
   /// Returns a simplified display label where all "Ara Öğün" types are shown as just "Ara"
   String get displayLabel {
     if (this == Meals.firstmid || this == Meals.secondmid || this == Meals.thirdmid) {
