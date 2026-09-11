@@ -3,14 +3,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/meas_provider.dart';
-import '../models/logger.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger log = Logger.forClass(TanitaExplorerPage);
 
 class TanitaExplorerPage extends StatefulWidget {
   final String userId;
@@ -74,7 +71,6 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         withData: false,
       );
       if (result == null || result.files.isEmpty) {
-        log.info('No PDF selected.');
         return;
       }
 
@@ -104,14 +100,11 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
           // Guard against pathologically large files that would otherwise make
           // the upload very slow and risk crashing the app on Windows desktop.
           if (file.size > kMaxUploadBytes) {
-            log.warn('Tanita PDF too large, skipping: {} ({} bytes)',
-                [file.name, file.size]);
             failed.add('${file.name} (çok büyük, en fazla $kMaxUploadSizeLabel)');
             continue;
           }
           final path = file.path;
           if (path == null) {
-            log.warn('No file path for Tanita PDF: {}', [file.name]);
             failed.add('${file.name} (dosya okunamadı)');
             continue;
           }
@@ -123,7 +116,6 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
             );
             success++;
           } catch (e) {
-            log.err('Error uploading Tanita PDF {}: {}', [file.name, e]);
             failed.add(e is UploadTimeoutException
                 ? '${file.name} (${e.userMessage})'
                 : file.name);
@@ -170,7 +162,6 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         if (mounted) setState(() { _busy = false; });
       }
     } catch (e) {
-      log.err('File pick error: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -221,7 +212,6 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         );
       }
     } catch (e) {
-      log.err('Error deleting Tanita PDF {}: {}', [pdf.docId, e]);
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;

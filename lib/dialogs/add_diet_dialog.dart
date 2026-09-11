@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 // Replace with your actual imports
 import '../models/diet_goals.dart'; // Su / Spor hedefi satırları
 import '../models/diet_section.dart'; // Hafta İçi / Hafta Sonu split
-import '../models/logger.dart';
 import '../models/meal_model.dart'; // For Meals enum
 import '../models/special_line_model.dart'; // SpecialLinesRegistry / detect
 import '../models/subs_model.dart'; // Add subscription model import
@@ -21,9 +20,6 @@ import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/diet_plan_view.dart';
-
-/// We'll create a logger for this dialog
-final Logger log = Logger.forClass(AddDietDialog);
 
 class AddDietDialog extends StatefulWidget {
   final String userId; // Which user to upload diets for
@@ -44,11 +40,8 @@ class _AddDietDialogState extends State<AddDietDialog> {
   List<Map<String, dynamic>> weekdaySubtitles = [];
 
   // Weekend (Hafta Sonu) meal list. Only populated when the docx contained a
-  // standalone "HAFTASONU" line; [_hasWeekend] tracks whether that happened.
+  // standalone "HAFTASONU" line.
   List<Map<String, dynamic>> weekendSubtitles = [];
-
-  // Set true once a "HAFTASONU" marker splits the document into two menus.
-  bool _hasWeekend = false;
 
   // Parsed menus in the same shape the user's plan is rendered from, so the
   // preview matches the "Planım" page one-to-one.
@@ -164,14 +157,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
         _selectedSubscription =
             activeSubscriptions.isNotEmpty ? activeSubscriptions.first : null;
       });
-
-      if (activeSubscriptions.isEmpty) {
-        log.warn(
-            'No active subscription for user {}; diet will be imported without one.',
-            [widget.userId]);
-      }
     } catch (e) {
-      log.err('Error fetching subscriptions: {}', [e]);
       if (!mounted) return;
       
       setState(() {
@@ -460,9 +446,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       await Provider.of<SpecialLinesProvider>(context, listen: false)
           .fetchSpecialLines();
     } catch (e) {
-      log.warn(
-          'Could not load admin special lines, falling back to built-ins only: {}',
-          [e]);
     }
 
     // Clear any old parse data (rebuild both menus from scratch).
@@ -471,7 +454,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     for (final subtitle in [...weekdaySubtitles, ...weekendSubtitles]) {
       subtitle['time'] = '';
     }
-    _hasWeekend = false;
     _localFilePath = null;
     _hasParsedPreview = false;
     // Reset any previously detected/attached recipe.
@@ -493,8 +475,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
         Uint8List? fileBytes = result.files.single.bytes;
         String fileName = result.files.single.name;
         if (result.files.single.size > kMaxUploadBytes) {
-          log.warn('Diet source file too large: {} ({} bytes)',
-              [fileName, result.files.single.size]);
           if (mounted) {
             await DialogUtils.openError(
               context,
@@ -511,8 +491,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
           await handleFile(
               fileBytes, fileName, _onFileProcessed, _onFileProcessingError);
         } else {
-          log.warn(
-              'fileBytes is null. cannot continue with handleFile method.');
           if(mounted) {
             DialogUtils.openError(context,
               title: 'Hata',
@@ -524,7 +502,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
         _onFileProcessingError(e.toString());
       }
     } else {
-      log.info('File selection canceled.');
       if (mounted) {
         await _showSnackbar('Dosya seçimi iptal edildi.');
       }
@@ -540,7 +517,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     _extractSubtitles(text);
     // Detect the "*tarifi ektedir" reference so the admin can attach a recipe.
     _hasRecipeMarker = _detectRecipeMarker();
-    log.info('Recipe marker detected in parsed diet: {}', [_hasRecipeMarker]);
     // Show the preview
     setState(() {
       _rebuildPreviewMenus();
@@ -584,7 +560,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       withData: true,
     );
     if (result == null) {
-      log.debug('Recipe PDF selection canceled.');
       return;
     }
 
@@ -592,7 +567,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     // Reject pathologically large PDFs up-front (slow / risk of crashing the
     // app on Windows desktop) instead of holding them in memory.
     if (file.size > kMaxUploadBytes) {
-      log.warn('Recipe PDF too large: {} ({} bytes)', [file.name, file.size]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -604,7 +578,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     }
     final bytes = file.bytes;
     if (bytes == null) {
-      log.warn('Recipe PDF bytes are null.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -619,11 +592,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
       _recipePdfBytes = bytes;
       _recipePdfName = file.name;
     });
-    log.info('Recipe PDF selected: {}', [file.name]);
   }
 
   void _onFileProcessingError(String error) {
-    log.err('Error processing file: {}', [error]);
     if (!mounted) return;
     DialogUtils.openError(
       context,
@@ -659,86 +630,11 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   /// EXACT logic from your FileHandlerPage's _extractSubtitles
   void _extractSubtitles(String text) {
-    log.info('text={}', [text]);
-
     final lines = text
         .split(RegExp(r'\r\n|\r|\n'))
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .toList();
-
-    // ----------------------------------------------------------------------
-    // TEMP DIAGNOSTIC (remove after debugging). For every parsed line dumps:
-    //   * exact characters with whitespace made visible,
-    //   * raw codeUnits,
-    //   * whether it is detected as a meal header (and which meal), and
-    //   * what SpecialLinesRegistry.detect() returns (marker + content).
-    //   » = TAB(0x09)  · = SPACE(0x20)  ⍽ = NBSP(0xA0)  ∅ = ZWSP(0x200B)
-    //   \xNN = any other control char (shown by hex code)
-    String visualize(String s) {
-      final sb = StringBuffer();
-      for (final r in s.runes) {
-        switch (r) {
-          case 0x09:
-            sb.write('»');
-            break;
-          case 0x20:
-            sb.write('·');
-            break;
-          case 0xA0:
-            sb.write('⍽');
-            break;
-          case 0x200B:
-            sb.write('∅');
-            break;
-          default:
-            if (r < 0x20) {
-              sb.write('\\x${r.toRadixString(16).padLeft(2, '0')}');
-            } else {
-              sb.writeCharCode(r);
-            }
-        }
-      }
-      return sb.toString();
-    }
-
-    String mealHit(String dl) {
-      final low = dl.toLowerCase();
-      if (_containsMealWord(low, 'sabah', atStart: true) ||
-          _containsMealWord(low, 'kahvaltı', atStart: true)) return 'SABAH';
-      if (_containsMealWord(low, 'öğle', atStart: true)) return 'ÖĞLE';
-      if (_containsMealWord(low, 'akşam', atStart: true)) return 'AKŞAM';
-      if (_containsMealWord(low, 'ara öğün 1', atStart: true)) {
-        return 'ARA ÖĞÜN 1';
-      }
-      if (_containsMealWord(low, 'ara öğün 2', atStart: true)) {
-        return 'ARA ÖĞÜN 2';
-      }
-      if (_containsMealWord(low, 'ara öğün 3', atStart: true)) {
-        return 'ARA ÖĞÜN 3';
-      }
-      if (_containsMealWord(low, 'ara', atStart: true) &&
-          !_containsMealWord(low, 'öğün')) return 'ARA(bare)';
-      return '-';
-    }
-
-    log.info('[DIET-DIAG] Special markers loaded: {}',
-        [SpecialLinesRegistry.all.map((c) => c.toTemplate()).join(' | ')]);
-    for (int d = 0; d < lines.length; d++) {
-      final dl = lines[d];
-      final match = SpecialLinesRegistry.detect(dl);
-      log.info(
-          '[DIET-DIAG] LINE[{}] meal={} text="{}" | detect={} | codeUnits={}', [
-        d,
-        mealHit(dl),
-        visualize(dl),
-        match == null
-            ? 'NONE'
-            : 'marker="${match.markerLabel}" after="${visualize(match.contentAfter)}"',
-        dl.codeUnits,
-      ]);
-    }
-    // -------------------------- END TEMP DIAGNOSTIC --------------------------
 
     // Two parallel meal lists — one for the weekday (Hafta İçi) menu and one
     // for the weekend (Hafta Sonu) menu. Everything parsed before a standalone
@@ -764,11 +660,8 @@ class _AddDietDialogState extends State<AddDietDialog> {
       if (sectionMarker != null) {
         if (sectionMarker == DietSection.weekend) {
           mealMatchers = weekendMatchers;
-          _hasWeekend = true;
-          log.info('Switched to WEEKEND (Hafta Sonu) menu at line {}', [i]);
         } else {
           mealMatchers = weekdayMatchers;
-          log.info('Switched to WEEKDAY (Hafta İçi) menu at line {}', [i]);
         }
         currentSubtitle = null;
         mealSequence = 0;
@@ -788,7 +681,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
           } else {
             _sportGoal ??= goal.line;
           }
-          log.info('Captured diet goal ({}): {}', [goal.type.name, goal.line]);
         }
         continue;
       }
@@ -853,7 +745,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       }
 
       if (foundSubtitle.isNotEmpty) {
-        log.info('Found subtitle: {}', [foundSubtitle['name']]);
         currentSubtitle = foundSubtitle;
 
         // A meal-header line leads with the meal name and its time, e.g.
@@ -871,8 +762,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
           timeStr = timeStr.replaceAll('.', ':');
           currentSubtitle['time'] = timeStr;
           contentSearchStart = timeMatch.end;
-          log.info('Extracted time for subtitle {}: {}',
-              [currentSubtitle['name'], currentSubtitle['time']]);
         } else {
           // If no time found, try to extract just numbers that might represent time
           final numberMatch = RegExp(r'(\d{1,2})').firstMatch(line);
@@ -880,8 +769,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
             final hour = int.tryParse(numberMatch.group(0)!);
             if (hour != null && hour >= 0 && hour <= 23) {
               currentSubtitle['time'] = '$hour:00';
-              log.info('Extracted hour for subtitle {}: {}',
-                  [currentSubtitle['name'], currentSubtitle['time']]);
             }
           }
         }
@@ -892,33 +779,14 @@ class _AddDietDialogState extends State<AddDietDialog> {
         if (separatorIdx != -1) {
           final inlineContent = line.substring(separatorIdx + 1).trim();
           if (inlineContent.isNotEmpty) {
-            log.info('Adding inline header content to subtitle {}: {}',
-                [currentSubtitle['name'], inlineContent]);
             _addContentLine(currentSubtitle, inlineContent);
           }
         }
       } else if (currentSubtitle != null) {
         // If we have an active subtitle, treat this line as content
-        log.info('Adding content to subtitle {}: {}',
-            [currentSubtitle['name'], line]);
         _addContentLine(currentSubtitle, line);
       }
     }
-
-    // Check if we found any content across either menu
-    bool foundAnyContent = false;
-    for (var subtitle in [...weekdaySubtitles, ...weekendSubtitles]) {
-      if ((subtitle['content'] as List).isNotEmpty) {
-        foundAnyContent = true;
-        break;
-      }
-    }
-
-    if (!foundAnyContent) {
-      log.warn('No content found in parsed document');
-    }
-    log.info('Parsed weekday+weekend menus. hasWeekend={}, weekendHasContent={}',
-        [_hasWeekend, _weekendHasContent]);
   }
 
   /// Adds a single food line to [currentSubtitle]'s content.
@@ -981,12 +849,10 @@ class _AddDietDialogState extends State<AddDietDialog> {
           }
         }
       } catch (e) {
-        log.warn('Error finding enum for meal: {} - {}', [mealName, e]);
       }
 
       // If we still don't have an enum key, skip this entry
       if (enumKey.isEmpty) {
-        log.warn('Could not find enum key for meal: {}', [mealName]);
         continue;
       }
 
@@ -1057,8 +923,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
           recipeUrl = info['url'];
           recipePath = info['path'];
           recipeName = info['name'];
-        } else {
-          log.warn('Recipe PDF upload failed; diet will be saved without it.');
         }
       }
 
@@ -1075,8 +939,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
           sourceUrl = info['url'];
           sourcePath = info['path'];
           sourceName = info['name'];
-        } else {
-          log.warn('Source docx upload failed; diet will be saved without it.');
         }
       }
 
@@ -1108,7 +970,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       });
 
       if (docId != null) {
-        log.info('Diet list uploaded with ID: {}', [docId]);
         if (!mounted) return;
         await DialogUtils.openInfo(
           context,
@@ -1133,7 +994,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
         _isUploading = false;
       });
       
-      log.err('Error uploading diet list: {}', [e.toString()]);
       await DialogUtils.openError(
         context,
         title: 'Hata',

@@ -9,7 +9,6 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../constants/app_constants.dart';
 import '../models/diet_section.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 
 /// Service for scheduling meal upload reminder notifications.
@@ -24,7 +23,6 @@ class MealReminderService {
   factory MealReminderService() => _instance;
   MealReminderService._internal();
 
-  final Logger _logger = Logger.forClass(MealReminderService);
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -68,7 +66,6 @@ class MealReminderService {
     await _notifications.initialize(initSettings);
 
     _isInitialized = true;
-    _logger.info('MealReminderService initialized');
   }
 
   /// Ensure initialized before scheduling
@@ -92,7 +89,6 @@ class MealReminderService {
   Future<void> scheduleMealReminders(String userId) async {
     final isReady = await _ensureInitialized();
     if (!isReady) {
-      _logger.info('Meal reminders not supported on this platform');
       return;
     }
 
@@ -102,14 +98,12 @@ class MealReminderService {
       final userData = userDoc.data();
       
       if (userData == null || userData['mealNotificationsEnabled'] != true) {
-        _logger.info('Meal notifications disabled for user $userId');
         return;
       }
 
       // 2. Fetch the latest diet subtitles (meal times)
       final mealTimes = await _fetchUserMealTimes(userId);
       if (mealTimes.isEmpty) {
-        _logger.info('No meal times found for user $userId');
         return;
       }
 
@@ -118,7 +112,6 @@ class MealReminderService {
 
       // 4. Schedule reminders for unchecked meals
       final now = DateTime.now();
-      int scheduledCount = 0;
 
       for (final entry in mealTimes.entries) {
         final meal = entry.key;
@@ -126,7 +119,6 @@ class MealReminderService {
 
         // Skip if meal is already checked/uploaded
         if (mealStates[meal] == true) {
-          _logger.debug('Meal ${meal.name} already checked, skipping');
           continue;
         }
 
@@ -147,16 +139,9 @@ class MealReminderService {
             body: NotificationConstants.getMealReminderBody(meal.displayLabel),
             scheduledTime: reminderTime,
           );
-          scheduledCount++;
-          _logger.info('Scheduled reminder for ${meal.name} at $reminderTime');
-        } else {
-          _logger.debug('Reminder time for ${meal.name} has passed');
         }
       }
-
-      _logger.info('Scheduled $scheduledCount meal reminders for user $userId');
     } catch (e) {
-      _logger.err('Error scheduling meal reminders: $e');
     }
   }
 
@@ -172,9 +157,7 @@ class MealReminderService {
     try {
       final notificationId = MEAL_NOTIFICATION_BASE_ID + meal.index;
       await _notifications.cancel(notificationId);
-      _logger.info('Cancelled reminder for ${meal.name}');
     } catch (e) {
-      _logger.err('Error cancelling meal reminder: $e');
     }
   }
 
@@ -190,9 +173,7 @@ class MealReminderService {
         final notificationId = MEAL_NOTIFICATION_BASE_ID + meal.index;
         await _notifications.cancel(notificationId);
       }
-      _logger.info('Cancelled all meal reminders');
     } catch (e) {
-      _logger.err('Error cancelling all meal reminders: $e');
     }
   }
 
@@ -210,7 +191,6 @@ class MealReminderService {
           .get();
 
       if (querySnapshot.docs.isEmpty) {
-        _logger.info('No diet lists found for user $userId');
         return mealTimes;
       }
 
@@ -226,11 +206,8 @@ class MealReminderService {
       final subtitles = useWeekend ? weekendSubtitles : weekdaySubtitles;
 
       if (subtitles == null) {
-        _logger.warn('Diet list has no subtitles');
         return mealTimes;
       }
-      _logger.info('Using {} menu for meal reminders',
-          [useWeekend ? 'weekend' : 'weekday']);
 
       for (final entry in subtitles.entries) {
         final mealName = entry.key;
@@ -257,7 +234,6 @@ class MealReminderService {
         mealTimes[meal] = time;
       }
     } catch (e) {
-      _logger.err('Error fetching user meal times: $e');
     }
 
     return mealTimes;
@@ -292,7 +268,6 @@ class MealReminderService {
         }
       }
     } catch (e) {
-      _logger.err('Error fetching meal states: $e');
     }
 
     return states;
@@ -312,7 +287,6 @@ class MealReminderService {
         }
       }
     } catch (e) {
-      _logger.err('Error parsing time string "$timeString": $e');
     }
     return null;
   }
@@ -371,9 +345,7 @@ class MealReminderService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
-      _logger.info('scheduled notification {}');
     } catch (e) {
-      _logger.err('Error scheduling notification: $e');
     }
   }
 }

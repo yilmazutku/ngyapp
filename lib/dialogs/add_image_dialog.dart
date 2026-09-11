@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/subs_model.dart';
 import '../providers/meal_state_and_upload_manager.dart';
@@ -28,7 +27,6 @@ class AddImageDialog extends StatefulWidget {
 }
 
 class _AddImageDialogState extends State<AddImageDialog> {
-  final Logger logger = Logger.forClass(AddImageDialog);
   final ImagePicker _picker = ImagePicker();
   XFile? _selectedImage;
   Meals? _selectedMeal;
@@ -71,7 +69,6 @@ class _AddImageDialogState extends State<AddImageDialog> {
       });
       
       if (activeSubscriptions.isEmpty) {
-        logger.err('No active subscriptions found for user: {}', [widget.userId]);
         if (mounted) {
           await DialogUtils.openError(
             context,
@@ -82,7 +79,6 @@ class _AddImageDialogState extends State<AddImageDialog> {
         }
       }
     } catch (e) {
-      logger.err('Error fetching subscriptions: {}', [e]);
       setState(() {
         _isLoadingSubscriptions = false;
       });
@@ -195,7 +191,6 @@ class _AddImageDialogState extends State<AddImageDialog> {
         });
       }
     } catch (e) {
-      logger.err('Error picking image: $e');
       setState(() {
         _errorMessage = 'Error picking image.';
       });
@@ -262,7 +257,6 @@ class _AddImageDialogState extends State<AddImageDialog> {
         });
       }
     } catch (e) {
-      logger.err('Error in _uploadImage: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,

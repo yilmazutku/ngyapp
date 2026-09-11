@@ -14,11 +14,8 @@ import '../dialogs/add_appointment_dialog.dart';
 import '../dialogs/add_sub_dialog.dart';
 import '../dialogs/add_diet_dialog.dart';
 import '../models/user_model.dart';
-import '../models/logger.dart';
 import '../tabs/basetab.dart';
 import '../tabs/sub_tab.dart';
-
-final Logger logger = Logger.forClass(CustomerSummaryPage);
 
 class CustomerSummaryPage extends StatefulWidget {
   final UserModel user;
@@ -55,7 +52,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
       if (_tabController.indexIsChanging) return;
       final newIndex = _tabController.index;
       if (newIndex == _previousTabIndex) return;
-      logger.info('Tab changed: index={}', [newIndex]);
       _previousTabIndex = newIndex;
       if (!_tabVisited[newIndex]) {
         // First visit: build the tab; it fetches its own data on init.
@@ -75,7 +71,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
   void _autoRefreshTab(int index) {
     final state = _keys[index].currentState;
     if (state is BaseTabState) {
-      logger.info('Auto-refreshing tab on re-entry: index={}', [index]);
       state.refreshData();
     }
   }
@@ -215,7 +210,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
         return AddSubscriptionDialog(
           userId: widget.user.userId,
           onSubscriptionAdded: () {
-            logger.info('Subscription added and refreshed for userId={}', [widget.user.userId]);
             // Tabs keep their own state; relevant tabs will react via providers.
           },
         );
@@ -230,7 +224,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
         return AddAppointmentDialog(
           userId: widget.user.userId,
           onAppointmentAdded: () {
-            logger.info('Appointment added for userId={}', [widget.user.userId]);
           },
         );
       },
@@ -244,7 +237,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
         return AddPaymentDialog(
           userId: widget.user.userId,
           onPaymentAdded: () {
-            logger.info('Payment added for userId={}', [widget.user.userId]);
           },
         );
       },
@@ -258,7 +250,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
         return AddImageDialog(
           userId: widget.user.userId,
           onImageAdded: () {
-            logger.info('Image added for userId={}', [widget.user.userId]);
           },
         );
       },

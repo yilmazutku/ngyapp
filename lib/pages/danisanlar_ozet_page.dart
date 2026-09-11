@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/customer_summary_row.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../models/summary_color_config.dart';
 import '../providers/customer_summary_provider.dart';
@@ -11,8 +10,6 @@ import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import 'customer_sum.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger logger = Logger.forClass(DanisanlarOzetPage);
 
 /// Sayfanın app bar mavisi. Sayfa içindeki "Yenile" butonu da aynı tonu
 /// kullanır.
@@ -73,7 +70,6 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     try {
       await provider.fetchColors(force: true);
     } catch (e) {
-      logger.err('Failed to load summary colors: {}', [e]);
     }
     if (!mounted) return;
     setState(() {});
@@ -273,7 +269,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         _loading = false;
       });
     } catch (e) {
-      logger.err('Failed to load customer summaries: {}', [e]);
       if (!mounted) return;
       setState(() {
         _error = 'Özet verileri yüklenirken bir hata oluştu.';
@@ -504,7 +499,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         return;
       }
 
-      logger.info('Opening customer details from summary: userId={}', [row.userId]);
       // The details tab pops back with the deleted user's id when the admin
       // removes them, so the row is dropped here instead of leaving a customer
       // listed who no longer exists.
@@ -519,7 +513,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         });
       }
     } catch (e) {
-      logger.err('Could not open customer details for {}: {}', [row.userId, e]);
       closeLoading();
       if (!mounted) return;
       await DialogUtils.openError(

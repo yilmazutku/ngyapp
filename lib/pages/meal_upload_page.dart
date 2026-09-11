@@ -10,7 +10,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diet_goals.dart';
 import '../models/diet_section.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../providers/daily_data_provider.dart';
 import '../providers/diet_provider.dart';
@@ -26,8 +25,6 @@ import '../widgets/chat_image_preview.dart';
 import '../widgets/diet_plan_view.dart';
 import '../widgets/loading_overlay.dart';
 import 'dart:async';
-
-final Logger logger = Logger.forClass(MealUploadPage);
 
 /// Set to false to hide font size adjustment controls
 const bool IS_TESTING = false;
@@ -142,9 +139,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
           }
         });
       }
-      logger.debug('Loaded expanded meals: {}', [expandedList]);
     } catch (e) {
-      logger.err('Error loading expanded meals: {}', [e.toString()]);
     }
   }
 
@@ -157,9 +152,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
           .map((entry) => entry.key)
           .toList();
       await prefs.setStringList(_expandedMealsKey, expandedList);
-      logger.debug('Saved expanded meals: {}', [expandedList]);
     } catch (e) {
-      logger.err('Error saving expanded meals: {}', [e.toString()]);
     }
   }
 
@@ -168,7 +161,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
     try {
       await _mealReminderService.scheduleMealReminders(widget.userId);
     } catch (e) {
-      logger.err('Error scheduling meal reminders: {}', [e.toString()]);
     }
   }
 
@@ -180,9 +172,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         await Provider.of<SpecialLinesProvider>(context, listen: false)
             .fetchSpecialLines();
       } catch (e) {
-        logger.warn(
-            'Could not load admin special lines, falling back to built-ins only: {}',
-            [e.toString()]);
       }
 
       // Fetch the latest diet document (weekday + optional weekend menus).
@@ -191,10 +180,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
       if (!mounted) return;
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
       final diet = await dietProvider.fetchLatestDietDocument(widget.userId);
-
-      if (diet == null) {
-        logger.warn('No diet lists found for the user.');
-      }
 
       if (!mounted) return;
       setState(() {
@@ -235,7 +220,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         _waterIntakeLiters = (dailyData.waterIntake as num).toDouble();
       });
     } catch (e) {
-      logger.err('Error fetching meal states or contents: {}', [e.toString()]);
     }
   }
 
@@ -264,7 +248,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         _mealImages = map;
       });
     } catch (e) {
-      logger.err('Error refreshing meal images: {}', [e]);
     }
   }
 
@@ -282,7 +265,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
     }
 
     var status = await permission.status;
-    logger.info('Photo permission initial status: {}', [status.toString()]);
 
     // Already granted or limited access - proceed
     if (status.isGranted || status.isLimited) {
@@ -293,9 +275,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting photo permission...');
       status = await permission.request();
-      logger.info('Photo permission after request: {}', [status.toString()]);
       
       if (status.isGranted || status.isLimited) {
         return true;
@@ -325,7 +305,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
   /// Shows a dialog to open Settings if permission is permanently denied.
   Future<bool> _checkCameraPermission() async {
     var status = await Permission.camera.status;
-    logger.info('Camera permission initial status: {}', [status.toString()]);
 
     // Already granted - proceed
     if (status.isGranted) {
@@ -336,9 +315,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied or restricted
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting camera permission...');
       status = await Permission.camera.request();
-      logger.info('Camera permission after request: {}', [status.toString()]);
       
       if (status.isGranted) {
         return true;
@@ -365,8 +342,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   /// Show dialog to choose image source (gallery or camera)
   Future<ImageSource?> _chooseSource() async {
-    logger.debug('Opening image source selection dialog');
-    
     return showDialog<ImageSource>(
       context: context,
       builder: (_) => AlertDialog(
@@ -375,14 +350,12 @@ class _MealUploadPageState extends State<MealUploadPage> {
         actions: [
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: gallery');
               Navigator.pop(context, ImageSource.gallery);
             },
             child: const Text('Galeri'),
           ),
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: camera');
               Navigator.pop(context, ImageSource.camera);
             },
             child: const Text('Kamera'),
@@ -396,17 +369,14 @@ class _MealUploadPageState extends State<MealUploadPage> {
     // 1) Choose image source (gallery or camera)
     final ImageSource? source = await _chooseSource();
     if (source == null) {
-      logger.debug('Meal upload cancelled: No source selected');
       return;
     }
-    logger.debug('Image source selected: {}', [source.name]);
 
     // 2) Check permission based on selected source
     final hasPermission = source == ImageSource.camera
         ? await _checkCameraPermission()
         : await _checkPhotoPermission();
     if (!hasPermission) {
-      logger.info('Permission denied for {}, aborting upload', [source.name]);
       return;
     }
 
@@ -499,7 +469,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         );
       }
     } catch (e) {
-      logger.err('Error in _uploadMealImage: {}', [e.toString()]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -554,7 +523,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         message: 'Günlük verileriniz başarıyla kaydedildi.',
       );
     } catch (e) {
-      logger.err('Error saving daily data: {}', [e.toString()]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -572,7 +540,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   @override
   Widget build(BuildContext context) {
-    logger.info('Building MealUploadPage');
     const defaultMealTime = TimeOfDay(hour: 0, minute: 0);
 
     return Scaffold(
@@ -590,8 +557,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               } else if (snapshot.hasError) {
-                logger.err('Error in FutureBuilder: {}',
-                    [snapshot.error ?? 'snapshot error']);
                 return Center(child: Text('Error: ${snapshot.error}'));
               } else {
                 return SingleChildScrollView(
@@ -1374,9 +1339,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
                                                       }
                                                       setSheetState(() {});
                                                     } catch (e) {
-                                                      logger.err(
-                                                          'Error deleting meal image: {}',
-                                                          [e]);
                                                       // Guarded on ctx, the
                                                       // sheet's own context.
                                                       if (ctx.mounted) {

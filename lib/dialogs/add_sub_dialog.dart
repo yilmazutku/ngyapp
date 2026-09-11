@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
@@ -9,8 +8,6 @@ import '../providers/sub_provider.dart';
 import '../utils/amount_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
-
-final Logger logger = Logger.forClass(AddSubscriptionDialog);
 
 class AddSubscriptionDialog extends StatefulWidget {
   final String userId;
@@ -550,7 +547,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
 
   Future<void> _addSubscription() async {
     if (!_formKey.currentState!.validate()) {
-      logger.warn('Form doğrulama başarısız.');
       return;
     }
 
@@ -560,7 +556,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
         title: 'Hata',
         message: 'Lütfen başlangıç tarihini seçin.',
       );
-      logger.warn('Başlangıç tarihi seçilmedi.');
       return;
     }
 
@@ -570,7 +565,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
         title: 'Hata',
         message: 'Paket donduruldu olarak işaretlendi. Lütfen dondurulma tarihini seçin.',
       );
-      logger.warn('Dondurulma tarihi seçilmedi.');
       return;
     }
 
@@ -585,7 +579,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
           title: 'Hata',
           message: 'Online ve yüz yüze görüşme sayıları toplamı, toplam görüşme sayısına eşit olmalıdır.',
         );
-        logger.warn('Online ve yüz yüze görüşme sayıları toplamı toplam görüşme sayısına eşit değil.');
         return;
       }
     }
@@ -649,8 +642,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
         subscriptionData: subscriptionData,
       );
 
-      logger.info('Yeni abonelik eklendi');
-      
       // If payment is received, create a payment record
       if (paymentReceived && subscriptionId != null) {
         try {
@@ -678,10 +669,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
             paymentType: _paymentType,
             notes: 'Paket ödemesi: ${_packageNameController.text}',
           );
-          
-          logger.info('Abonelik ödemesi eklendi');
         } catch (e) {
-          logger.err('Error adding payment: {}', [e]);
           if (mounted) {
             await DialogUtils.openError(
               context,
@@ -720,10 +708,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
             paymentType: PaymentType.na,
             notes: 'Paket ödemesi: ${_packageNameController.text}',
           );
-
-          logger.info('Planlanan abonelik ödemesi eklendi');
         } catch (e) {
-          logger.err('Error adding planned payment: {}', [e]);
           if (mounted) {
             await DialogUtils.openError(
               context,
@@ -749,7 +734,6 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
-      logger.err('Error adding subscription: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,

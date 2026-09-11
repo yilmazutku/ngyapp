@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
@@ -64,8 +63,6 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   // Weight-tracking packages have no payment; payment widgets are hidden.
   bool get _isWeightTracking =>
       _status == SubActiveStatus.activeWeightTracking;
-
-  final Logger _logger = Logger.forClass(EditSubscriptionDialog);
 
   // Payment type of the payment(s) linked to this subscription.
   // Null = unspecified (PaymentType.na). Loaded from the linked payment so the
@@ -181,7 +178,6 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         });
       }
     } catch (e) {
-      _logger.err('Error loading linked payment type: {}', [e]);
       if (mounted) {
         setState(() => _loadingPaymentType = false);
       }

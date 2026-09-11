@@ -10,7 +10,6 @@ import 'package:provider/provider.dart';
 
 import '../models/diet_model.dart';
 import '../models/diet_section.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/mock_test_run.dart';
 import '../models/subs_model.dart';
@@ -26,8 +25,6 @@ import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/status_note.dart';
-
-final Logger logger = Logger.forClass(AdminMockMealPhotosPage);
 
 /// TEST ARACI: seçilen danışanlar adına geçici diyet + sahte öğün fotoğrafı
 /// yükler ve ürettiği her şeyi tek tuşla geri siler.
@@ -141,7 +138,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
   @override
   void initState() {
     super.initState();
-    logger.info('AdminMockMealPhotosPage initialized');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadPage();
@@ -201,10 +197,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
             .removeWhere((id) => !clients.any((c) => c.user.userId == id));
         _isLoading = false;
       });
-      logger.info('Mock page loaded. activeClients={} pendingRuns={}',
-          [clients.length, runs.length]);
     } catch (e) {
-      logger.err('Error loading mock page: {}', [e]);
       if (!mounted) return;
       setState(() {
         _errorText = _loadErrorText;
@@ -222,7 +215,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
       if (!mounted) return;
       setState(() => _runs = runs);
     } catch (e) {
-      logger.err('Error reloading mock test runs: {}', [e]);
     }
   }
 
@@ -298,9 +290,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
         _photoName = file.name;
         _photoMimeType = _mimeTypeOf(file.extension);
       });
-      logger.info('Mock photo selected: {} ({} bytes)', [file.name, file.size]);
     } catch (e) {
-      logger.err('Error picking mock photo: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -336,8 +326,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
       _sourceDiet = selection.diet;
       _sourceDietOwner = selection.ownerName;
     });
-    logger.info('Source diet selected: {} (owner {})',
-        [selection.diet.docId, selection.ownerName]);
   }
 
   void _clearSourceDiet() {
@@ -544,8 +532,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
             '(${meals.map((meal) => meal.label).join(', ')})',
           ));
         } catch (e) {
-          logger.err(
-              'Mock upload failed for user {}: {}', [client.user.userId, e]);
           results.add(_MockResult.failed(client.displayName, 'Hata: $e'));
         }
       }
@@ -565,7 +551,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
             '(fotoğraflar + geçici diyetler) kaldırabilirsiniz.',
       );
     } catch (e) {
-      logger.err('Mock upload run failed: {}', [e]);
       _closeProgress(navigator);
       await _reloadRuns();
       if (!mounted) return;
@@ -663,7 +648,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
         message: result.summary,
       );
     } catch (e) {
-      logger.err('Mock cleanup failed: {}', [e]);
       _closeProgress(navigator);
       await _reloadRuns();
       if (!mounted) return;
@@ -1317,7 +1301,6 @@ class _SourceDietPickerDialogState extends State<_SourceDietPickerDialog> {
         _loadingDiets = false;
       });
     } catch (e) {
-      logger.err('Error loading diets of {}: {}', [customer.userId, e]);
       if (!mounted) return;
       setState(() {
         _dietError = 'Diyetler yüklenemedi.';

@@ -1,10 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../models/filter_params.dart';
-
-final Logger logger = Logger.forClass(SubProvider);
 
 /// Provides subscription management functionality, including CRUD operations
 /// for user subscription packages. Implements ChangeNotifier pattern for state management.
@@ -27,7 +24,6 @@ class SubProvider extends ChangeNotifier {
     if(_subChanged)
       return;
     _subChanged = true;
-    logger.info('** SUB MARK CHANGED.**');
     notifyListeners();
   }
 
@@ -56,7 +52,6 @@ class SubProvider extends ChangeNotifier {
     if (data == null) {
       final snap = await tx.get(subRef);
       if (!snap.exists) {
-        logger.warn('Sub not found for counter update: user={}, sub={}', [userId, subscriptionId]);
         return;
       }
       data = snap.data() as Map<String, dynamic>;
@@ -70,9 +65,6 @@ class SubProvider extends ChangeNotifier {
 
     final int newCompleted = (currentCompleted + delta).clamp(0, totalMeetings);
     tx.update(subRef, {'meetingsCompleted': newCompleted});
-
-    logger.info('meetingsCompleted adjusted: user={}, sub={}, delta={}, from {} to {}',
-        [userId, subscriptionId, delta, currentCompleted, newCompleted]);
   }
 
   /// Fetches subscriptions for a user
@@ -132,10 +124,8 @@ class SubProvider extends ChangeNotifier {
         }).toList();
       }
       
-      logger.info('Fetched {} subscriptions with filters: {}', [list.length, filterParams?.toDebugMap()]);
       return list;
     } catch (e) {
-      logger.err('Error fetching subscriptions for userId={}: {}', [userId, e]);
       rethrow;
     }
   }
@@ -148,8 +138,8 @@ class SubProvider extends ChangeNotifier {
   /// danışan dönen map'te bulunmaz.
   ///
   /// İş kuralı gereği bir danışanın aynı anda en fazla bir aktif paketi olur;
-  /// veri bozuksa durum loglanır ve başlangıç tarihi en yeni olan paket
-  /// kullanılır. Tek bir danışanın sorgusu hata verirse o danışan atlanır,
+  /// veri bozuksa başlangıç tarihi en yeni olan paket kullanılır.
+  /// Tek bir danışanın sorgusu hata verirse o danışan atlanır,
   /// çağrı bütünüyle düşmez.
   Future<Map<String, SubscriptionModel>> fetchActiveSubscriptionsOfUsers(
       List<String> userIds) async {
@@ -178,8 +168,6 @@ class SubProvider extends ChangeNotifier {
       }
     }
 
-    logger.info('Active subscriptions resolved. users={} ofRequested={}',
-        [activeByUser.length, userIds.length]);
     return activeByUser;
   }
 
@@ -199,29 +187,13 @@ class SubProvider extends ChangeNotifier {
         try {
           subs.add(SubscriptionModel.fromDocument(doc));
         } catch (e) {
-          logger.warn('Skipping malformed subscription {} for user {}: {}',
-              [doc.id, userId, e]);
         }
       }
       if (subs.isEmpty) return null;
 
       subs.sort((a, b) => b.startDate.compareTo(a.startDate));
-      if (subs.length > 1) {
-        logger.warn(
-          'Tek aktif paket kuralı bozuldu: user={} paket sayısı={} ({}). '
-          'En yenisi kullanılıyor: {}',
-          [
-            userId,
-            subs.length,
-            subs.map((s) => s.subscriptionId).join(', '),
-            subs.first.subscriptionId,
-          ],
-        );
-      }
       return subs.first;
     } catch (e) {
-      logger.err('Error fetching active subscription for user {}: {}',
-          [userId, e]);
       return null;
     }
   }
@@ -260,13 +232,11 @@ class SubProvider extends ChangeNotifier {
           .doc(subscriptionId)
           .set(finalData);
 
-      logger.info('New subscription added: {}', [finalData]);
       _subChanged = true;
       notifyListeners();
       
       return subscriptionId;
     } catch (e) {
-      logger.err('Error adding subscription for userId={}: {}', [userId, e]);
       rethrow;
     }
   }
@@ -292,13 +262,10 @@ class SubProvider extends ChangeNotifier {
           .doc(subscriptionId)
           .update(updateData);
 
-      logger.info('Subscription updated: {}', [subscriptionId]);
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error updating subscription id={} for userId={}: {}', 
-          [subscriptionId, userId, e]);
       rethrow;
     }
   }
@@ -416,16 +383,10 @@ class SubProvider extends ChangeNotifier {
       ];
       await _commitDeletesInChunks(db, refsToDelete);
 
-      logger.info(
-        'Subscription {} deleted with {} linked appointment(s) and {} linked payment(s)',
-        [subscriptionId, appointmentsSnap.docs.length, paymentsSnap.docs.length],
-      );
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error deleting subscription id={} for userId={}: {}', 
-          [subscriptionId, userId, e]);
       rethrow;
     }
   }
@@ -475,8 +436,6 @@ class SubProvider extends ChangeNotifier {
       final data = docSnapshot.data();
       return data?['packageName'] as String?;
     } catch (e) {
-      logger.err('Error fetching subscription package name for userId={}, subscriptionId={}: {}', 
-          [userId, subscriptionId, e]);
       return null;
     }
   }
@@ -507,8 +466,6 @@ class SubProvider extends ChangeNotifier {
 
       final snap = await subRef.get();
       if (!snap.exists) {
-        logger.warn('Sub not found for postponement update: user={}, sub={}',
-            [userId, subscriptionId]);
         return false;
       }
 
@@ -526,18 +483,11 @@ class SubProvider extends ChangeNotifier {
           'updateUser': updateUser,
         });
       }
-      logger.info(
-        'postponementsUsed adjusted: user={}, sub={}, delta={}, applied={}, from {}',
-        [userId, subscriptionId, delta, appliedDelta, current],
-      );
 
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err(
-          'Error adjusting postponementsUsed for userId={}, subscriptionId={}: {}',
-          [userId, subscriptionId, e]);
       return false;
     }
   }
@@ -576,8 +526,6 @@ class SubProvider extends ChangeNotifier {
 
       final snap = await subRef.get();
       if (!snap.exists) {
-        logger.warn('Sub not found for amountPaid update: user={}, sub={}',
-            [userId, subscriptionId]);
         return false;
       }
 
@@ -592,17 +540,11 @@ class SubProvider extends ChangeNotifier {
       if (appliedDelta != 0) {
         await subRef.update({'amountPaid': FieldValue.increment(appliedDelta)});
       }
-      logger.info(
-        'amountPaid adjusted: user={}, sub={}, delta={}, applied={}, from {}',
-        [userId, subscriptionId, delta, appliedDelta, current],
-      );
 
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error adjusting amountPaid for userId={}, subscriptionId={}: {}',
-          [userId, subscriptionId, e]);
       return false;
     }
   }
@@ -657,13 +599,10 @@ class SubProvider extends ChangeNotifier {
         await subRef.delete();
       }
 
-      logger.info('Subscription deleted: {}', [subscriptionId]);
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error deleting subscription id={} for userId={}: {}', 
-          [subscriptionId, userId, e]);
       rethrow;
     }
   }

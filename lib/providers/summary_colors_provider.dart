@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../models/appointment_color_palette.dart';
-import '../models/logger.dart';
 import '../models/summary_color_config.dart';
 
 /// Provider responsible for the admin-configured "Danışanlar Özet" table
@@ -17,7 +16,6 @@ class SummaryColorsProvider extends ChangeNotifier {
   static const String _docId = 'summaryColors';
   static const String updatedAtField = 'updatedAt';
 
-  final Logger logger = Logger.forClass(SummaryColorsProvider);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool _hasLoaded = false;
@@ -49,12 +47,10 @@ class SummaryColorsProvider extends ChangeNotifier {
       }
       SummaryColorsRegistry.setOverrides(overrides);
       _hasLoaded = true;
-      logger.info('Loaded {} summary color overrides', [overrides.length]);
       return SummaryColorsRegistry.snapshot();
     } catch (e) {
       // Keep whatever was already in the registry; don't mark as loaded so a
       // later screen can retry.
-      logger.err('Error fetching summary colors: {}', [e]);
       rethrow;
     }
   }
@@ -79,10 +75,8 @@ class SummaryColorsProvider extends ChangeNotifier {
       }, SetOptions(merge: true));
       SummaryColorsRegistry.setOverrides(cleaned);
       _hasLoaded = true;
-      logger.info('Saved {} summary color overrides', [cleaned.length]);
       notifyListeners();
     } catch (e) {
-      logger.err('Error saving summary colors: {}', [e]);
       rethrow;
     }
   }

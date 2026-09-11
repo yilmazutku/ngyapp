@@ -5,11 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../models/kvkk_consent_model.dart';
-
-final Logger logger = Logger.forClass(UserProvider);
 
 /// Provides user management functionality, including user data handling, authentication,
 /// and subscription management. Implements ChangeNotifier pattern for state management.
@@ -31,7 +28,6 @@ class UserProvider extends ChangeNotifier {
           .collection('users')
           .doc(userId)
           .get();
-      logger.info('Fetching user details for userId={} ', [userId]);
 
       if (doc.exists) {
         return UserModel.fromDocument(doc);
@@ -39,7 +35,6 @@ class UserProvider extends ChangeNotifier {
         return null;
       }
     } catch (e) {
-      logger.err('Error fetching user details: {}', [e]);
       rethrow;
     }
   }
@@ -55,13 +50,9 @@ class UserProvider extends ChangeNotifier {
           .collection('users')
           .doc(updatedUser.userId);
       await userDoc.update(updatedUser.toMap());
-      logger.info('User details updated successfully for userId={}',
-          [updatedUser.userId]);
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error updating user details for userId={}: {}',
-          [updatedUser.userId, e]);
       rethrow;
     }
   }
@@ -108,7 +99,6 @@ class UserProvider extends ChangeNotifier {
         }),
       );
     } catch (e) {
-      logger.err('updateUserEmail network error: {}', [e]);
       throw Exception(
           'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.');
     }
@@ -125,7 +115,6 @@ class UserProvider extends ChangeNotifier {
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      logger.info('Sign-in email updated for userId={}', [userId]);
       notifyListeners();
       return;
     }
@@ -134,8 +123,6 @@ class UserProvider extends ChangeNotifier {
     final message = (error is Map && error['message'] is String)
         ? error['message'] as String
         : 'E-posta güncellenirken bir hata oluştu.';
-    logger.err('updateUserEmail failed: status={}, body={}',
-        [response.statusCode, response.body]);
     throw Exception(message);
   }
 
@@ -180,7 +167,6 @@ class UserProvider extends ChangeNotifier {
         }),
       );
     } catch (e) {
-      logger.err('deleteUserAccount network error: {}', [e]);
       throw Exception(
           'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.');
     }
@@ -197,7 +183,6 @@ class UserProvider extends ChangeNotifier {
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      logger.info('User account deleted for userId={}', [userId]);
       notifyListeners();
       return;
     }
@@ -206,8 +191,6 @@ class UserProvider extends ChangeNotifier {
     final message = (error is Map && error['message'] is String)
         ? error['message'] as String
         : 'Kullanıcı silinirken bir hata oluştu.';
-    logger.err('deleteUserAccount failed: status={}, body={}',
-        [response.statusCode, response.body]);
     throw Exception(message);
   }
 
@@ -229,9 +212,7 @@ class UserProvider extends ChangeNotifier {
 
     try {
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-      logger.info('Password reset email sent to signed-in user');
-    } on FirebaseAuthException catch (e) {
-      logger.err('sendPasswordResetEmailToCurrentUser failed: {}', [e.code]);
+    } on FirebaseAuthException {
       throw Exception(
           'Şifre sıfırlama bağlantısı gönderilemedi. Lütfen tekrar deneyiniz.');
     }
@@ -248,10 +229,8 @@ class UserProvider extends ChangeNotifier {
           await FirebaseFirestore.instance.collection('users').get();
       final users =
           snapshot.docs.map((doc) => UserModel.fromDocument(doc)).toList();
-      logger.debug('Fetched users: {}', [users]);
       return users;
     } catch (e) {
-      logger.err('Error fetching users: $e');
       rethrow;
     }
   }
@@ -270,10 +249,8 @@ class UserProvider extends ChangeNotifier {
         return UserModel.fromDocument(doc);
       }).toList();
 
-      logger.info('Fetched {} customer users', [users.length]);
       return users;
     } catch (e) {
-      logger.err('Error fetching customer users: {}', [e]);
       rethrow;
     }
   }
@@ -300,7 +277,6 @@ class UserProvider extends ChangeNotifier {
       }
       return null;
     } catch (e) {
-      logger.err('Error fetching KVKK consent for userId={}: {}', [userId, e]);
       rethrow;
     }
   }
@@ -314,14 +290,11 @@ class UserProvider extends ChangeNotifier {
     try {
       final consent = await fetchKvkkConsent(userId: userId);
       if (consent == null) {
-        logger.info('No KVKK consent found for userId={}', [userId]);
         return false;
       }
       final hasValid = consent.hasValidConsent;
-      logger.info('KVKK consent check for userId={}: hasValid={}', [userId, hasValid]);
       return hasValid;
     } catch (e) {
-      logger.err('Error checking KVKK consent for userId={}: {}', [userId, e]);
       return false;
     }
   }
@@ -356,15 +329,9 @@ class UserProvider extends ChangeNotifier {
           .doc(userId)
           .update(consentData);
 
-      logger.info(
-        'KVKK consent saved for userId={}: version={}, kvkkAccepted={}, explicitConsentAccepted={}',
-        [userId, kvkkCurrentVersion, kvkkAccepted, explicitConsentAccepted],
-      );
-      
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error saving KVKK consent for userId={}: {}', [userId, e]);
       rethrow;
     }
   }

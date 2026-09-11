@@ -6,10 +6,6 @@ import 'dart:typed_data';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 
-import '../models/logger.dart';
-
-final Logger _log = Logger('StorageUpload');
-
 /// Maximum accepted upload size, in bytes (50 MB).
 ///
 /// Files larger than this are rejected up-front (with a clear message) instead
@@ -42,7 +38,7 @@ class PreparedUploadImage {
   final String fileName;
   final String contentType;
 
-  /// Sıkıştırma gerçekten uygulandı mı (kayıt/log için).
+  /// Sıkıştırma gerçekten uygulandı mı.
   final bool compressed;
 
   const PreparedUploadImage({
@@ -92,16 +88,9 @@ Future<PreparedUploadImage> prepareImageForUpload({
     );
 
     if (compressed.isEmpty || compressed.length >= bytes.length) {
-      _log.info('Compression skipped: no gain. original={} result={}',
-          [bytes.length, compressed.length]);
       return original;
     }
 
-    _log.info('Image compressed for upload. {} -> {} bytes ({}%)', [
-      bytes.length,
-      compressed.length,
-      (100 * compressed.length / bytes.length).round(),
-    ]);
     return PreparedUploadImage(
       bytes: compressed,
       fileName: _withJpegExtension(fileName),
@@ -110,7 +99,6 @@ Future<PreparedUploadImage> prepareImageForUpload({
     );
   } catch (e) {
     // Masaüstünde eklenti yok; orijinal dosya yüklenir.
-    _log.warn('Image compression unavailable, uploading original: {}', [e]);
     return original;
   }
 }
@@ -251,7 +239,6 @@ Future<void> uploadFileToStorage({
       // Streaming failed for a non-timeout reason. Fall back to an in-memory
       // upload rather than failing outright, reading the bytes now only if the
       // caller did not already hand them to us.
-      _log.warn('putFile failed, falling back to putData: {}', [e]);
       bytes ??= await File(filePath).readAsBytes();
     }
   }

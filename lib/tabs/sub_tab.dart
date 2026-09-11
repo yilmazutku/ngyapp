@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:ngy_app/tabs/appointments_tab.dart';
 import '../dialogs/edit_sub_dialog.dart';
 import '../dialogs/add_sub_dialog.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../models/appointment_model.dart';
 import '../models/filter_params.dart';
@@ -15,7 +14,6 @@ import '../utils/dialog_utils.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
 import '../widgets/labeled_action_button.dart';
-final Logger logger = Logger.forClass(SubscriptionsTab);
 class SubscriptionsTab extends BaseTab<SubProvider> {
   const SubscriptionsTab({super.key, required super.userId})
       : super(allDataLabel: 'Tüm Paketler', subscriptionDataLabel: 'Aktif Paketler');
@@ -130,7 +128,6 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
           _subscriptionAppointments[cacheKey] = appointments;
         }
       } catch (e) {
-        debugPrint('Error fetching appointments for subscription ${sub.subscriptionId}: $e');
         if (mounted) {
           _subscriptionAppointments[cacheKey] = [];
         }

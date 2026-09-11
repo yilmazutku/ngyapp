@@ -2,13 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/mock_test_run.dart';
 import 'diet_provider.dart';
 import 'meal_state_and_upload_manager.dart';
-
-final Logger logger = Logger.forClass(MockTestDataProvider);
 
 /// Mock test aracının ürettiği verinin defterini tutar ve tek tuşla siler.
 ///
@@ -55,8 +52,6 @@ class MockTestDataProvider extends ChangeNotifier {
       'photos': <Map<String, dynamic>>[],
       'diets': <Map<String, dynamic>>[],
     });
-    logger.info('Mock test run started. runId={} clients={} date={}',
-        [doc.id, clientNames.length, _dateKeyFormat.format(date)]);
     return doc.id;
   }
 
@@ -91,10 +86,8 @@ class MockTestDataProvider extends ChangeNotifier {
       try {
         runs.add(MockTestRun.fromDocument(doc));
       } catch (e) {
-        logger.err('Error parsing mock test run {}: {}', [doc.id, e]);
       }
     }
-    logger.info('Fetched {} mock test run(s)', [runs.length]);
     return runs;
   }
 
@@ -151,8 +144,6 @@ class MockTestDataProvider extends ChangeNotifier {
           // de kayıtta tutmanın anlamı yok; silinecek bir şey kalmamıştır.
           result.deletedDiets += deleted ? 1 : 0;
         } catch (e) {
-          logger.err('Could not delete mock diet {} of user {}: {}',
-              [diet.docId, diet.userId, e]);
           result.failedDiets++;
           remainingDiets.add(diet);
         }
@@ -190,15 +181,6 @@ class MockTestDataProvider extends ChangeNotifier {
     }
 
     notifyListeners();
-    logger.info(
-        'Mock cleanup done. photos={} failedPhotos={} diets={} failedDiets={} runs={}',
-        [
-          result.deletedPhotos,
-          result.failedPhotos,
-          result.deletedDiets,
-          result.failedDiets,
-          result.deletedRuns,
-        ]);
     return result;
   }
 
@@ -266,8 +248,6 @@ class MockTestDataProvider extends ChangeNotifier {
           }
         }
       } catch (e) {
-        logger.err('Photo sweep failed for user {} date {}: {}',
-            [userId, dateKey, e]);
         allClean = false;
       }
     }
@@ -284,7 +264,6 @@ class MockTestDataProvider extends ChangeNotifier {
         if (deleted) result.deletedDiets++;
       }
     } catch (e) {
-      logger.err('Diet sweep failed for user {}: {}', [userId, e]);
       allClean = false;
     }
 
@@ -311,7 +290,6 @@ class MockTestDataProvider extends ChangeNotifier {
       MealManager mealManager, MockTestPhotoRef photo) async {
     final Meals? meal = Meals.fromName(photo.mealName);
     if (meal == null) {
-      logger.err('Unknown meal name in mock record: {}', [photo.mealName]);
       return false;
     }
 
@@ -319,7 +297,6 @@ class MockTestDataProvider extends ChangeNotifier {
     try {
       date = _dateKeyFormat.parseStrict(photo.dateKey);
     } catch (e) {
-      logger.err('Unparsable date in mock record: {}', [photo.dateKey]);
       return false;
     }
 
@@ -334,8 +311,6 @@ class MockTestDataProvider extends ChangeNotifier {
       );
       return true;
     } catch (e) {
-      logger.err('Could not delete mock photo {} of user {}: {}',
-          [photo.url, photo.userId, e]);
       return false;
     }
   }

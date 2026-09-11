@@ -7,7 +7,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../models/user_model.dart';
@@ -23,7 +22,6 @@ import '../widgets/loading_overlay.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/filter_chip_group.dart';
 
-final Logger logger = Logger.forClass(AdminPaymentsPage);
 final DateFormat kDateFormat = DateFormat('dd.MM.yyyy', 'tr_TR');
 final DateFormat kMonthNameFormat = DateFormat('MMMM', 'tr_TR');
 final DateFormat kMonthYearFormat = DateFormat('MMMM yyyy', 'tr_TR');
@@ -159,14 +157,12 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    logger.info('Loading payment data for all users with Firebase-side filtering');
 
     try {
       // 1) Fetch users, build cache
       final userProvider = Provider.of<UserProvider>(context, listen: false);
       final users = await userProvider.fetchUsers();
       final map = {for (final u in users) u.userId: u};
-      logger.info('Fetched ${users.length} users successfully');
 
       // 2) Fetch all payments with Firebase-side filtering (status only)
       // Date range filtering is done client-side due to conditional date field logic
@@ -188,10 +184,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         _applyClientSideFilters();
         _isLoading = false;
       });
-
-      logger.info('Total payments loaded: ${_allPayments.length}');
     } catch (e) {
-      logger.err('Error loading data: {}', [e]);
       if (!mounted) return;
       setState(() => _isLoading = false);
       await DialogUtils.openError(
@@ -321,8 +314,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   /// Apply client-side filters (search, date range, and sorting)
   /// Status filter is applied on Firebase side
   void _applyClientSideFilters() {
-    logger.info('Applying client-side filters - Search: "$_searchQuery", DateRange: $_startDate to $_endDate, Sort: ${_sortOption.label}');
-
     List<PaymentModel> filtered = List.from(_allPayments);
 
     // Date range filtering (client-side: conditional date field based on status)
@@ -351,7 +342,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
           return false;
         }
       }).toList();
-      logger.info('Date range filter applied: $_startDate to $_endDate, results: ${filtered.length}');
     }
 
     // Search (client-side: user name, surname, full name, email, notes)
@@ -366,7 +356,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         final notes = p.notes?.toLowerCase() ?? '';
         return name.contains(q) || surname.contains(q) || fullName.contains(q) || email.contains(q) || notes.contains(q);
       }).toList();
-      logger.info('Search filter applied with query: "$_searchQuery", results: ${filtered.length}');
     }
 
     // Sort (client-side: complex sorting not supported by Firebase).
@@ -393,26 +382,20 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
           return displayName(b).compareTo(displayName(a));
       }
     });
-    logger.info('Sorting applied - ${_sortOption.label}');
 
     _filteredPayments = filtered;
     _recomputeTabCounts(_filteredPayments); // update labels
-
-    logger.info('Client-side filters applied successfully. Total filtered payments: ${filtered.length}');
   }
   
   /// Apply filters and trigger data reload for Firebase-side filters
   /// Search and sort are applied client-side only
   void _applyFilters() {
-    logger.info('Applying filters - Status: $_statusFilter, DateRange: $_startDate to $_endDate, Sort: ${_sortOption.label}');
-    
     // For status and date range changes, reload data from Firebase
     // Search and sort will be applied client-side in _loadData()
     _loadData();
   }
 
   void _resetFilters() {
-    logger.info('Resetting all filters to default values');
     setState(() {
       _statusFilter = null;
       _startDate = null;
@@ -434,8 +417,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       _userById[userId]?.fullName ?? 'Bilinmiyor';
 
   void _showEditPaymentDialog(PaymentModel payment) {
-    logger.info(
-        'Opening admin edit payment dialog for payment ${payment.paymentId} (User: ${_getUserName(payment.userId)})');
     showDialog(
       context: context,
       builder: (context) {
@@ -444,7 +425,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
           users: _users,
           userById: _userById,
           onPaymentUpdated: () {
-            logger.info('Payment ${payment.paymentId} updated successfully');
             _loadData(); // refresh whole page/caches
           },
         );
@@ -453,15 +433,12 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   }
 
   void _showAddPaymentDialog(BuildContext context) {
-    logger.info('Opening admin add payment dialog');
-
     showDialog(
       context: context,
       builder: (context) {
         return _AdminAddPaymentDialog(
           users: _users,
           onPaymentAdded: () {
-            logger.info('Payment added successfully');
             _loadData();
           },
         );
@@ -851,7 +828,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
   void _selectHistoryMonth({required int year, required int month}) {
     if (year == _historyYear && month == _historyMonth) return;
-    logger.info('Geçmiş Aylar selection changed to {}/{}', [month, year]);
     setState(() {
       _historyYear = year;
       _historyMonth = month;
@@ -883,7 +859,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       final targetPath =
           await PaymentExportUtil.promptForTargetPath(titleLabel: titleLabel);
       if (targetPath == null) {
-        logger.info('Excel export cancelled');
         return;
       }
 
@@ -906,7 +881,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         message: '${payments.length} ödeme dışa aktarıldı.\n\nDosya: $targetPath',
       );
     } catch (e) {
-      logger.err('Excel export failed: {}', [e]);
       closeLoading();
       if (!mounted) return;
       await DialogUtils.openError(
@@ -1027,8 +1001,6 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
 
   @override
   Widget build(BuildContext context) {
-    logger.info('Building AdminPaymentsPage UI');
-
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Ödemeler',
@@ -1341,7 +1313,6 @@ class _AdminAddPaymentDialog extends StatefulWidget {
 
 class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
     with LoadingStateMixin {
-  final Logger _logger = Logger.forClass(_AdminAddPaymentDialog);
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _userSearchController = TextEditingController();
   final DateFormat _df = DateFormat('dd.MM.yyyy', 'tr_TR');
@@ -1424,7 +1395,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
         }
       });
     } catch (e) {
-      _logger.err('Error fetching subscriptions: {}', [e]);
       if (!mounted) return;
       setState(() => _isLoadingSubscriptions = false);
       if (mounted) {
@@ -1442,9 +1412,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
     setState(() {
       if (pickedFile != null) {
         _dekontImage = File(pickedFile.path);
-        _logger.info('Dekont image selected: ${pickedFile.path}');
-      } else {
-        _logger.err('No dekont image selected.');
       }
     });
   }
@@ -1452,7 +1419,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
   Future<void> _addPayment() async {
     // Validation - matches AddPaymentDialog
     if (_selectedUser == null) {
-      _logger.err('_addPayment: User is required.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -1464,7 +1430,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
     }
 
     if (_amountController.text.trim().isEmpty) {
-      _logger.err('_addPayment: Amount is required.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -1477,7 +1442,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
 
     final parsedAmount = parseAmountOrNull(_amountController.text);
     if (parsedAmount == null) {
-      _logger.warn('_addPayment: Invalid amount input: "{}"', [_amountController.text]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -1543,7 +1507,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
         );
 
         _selectedSubscription!.amountPaid += paymentAmount;
-        _logger.info('Added $paymentAmount to subscription $subscriptionId amountPaid');
       }
 
       widget.onPaymentAdded();
@@ -1555,7 +1518,6 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
         );
       }
     } catch (e) {
-      _logger.err('Error adding payment: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -1840,7 +1802,6 @@ class _AdminEditPaymentDialog extends StatefulWidget {
 
 class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     with LoadingStateMixin {
-  final Logger _logger = Logger.forClass(_AdminEditPaymentDialog);
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _userSearchController = TextEditingController();
   final DateFormat _df = DateFormat('dd.MM.yyyy', 'tr_TR');
@@ -1915,7 +1876,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
           if (_selectedSubscriptionId != null) {
             final exists = subscriptions.any((s) => s.subscriptionId == _selectedSubscriptionId);
             if (!exists) {
-              _logger.warn('Selected subscription $_selectedSubscriptionId no longer exists, resetting to Paketsiz');
               _selectedSubscriptionId = null;
             }
           }
@@ -1924,7 +1884,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
         });
       }
     } catch (e) {
-      _logger.err('Error loading subscriptions: {}', [e]);
       if (mounted) {
         setState(() => _loadingSubscriptions = false);
       }
@@ -1976,9 +1935,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
     setState(() {
       if (pickedFile != null) {
         _dekontImage = File(pickedFile.path);
-        _logger.info('Dekont image selected: ${pickedFile.path}');
-      } else {
-        _logger.err('No dekont image selected.');
       }
     });
   }
@@ -1986,7 +1942,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
   Future<void> _updatePayment() async {
     // Validation - matches EditPaymentDialog
     if (_selectedUser == null) {
-      _logger.warn('User is required on _updatePayment.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -1999,7 +1954,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
 
     final rawAmount = _amountController.text;
     if (rawAmount.trim().isEmpty) {
-      _logger.warn('Amount is required on _updatePayment.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -2012,7 +1966,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
 
     final parsedAmount = parseAmountOrNull(rawAmount);
     if (parsedAmount == null) {
-      _logger.warn('Invalid amount input: "{}"', [rawAmount]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -2062,14 +2015,12 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
       // Upload dekont if selected
       String? dekontUrl = widget.payment.dekontUrl;
       if (_dekontImage != null) {
-        _logger.info('Uploading new dekont image for payment ${oldPayment.paymentId}');
         final storageRef = FirebaseStorage.instance
             .ref()
             .child('payments')
             .child('${widget.payment.paymentId}_${DateTime.now().millisecondsSinceEpoch}');
         await storageRef.putFile(_dekontImage!);
         dekontUrl = await storageRef.getDownloadURL();
-        _logger.info('New dekont image uploaded successfully, URL: $dekontUrl');
       }
 
       final amountDifference = newAmount - oldAmount;
@@ -2078,25 +2029,17 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
       final bool subscriptionChanged = oldSubscriptionId != newSubscriptionId;
       final statusChanged = oldStatus != _paymentStatus;
 
-      _logger.info('Payment update initiated for payment ${oldPayment.paymentId}:');
-      _logger.info('- User changed: $userChanged');
-      _logger.info('- Amount: $oldAmount -> $newAmount');
-      _logger.info('- Status: ${oldStatus.label} -> ${_paymentStatus.label}');
-      _logger.info('- Subscription changed: $subscriptionChanged');
-
       // Re-checked after the await: the widget may be gone by now.
       if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
 
       if (userChanged) {
         // User changed: delete from old user, add to new user
-        _logger.info('User changed from $_originalUserId to ${_selectedUser!.userId}');
 
         // Delete payment from old user. deletePayment takes the amount back
         // off the old package itself when the payment was a completed one, so
         // it is no longer subtracted here.
         await paymentProvider.deletePayment(oldPayment.paymentId, _originalUserId);
-        _logger.info('Deleted payment from old user $_originalUserId');
 
         // Add payment to new user
         await paymentProvider.addPayment(
@@ -2111,11 +2054,9 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
           dekontImage: _dekontImage,
           dueDate: _selectedDueDate,
         );
-        _logger.info('Added payment to new user ${_selectedUser!.userId}');
 
         // Add to new subscription if payment is completed
         if (newSubscriptionId != null && _paymentStatus == PaymentStatus.completed) {
-          _logger.info('Adding amount to new subscription $newSubscriptionId');
           try {
             final newSubDoc = await FirebaseFirestore.instance
                 .collection('users')
@@ -2135,11 +2076,8 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                   .collection('subscriptions')
                   .doc(newSubscriptionId)
                   .update({'amountPaid': adjustedAmountPaid});
-
-              _logger.info('Updated new subscription $newSubscriptionId amountPaid from $currentAmountPaid to $adjustedAmountPaid');
             }
           } catch (e) {
-            _logger.err('Error updating new subscription $newSubscriptionId: {}', [e]);
           }
         }
       } else {
@@ -2162,20 +2100,15 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
           notificationTimes: widget.payment.notificationTimes,
         );
 
-        _logger.info('Updating payment in database...');
         await paymentProvider.updatePayment(updatedPayment);
-        _logger.info('Payment ${updatedPayment.paymentId} updated successfully in database');
 
         // Handle subscription amount adjustments - matches EditPaymentDialog logic
         if (subscriptionChanged || statusChanged || (oldStatus == PaymentStatus.completed && amountDifference != 0)) {
-          _logger.info('Processing subscription adjustments...');
-
           if (subscriptionChanged) {
             // Subscription changed: remove from old, add to new
 
             // Step 1: Remove amount from old subscription if it was completed
             if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
-              _logger.info('Removing amount from old subscription $oldSubscriptionId');
               try {
                 final oldSubDoc = await FirebaseFirestore.instance
                     .collection('users')
@@ -2195,17 +2128,13 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                       .collection('subscriptions')
                       .doc(oldSubscriptionId)
                       .update({'amountPaid': newAmountPaid});
-
-                  _logger.info('Updated old subscription $oldSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (removed $oldAmount)');
                 }
               } catch (e) {
-                _logger.err('Error updating old subscription $oldSubscriptionId: {}', [e]);
               }
             }
 
             // Step 2: Add amount to new subscription if it is completed
             if (newSubscriptionId != null && _paymentStatus == PaymentStatus.completed) {
-              _logger.info('Adding amount to new subscription $newSubscriptionId');
               try {
                 final newSubDoc = await FirebaseFirestore.instance
                     .collection('users')
@@ -2225,16 +2154,12 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                       .collection('subscriptions')
                       .doc(newSubscriptionId)
                       .update({'amountPaid': adjustedAmountPaid});
-
-                  _logger.info('Updated new subscription $newSubscriptionId amountPaid from $currentAmountPaid to $adjustedAmountPaid (added $newAmount)');
                 }
               } catch (e) {
-                _logger.err('Error updating new subscription $newSubscriptionId: {}', [e]);
               }
             }
           } else if (newSubscriptionId != null) {
             // Same subscription, but amount or status changed
-            _logger.info('Same subscription - adjusting amount for subscription $newSubscriptionId');
             try {
               final subDoc = await FirebaseFirestore.instance
                   .collection('users')
@@ -2251,14 +2176,11 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                 if (statusChanged) {
                   if (_paymentStatus == PaymentStatus.completed && oldStatus != PaymentStatus.completed) {
                     adjustmentAmount = newAmount;
-                    _logger.info('Status changed to completed - adding full amount $newAmount');
                   } else if (_paymentStatus != PaymentStatus.completed && oldStatus == PaymentStatus.completed) {
                     adjustmentAmount = -oldAmount;
-                    _logger.info('Status changed from completed - subtracting old amount $oldAmount');
                   }
                 } else if (_paymentStatus == PaymentStatus.completed && amountDifference != 0) {
                   adjustmentAmount = amountDifference;
-                  _logger.info('Amount changed for completed payment - adjusting by $amountDifference');
                 }
 
                 if (adjustmentAmount != 0) {
@@ -2269,18 +2191,13 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                       .collection('subscriptions')
                       .doc(newSubscriptionId)
                       .update({'amountPaid': newAmountPaid});
-
-                  _logger.info('Adjusted subscription $newSubscriptionId amountPaid from $currentAmountPaid to $newAmountPaid (adjustment: $adjustmentAmount)');
                 }
               }
             } catch (e) {
-              _logger.err('Error adjusting subscription $newSubscriptionId: {}', [e]);
             }
           }
         }
       }
-
-      _logger.info('Payment update completed successfully');
 
       widget.onPaymentUpdated();
       if (mounted) {
@@ -2291,8 +2208,6 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
         );
       }
     } catch (e) {
-      _logger.err('Error updating payment ${widget.payment.paymentId}: {}', [e]);
-
       if (mounted) {
         await DialogUtils.openError(
           context,

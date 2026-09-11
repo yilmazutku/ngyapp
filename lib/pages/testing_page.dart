@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../models/appointment_color_palette.dart';
 import '../models/appointment_duration_config.dart';
-import '../models/logger.dart';
 import '../models/special_line_model.dart';
 import '../models/summary_color_config.dart';
 import '../providers/appointment_colors_provider.dart';
@@ -13,13 +12,6 @@ import '../providers/summary_colors_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/appointment_color_picker.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger _specialLinesLogger = Logger.forClass(_SpecialLinesSection);
-final Logger _appointmentColorsLogger =
-    Logger.forClass(_AppointmentColorsSection);
-final Logger _appointmentDurationsLogger =
-    Logger.forClass(_AppointmentDurationsSection);
-final Logger _summaryColorsLogger = Logger.forClass(_SummaryColorsSection);
 
 class TestingPage extends StatefulWidget {
   const TestingPage({super.key});
@@ -94,8 +86,6 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
         _loading = false;
       });
     } catch (e) {
-      _specialLinesLogger
-          .err('Failed to load admin special lines: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _loading = false);
       await DialogUtils.openError(
@@ -129,8 +119,6 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
         message: successMessage,
       );
     } catch (e) {
-      _specialLinesLogger
-          .err('Failed to save admin special lines: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _saving = false);
       await DialogUtils.openError(
@@ -595,8 +583,6 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
         _loading = false;
       });
     } catch (e) {
-      _appointmentColorsLogger
-          .err('Failed to load appointment colors: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _loading = false);
       await DialogUtils.openError(
@@ -645,8 +631,6 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
         message: 'Randevu renkleri güncellendi.',
       );
     } catch (e) {
-      _appointmentColorsLogger
-          .err('Failed to save appointment colors: {}', [e.toString()]);
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -872,8 +856,6 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
         _loading = false;
       });
     } catch (e) {
-      _summaryColorsLogger
-          .err('Failed to load summary colors: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _loading = false);
       await DialogUtils.openError(
@@ -925,8 +907,6 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
         message: 'Danışanlar Özet renkleri güncellendi.',
       );
     } catch (e) {
-      _summaryColorsLogger
-          .err('Failed to save summary colors: {}', [e.toString()]);
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -1193,8 +1173,6 @@ class _AppointmentDurationsSectionState
         _loading = false;
       });
     } catch (e) {
-      _appointmentDurationsLogger
-          .err('Failed to load appointment durations: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _loading = false);
       await DialogUtils.openError(
@@ -1267,8 +1245,6 @@ class _AppointmentDurationsSectionState
         message: 'Randevu süreleri güncellendi.',
       );
     } catch (e) {
-      _appointmentDurationsLogger
-          .err('Failed to save appointment durations: {}', [e.toString()]);
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;

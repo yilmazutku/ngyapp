@@ -12,7 +12,6 @@ import '../pages/tanita_explorer_page.dart';
 import '../providers/meas_provider.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
-import '../models/logger.dart';
 import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/labeled_action_button.dart';
@@ -34,8 +33,6 @@ class MeasTab extends BaseTab<MeasProvider> {
 }
 
 class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<MeasProvider>> {
-  final Logger logger = Logger.forClass(_MeasurementsTabState);
-
   bool _isSaving = false;
   // Nullable and set from a post-frame callback: the tab can be disposed before
   // that callback runs, and dispose() must not touch a field that was never
@@ -108,7 +105,6 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
   }
 
   Future<void> _addRow() async {
-    logger.info('AddMeasurementDialog opening...');
     await showDialog(
       context: context,
       builder: (ctx) => AddMeasurementDialog(
@@ -119,7 +115,6 @@ class _MeasurementsTabState extends FilterableTabState<MeasProvider, BaseTab<Mea
   }
 
   Future<void> _deleteMeasurement(MeasurementModel measurement) async {
-    logger.info('Preparing to delete measurement: {}', [measurement]);
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Ölçümü Sil',

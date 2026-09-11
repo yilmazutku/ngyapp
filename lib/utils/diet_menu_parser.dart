@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../models/logger.dart';
 import '../models/meal_model.dart';
-
-final Logger dietMenuLogger = Logger('DietMenuParser');
 
 /// One menu of a diet plan (weekday or weekend): the content lines and the
 /// time of each meal, resolved to the [Meals] enum.
@@ -42,7 +39,6 @@ class DietMenu {
 
       final mealData = entry.value;
       if (mealData is! Map) {
-        dietMenuLogger.warn('Skipping malformed meal entry: {}', [entry.key]);
         continue;
       }
 
@@ -82,8 +78,6 @@ TimeOfDay parseMealTime(String? timeString) {
       return TimeOfDay.fromDateTime(DateFormat('HH:mm').parse(timeString));
     }
   } catch (e) {
-    dietMenuLogger
-        .err('Error when parsing the time of dietlist:{}', [e.toString()]);
   }
   return const TimeOfDay(hour: 0, minute: 0);
 }

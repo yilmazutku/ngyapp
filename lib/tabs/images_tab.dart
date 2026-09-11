@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/filter_params.dart';
 import '../providers/meal_state_and_upload_manager.dart';
@@ -12,8 +11,6 @@ import '../providers/daily_data_provider.dart';
 import '../widgets/meal_image_card.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
-
-final Logger logger = Logger.forClass(ImagesTab);
 
 /// Tab for displaying and managing meal images
 /// Shows uploaded meal photos with filtering options
@@ -158,10 +155,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       setState(() {
         _dailyDataMap = tempMap;
       });
-
-      logger.debug('Fetched daily data for {} days', [tempMap.length]);
     } catch (e) {
-      logger.err('Error fetching date range daily data: {}', [e]);
       if (!mounted) return;
       setState(() {
         //_hasDataError = true; // mark error so page shows only error message
@@ -198,10 +192,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       setState(() {
         _mealStatesMap = tempMap;
       });
-
-      logger.debug('Fetched meal states for {} days', [tempMap.length]);
     } catch (e) {
-      logger.err('Error fetching date range meal states: {}', [e]);
       if (!mounted) return;
       setState(() {
         //_hasDataError = true; // same flag used here
@@ -1090,7 +1081,6 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
         return DateTime(year, month, day);
       }
     } catch (e) {
-      logger.err('Error parsing date string: {}', [e]);
     }
     // Return today as fallback
     final now = DateTime.now();

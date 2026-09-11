@@ -5,10 +5,6 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 
-import '../models/logger.dart';
-
-final Logger _log = Logger('MealPhotoLoader');
-
 /// Fotoğraf baytlarını indirir; aynı anda açık indirme sayısını sınırlar.
 ///
 /// `Image.network` her görsel için anında bir istek açar: ekranda 30 kart
@@ -74,7 +70,6 @@ class MealPhotoLoader {
     }
     _active--;
     if (_active < 0) {
-      _log.warn('Loader slot count went negative; resetting');
       _active = 0;
     }
   }

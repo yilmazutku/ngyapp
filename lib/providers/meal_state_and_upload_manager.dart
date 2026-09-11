@@ -4,14 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/filter_params.dart';
 import '../utils/image_thumbnail.dart';
 import '../utils/storage_upload.dart';
 import '../providers/chat_manager_new.dart';
-
-final Logger logger = Logger.forClass(MealManager);
 
 /// Manages meal state and provides functionality for uploading and fetching meals
 /// Handles the storage and retrieval of meal data from Firestore
@@ -95,7 +92,6 @@ static const MEAL_RANGE_DAYS=7;
       all.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       return all;
     } catch (e) {
-      logger.err('Error fetching meals (unified nested path): {}', [e]);
       rethrow;
     }
   }
@@ -120,8 +116,6 @@ static const MEAL_RANGE_DAYS=7;
         current = current.add(const Duration(days: 1));
       }
       
-      logger.debug('Fetching meals for {} dates in range', [dateKeys.length]);
-      
       // Batch fetch: Get all date documents and their subcollections in parallel
       // This is more efficient than sequential queries
 
@@ -139,12 +133,10 @@ static const MEAL_RANGE_DAYS=7;
             try {
               dateMeals.add(MealModel.fromDocument(doc));
             } catch (e) {
-              logger.err('Error parsing meal document {}: {}', [doc.id, e]);
             }
           }
           return dateMeals;
         } catch (e) {
-          logger.err('Error fetching meals for date {}: {}', [dateKey, e]);
           return <MealModel>[];
         }
       }).toList();
@@ -156,11 +148,7 @@ static const MEAL_RANGE_DAYS=7;
       for (final dateMeals in results) {
         meals.addAll(dateMeals);
       }
-      
-      logger.info('Fetched {} meal images for date range {} to {}',
-        [meals.length, DateFormat('yyyy-MM-dd').format(startDate), DateFormat('yyyy-MM-dd').format(endDate)]);
     } catch (e) {
-      logger.err('Error fetching meal images in range: {}', [e]);
     }
     
     return meals;
@@ -215,8 +203,6 @@ static const MEAL_RANGE_DAYS=7;
       onBatch?.call(batchMeals);
     }
 
-    logger.info('Fetched meal photos for date {}. users={} ofRequested={}',
-        [dateKey, mealsByUser.length, userIds.length]);
     return mealsByUser;
   }
 
@@ -238,13 +224,9 @@ static const MEAL_RANGE_DAYS=7;
         try {
           meals.add(MealModel.fromDocument(doc));
         } catch (e) {
-          logger.err('Error parsing meal document: {}', [e]);
         }
       }
-      
-      logger.info('Fetched {} meal images for date {}', [meals.length, currentDate]);
     } catch (e) {
-      logger.err('Error fetching meal images: {}', [e]);
     }
     
     return meals;
@@ -262,8 +244,6 @@ Future<String?> uploadMealImg({
   ChatManager? chatManager,
 }) async {
   try {
-    logger.info('Uploading meal photo. meal={}', [meal.name]);
-
     final referenceDate = overrideDate ?? DateTime.now();
     final currentDate = DateFormat('yyyy-MM-dd').format(referenceDate);
     final mealDocRef = FirebaseFirestore.instance
@@ -282,12 +262,10 @@ Future<String?> uploadMealImg({
         previousMealModel = MealModel.fromDocument(mealDoc);
 
         if (!previousMealModel.canAddMoreImages) {
-          logger.warn('Max images reached for meal: {}', [meal.name]);
           return null;
         }
       }
     } catch (e) {
-      logger.err('Error reading previous meal doc: {}', [e]);
     }
 
     final result = await _uploadImg(
@@ -298,7 +276,6 @@ Future<String?> uploadMealImg({
     );
 
     if (!result.isUploadOk || result.downloadUrl == null) {
-      logger.err('Image upload failed: {}', [result.errorMessage ?? 'Unknown error']);
       return null;
     }
 
@@ -334,10 +311,8 @@ Future<String?> uploadMealImg({
 
     notifyListeners();
 
-    logger.info('Meal upload finished. downloadUrl={}', [result.downloadUrl]);
     return result.downloadUrl;
-  } catch (e, st) {
-    logger.err('Error uploading meal: {}, Stack:', [e, st]);
+  } catch (e) {
     rethrow;
   }
 }
@@ -383,8 +358,6 @@ Future<void> deleteMealImage({
       await deleteFile(imageUrlToDelete);
     } catch (e) {
       if (!ignoreStorageFailure) rethrow;
-      logger.warn('Ignoring storage delete failure for {}: {}',
-          [imageUrlToDelete, e]);
     }
 
     // Küçük görsel yardımcı bir dosya: silinemese de kayıt temizlenir.
@@ -392,8 +365,6 @@ Future<void> deleteMealImage({
       try {
         await deleteFile(thumbUrlToDelete);
       } catch (e) {
-        logger.warn('Ignoring thumbnail delete failure for {}: {}',
-            [thumbUrlToDelete, e]);
       }
     }
 
@@ -419,10 +390,7 @@ Future<void> deleteMealImage({
     }
 
     notifyListeners();
-    logger.info('Deleted image from meal {}. Remaining: {}',
-        [meal.name, updatedUrls.length]);
   } catch (e) {
-    logger.err('Error deleting meal image: {}', [e]);
     rethrow;
   }
 }
@@ -441,10 +409,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
         meal.name: isChecked, // mark this meal as "checked" for today
       },
     }, SetOptions(merge: true));
-
-    logger.info('Updated state for {} to {} for date {}', [meal.name, isChecked, currentDate]);
   } catch (e) {
-    logger.err('Error updating meal state: {}', [e]);
   }
 }
 
@@ -484,11 +449,8 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       if (chatManager != null) {
         msgData['storagePath'] = 'meals/$userId/${meal.name}';
       }
-      final refMsg = await chatDoc.collection('messages').add(msgData);
-      
-      logger.info('Meal image posted to chat. messageId={}', [refMsg.id]);
+      await chatDoc.collection('messages').add(msgData);
     } catch (e) {
-      logger.err('Error posting to chat: {}', [e]);
     }
   }
   
@@ -524,7 +486,6 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
         }
       }
     } catch (e) {
-      logger.err('Error fetching meal states: {}', [e]);
     }
     
     return checkedStates;
@@ -580,18 +541,14 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
 
       // After uploading, get the download URL
       String downloadUrl = await ref.getDownloadURL();
-      logger.info('Uploaded file to path: $path, downloadUrl: $downloadUrl');
 
       // Küçük görsel: liste ekranları orijinal yerine bunu indirir. Üretilemez
       // ya da yüklenemezse fotoğraf küçük görselsiz kalır, yükleme bozulmaz.
       final String? thumbUrl = await _uploadThumbnail(ref, prepared.bytes);
       return UploadResult(downloadUrl: downloadUrl, thumbUrl: thumbUrl);
-    } on FirebaseException catch (e) {
-      logger.err('FirebaseException Error during file upload: {}',
-          [e.message ?? 'exception does not have message.']);
+    } on FirebaseException {
       rethrow;
     } catch (e2) {
-      logger.err('Unexpected error during file upload: {}', [e2.toString()]);
       rethrow;
     }
   }
@@ -609,11 +566,8 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
         SettableMetadata(contentType: thumb.contentType),
       );
       final String url = await thumbRef.getDownloadURL();
-      logger.info('Thumbnail uploaded. path={} bytes={}',
-          [thumbRef.fullPath, thumb.bytes.length]);
       return url;
     } catch (e) {
-      logger.warn('Thumbnail upload skipped: {}', [e]);
       return null;
     }
   }
@@ -689,9 +643,6 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       thumbs[freshIndex] = thumbUrl;
       transaction.update(mealDocRef, {'thumbUrls': thumbs});
     });
-
-    logger.info('Thumbnail backfilled. user={} date={} meal={} index={}',
-        [userId, dateKey, meal.name, index]);
   }
 
   /// Deletes a file from Firebase Storage
@@ -701,9 +652,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     try {
       final Reference ref = FirebaseStorage.instance.refFromURL(imageUrl);
       await ref.delete();
-      logger.info('Deleted file at URL: $imageUrl');
     } catch (e) {
-      logger.err('Error deleting file at URL {}: {}', [imageUrl, e.toString()]);
       rethrow;
     }
   }

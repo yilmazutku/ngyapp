@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/user_model.dart';
 import '../models/subs_model.dart';
@@ -16,8 +15,6 @@ import 'file_handler.dart'; // New conditional import
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger log = Logger.forClass(FileHandlerPage);
 
 /*
 Suggested Improvements:
@@ -59,7 +56,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
 
   @override
   Widget build(BuildContext context) {
-    log.info('Building file handler page..');
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Diyet Listeleri Yöneticisi',
@@ -243,10 +239,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
           for (var doc in documents) doc.id: UserModel.fromDocument(doc).name
         };
       });
-
-      log.info('Fetched user list: {}', [_userMap]);
     } catch (e) {
-      log.err('Error fetching user list: {}', [e.toString()]);
       _showSnackbar('Kullanıcı listesi yüklenirken hata oluştu.');
     }
   }
@@ -270,9 +263,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
         });
       }
       
-      log.info('Fetched {} subscriptions for user {}', 
-        [activeSubscriptions.length, userId]);
-        
       if (activeSubscriptions.isEmpty && mounted) {
         await DialogUtils.openInfo(
           context,
@@ -281,7 +271,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
         );
       }
     } catch (e) {
-      log.err('Error fetching subscriptions: {}', [e.toString()]);
       if (mounted) {
         _showSnackbar('Paketler yüklenirken hata oluştu.');
       }
@@ -291,13 +280,11 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
   /// Step 2: Pick a file, save it to a temporary local directory, and parse it
   Future<void> _pickAndSaveFile() async {
     if (_selectedUser == null) {
-      log.warn('Please select a user first.');
       _showSnackbar('Lütfen önce bir kullanıcı seçin.');
       return;
     }
     
     if (_selectedSubscription == null) {
-      log.warn('Please select a subscription first.');
       _showSnackbar('Lütfen önce bir paket seçin.');
       return;
     }
@@ -322,8 +309,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
           await handleFile(
               fileBytes, fileName, _onFileProcessed, _onFileProcessingError);
         } else {
-          log.warn(
-              'fileBytes is null. cannot continue with handleFile method.');
           if(mounted) {
             DialogUtils.openError(context,
                 title: 'Hata',
@@ -335,7 +320,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
         _onFileProcessingError(e.toString());
       }
     } else {
-      log.info('File selection canceled.');
       _showSnackbar('Dosya seçimi iptal edildi.');
     }
   }
@@ -349,16 +333,10 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
   }
 
   void _onFileProcessingError(String error) {
-    log.err('Error processing file: {}', [error]);
     _showSnackbar('Dosya işlenirken hata oluştu: $error');
   }
 
   void _extractSubtitles(String text) {
-    log.info('============ PARSING DEBUG START ============');
-    log.info('Text length: {}', [text.length]);
-    // Log the first 1000 characters to see the document structure
-    log.info('Text preview: {}', [text.length > 1000 ? '${text.substring(0, 1000)}...' : text]);
-    
     // Split the text into lines and clean it
     final lines = text
         .split(RegExp(r'\r\n|\r|\n'))
@@ -366,23 +344,9 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
         .where((line) => line.isNotEmpty)
         .toList();
     
-    log.info('Extracted {} lines from document', [lines.length]);
-    // Log all lines for detailed analysis
-    for (int i = 0; i < lines.length; i++) {
-      log.info('Line {}: {}', [i, lines[i]]);
-    }
-    
-    // Log all meal types we're looking for
-    log.info('Searching for these meal types:');
-    for (var meal in Meals.dietValues) {
-      log.info('- {} ({})', [meal.name, meal.label]);
-    }
-    
     Map<String, dynamic>? currentSubtitle;
     
     for (var line in lines) {
-      log.info('Processing line: {}', [line]);
-
       // Check if this line starts a new meal section
       bool foundMealSection = false;
       
@@ -391,8 +355,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
         if (meal != Meals.firstmid && meal != Meals.secondmid && meal != Meals.thirdmid) {
           // Case insensitive check
           if (line.toLowerCase().contains(meal.label.toLowerCase())) {
-            log.info('MATCH FOUND: "{}" contains "{}"', [line, meal.label]);
-            
             // Find the corresponding subtitle in our list
             var foundSubtitle = subtitles.firstWhere(
               (subtitle) => subtitle['name'] == meal.label,
@@ -411,9 +373,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
                 currentSubtitle['time'] = timeStr;
               }
               
-              log.info('Extracted time for subtitle {}: {}',
-                  [currentSubtitle['name'], currentSubtitle['time']]);
-              
               foundMealSection = true;
               break;
             }
@@ -425,8 +384,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
       if (!foundMealSection) {
         // Case insensitive check for "Ara"
         if (line.toLowerCase().contains("ara")) {
-          log.info('MATCH FOUND: "Ara" in line: {}', [line]);
-          
           // Get time if present to determine which Ara meal
           final timeMatch = RegExp(r'(\d{1,2})[:.](\d{2})').firstMatch(line);
           int hour = 0;
@@ -474,9 +431,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
               currentSubtitle['time'] = timeStr;
             }
             
-            log.info('Selected Ara subtitle: {} with time {}', 
-              [currentSubtitle['name'], currentSubtitle['time']]);
-            
             foundMealSection = true;
           }
         }
@@ -484,50 +438,27 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
       
       // If we have a current subtitle, add content to it
       if (currentSubtitle != null && !foundMealSection) {
-        log.info('Adding content to subtitle {}: {}', 
-          [currentSubtitle['name'], line]);
-        
         // Check if this line starts with "Veya" followed by whitespace (tab)
         // Use the same RegExp pattern from meal_formatter.dart
         if (line.trim().startsWith(VEYA_MARKER) || VEYA_OPTION_SEPARATOR_REGEX.hasMatch(line)) {
           // Add the exact line to preserve the "Veya" marker and spacing
           currentSubtitle['content'].add({'content': line});
-          log.info('Added VEYA separator: {}', [line]);
         } else {
           // Regular content line
           currentSubtitle['content'].add({'content': line});
         }
       }
     }
-    
-    log.info('============ PARSING DEBUG END ============');
-    
-    // Check if we found any content
-    bool foundAnyContent = false;
-    for (var subtitle in subtitles) {
-      if ((subtitle['content'] as List).isNotEmpty) {
-        foundAnyContent = true;
-        break;
-      }
-    }
-
-    if (!foundAnyContent) {
-      log.warn('No content found in parsed document');
-    } else {
-      log.info('Successfully parsed document with content');
-    }
   }
 
   /// Updated Step 4: Upload the parsed content using DietProvider
   Future<void> _uploadContentToFirestore() async {
     if (_selectedUser == null) {
-      log.warn('No user selected for upload.');
       _showSnackbar('Lütfen önce bir kullanıcı seçin.');
       return;
     }
     
     if (_selectedSubscription == null) {
-      log.warn('No subscription selected for upload.');
       _showSnackbar('Lütfen önce bir paket seçin.');
       return;
     }
@@ -575,7 +506,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
       }
 
       if (docId != null) {
-        log.info('Diet list uploaded with ID: {}', [docId]);
         if (mounted) {
           await DialogUtils.openInfo(
             context,
@@ -595,14 +525,11 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
           });
         }
       } else {
-        log.err('Failed to upload diet list, docId is null');
         if (mounted) {
           _showSnackbar('Diyet listesi yüklenirken bir hata oluştu.');
         }
       }
     } catch (e) {
-      log.err('Error uploading diet list: {}', [e.toString()]);
-      
       if (mounted) {
         setState(() {
           _isUploading = false;
@@ -617,7 +544,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
     if (_localFilePath != null) {
       try {
         await deleteFile(_localFilePath!);
-        log.info('File deleted.');
 
         setState(() {
           _localFilePath = null;
@@ -630,7 +556,6 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
 
         _showSnackbar('Dosya başarıyla silindi.');
       } catch (e) {
-        log.err('Error deleting file: {}', [e.toString()]);
         _showSnackbar('Dosya silinirken bir hata oluştu: ${e.toString()}');
       }
     } else {

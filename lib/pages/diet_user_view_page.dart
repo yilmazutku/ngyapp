@@ -3,14 +3,11 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/diet_model.dart';
-import '../models/logger.dart';
 import '../providers/special_lines_provider.dart';
 import '../utils/diet_menu_parser.dart';
 import '../utils/pdf_launcher.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/diet_plan_view.dart';
-
-final Logger dietUserViewLogger = Logger.forClass(DietUserViewPage);
 
 /// Shows a diet exactly the way the user sees it on their "Planım" page:
 /// collapsible meal tiles that reveal the formatted content when tapped.
@@ -39,9 +36,6 @@ class _DietUserViewPageState extends State<DietUserViewPage> {
       await Provider.of<SpecialLinesProvider>(context, listen: false)
           .fetchSpecialLines();
     } catch (e) {
-      dietUserViewLogger.warn(
-          'Could not load admin special lines, falling back to built-ins only: {}',
-          [e.toString()]);
     }
   }
 
