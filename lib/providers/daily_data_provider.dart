@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../models/logger.dart';
 
 /// Model class for daily user data (water intake and steps)
 class DailyData {
@@ -12,7 +11,6 @@ class DailyData {
 }
 
 class DailyDataProvider extends ChangeNotifier {
-  final Logger logger = Logger.forClass(DailyDataProvider);
   final DateFormat df=DateFormat('yyyy-MM-dd');
 
   /// Fetches daily data for a specific date as a DailyData object
@@ -38,7 +36,6 @@ class DailyDataProvider extends ChangeNotifier {
         }
       }
     } catch (e) {
-      logger.err('Error fetching daily data for {}: {}', [currentDate, e]);
       rethrow;
     }
     
@@ -74,13 +71,9 @@ class DailyDataProvider extends ChangeNotifier {
         resultMap[entry.key] = entry.value;
       }
       
-      logger.info('Fetched daily data for {} days in range {}-{}', 
-        [days, df.format(start), df.format(end)]);
-
       // throw Exception('asd');
       return resultMap;
     } catch (e) {
-      logger.err('Error fetching date range daily data, daterange={}, err={}', [dateRange,e]);
       rethrow;
     }
   }
@@ -99,12 +92,7 @@ class DailyDataProvider extends ChangeNotifier {
       await docRef.set({
         'waterIntake': liters,
       }, SetOptions(merge: true));
-
-      logger.info(
-          'Water intake updated to {} liters for date {}', [liters, dateStr]);
     } catch (e) {
-      logger.err(
-          'Error saving water intake for date {}: {}', [dateStr, e]);
       rethrow;
     }
   }
@@ -122,10 +110,7 @@ class DailyDataProvider extends ChangeNotifier {
       await docRef.set({
         'steps': steps,
       }, SetOptions(merge: true));
-
-      logger.info('Steps updated to {} for date {}', [steps, dateStr]);
     } catch (e) {
-      logger.err('Error saving steps for date {}: {}', [dateStr, e]);
       rethrow;
     }
   }

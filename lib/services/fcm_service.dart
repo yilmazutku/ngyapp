@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:app_badge_plus/app_badge_plus.dart';
 
 import '../constants/app_constants.dart';
-import '../models/logger.dart';
 import '../pages/admin_chat_page.dart';
 import '../pages/chat_page_new.dart';
 import '../news/news_list_page.dart';
@@ -16,7 +15,6 @@ import '../news/news_list_page.dart';
 /// Background message handler - must be top-level function
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  debugPrint('Handling background message: ${message.messageId}');
 }
 
 /// Service for handling Firebase Cloud Messaging (FCM)
@@ -33,8 +31,6 @@ class FcmService {
   factory FcmService() => _instance;
   FcmService._internal();
 
-  final Logger _logger = Logger.forClass(FcmService);
-  
   // Lazy initialization of FirebaseMessaging to avoid errors on unsupported platforms
   FirebaseMessaging? _messagingInstance;
   FirebaseMessaging get _messaging {
@@ -106,12 +102,10 @@ class FcmService {
   /// Returns false if FCM is not supported on this platform.
   Future<bool> initFcmService({required GlobalKey<NavigatorState> navigatorKey}) async {
     if (!isSupported) {
-      _logger.info('FCM is not supported on this platform, skipping initialization');
       return false;
     }
 
     _navigatorKey = navigatorKey;
-    _logger.info('Initializing FCM service');
 
     // Request notification permissions
     await _requestPermissions();
@@ -124,7 +118,6 @@ class FcmService {
       badge: false,  // Don't update badge
       sound: false,  // Don't play sound
     );
-    _logger.info('Foreground notification presentation disabled (using in-app banner instead)');
 
     // Set up message handlers
     _setupMessageHandlers();
@@ -139,7 +132,6 @@ class FcmService {
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
       _pendingMessage = initialMessage;
-      _logger.info('App launched from notification: ${initialMessage.messageId}');
     }
 
     // Listen to auth state changes to save token when user logs in
@@ -150,7 +142,6 @@ class FcmService {
       }
     });
 
-    _logger.info('FCM service initialized');
     return true;
   }
   
@@ -169,31 +160,25 @@ class FcmService {
       // Check if badge is supported on this device
       final isSupported = await AppBadgePlus.isSupported();
       if (!isSupported) {
-        _logger.debug('App badge is not supported on this device');
         return;
       }
 
       // A count of 0 clears the badge.
       await AppBadgePlus.updateBadge(0);
-      _logger.info('App badge cleared');
     } catch (e) {
-      _logger.err('Error clearing app badge: $e');
     }
   }
 
   /// Request notification permissions
   Future<void> _requestPermissions() async {
     try {
-      final settings = await _messaging.requestPermission( //BUNU HER ACTIGBIMDA ISTICEK MI???
+      await _messaging.requestPermission( //BUNU HER ACTIGBIMDA ISTICEK MI???
         alert: true,
         badge: true,
         sound: true,
         provisional: false,
       );
-
-      _logger.info('Notification permission status: ${settings.authorizationStatus}');
     } catch (e) {
-      _logger.err('Error requesting notification permissions: $e');
     }
   }
 
@@ -211,8 +196,6 @@ class FcmService {
 
   /// Handle foreground messages - show in-app notification banner
   void _onForegroundMessage(RemoteMessage message) {
-    _logger.info('Foreground message received: ${message.notification?.title}');
-
     // Check if user is logged in
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
@@ -222,23 +205,19 @@ class FcmService {
       final isAnnouncementNotification = type == 'news';
       
       if (isChatNotification && !allowChatNotificationsWhenLoggedOut) {
-        _logger.info('Ignoring chat notification - user is logged out');
         return;
       }
       if (isAnnouncementNotification && !allowAnnouncementNotificationsWhenLoggedOut) {
-        _logger.info('Ignoring announcement notification - user is logged out');
         return;
       }
       // For other notification types when logged out, still skip
       if (!isChatNotification && !isAnnouncementNotification) {
-        _logger.info('Ignoring notification - user is logged out');
         return;
       }
     }
 
     final context = _navigatorKey?.currentContext;
     if (context == null) {
-      _logger.warn('No context available for showing in-app notification');
       return;
     }
 
@@ -247,7 +226,6 @@ class FcmService {
 
     // Check if we should suppress this notification (user is already viewing this chat)
     if (_shouldSuppressNotification(message.data)) {
-      _logger.info('Suppressing notification - user is already in this chat');
       return;
     }
 
@@ -257,11 +235,9 @@ class FcmService {
     final isAnnouncementNotification = type == 'news';
     
     if (isChatNotification && !showInAppChatNotifications) {
-      _logger.info('Skipping in-app chat notification - disabled by flag');
       return;
     }
     if (isAnnouncementNotification && !showInAppAnnouncementNotifications) {
-      _logger.info('Skipping in-app announcement notification - disabled by flag');
       return;
     }
 
@@ -287,7 +263,6 @@ class FcmService {
     // Suppress if the current user is the sender (they shouldn't receive their own message notification)
     final senderId = (data['senderId'] ?? '').toString();
     if (senderId.isNotEmpty && senderId == currentUserId) {
-      _logger.info('Suppressing notification - current user is the sender');
       return true;
     }
 
@@ -315,7 +290,6 @@ class FcmService {
     // (Overlay.of(context) fails because Navigator's context doesn't have Overlay as ancestor)
     final overlay = _navigatorKey?.currentState?.overlay;
     if (overlay == null) {
-      _logger.warn('No overlay available for showing in-app notification');
       return;
     }
 
@@ -357,8 +331,6 @@ class FcmService {
 
   /// Handle notification tap (from background/terminated state)
   void _onNotificationTap(RemoteMessage message) {
-    _logger.info('Notification tapped: ${message.messageId}');
-    
     // Check if user is logged in before processing notification tap
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
@@ -367,12 +339,10 @@ class FcmService {
       final isAnnouncementNotification = type == 'news';
       
       if (isChatNotification && !allowChatNotificationsWhenLoggedOut) {
-        _logger.info('Ignoring chat notification tap - user is logged out');
         clearBadge();
         return;
       }
       if (isAnnouncementNotification && !allowAnnouncementNotificationsWhenLoggedOut) {
-        _logger.info('Ignoring announcement notification tap - user is logged out');
         clearBadge();
         return;
       }
@@ -408,8 +378,6 @@ class FcmService {
 
     final type = (data['type'] ?? '').toString();
     final isAdmin = _adminUids.contains(user.uid);
-
-    _logger.info('Handling notification tap: type=$type, isAdmin=$isAdmin');
 
     switch (type) {
       case 'chat':
@@ -455,9 +423,6 @@ class FcmService {
           builder: (_) => const NewsListPage(),
         ));
         break;
-
-      default:
-        _logger.warn('Unknown notification type: $type');
     }
   }
 
@@ -478,29 +443,22 @@ class FcmService {
     
     final user = _auth.currentUser;
     if (user == null) {
-      _logger.info('No user logged in, skipping FCM token save');
       return;
     }
 
     try {
       final token = await _messaging.getToken();
       if (token == null) {
-        _logger.warn('Could not get FCM token');
         return;
       }
-
-      _logger.info('FCM token obtained: ${token.substring(0, 20)}...');
 
       final userDoc = _firestore.collection('users').doc(user.uid);
       await userDoc.set({
         'fcmToken': token,
       }, SetOptions(merge: true));
 
-      _logger.info('FCM token saved for user ${user.uid}');
-
       _listenForTokenRefresh();
     } catch (e) {
-      _logger.err('Error saving FCM token: $e');
     }
   }
 
@@ -510,7 +468,6 @@ class FcmService {
     if (_tokenRefreshSub != null) return;
 
     _tokenRefreshSub = _messaging.onTokenRefresh.listen((newToken) async {
-      _logger.info('FCM token refreshed');
       final currentUser = _auth.currentUser;
       if (currentUser == null) return;
 
@@ -527,7 +484,6 @@ class FcmService {
     
     final user = _auth.currentUser;
     if (user == null) {
-      _logger.info('No user logged in, skipping FCM token removal');
       return;
     }
 
@@ -536,10 +492,7 @@ class FcmService {
       await userDoc.set({
         'fcmToken': FieldValue.delete(),
       }, SetOptions(merge: true));
-
-      _logger.info('FCM token removed for user ${user.uid}');
     } catch (e) {
-      _logger.err('Error removing FCM token: $e');
     }
   }
 
@@ -550,13 +503,11 @@ class FcmService {
   /// Call this when entering a chat page to suppress notifications for that chat.
   void setActiveChatId(String? chatId) {
     _activeChatId = chatId;
-    _logger.info('Active chat set to: $chatId');
   }
 
   /// Clear the active chat ID.
   /// Call this when leaving a chat page.
   void clearActiveChatId() {
-    _logger.info('Active chat cleared (was: $_activeChatId)');
     _activeChatId = null;
   }
 

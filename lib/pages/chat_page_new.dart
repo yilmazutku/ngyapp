@@ -3,7 +3,6 @@ import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -12,7 +11,6 @@ import 'package:provider/provider.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/meal_model.dart';
-import 'package:ngy_app/models/logger.dart';
 import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
 import 'package:ngy_app/pages/user_media_gallery_page.dart';
@@ -52,7 +50,6 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
-  final Logger logger = Logger.forClass(_ChatPageState);
   final ImagePicker _picker = ImagePicker();
   static const _months = [
     '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -95,11 +92,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     } else {
       _markChatAsReadForUser();
     }
-    
-    logger.info(
-      'ChatPage initialized. currentUid={} isAdmin={} chatId={}',
-      [_currentUid, _isAdminUser, _chatId]
-    );
   }
 
   @override
@@ -108,7 +100,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     // Clear active chat ID to resume receiving notifications
     FcmService().clearActiveChatId();
-    logger.info('ChatPage disposed. currentUid={}', [_currentUid]);
     super.dispose();
   }
 
@@ -117,9 +108,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       final chatManager = context.read<ChatManager>();
       await chatManager.markChatAsRead(_chatId);
-      logger.debug('Chat marked as read for admin. chatId={}', [_chatId]);
     } catch (e) {
-      logger.warn('Failed to mark chat as read (admin): {}', [e]);
     }
   }
 
@@ -128,9 +117,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       final chatManager = context.read<ChatManager>();
       await chatManager.markChatAsReadForUser(_chatId);
-      logger.debug('Chat marked as read for user. chatId={}', [_chatId]);
     } catch (e) {
-      logger.warn('Failed to mark chat as read (user): {}', [e]);
     }
   }
 
@@ -149,7 +136,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
 
     if (!confirmed) {
-      logger.debug('Chat deletion cancelled by admin. chatId={}', [_chatId]);
       return;
     }
 
@@ -164,7 +150,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
 
     try {
-      logger.info('Deleting chat (admin). chatId={}', [_chatId]);
       await chat.deleteChat(_chatId);
 
       if (mounted && loadingOpen) {
@@ -180,10 +165,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (mounted) {
         Navigator.of(context).pop();
       }
-    } catch (e, st) {
-      logger.err('Chat deletion failed. chatId={} error={}', [_chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -207,7 +189,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       // App is going to background - allow notifications
       FcmService().clearActiveChatId();
-      logger.info('App backgrounded, cleared active chat ID to allow notifications');
     } else if (state == AppLifecycleState.resumed) {
       // App is back in foreground - suppress notifications for this chat again
       FcmService().setActiveChatId(_chatId);
@@ -217,7 +198,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       } else {
         _markChatAsReadForUser();
       }
-      logger.info('App resumed, re-set active chat ID to suppress in-app notifications');
     }
   }
 
@@ -233,7 +213,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
 
     var status = await permission.status;
-    logger.info('Photo permission initial status: {}', [status.toString()]);
 
     // Already granted or limited access - proceed
     if (status.isGranted || status.isLimited) {
@@ -244,9 +223,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting photo permission...');
       status = await permission.request();
-      logger.info('Photo permission after request: {}', [status.toString()]);
       
       if (status.isGranted || status.isLimited) {
         return true;
@@ -276,7 +253,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Shows a dialog to open Settings if permission is permanently denied.
   Future<bool> _checkCameraPermission() async {
     var status = await Permission.camera.status;
-    logger.info('Camera permission initial status: {}', [status.toString()]);
 
     // Already granted - proceed
     if (status.isGranted) {
@@ -287,9 +263,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied or restricted
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting camera permission...');
       status = await Permission.camera.request();
-      logger.info('Camera permission after request: {}', [status.toString()]);
       
       if (status.isGranted) {
         return true;
@@ -322,22 +296,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _pickAndSendImage({Meals? meal}) async {
     final hasPermission = await _checkPhotoPermission();
     if (!hasPermission) {
-      logger.info('Photo permission denied, aborting gallery pick');
       return;
     }
 
     // Re-checked after the await: the widget may be gone by now.
     if (!mounted) return;
     final chat = context.read<ChatManager>();
-    logger.info('Gallery image picker opened. chatId={}', [_chatId]);
 
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image == null) {
-      logger.debug('Gallery image pick cancelled by user');
       return;
     }
-
-    logger.debug('Gallery image selected. path={}', [image.path]);
 
     bool loadingOpen = false;
     if (mounted) {
@@ -346,12 +315,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: meal != null ? 'Öğün fotoğrafı yükleniyor...' : 'Görsel yükleniyor...',
       );
       loadingOpen = true;
-      logger.debug('Loading dialog opened');
     }
 
     try {
       if (meal != null) {
-        logger.info('Starting meal image upload (gallery). meal={} userId={}', [meal.name, _currentUid]);
         // Re-checked after the await: the widget may be gone by now.
         if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
@@ -366,26 +333,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (downloadUrl == null) {
           throw Exception('Öğün fotoğrafı yüklenemedi (downloadUrl is null)');
         }
-        logger.info('Meal upload successful (gallery). meal={} userId={}', [meal.name, _currentUid]);
       } else {
-        logger.debug('Starting image send operation...');
         await chat.sendImageTo(_chatId, image);
-        logger.info('Gallery image sent successfully. chatId={}', [_chatId]);
       }
 
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed');
       }
-    } catch (e, st) {
-      logger.err('Gallery image send failed. chatId={} error={}', [_chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed (error case)');
       }
 
       if (!mounted) return;
@@ -407,25 +366,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _captureAndSendImage({Meals? meal}) async {
     final hasPermission = await _checkCameraPermission();
     if (!hasPermission) {
-      logger.info('Camera permission denied, aborting capture');
       return;
     }
 
     // Re-checked after the await: the widget may be gone by now.
     if (!mounted) return;
     final chat = context.read<ChatManager>();
-    logger.info('Camera capture opened. chatId={}', [_chatId]);
 
     final XFile? image = await _picker.pickImage(
       source: ImageSource.camera,
       preferredCameraDevice: CameraDevice.rear,
     );
     if (image == null) {
-      logger.debug('Camera capture cancelled by user');
       return;
     }
-
-    logger.debug('Camera image captured. path={}', [image.path]);
 
     bool loadingOpen = false;
     if (mounted) {
@@ -434,12 +388,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: meal != null ? 'Öğün fotoğrafı yükleniyor...' : 'Görsel yükleniyor...',
       );
       loadingOpen = true;
-      logger.debug('Loading dialog opened');
     }
 
     try {
       if (meal != null) {
-        logger.info('Starting meal image upload (camera). meal={} userId={}', [meal.name, _currentUid]);
         // Re-checked after the await: the widget may be gone by now.
         if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
@@ -454,26 +406,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (downloadUrl == null) {
           throw Exception('Öğün fotoğrafı yüklenemedi (downloadUrl is null)');
         }
-        logger.info('Meal upload successful (camera). meal={} userId={}', [meal.name, _currentUid]);
       } else {
-        logger.debug('Starting image send operation...');
         await chat.sendImageTo(_chatId, image);
-        logger.info('Camera image sent successfully. chatId={}', [_chatId]);
       }
 
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed');
       }
-    } catch (e, st) {
-      logger.err('Camera image send failed. chatId={} error={}', [_chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed (error case)');
       }
 
       if (!mounted) return;
@@ -493,21 +437,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 2. User selects image source (gallery or camera)
   /// 3. Delegates to [_pickAndSendImage] or [_captureAndSendImage]
   Future<void> _startMealUploadFlow() async {
-    logger.info('Meal upload flow started. currentUid={}', [_currentUid]);
-
     final Meals? meal = await _chooseMeal();
     if (meal == null) {
-      logger.debug('Meal upload cancelled: No meal selected');
       return;
     }
-    logger.debug('Meal selected: {}', [meal.name]);
 
     final ImageSource? src = await _chooseSource();
     if (src == null) {
-      logger.debug('Meal upload cancelled: No source selected');
       return;
     }
-    logger.debug('Image source selected: {}', [src.name]);
 
     if (src == ImageSource.gallery) {
       await _pickAndSendImage(meal: meal);
@@ -520,8 +458,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 
   /// Returns the selected Meals enum value, or null if cancelled.
   Future<Meals?> _chooseMeal() async {
-    logger.debug('Opening meal chooser bottom sheet');
-    
     return showModalBottomSheet<Meals>(
       context: context,
       builder: (ctx) {
@@ -537,7 +473,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   title: Text(m.label),
                   subtitle: m.defaultTime.isNotEmpty ? Text(m.defaultTime) : null,
                   onTap: () {
-                    logger.debug('Meal selected in bottom sheet: {} ({})', [m.name, m.label]);
                     Navigator.of(ctx).pop(m);
                   },
                 ),
@@ -552,8 +487,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 
   /// Returns the selected ImageSource, or null if cancelled.
   Future<ImageSource?> _chooseSource() async {
-    logger.debug('Opening image source selection dialog');
-    
     return showDialog<ImageSource>(
       context: context,
       builder: (_) => AlertDialog(
@@ -562,14 +495,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         actions: [
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: gallery');
               Navigator.pop(context, ImageSource.gallery);
             },
             child: const Text('Galeri'),
           ),
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: camera');
               Navigator.pop(context, ImageSource.camera);
             },
             child: const Text('Kamera'),
@@ -594,17 +525,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _handleToggleReaction(MessageData message, String emoji) async {
     final chat = context.read<ChatManager>();
     final current = message.reactions[_currentUid];
-    logger.info(
-      'Toggling reaction. chatId={} messageId={} emoji={} current={}',
-      [_chatId, message.id, emoji, current ?? 'none'],
-    );
 
     try {
       await chat.toggleReaction(_chatId, message.id, emoji, currentEmoji: current);
-    } catch (e, st) {
-      logger.err('Toggle reaction failed. messageId={} error={}', [message.id, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (!mounted) return;
       DialogUtils.openError(
         context,
@@ -655,7 +579,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () {
-                        logger.info('Upload cancel button tapped');
                         context.read<ChatManager>().cancelUpload();
                       },
                       child: const Text('İptal'),
@@ -714,7 +637,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _ChatInputRow(
             chatId: _chatId,
             onMealUpload: _startMealUploadFlow,
-            logger: logger,
           ),
         ],
       ),
@@ -746,7 +668,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Open the gallery listing every photo uploaded by [userId].
   void _openUserMediaGallery(String userId) {
-    logger.info('Opening user media gallery from chat title. userId={}', [userId]);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -776,9 +697,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           final firstName = user.name.trim();
           final lastName = user.surname.trim();
           displayName = lastName.isNotEmpty ? '$firstName $lastName' : firstName;
-          logger.debug('User name loaded for chat title: {}', [displayName]);
-        } else if (snapshot.hasError) {
-          logger.warn('Failed to load user name for chat title: {}', [snapshot.error]);
         }
         
         return Text(
@@ -1414,12 +1332,10 @@ class _ReactionMoreButton extends StatelessWidget {
 class _ChatInputRow extends StatefulWidget {
   final String chatId;
   final VoidCallback onMealUpload;
-  final Logger logger;
 
   const _ChatInputRow({
     required this.chatId,
     required this.onMealUpload,
-    required this.logger,
   });
 
   @override
@@ -1562,14 +1478,10 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                           ? null
                           : () async {
                         final chat = context.read<ChatManager>();
-                        widget.logger.info('Send text button tapped. chatId={}', [widget.chatId]);
                         
                         try {
                           await chat.sendTextTo(widget.chatId);
-                        } catch (e, st) {
-                          widget.logger.err('Send text button handler failed. error={}', [e]);
-                          if (kDebugMode) widget.logger.debug('Stack trace:\n{}', [st]);
-                          
+                        } catch (e) {
                           if (!context.mounted) return;
                           DialogUtils.openError(context, title: 'Mesaj Gönderim Hatası', message: 'Mesaj gönderilemedi.');
                         }

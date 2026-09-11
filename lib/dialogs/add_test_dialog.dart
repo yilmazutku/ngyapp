@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import '../models/logger.dart';
 import '../models/test_model.dart';
 import '../utils/dialog_utils.dart';
 import '../dialogs/dialog_widgets.dart'; // Import dialog widgets
@@ -22,8 +21,6 @@ class AddTestDialog extends StatefulWidget {
 }
 
 class _AddTestDialogState extends State<AddTestDialog> {
-  final Logger logger = Logger.forClass(AddTestDialog);
-
   // Controllers and variables
   final TextEditingController _testNameController = TextEditingController();
   final TextEditingController _testDescriptionController =
@@ -56,7 +53,6 @@ class _AddTestDialogState extends State<AddTestDialog> {
                 setState(() {
                   _selectedTestDate = date;
                 });
-                logger.info('Test date selected: {}', [date]);
               },
               label: 'Test Tarihini Seçin',
               selectedLabel: 'Test Tarihi',
@@ -70,7 +66,6 @@ class _AddTestDialogState extends State<AddTestDialog> {
                 setState(() {
                   _testFile = file;
                 });
-                logger.info('Test file selected: {}', [file.path]);
               },
               buttonText: 'Upload Test File',
               noImageText: 'No test file selected',
@@ -100,7 +95,6 @@ class _AddTestDialogState extends State<AddTestDialog> {
     if (_testNameController.text.isEmpty ||
         _selectedTestDate == null ||
         _testFile == null) {
-      logger.err('Please fill all required fields.');
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -135,7 +129,6 @@ class _AddTestDialogState extends State<AddTestDialog> {
       );
 
       await testDocRef.set(testModel.toMap());
-      logger.info('Test added successfully for user {}', [widget.userId]);
 
       if (!mounted) return;
       await DialogUtils.openInfo(
@@ -148,7 +141,6 @@ class _AddTestDialogState extends State<AddTestDialog> {
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
-      logger.err('Error adding test: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -176,11 +168,8 @@ class _AddTestDialogState extends State<AddTestDialog> {
       final snapshot = await uploadTask;
       final downloadUrl = await snapshot.ref.getDownloadURL();
 
-      logger.info('Test file uploaded: {}', [downloadUrl]);
-
       return downloadUrl;
     } catch (e) {
-      logger.err('Error uploading test file: {}', [e]);
       throw Exception('Error uploading test file: $e');
     }
   }

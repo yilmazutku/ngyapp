@@ -2,7 +2,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:ngy_app/models/logger.dart';
 import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
@@ -40,8 +39,6 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   static const String _mealPathPrefix = 'meals/';
   static const String _mealTextPrefix = 'Öğün: ';
 
-  final Logger logger = Logger.forClass(UserMediaGalleryPage);
-
   /// Owns the grid scroll position so the [Scrollbar] can attach to it
   /// (shared-controller rule) and so we can jump to the bottom on open.
   final ScrollController _scrollController = ScrollController();
@@ -62,13 +59,11 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     _imagesStream = chat.userUploadedImagesStream(widget.userId);
     _userFuture = userProvider.fetchUserDetails(userId: widget.userId);
-    logger.info('UserMediaGalleryPage initialized. userId={}', [widget.userId]);
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
-    logger.info('UserMediaGalleryPage disposed. userId={}', [widget.userId]);
     super.dispose();
   }
 
@@ -129,7 +124,6 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
           }
 
           if (snap.hasError) {
-            logger.err('User media stream error. userId={} error={}', [widget.userId, snap.error]);
             return const _CenteredNote(
               icon: Icons.error_outline,
               message: 'Fotoğraflar yüklenemedi. Lütfen tekrar deneyin.',

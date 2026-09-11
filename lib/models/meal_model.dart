@@ -1,7 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'logger.dart';
-
 class MealModel {
   static const int maxImages = 3;
 
@@ -119,8 +117,6 @@ class MealModel {
   }
 }
 
-final Logger logger = Logger.forClass(Meals);
-
 /// word dokumaninda ara ogun ararken aranan ifade "Ara"
 const String ARA_WORD_LABEL='Ara';
 enum Meals {
@@ -171,7 +167,6 @@ enum Meals {
     try {
       return Meals.values.firstWhere((meal) => meal.name== name);
     } catch (e) {
-      logger.warn('No matching meal found for name: {}', [name]);
       return null; // Return null if no match is found
     }
   }

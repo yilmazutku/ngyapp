@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/logger.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
-
-final Logger logger = Logger.forClass(ResetPasswordPage);
 
 class ResetPasswordPage extends StatefulWidget {
   final String email;

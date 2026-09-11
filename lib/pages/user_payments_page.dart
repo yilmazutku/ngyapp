@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/payment_model.dart';
-import '../models/logger.dart';
 import '../providers/payment_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -23,8 +22,6 @@ class UserPaymentsPage extends StatefulWidget {
 }
 
 class _UserPaymentsPageState extends State<UserPaymentsPage> {
-  final Logger _logger = Logger.forClass(UserPaymentsPage);
-
   /// The user's payments, already ordered for display by [_sortForDisplay].
   List<PaymentModel> _payments = [];
 
@@ -34,7 +31,6 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
   @override
   void initState() {
     super.initState();
-    _logger.info('Initializing UserPaymentsPage for userId=${widget.userId}.');
     _fetchUserPayments();
   }
 
@@ -56,18 +52,13 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
         userId: widget.userId,
         showAllPayments: true,
       );
-      _logger.info(
-          'Fetched ${payments.length} payments for user ${widget.userId}.');
 
       if (!mounted) return;
       setState(() {
         _payments = _sortForDisplay(payments);
         _isLoading = false;
       });
-    } catch (error, stackTrace) {
-      _logger.err('Error fetching payments: {}', [error]);
-      _logger.err('Stack trace: {}', [stackTrace]);
-
+    } catch (error) {
       if (!mounted) return;
       setState(() => _isLoading = false);
       await DialogUtils.openError(
@@ -127,7 +118,6 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
 
   @override
   Widget build(BuildContext context) {
-    _logger.info('Building UserPaymentsPage UI for userId=${widget.userId}.');
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Ödemelerim',

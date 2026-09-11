@@ -7,7 +7,6 @@ import 'package:timezone/timezone.dart' as tz;
 
 
 import '../constants/app_constants.dart';
-import '../models/logger.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -16,7 +15,6 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
-  final Logger _logger = Logger.forClass(NotificationService);
 
   static const int MEAL_NOTIFICATION_DELAY_MINUTES = 45;
   static const String PAYMENT_NOTIFICATION_CHANNEL = NotificationConstants.paymentReminderChannelId;
@@ -35,7 +33,6 @@ class NotificationService {
     if (_isInitialized) return;
     
     if (!_isSupported) {
-      _logger.info('Local notifications not supported on this platform');
       _isInitialized = true; // Mark as initialized to avoid repeated attempts
       return;
     }
@@ -52,7 +49,6 @@ class NotificationService {
         badge: true,
         sound: true,
       );
-      _logger.info('iOS notification permissions requested');
     }
 
     // Request permissions for Android
@@ -61,7 +57,6 @@ class NotificationService {
             AndroidFlutterLocalNotificationsPlugin>();
     if (androidImplementation != null) {
       await androidImplementation.requestNotificationsPermission();
-      _logger.info('Android notification permissions requested');
     }
 
     const androidSettings =
@@ -82,17 +77,14 @@ class NotificationService {
       initSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
         // Handle notification tap
-        _logger.info('Notification tapped: ${response.payload}');
       },
     );
     _isInitialized = true;
-    _logger.info('Notification service initialized');
   }
 
   /// Ensure initialized before using notifications
   Future<bool> _ensureInitialized() async {
     if (!_isSupported) {
-      _logger.info('Local notifications not supported on this platform');
       return false;
     }
     if (!_isInitialized) {
@@ -105,7 +97,6 @@ class NotificationService {
     try {
       final isReady = await _ensureInitialized();
       if (!isReady) {
-        _logger.info('Cannot schedule test notification - platform not supported');
         return;
       }
 
@@ -150,11 +141,7 @@ class NotificationService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
-
-      _logger
-          .info('Test notification scheduled for: ${scheduledDate.toString()}');
     } catch (e) {
-      _logger.err('Error scheduling test notification: $e');
     }
   }
 
@@ -175,7 +162,6 @@ class NotificationService {
     try {
       final isReady = await _ensureInitialized();
       if (!isReady) {
-        _logger.info('Cannot schedule payment notification - platform not supported');
         return;
       }
 
@@ -184,7 +170,6 @@ class NotificationService {
       
       // Don't schedule if the time has already passed
       if (notificationTime.isBefore(DateTime.now())) {
-        _logger.info('Notification time has already passed for payment $paymentId');
         return;
       }
 
@@ -228,10 +213,7 @@ class NotificationService {
             UILocalNotificationDateInterpretation.absoluteTime,
         payload: paymentId, // Store the payment ID as payload
       );
-
-      _logger.info('Scheduled payment notification for $paymentId at $notificationTime');
     } catch (e) {
-      _logger.err('Error scheduling payment notification: $e');
     }
   }
 
@@ -244,7 +226,6 @@ class NotificationService {
       if (!_isSupported) return;
       
       if (notificationTimes == null || notificationTimes.isEmpty) {
-        _logger.info('No notification times specified for payment $paymentId');
         return;
       }
       
@@ -252,10 +233,8 @@ class NotificationService {
       for (final minutesBefore in notificationTimes) {
         final notificationId = '${paymentId}_$minutesBefore'.hashCode;
         await _notifications.cancel(notificationId);
-        _logger.info('Canceled notification $notificationId for payment $paymentId');
       }
     } catch (e) {
-      _logger.err('Error canceling payment notifications: $e');
     }
   }
 
@@ -267,7 +246,6 @@ class NotificationService {
     try {
       final isReady = await _ensureInitialized();
       if (!isReady) {
-        _logger.info('Cannot schedule meal notification - platform not supported');
         return;
       }
 
@@ -278,7 +256,6 @@ class NotificationService {
           .get();
       final userData = userDoc.data();
       if (userData == null || userData['mealNotificationsEnabled'] != true) {
-        _logger.info('Meal notifications are disabled for user $userId');
         return;
       }
 
@@ -289,7 +266,6 @@ class NotificationService {
 
       // Don't schedule if the time has already passed
       if (notificationTime.isBefore(DateTime.now())) {
-        _logger.info('Notification time has already passed for meal $mealName');
         return;
       }
 
@@ -331,18 +307,13 @@ class NotificationService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
-
-      _logger.info(
-          'Scheduled notification for meal $mealName at $notificationTime');
     } catch (e) {
-      _logger.err('Error scheduling meal notification: $e');
     }
   }
 
   Future<void> cancelAllNotifications() async {
     if (!_isSupported) return;
     await _notifications.cancelAll();
-    _logger.info('All notifications cancelled');
   }
 
   /// Clear the app badge (set badge count to 0)
@@ -388,17 +359,11 @@ class NotificationService {
         
         // Immediately cancel to ensure no notification is shown
         await _notifications.cancel(-1);
-        
-        _logger.info('iOS badge cleared');
       }
       
       // Android: Badge is automatically managed by the system based on active notifications
       // No action needed - badge clears when notifications are dismissed
-      if (Platform.isAndroid) {
-        _logger.info('Android badge is auto-managed by system');
-      }
     } catch (e) {
-      _logger.err('Error clearing badge: $e');
     }
   }
 }

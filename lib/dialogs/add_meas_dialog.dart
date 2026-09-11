@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/meas_model.dart';
 import '../providers/meas_provider.dart';
 import '../utils/dialog_utils.dart';
@@ -22,8 +21,6 @@ class AddMeasurementDialog extends StatefulWidget {
 }
 
 class _AddMeasurementDialogState extends State<AddMeasurementDialog> {
-  final Logger logger = Logger.forClass(AddMeasurementDialog);
-
   // Form state
   final _formKey = GlobalKey<FormState>();
 
@@ -136,7 +133,6 @@ class _AddMeasurementDialogState extends State<AddMeasurementDialog> {
 
       widget.onMeasurementAdded(); // parent refresh
     } catch (e) {
-      logger.err('Error adding measurement: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -152,7 +148,6 @@ class _AddMeasurementDialogState extends State<AddMeasurementDialog> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    logger.info('AddMeasDialog build.');
     return AlertDialog(
       title: const Text('Ölçüm Ekle'),
       content: ConstrainedBox(

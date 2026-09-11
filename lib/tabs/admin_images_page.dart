@@ -2,15 +2,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../pages/customer_sum.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
-
-final Logger logger = Logger.forClass(AdminUsersPage);
 
 /// Admin page for viewing all users.
 /// Features:
@@ -51,7 +48,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   @override
   void initState() {
     super.initState();
-    logger.info('AdminUsersPage page initialized');
     _loadUsers();
   }
 
@@ -60,16 +56,11 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// Sets up the users list and handles errors gracefully.
   /// Updates loading state and filtered list upon completion.
   void _loadUsers() {
-    logger.debug('Starting user load operation');
-    
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     _usersFuture = userProvider.fetchUsers();
     
     _usersFuture.then((users) {
-      logger.info('Successfully loaded {} users', [users.length]);
-      
       if (!mounted) {
-        logger.debug('Widget unmounted, skipping state update');
         return;
       }
       
@@ -84,26 +75,13 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
             u.email.trim().isNotEmpty;
       }).toList();
 
-      logger.info(
-        'Filtered users for display. total={} valid={} skipped={}',
-        [users.length, validUsers.length, users.length - validUsers.length],
-      );
-
       setState(() {
         _allUsers = validUsers;
         _filteredUsers = validUsers;
         _isLoading = false;
       });
-      
-      logger.debug('User list state updated. allUsers={} filteredUsers={}', 
-        [_allUsers.length, _filteredUsers.length]);
-        
     }).catchError((error, stackTrace) {
-      logger.err('Error loading users: {}', [error]);
-      logger.debug('Stack trace: {}', [stackTrace]);
-      
       if (!mounted) {
-        logger.debug('Widget unmounted, skipping error state update');
         return;
       }
       
@@ -120,15 +98,12 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// 
   /// @param query The search text entered by user
   void _onSearchChanged(String query) {
-    logger.debug('Search query changed: "{}"', [query]);
-    
     setState(() {
       _searchQuery = query.toLowerCase();
       
       if (_searchQuery.isEmpty) {
         // No filter: show all users
         _filteredUsers = _allUsers;
-        logger.debug('Search cleared. Showing all {} users', [_allUsers.length]);
       } else {
         // Filter users by matching query in name, surname, or email
         _filteredUsers = _allUsers.where((user) {
@@ -138,9 +113,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
           return nameMatch || emailMatch || surnameMatch;
         }).toList();
-        
-        logger.debug('Search applied. Found {} matches out of {} total users', 
-          [_filteredUsers.length, _allUsers.length]);
       }
     });
   }
@@ -155,7 +127,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// without a full reload.
   Future<void> _confirmAndDeleteUser(UserModel user) async {
     final fullName = '${user.name} ${user.surname}'.trim();
-    logger.info('Delete requested. userId={} name="{}"', [user.userId, fullName]);
 
     final confirmed = await DialogUtils.openConfirm(
       context,
@@ -201,16 +172,12 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         _filteredUsers.removeWhere((u) => u.userId == user.userId);
       });
 
-      logger.info('User deleted and removed from list. userId={}', [user.userId]);
-
       await DialogUtils.openInfo(
         context,
         title: 'Silindi',
         message: '"$fullName" kullanıcısı ve tüm verileri kalıcı olarak silindi.',
       );
     } catch (e) {
-      logger.err('Failed to delete user. userId={}, error={}', [user.userId, e]);
-
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -230,9 +197,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
   @override
   Widget build(BuildContext context) {
-    logger.debug('Building AdminUsers page. loading={} filteredCount={}',
-      [_isLoading, _filteredUsers.length]);
-
     return Scaffold(
       appBar: const AppBarWithBack(
         title: 'Kullanıcılar',
@@ -253,7 +217,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                         icon: const Icon(Icons.clear),
                         tooltip: 'Aramayı temizle',
                         onPressed: () {
-                          logger.debug('Search cleared via button');
                           _searchController.clear();
                           _onSearchChanged('');
                         },
@@ -340,8 +303,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// - Email address
   /// - Navigation arrow
   Widget _buildUserList() {
-    logger.debug('Building user list with {} items', [_filteredUsers.length]);
-    
     return ListView.builder(
       itemCount: _filteredUsers.length,
       itemBuilder: (context, index) {
@@ -410,8 +371,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
               ],
             ),
             onTap: () async {
-              logger.info('User tapped. userId={} name="{}"', [user.userId, fullName]);
-
               // Navigate to user summary page.
               // The CustomerSummaryPage contains tabs including the Detay tab,
               // which can delete the user and pops back with the deleted userId
@@ -428,8 +387,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                   _allUsers.removeWhere((u) => u.userId == deletedUserId);
                   _filteredUsers.removeWhere((u) => u.userId == deletedUserId);
                 });
-                logger.info(
-                    'Removed deleted user from list. userId={}', [deletedUserId]);
               }
             },
           ),
@@ -440,7 +397,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
   @override
   void dispose() {
-    logger.info('AdminUsers page disposed');
     _searchController.dispose();
     super.dispose();
   }

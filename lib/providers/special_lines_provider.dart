@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import '../models/logger.dart';
 import '../models/special_line_model.dart';
 
 /// Provider responsible for the admin-configured "special lines" list stored at
@@ -25,7 +24,6 @@ class SpecialLinesProvider extends ChangeNotifier {
   static const String linesField = 'lines';
   static const String updatedAtField = 'updatedAt';
 
-  final Logger logger = Logger.forClass(SpecialLinesProvider);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool _hasLoaded = false;
@@ -54,14 +52,12 @@ class SpecialLinesProvider extends ChangeNotifier {
         _hasLoaded = true;
         final after = _registrySignature();
         if (before != after) {
-          logger.info('Admin special lines updated remotely: {}', [after]);
           notifyListeners();
         }
       },
       onError: (Object e) {
         // A snapshot listener is dead once it errors (e.g. a permission error
         // raised before sign-in). Drop it so the next fetch re-attaches.
-        logger.err('Special lines listener failed: {}', [e]);
         _subscription?.cancel();
         _subscription = null;
       },
@@ -110,10 +106,8 @@ class SpecialLinesProvider extends ChangeNotifier {
       final lines = _parseLines(snapshot.data());
       SpecialLinesRegistry.setCustomLines(lines);
       _hasLoaded = true;
-      logger.info('Loaded {} admin special lines', [lines.length]);
       return SpecialLinesRegistry.custom;
     } catch (e) {
-      logger.err('Error fetching admin special lines: {}', [e]);
       // Keep whatever was already in the registry; don't mark as loaded so a
       // later screen can retry.
       rethrow;
@@ -130,10 +124,8 @@ class SpecialLinesProvider extends ChangeNotifier {
       }, SetOptions(merge: true));
       SpecialLinesRegistry.setCustomLines(lines);
       _hasLoaded = true;
-      logger.info('Saved {} admin special lines', [lines.length]);
       notifyListeners();
     } catch (e) {
-      logger.err('Error saving admin special lines: {}', [e]);
       rethrow;
     }
   }

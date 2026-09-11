@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import '../firebase_options.dart';
-import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
@@ -40,8 +39,6 @@ class _CapitalizeWordsFormatter extends TextInputFormatter {
     );
   }
 }
-
-final Logger logger = Logger.forClass(CreateUserPage);
 
 class CreateUserPage extends StatefulWidget {
   const CreateUserPage({super.key});
@@ -185,8 +182,6 @@ class _CreateUserPageState extends State<CreateUserPage> {
           .doc(userId)
           .set(newUser.toMap());
 
-      logger.info('User created: {}', [newUser]);
-
       if (!mounted) return;
       _resetForm();
       await DialogUtils.openInfo(
@@ -196,7 +191,6 @@ class _CreateUserPageState extends State<CreateUserPage> {
             'Giriş e-postası: $email\nŞifre: $password',
       );
     } catch (e) {
-      logger.err('Kullanıcı oluşturulamadı: {}', [e.toString()]);
       if (!mounted) return;
       await DialogUtils.openError(context,
           title: 'Hata', message: 'Kullanıcı oluşturulamadı. Hata: $e');

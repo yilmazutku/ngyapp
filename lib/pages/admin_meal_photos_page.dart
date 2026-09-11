@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/mock_test_run.dart';
 import '../models/subs_model.dart';
@@ -19,8 +18,6 @@ import '../widgets/labeled_action_button.dart';
 import '../widgets/meal_image_card.dart';
 import '../widgets/status_note.dart';
 import 'admin_mock_meal_photos_page.dart';
-
-final Logger logger = Logger.forClass(AdminMealPhotosPage);
 
 /// Yönetici sayfası: **aktif paketi olan** danışanların **seçilen güne** ait
 /// öğün fotoğraflarını tek ekranda toplar. Sayfa bugünle açılır; üstteki tarih
@@ -148,7 +145,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   @override
   void initState() {
     super.initState();
-    logger.info('AdminMealPhotosPage initialized');
     // İlk kare çizildikten sonra yüklenir: sayfa "yükleniyor" durumuyla açılır.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -208,7 +204,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         userProvider.fetchAllCustomers(),
         // Uyarı sayfanın asıl işi değil: okunamazsa sayfa yine çalışır.
         mockProvider.fetchRuns().catchError((Object e) {
-          logger.err('Could not read mock test runs: {}', [e]);
           return <MockTestRun>[];
         }),
       ]);
@@ -256,17 +251,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
       if (!mounted || loadId != _loadId) return;
       setState(() => _photosLoading = false);
-
-      logger.info(
-          'Meal photo page loaded. day={} activeCustomers={} withPhotos={} '
-          'photos={}', [
-        DateFormat('yyyy-MM-dd').format(targetDay),
-        _groups.length,
-        _groups.where((group) => group.photos.isNotEmpty).length,
-        _groups.fold<int>(0, (sum, group) => sum + group.photos.length),
-      ]);
     } catch (e) {
-      logger.err('Error loading meal photos: {}', [e]);
       if (!mounted || loadId != _loadId) return;
       setState(() {
         _errorText = _loadErrorText;
@@ -382,8 +367,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   Future<void> _selectDay(DateTime day) async {
     final DateTime normalized = DateTime(day.year, day.month, day.day);
     if (normalized == _day) return;
-    logger.info('Day changed to {}',
-        [DateFormat('yyyy-MM-dd').format(normalized)]);
     await _load(day: normalized);
   }
 

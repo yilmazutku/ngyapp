@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:ngy_app/pages/chat_page_new.dart';
-import 'package:ngy_app/models/logger.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/user_model.dart';
@@ -41,8 +40,6 @@ class AdminChatListPage extends StatefulWidget {
 }
 
 class _AdminChatListPageState extends State<AdminChatListPage> {
-  final Logger logger = Logger.forClass(AdminChatListPage);
-  
   /// Flag to ignore the first purely-cached snapshot to avoid showing stale data
   bool _serverSeen = false;
 
@@ -62,8 +59,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   @override
   void initState() {
     super.initState();
-    final adminUid = FirebaseAuth.instance.currentUser?.uid;
-    logger.info('AdminChatListPage initialized. adminUid={}', [adminUid ?? 'null']);
     _chatStream = _buildChatStream();
   }
 
@@ -124,7 +119,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
 
   @override
   void dispose() {
-    logger.info('AdminChatListPage disposed');
     super.dispose();
   }
 
@@ -133,28 +127,22 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   /// Shows a searchable list of all customer users. When a user is selected,
   /// navigates to ChatPage with the selected user's ID.
   Future<void> _showNewChatDialog() async {
-    logger.info('Opening new chat user selection dialog');
-    
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     
     final selectedUserId = await showDialog<String>(
       context: context,
       builder: (context) => _UserSelectionDialog(
         userProvider: userProvider,
-        logger: logger,
       ),
     );
     
     if (selectedUserId != null && mounted) {
-      logger.info('User selected for new chat. userId={}', [selectedUserId]);
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ChatPage(overrideChatId: selectedUserId),
         ),
       );
-    } else {
-      logger.debug('New chat dialog cancelled or no user selected');
     }
   }
 
@@ -163,8 +151,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   /// Runs from the page's own context so the confirm/loading/info dialogs stay
   /// valid even after the deleted item disappears from the streamed list.
   Future<void> _handleDeleteChat(String chatId, String displayName) async {
-    logger.info('Delete chat requested from list. chatId={} name="{}"', [chatId, displayName]);
-
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Sohbeti Sil',
@@ -175,7 +161,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     );
 
     if (!confirmed) {
-      logger.debug('Chat deletion cancelled. chatId={}', [chatId]);
       return;
     }
 
@@ -200,8 +185,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
         await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Sohbet silindi.');
       }
     } catch (e) {
-      logger.err('Chat deletion failed. chatId={} error={}', [chatId, e]);
-
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -223,8 +206,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     final ids = _selectedChatIds.toList();
     if (ids.isEmpty) return;
 
-    logger.info('Bulk delete requested. count={}', [ids.length]);
-
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Seçili Sohbetleri Sil',
@@ -235,7 +216,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     );
 
     if (!confirmed) {
-      logger.debug('Bulk deletion cancelled. count={}', [ids.length]);
       return;
     }
 
@@ -259,7 +239,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
           await chatManager.deleteChat(chatId);
           deleted++;
         } catch (e) {
-          logger.err('Bulk delete: chat deletion failed. chatId={} error={}', [chatId, e]);
           failed.add(chatId);
         }
         progress.value = 'Sohbetler siliniyor... (${i + 1}/${ids.length})';
@@ -287,8 +266,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
         }
       }
     } catch (e) {
-      logger.err('Bulk delete failed unexpectedly. error={}', [e]);
-
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -320,7 +297,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
           icon: const Icon(Icons.checklist),
           label: const Text('Toplu Seç'),
           onPressed: () {
-            logger.info('Bulk-select mode entered');
             _enterSelectionMode();
           },
         ),
@@ -328,7 +304,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
           icon: Icons.refresh,
           label: 'Yenile',
           onPressed: () {
-            logger.info('Manual refresh button tapped');
             setState(() {
               _chatStream = _buildChatStream();
             });
@@ -370,7 +345,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   @override
   Widget build(BuildContext context) {
     final adminUid = FirebaseAuth.instance.currentUser!.uid;
-    logger.debug('Building AdminChatListPage. adminUid={} selectionMode={}', [adminUid, _selectionMode]);
 
     return Scaffold(
       appBar: _selectionMode ? _buildSelectionAppBar() : _buildDefaultAppBar(),
@@ -387,7 +361,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
         builder: (context, snap) {
           // Loading state (keep showing existing data across resubscribes)
           if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
-            logger.debug('Chats stream: waiting for initial connection');
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -400,50 +373,36 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
             if (err is FirebaseException &&
                 err.plugin == 'cloud_firestore' &&
                 err.code == 'failed-precondition') {
-              logger.warn('Composite index is still building. Waiting for completion...');
               return const _CenterNote('Sunucu dizini hazırlanıyor… Birazdan yüklenecek.');
             }
             
             // Other errors
-            logger.err('Chats stream error. error={}', [err]);
             return _ErrorView(error: err.toString());
           }
 
           // No data received
           if (!snap.hasData) {
-            logger.warn('Chats stream: no data received');
             return const _CenterNote('Veri bulunamadı.');
           }
 
           // Process snapshot data
           final data = snap.data!;
           final fromCache = data.metadata.isFromCache;
-          final hasPendingWrites = data.metadata.hasPendingWrites;
           final docs = data.docs;
-
-          logger.debug(
-            'Chats stream update. docCount={} fromCache={} hasPendingWrites={}',
-            [docs.length, fromCache, hasPendingWrites],
-          );
 
           // Ignore first cached snapshot to avoid showing stale data
           // This ensures users see fresh data from the server
           if (fromCache && !_serverSeen) {
-            logger.debug('Ignoring first cached snapshot, waiting for server data');
             return const _CenterNote('Sunucu ile eşitleniyor…');
           }
           if (!fromCache) {
             _serverSeen = true;
-            logger.debug('Server data received, _serverSeen set to true');
           }
 
           // Empty state
           if (docs.isEmpty) {
-            logger.debug('No chats found');
             return const _CenterNote('Sohbet bulunamadı.');
           }
-
-          logger.debug('Rendering {} chats', [docs.length]);
 
           // Track visible chat IDs so "select all" knows what to select.
           _visibleChatIds = docs.map((e) => e.id).toList();
@@ -474,12 +433,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
 
               // Get unread count for this admin
               final unreadCount = ChatManager.getUnreadCountFromChatData(data, adminUid);
-              
-              // Debug log for unread count
-              logger.debug(
-                'Chat item: chatId={} adminUid={} unreadCount={} rawData={}',
-                [chatId, adminUid, unreadCount, data['adminUnreadCount']],
-              );
 
               return _ChatListItem(
                 chatId: chatId,
@@ -488,7 +441,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
                 timeStr: timeStr,
                 hasImage: hasImage,
                 unreadCount: unreadCount,
-                logger: logger,
                 onDelete: _handleDeleteChat,
                 selectionMode: _selectionMode,
                 selected: _selectedChatIds.contains(chatId),
@@ -514,7 +466,6 @@ class _ChatListItem extends StatelessWidget {
   final String timeStr;
   final bool hasImage;
   final int unreadCount;
-  final Logger logger;
 
   /// Called when the admin taps the delete (trash) icon for this chat.
   /// Receives the chatId and the resolved display name for the confirmation.
@@ -539,7 +490,6 @@ class _ChatListItem extends StatelessWidget {
     required this.timeStr,
     required this.hasImage,
     required this.unreadCount,
-    required this.logger,
     required this.onDelete,
     required this.selectionMode,
     required this.selected,
@@ -562,9 +512,6 @@ class _ChatListItem extends StatelessWidget {
           final firstName = user.name.trim();
           final lastName = user.surname.trim() ?? '';
           displayName = lastName.isNotEmpty ? '$firstName $lastName' : firstName;
-          logger.debug('User name loaded for chat list. chatId={} name="{}"', [chatId, displayName]);
-        } else if (snapshot.hasError) {
-          logger.warn('Failed to load user name for chat list. chatId={} error={}', [chatId, snapshot.error]);
         }
 
         return Column(
@@ -657,7 +604,6 @@ class _ChatListItem extends StatelessWidget {
                       label: 'Sohbeti Sil',
                       foregroundColor: Colors.red,
                       onPressed: () {
-                        logger.debug('Chat delete icon tapped. chatId={}', [chatId]);
                         onDelete(chatId, displayName);
                       },
                     ),
@@ -668,7 +614,6 @@ class _ChatListItem extends StatelessWidget {
               onTap: selectionMode
                   ? () => onToggleSelected(chatId)
                   : () async {
-                      logger.info('Opening chat for user. chatId={} userName="{}"', [chatId, displayName]);
                       // Mark chat as read when admin opens it
                       final chatManager = Provider.of<ChatManager>(context, listen: false);
                       await chatManager.markChatAsRead(chatId);
@@ -700,7 +645,6 @@ class _ChatListItem extends StatelessWidget {
                       onTap: selectionMode
                           ? () => onToggleSelected(chatId)
                           : () {
-                              logger.info('Image preview tapped, opening chat. chatId={} userName="{}"', [chatId, displayName]);
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -773,11 +717,9 @@ class _ErrorView extends StatelessWidget {
 /// - Returns the selected user's ID or null if cancelled
 class _UserSelectionDialog extends StatefulWidget {
   final UserProvider userProvider;
-  final Logger logger;
 
   const _UserSelectionDialog({
     required this.userProvider,
-    required this.logger,
   });
 
   @override
@@ -806,8 +748,6 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
 
   /// Load all customer users from Firestore.
   Future<void> _loadUsers() async {
-    widget.logger.debug('Loading users for new chat dialog');
-    
     try {
       final users = await widget.userProvider.fetchAllCustomers();
       
@@ -825,11 +765,7 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
         _filteredUsers = users;
         _isLoading = false;
       });
-      
-      widget.logger.info('Loaded {} users for new chat selection', [users.length]);
     } catch (e) {
-      widget.logger.err('Error loading users for new chat dialog: {}', [e]);
-      
       if (!mounted) return;
       
       setState(() {
@@ -859,8 +795,6 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
         return fullName.contains(normalizedQuery) || email.contains(normalizedQuery);
       }).toList();
     });
-    
-    widget.logger.debug('Search filter applied. query="{}" results={}', [query, _filteredUsers.length]);
   }
 
   @override
@@ -987,7 +921,6 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
             style: const TextStyle(fontSize: 12),
           ),
           onTap: () {
-            widget.logger.debug('User selected in dialog. userId={} name="{}"', [user.userId, displayName]);
             Navigator.of(context).pop(user.userId);
           },
         );

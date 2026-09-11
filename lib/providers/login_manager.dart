@@ -1,9 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/logger.dart';
-
-final Logger logger = Logger.forClass(LoginProvider);
 
 ///TODO: mail/şifre yanlış girince defaulta düşüyor. login methodu commentler yer değiştirmeli uncommented yerlerle
 /// Manages user authentication and login state
@@ -55,7 +52,6 @@ class LoginProvider extends ChangeNotifier {
           await FirebaseAuth.instance.signOut();
           _errorMessage =
               'E-posta adresi veya şifre yanlış, lütfen kontrol ediniz.';
-          logger.info('Login blocked: user {} requested account removal', [uid]);
           _setLoadingState(false);
           notifyListeners();
           return false;
@@ -67,10 +63,8 @@ class LoginProvider extends ChangeNotifier {
       _handleFirebaseAuthError(e);
     } catch (e) {
       _errorMessage = 'Beklenmeyen bir hata oluştu.';
-      logger.err('Unexpected error during sign-in: {}', [e.toString()]);
     }
     
-    logger.info('isLoginSuccessful={}', [isLoginSuccessful]);
     _setLoadingState(false);
     notifyListeners();
     return isLoginSuccessful;
@@ -100,7 +94,6 @@ class LoginProvider extends ChangeNotifier {
         _errorMessage = 'Giriş yaparken beklenmeyen bir hata oluştu. Lütfen mailinizi ve şifrenizi kontrol ediniz.';
         break;
     }
-    logger.err('Firebase auth error: {}', [e.code]);
     notifyListeners();
   }
 

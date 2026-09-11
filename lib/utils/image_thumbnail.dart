@@ -3,10 +3,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 
-import '../models/logger.dart';
-
-final Logger _log = Logger('ImageThumbnail');
-
 /// Küçük görselin kısa kenarı (piksel). Liste kartları ~200 mantıksal px;
 /// 320 px, 1.5x yoğunluklu ekranda bile net kalır.
 const int kThumbnailShortSide = 320;
@@ -58,7 +54,6 @@ Future<ThumbnailData?> generateThumbnail(Uint8List bytes) async {
           bytes: jpeg, contentType: 'image/jpeg', extension: '.jpg');
     }
   } catch (e) {
-    _log.debug('Native thumbnail generation unavailable: {}', [e]);
   }
 
   return _generateWithDartUi(bytes);
@@ -100,7 +95,6 @@ Future<ThumbnailData?> _generateWithDartUi(Uint8List bytes) async {
       extension: '.png',
     );
   } catch (e) {
-    _log.warn('Thumbnail generation failed: {}', [e]);
     return null;
   } finally {
     image?.dispose();

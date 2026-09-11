@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
 
 import '../dialogs/edit_appointment_dialog.dart';
-import '../models/logger.dart';
 import '../models/appointment_model.dart';
 import '../models/event_model.dart';
 import '../providers/timeslot_manager.dart';
@@ -13,8 +12,6 @@ import '../utils/time_picker_utils.dart';
 import '../models/time_range_config.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger logger = Logger.forClass(AdminTimeSlotsPage);
 
 class AdminTimeSlotsPage extends StatefulWidget {
   const AdminTimeSlotsPage({super.key});
@@ -161,7 +158,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         _isLoading = false;
       });
     } catch (e) {
-      logger.err('Error fetching day data: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -360,7 +356,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                           await _fetchDayData(_selectedDate);
                         }
                       } catch (e) {
-                        logger.err('Error in saving timeslots: {}', [e]);
                         if (mounted) {
                           await DialogUtils.openError(
                             context,
@@ -393,7 +388,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
       Provider.of<TimeslotManager>(context, listen: false);
       return await timeslotManager.fetchTimeslotDataForDate(_selectedDate);
     } catch (e) {
-      logger.err('Error fetching latest time slot data: {}', [e]);
       return {
         'storedTimes': <String>[],
         'hasAppointment': <String, bool>{},
@@ -482,7 +476,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
       }
       return true;
     } catch (e) {
-      logger.err('Error in saving timeslots. {}', [e]);
       await _showErrorDialog(
         'Hata',
         'Zaman dilimleri kaydedilemedi. Lütfen destek talep ediniz.',
@@ -593,7 +586,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
                   if (!context.mounted) return;
                   Navigator.of(context).pop();
                 } catch (e) {
-                  logger.err('Error in saving timeslots. {}', [e]);
                   if (!context.mounted) return;
                   await DialogUtils.openError(
                     context,
@@ -747,7 +739,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
       await timeslotManager.updateTimeSlots(_selectedDate, unique);
       return true;
     } catch (e) {
-      logger.err('Error in saving timeslots. {}', [e]);
       if (mounted) {
         await _showErrorDialog(
           'Hata',
@@ -1270,7 +1261,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         await _fetchDayData(_selectedDate);
       }
     } catch (e) {
-      logger.err('Error in saving timeslots. {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -1458,7 +1448,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         },
       );
     } catch (e) {
-      logger.err('Error in manual selection dialog: {}', [e]);
     }
   }
 
@@ -1595,7 +1584,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         await _fetchDayData(_selectedDate);
       }
     } catch (e) {
-      logger.err('Error in applying manual selection: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -1684,7 +1672,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
           return;
         }
       } catch (e) {
-        logger.err('Error fetching source date data: {}', [e]);
         if (!mounted) return;
         await DialogUtils.openError(
           context,
@@ -1808,7 +1795,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         await _fetchDayData(_selectedDate);
       }
     } catch (e) {
-      logger.err('Error applying copy from another day: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -2063,7 +2049,6 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
         'Tüm boş zaman dilimleri silindi. Randevulu zaman dilimleri korundu.',
       );
     } catch (e) {
-      logger.err('Error deleting time slots: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,

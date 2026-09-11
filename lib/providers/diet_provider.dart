@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import '../models/diet_model.dart';
-import '../models/logger.dart';
 import '../models/filter_params.dart';
 import '../models/mock_test_run.dart';
 import '../utils/storage_upload.dart';
@@ -12,7 +11,6 @@ import '../utils/storage_upload.dart';
 /// Manages diet data for users
 /// Provides functionality for fetching, creating, updating, and deleting diet documents
 class DietProvider extends ChangeNotifier {
-  final Logger logger = Logger.forClass(DietProvider);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Returns true when any meal key or content line in [subtitles] contains
@@ -60,20 +58,16 @@ class DietProvider extends ChangeNotifier {
           .get();
 
       if (querySnapshot.docs.isEmpty) {
-        logger.info('No diet lists found for user {}', [userId]);
         return null;
       }
 
       final latestDoc = querySnapshot.docs.first;
       if (latestDoc.data()['subtitles'] == null) {
-        logger.warn('Latest diet list has no subtitles for user {}', [userId]);
         return null;
       }
 
-      logger.info('Found latest diet document for user {}', [userId]);
       return DietDocument.fromSnapshot(latestDoc);
     } catch (e) {
-      logger.err('Error fetching latest diet document: {}', [e]);
       rethrow;
     }
   }
@@ -121,8 +115,7 @@ class DietProvider extends ChangeNotifier {
         try {
           final diet = DietDocument.fromSnapshot(doc);
           diets.add(diet);
-        } catch (e, s) {
-          logger.err('Error parsing diet document ${doc.id}: {}, {}', [e,s]);
+        } catch (e) {
           // Continue with next document instead of failing completely
           continue;
         }
@@ -145,10 +138,8 @@ class DietProvider extends ChangeNotifier {
         }).toList();
       }
 
-      logger.info('Fetched ${diets.length} diets for user $userId with filters: {}', [filterParams?.toDebugMap()]);
       return diets;
-    } catch (e, s) {
-      logger.err('Error fetching diets: $e', [s]);
+    } catch (e) {
       return [];
     }
   }
@@ -234,8 +225,7 @@ class DietProvider extends ChangeNotifier {
             if (matchCount > 0) {
               matchCounts[diet.docId] = matchCount;
             }
-          } catch (e, s) {
-            logger.err('Error searching diet content: $e', [s]);
+          } catch (e) {
             // On error, include the diet in results to avoid hiding data due to errors
             return true;
           }
@@ -259,14 +249,11 @@ class DietProvider extends ChangeNotifier {
             final bDate = b.uploadTime ?? DateTime(1900);
             return bDate.compareTo(aDate);
           });
-          
-          logger.info('Sorted diets by relevance for query: $searchQuery');
         }
       }
       
       return allDiets;
-    } catch (e, s) {
-      logger.err('Error searching diets: $e', [s]);
+    } catch (e) {
       return [];
     }
   }
@@ -304,14 +291,12 @@ class DietProvider extends ChangeNotifier {
       );
       final downloadUrl = await ref.getDownloadURL();
 
-      logger.info('Recipe PDF uploaded. userId=$userId path=$storagePath');
       return {
         'url': downloadUrl,
         'path': storagePath,
         'name': safeName,
       };
-    } catch (e, s) {
-      logger.err('Error uploading recipe PDF: $e', [s]);
+    } catch (e) {
       return null;
     }
   }
@@ -342,14 +327,12 @@ class DietProvider extends ChangeNotifier {
       );
       final downloadUrl = await ref.getDownloadURL();
 
-      logger.info('Diet source file uploaded. userId=$userId path=$storagePath');
       return {
         'url': downloadUrl,
         'path': storagePath,
         'name': safeName,
       };
-    } catch (e, s) {
-      logger.err('Error uploading diet source file: $e', [s]);
+    } catch (e) {
       return null;
     }
   }
@@ -361,9 +344,7 @@ class DietProvider extends ChangeNotifier {
     if (path.isEmpty) return;
     try {
       await FirebaseStorage.instance.ref().child(path).delete();
-      logger.info('Deleted storage file at $path');
     } catch (e) {
-      logger.warn('Could not delete storage file at $path: $e');
     }
   }
 
@@ -392,14 +373,11 @@ class DietProvider extends ChangeNotifier {
           await deleteStorageFile(data?[field] as String?);
         }
       } catch (e) {
-        logger.warn('Could not read attachments of diet $docId: $e');
       }
 
       await docRef.delete();
-      logger.info('Deleted diet document: $docId');
       notifyListeners();
-    } catch (e, s) {
-      logger.err('Error deleting diet document: $e', [s]);
+    } catch (e) {
       rethrow;
     }
   }
@@ -439,14 +417,10 @@ class DietProvider extends ChangeNotifier {
 
     final snapshot = await docRef.get();
     if (!snapshot.exists) {
-      logger.info('Mock diet {} of user {} already gone', [docId, userId]);
       return false;
     }
 
     if (snapshot.data()?[kMockTestDataField] != true) {
-      logger.warn(
-          'Refusing to delete diet {} of user {}: not marked as test data',
-          [docId, userId]);
       return false;
     }
 
@@ -483,11 +457,9 @@ class DietProvider extends ChangeNotifier {
           .collection('dietLists')
           .add(dietData);
 
-      logger.info('Created new diet document with ID: ${docRef.id}');
       notifyListeners();
       return docRef.id;
-    } catch (e, s) {
-      logger.err('Error creating diet document: $e', [s]);
+    } catch (e) {
       rethrow;
     }
   }
@@ -553,11 +525,9 @@ class DietProvider extends ChangeNotifier {
           .doc(docId)
           .update(updatedData);
 
-      logger.info('Updated diet document: $docId');
       notifyListeners();
       return true;
-    } catch (e, s) {
-      logger.err('Error updating diet document: $e', [s]);
+    } catch (e) {
       return false;
     }
   }
@@ -621,11 +591,9 @@ class DietProvider extends ChangeNotifier {
           .collection('dietLists')
           .add(dietData);
 
-      logger.info('Diet list uploaded with ID: ${docRef.id}');
       notifyListeners();
       return docRef.id;
-    } catch (e, s) {
-      logger.err('Error uploading diet list: $e', [s]);
+    } catch (e) {
       return null;
     }
   }

@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../dialogs/add_diet_dialog.dart';
 import '../models/diet_model.dart';
 import '../models/filter_params.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/subs_model.dart';
 import '../pages/admin_diet_edit_page.dart';
@@ -17,8 +16,6 @@ import '../utils/dialog_utils.dart';
 import '../utils/pdf_launcher.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
-
-final Logger dietEditLogger = Logger.forClass(DietEditPage);
 
 class DietTab extends BaseTab<DietProvider> {
   const DietTab({super.key, required super.userId})
@@ -41,8 +38,6 @@ class DietTab extends BaseTab<DietProvider> {
 }
 
 class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
-  final Logger logger = Logger.forClass(_DietTabState);
-
   // Smooth scrolling & visible scrollbar for long lists
   final ScrollController _listCtrl = ScrollController();
 
@@ -218,7 +213,6 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
 
       return selected;
     } catch (e) {
-      logger.err('Error selecting subscription: {}', [e]);
       if (context.mounted) {
         await DialogUtils.openError(context, title: 'Hata', message: 'Paketler yüklenirken bir hata oluştu: $e');
       }
@@ -244,7 +238,6 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
         );
       },
       onDelete: () async {
-        dietEditLogger.info('Attempting to delete diet: {} ({})', [dietDoc.displayName, dietDoc.docId]);
         try {
           final confirmed = await DialogUtils.openConfirm(
             context,
@@ -259,8 +252,7 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
             await dietProvider.deleteDiet(userId: widget.userId, docId: dietDoc.docId);
             if (mounted) refreshData();
           }
-        } catch (e, s) {
-          dietEditLogger.err('Unexpected error during diet deletion flow: {} \nStack trace: {}', [e, s.toString()]);
+        } catch (e) {
           if (context.mounted) {
             DialogUtils.openError(context, title: 'Hata', message: 'Diyet silinirken bir hata oluştu: $e');
           }

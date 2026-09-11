@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../providers/meal_state_and_upload_manager.dart';
 import '../widgets/meal_image_card.dart';
@@ -34,7 +33,6 @@ class _DailyUploadsPageState extends State<DailyUploadsPage> {
   static const double _gap = 8.0;
   static const double _cardAspectRatio = 0.85;
 
-  final Logger logger = Logger.forClass(DailyUploadsPage);
   final ScrollController _scrollController = ScrollController();
 
   Future<List<MealModel>>? _mealsFuture;
@@ -49,8 +47,6 @@ class _DailyUploadsPageState extends State<DailyUploadsPage> {
       showAllImages: true,
       date: DateFormat('yyyy-MM-dd').format(widget.date),
     );
-    logger.info('DailyUploadsPage initialized. userId={} date={}',
-        [widget.userId, DateFormat('yyyy-MM-dd').format(widget.date)]);
   }
 
   @override
@@ -73,7 +69,6 @@ class _DailyUploadsPageState extends State<DailyUploadsPage> {
           }
 
           if (snap.hasError) {
-            logger.err('DailyUploadsPage load error: {}', [snap.error]);
             return const StatusNote(
               icon: Icons.error_outline,
               text: 'Fotoğraflar yüklenemedi. Lütfen tekrar deneyin.',

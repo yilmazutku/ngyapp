@@ -131,7 +131,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         });
       }
     } catch (e) {
-      debugPrint('Error fetching user details: $e');
       if (mounted) {
         setState(() {
           _isLoadingUser = false;
@@ -168,7 +167,6 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         });
       }
     } catch (e) {
-      debugPrint('Error fetching subscriptions: $e');
       if (mounted) {
         setState(() {
           _isLoadingSubscriptions = false;

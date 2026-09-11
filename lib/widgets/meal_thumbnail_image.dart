@@ -4,10 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../models/logger.dart';
 import '../services/meal_photo_loader.dart';
-
-final Logger _log = Logger('MealThumbnailImage');
 
 /// Orijinal fotoğraf indirilmek zorunda kaldığında (küçük görseli yoktu)
 /// baytlarıyla çağrılır; küçük görselin üretilip kaydedilmesi için.
@@ -66,9 +63,7 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
 
     if (isOriginal && onOriginalLoaded != null) {
       // Gösterimi bekletmez; üretim arka planda sürer.
-      unawaited(onOriginalLoaded!(bytes).catchError((Object e) {
-        _log.warn('Thumbnail backfill failed for {}: {}', [url, e]);
-      }));
+      unawaited(onOriginalLoaded!(bytes).catchError((Object e) {}));
     }
 
     final ui.ImmutableBuffer buffer =

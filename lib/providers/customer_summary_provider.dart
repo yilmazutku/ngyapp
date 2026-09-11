@@ -4,12 +4,9 @@ import 'package:intl/intl.dart';
 
 import '../models/appointment_model.dart';
 import '../models/customer_summary_row.dart';
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../models/user_model.dart';
-
-final Logger logger = Logger.forClass(CustomerSummaryProvider);
 
 /// Aggregates, for every non-admin customer that owns a subscription with a
 /// given status (e.g. Aktif/Haftalık, Aktif/Kilo Takip, Donduruldu), the data
@@ -44,8 +41,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
           .map((doc) => UserModel.fromDocument(doc))
           .toList();
 
-      logger.info('Building summary for {} customer(s)', [customers.length]);
-
       // 2) Resolve each customer in parallel; null => no matching subscription.
       final rows = await Future.wait(
         customers.map((c) => _buildRowForCustomer(c, status)),
@@ -55,11 +50,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
         ..sort((a, b) =>
             a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()));
 
-      logger.info('Summary built: {} customer(s) with {} subscription',
-          [result.length, status.label]);
       return result;
     } catch (e) {
-      logger.err('Error building customer summaries: {}', [e]);
       rethrow;
     }
   }
@@ -158,8 +150,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
   ///
   /// İş kuralı gereği bu sorgu en fazla bir paket döndürmeli
   /// ([SubActiveStatus.isActive] belgesine bakın). Birden fazla çıkıyorsa veri
-  /// bozuktur: durum uyarı olarak loglanır ve sayfanın kararlı kalması için
-  /// başlangıç tarihi en yeni olan paket kullanılır.
+  /// bozuktur: sayfanın kararlı kalması için başlangıç tarihi en yeni olan
+  /// paket kullanılır.
   Future<SubscriptionModel?> _findSubscriptionByStatus(
       String userId, SubActiveStatus status) async {
     try {
@@ -176,34 +168,14 @@ class CustomerSummaryProvider extends ChangeNotifier {
         try {
           subs.add(SubscriptionModel.fromDocument(doc));
         } catch (e) {
-          logger.warn('Skipping malformed subscription {} for user {}: {}',
-              [doc.id, userId, e]);
         }
       }
       if (subs.isEmpty) return null;
 
       subs.sort((a, b) => b.startDate.compareTo(a.startDate));
 
-      if (subs.length > 1) {
-        // Tek aktif paket kuralı bozulmuş: hangi paketlerin çakıştığını yaz ki
-        // veri düzeltilebilsin. Satır en yeni paketle kurulmaya devam eder.
-        logger.warn(
-          'Tek paket kuralı bozuldu: user={} durum={} paket sayısı={} ({}). '
-          'En yenisi kullanılıyor: {}',
-          [
-            userId,
-            status.label,
-            subs.length,
-            subs.map((s) => s.subscriptionId).join(', '),
-            subs.first.subscriptionId,
-          ],
-        );
-      }
-
       return subs.first;
     } catch (e) {
-      logger.err('Error fetching {} subscription for user {}: {}',
-          [status.label, userId, e]);
       return null;
     }
   }
@@ -247,8 +219,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
             planned.add(payment);
           }
         } catch (e) {
-          logger.warn('Skipping malformed payment {} for user {}: {}',
-              [doc.id, userId, e]);
         }
       }
 
@@ -271,8 +241,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       return const _PaymentCells.empty();
     } catch (e) {
-      logger.err('Error resolving last payment for user {} sub {}: {}',
-          [userId, subscriptionId, e]);
       return const _PaymentCells.error();
     }
   }
@@ -387,8 +355,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
         ),
       );
     } catch (e) {
-      logger.err('Error resolving appointments for user {} sub {}: {}',
-          [userId, subscriptionId, e]);
       return _AppointmentCells(
         seans: List<SummaryCell>.filled(max, const SummaryCell.error()),
         postponementUseDates: List<SummaryCell>.filled(
