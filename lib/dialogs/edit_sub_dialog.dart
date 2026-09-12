@@ -31,6 +31,27 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
       'Bu alan düzenlenemez. Değiştirmek için Ödemeler sekmesinden ödeme '
       'ekleyin veya düzenleyin.';
 
+  /// Alan etiketleri. Hem [InputDecoration.labelText] hem de doğrulama hata
+  /// listesi bunları kullanır; hangi alanın hatalı olduğu ikisinde de aynı
+  /// isimle görünür.
+  static const String _packageNameLabel = 'Paket İsmi';
+  static const String _totalMeetingsLabel = 'Toplam Görüşme Sayısı';
+  static const String _totalAmountLabel = 'Toplam Ücret (TL)';
+  static const String _amountPaidLabel = 'Ödenmiş Miktar (TL)';
+  static const String _plannedDateLabel = 'Ödemenin Alınacağı Tarih';
+  static const String _onlineMeetingsLabel = 'Online Görüşme Sayısı';
+  static const String _faceToFaceMeetingsLabel = 'Yüz Yüze Görüşme Sayısı';
+  static const String _allowedPostponementsLabel =
+      'Toplam İzin Verilen Erteleme Sayısı';
+  static const String _postponementsUsedLabel = 'Kullanılan Erteleme Sayısı';
+
+  /// Form doğrulaması düştüğünde gösterilen hata başlığı. Hatalı alan formun
+  /// görünmeyen bir yerinde kalabildiği için mesaj dialogla verilir.
+  static const String _validationErrorTitle = 'Eksik veya hatalı alanlar var';
+  static const String _validationErrorFallback =
+      'Formda eksik veya hatalı alanlar var. Lütfen kırmızı ile işaretlenen '
+      'alanları kontrol ediniz.';
+
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _packageNameController;
   late TextEditingController _notesController;
@@ -220,6 +241,139 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     setState(() {});
   }
 
+  // ---------- Alan doğrulayıcıları ----------
+  // Her doğrulayıcı hem ilgili TextFormField'ın validator'ında hem de
+  // [_validationErrors] içinde kullanılır; kural tek yerde tanımlıdır.
+
+  String? _validatePackageName(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Lütfen paket ismini giriniz./n(ör: 1 ay,ekim-kasım)';
+    }
+    return null;
+  }
+
+  String? _validateTotalMeetings(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Toplam görüşme sayısını giriniz.';
+    }
+    if (int.tryParse(value) == null) {
+      return 'Geçersiz görüşme sayısı. Lütfen girdiğiniz sayıyı kontrol ediniz.';
+    }
+    return null;
+  }
+
+  String? _validateTotalAmount(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Lütfen toplam ödeme miktarını giriniz.';
+    }
+    if (parseWholeLiraOrNull(value) == null) {
+      return 'Geçersiz ödeme miktarı. Lütfen kontrol ediniz.';
+    }
+    return null;
+  }
+
+  String? _validateAmountPaid(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Lütfen ödenmiş miktarı giriniz.';
+    }
+    if (parseWholeLiraOrNull(value) == null) {
+      return 'Geçerli bir miktar girin.';
+    }
+    return null;
+  }
+
+  String? _validatePlannedDate(String? value) {
+    if (!_isPaymentPlanned) return null;
+    if (value == null || parseDayMonthYear(value) == null) {
+      return 'Geçerli bir tarih girin (gg.aa.yyyy).';
+    }
+    return null;
+  }
+
+  String? _validateHybridMeetingCount(String? value, String fieldName) {
+    if (value == null || value.isEmpty) {
+      return 'Lütfen $fieldName sayısını girin.';
+    }
+    if (int.tryParse(value) == null) {
+      return 'Geçerli bir sayı girin.';
+    }
+    return null;
+  }
+
+  String? _validateAllowedPostponements(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Lütfen izin verilen erteleme sayısını girin.';
+    }
+    final parsed = int.tryParse(value);
+    if (parsed == null) {
+      return 'Geçerli bir sayı girin.';
+    }
+    if (parsed < 0) {
+      return 'Erteleme sayısı negatif olamaz.';
+    }
+    return null;
+  }
+
+  /// Kullanılan erteleme sayısı **izin verilen sayıyı aşabilir**: randevu
+  /// dialoglarında "erteleme hakkı yok" uyarısına rağmen devam edilebildiği
+  /// için bu veri gerçekten oluşuyor (bkz. SubscriptionModel.remainingPostponements).
+  /// Bu yüzden aşım kaydı engellemez, yalnızca formun altında uyarı olarak
+  /// gösterilir (bkz. [_buildPostponementOverLimitWarning]).
+  String? _validatePostponementsUsed(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Lütfen kullanılan erteleme sayısını girin.';
+    }
+    final postponements = int.tryParse(value);
+    if (postponements == null) {
+      return 'Geçerli bir sayı girin.';
+    }
+    if (postponements < 0) {
+      return 'Erteleme sayısı negatif olamaz.';
+    }
+    return null;
+  }
+
+  /// Kullanılan erteleme sayısının izin verilen sayıyı aştığı durum. Kayıt
+  /// engellenmez; yalnızca uyarı gösterilir.
+  bool get _isPostponementOverLimit {
+    final used = int.tryParse(_postponementsUsedController.text);
+    final allowed = int.tryParse(_allowedPostponementsController.text);
+    if (used == null || allowed == null) return false;
+    return used > allowed;
+  }
+
+  /// Görünür alanların doğrulama hatalarını "• Alan: mesaj" satırları hâlinde
+  /// toplar. Hatalı alan uzun formun kaydırılmamış bir yerinde kalabildiği
+  /// için mesajlar ayrıca dialogla gösterilir.
+  List<String> _validationErrors() {
+    final Map<String, String?> results = {
+      _packageNameLabel: _validatePackageName(_packageNameController.text),
+      _totalMeetingsLabel: _validateTotalMeetings(_totalMeetingsController.text),
+      if (!_isWeightTracking) ...{
+        _totalAmountLabel: _validateTotalAmount(_totalAmountController.text),
+        _amountPaidLabel: _validateAmountPaid(_amountPaidController.text),
+        if (_isPaymentPlanned)
+          _plannedDateLabel: _validatePlannedDate(_plannedDateController.text),
+      },
+      if (_meetingType == SubsMeetingType.hybrid) ...{
+        _onlineMeetingsLabel: _validateHybridMeetingCount(
+            _onlineMeetingsController.text, 'online görüşme'),
+        _faceToFaceMeetingsLabel: _validateHybridMeetingCount(
+            _faceToFaceMeetingsController.text, 'yüz yüze görüşme'),
+      },
+      _allowedPostponementsLabel:
+          _validateAllowedPostponements(_allowedPostponementsController.text),
+      _postponementsUsedLabel:
+          _validatePostponementsUsed(_postponementsUsedController.text),
+    };
+
+    final List<String> errors = [];
+    results.forEach((label, error) {
+      if (error != null) errors.add('• $label: $error');
+    });
+    return errors;
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -343,7 +497,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
               TextFormField(
                 controller: _packageNameController,
                 decoration: const InputDecoration(
-                  labelText: 'Paket İsmi',
+                  labelText: _packageNameLabel,
                   border: OutlineInputBorder(),
                   helperText:
                       'Paket süresi ve başlangıç tarihine göre otomatik güncellenir; elle değiştirebilirsiniz.',
@@ -351,12 +505,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   helperStyle: TextStyle(fontStyle: FontStyle.italic),
                 ),
                 onChanged: (_) => _packageNameEditedManually = true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Lütfen paket ismini giriniz./n(ör: 1 ay,ekim-kasım)';
-                  }
-                  return null;
-                },
+                validator: _validatePackageName,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -374,18 +523,10 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 controller: _totalMeetingsController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  labelText: 'Toplam Görüşme Sayısı',
+                  labelText: _totalMeetingsLabel,
                   border: OutlineInputBorder(),
                 ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Toplam görüşme sayısını giriniz.';
-                  }
-                  if (int.tryParse(value) == null) {
-                    return 'Geçersiz görüşme sayısı. Lütfen girdiğiniz sayıyı kontrol ediniz.';
-                  }
-                  return null;
-                },
+                validator: _validateTotalMeetings,
               ),
               // Fee + payment widgets are hidden entirely for free
               // weight-tracking packages.
@@ -396,19 +537,11 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   keyboardType: TextInputType.number,
                   inputFormatters: wholeLiraInputFormatters,
                   decoration: const InputDecoration(
-                    labelText: 'Toplam Ücret (TL)',
+                    labelText: _totalAmountLabel,
                     border: OutlineInputBorder(),
                     helperText: 'Tam lira; kuruş girilmez.',
                   ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Lütfen toplam ödeme miktarını giriniz.';
-                    }
-                    if (parseWholeLiraOrNull(value) == null) {
-                      return 'Geçersiz ödeme miktarı. Lütfen kontrol ediniz.';
-                    }
-                    return null;
-                  },
+                  validator: _validateTotalAmount,
                 ),
                 const SizedBox(height: 16),
 
@@ -420,7 +553,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   // kopabiliyordu.
                   readOnly: true,
                   decoration: InputDecoration(
-                    labelText: 'Ödenmiş Miktar (TL)',
+                    labelText: _amountPaidLabel,
                     border: const OutlineInputBorder(),
                     helperText: _amountPaidNote,
                     helperMaxLines: 3,
@@ -436,15 +569,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                           color: Colors.red.shade800,
                           fontWeight: FontWeight.bold)
                       : null,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Lütfen ödenmiş miktarı giriniz.';
-                    }
-                    if (parseWholeLiraOrNull(value) == null) {
-                      return 'Geçerli bir miktar girin.';
-                    }
-                    return null;
-                  },
+                  validator: _validateAmountPaid,
                 ),
                 const SizedBox(height: 8),
 
@@ -567,19 +692,13 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     keyboardType: TextInputType.number,
                     inputFormatters: [MaskedDateInputFormatter()],
                     decoration: const InputDecoration(
-                      labelText: 'Ödemenin Alınacağı Tarih',
+                      labelText: _plannedDateLabel,
                       helperText:
                           'gg.aa.yyyy — değişiklik bağlı ödeme kaydına uygulanır.',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.event),
                     ),
-                    validator: (v) {
-                      if (!_isPaymentPlanned) return null;
-                      if (v == null || parseDayMonthYear(v) == null) {
-                        return 'Geçerli bir tarih girin (gg.aa.yyyy).';
-                      }
-                      return null;
-                    },
+                    validator: _validatePlannedDate,
                   ),
                 ],
               ],
@@ -657,37 +776,23 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                     TextFormField(
                       controller: _onlineMeetingsController,
                       decoration: const InputDecoration(
-                        labelText: 'Online Görüşme Sayısı',
+                        labelText: _onlineMeetingsLabel,
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Lütfen online görüşme sayısını girin.';
-                        }
-                        if (int.tryParse(value) == null) {
-                          return 'Geçerli bir sayı girin.';
-                        }
-                        return null;
-                      },
+                      validator: (value) =>
+                          _validateHybridMeetingCount(value, 'online görüşme'),
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _faceToFaceMeetingsController,
                       decoration: const InputDecoration(
-                        labelText: 'Yüz Yüze Görüşme Sayısı',
+                        labelText: _faceToFaceMeetingsLabel,
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Lütfen yüz yüze görüşme sayısını girin.';
-                        }
-                        if (int.tryParse(value) == null) {
-                          return 'Geçerli bir sayı girin.';
-                        }
-                        return null;
-                      },
+                      validator: (value) => _validateHybridMeetingCount(
+                          value, 'yüz yüze görüşme'),
                     ),
                   ],
                 ),
@@ -697,26 +802,18 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
               TextFormField(
                 controller: _allowedPostponementsController,
                 decoration: const InputDecoration(
-                  labelText: 'Toplam İzin Verilen Erteleme Sayısı',
+                  labelText: _allowedPostponementsLabel,
                   border: OutlineInputBorder(),
                   helperText: 'Görüşme sayısına göre otomatik hesaplanır, değiştirilebilir.',
                   helperStyle: TextStyle(fontStyle: FontStyle.italic),
                 ),
                 keyboardType: TextInputType.number,
-                onChanged: (_) => _allowedPostponementsEditedManually = true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Lütfen izin verilen erteleme sayısını girin.';
-                  }
-                  final parsed = int.tryParse(value);
-                  if (parsed == null) {
-                    return 'Geçerli bir sayı girin.';
-                  }
-                  if (parsed < 0) {
-                    return 'Erteleme sayısı negatif olamaz.';
-                  }
-                  return null;
+                onChanged: (_) {
+                  _allowedPostponementsEditedManually = true;
+                  // Aşım uyarısı iki alandan da anında etkilenir.
+                  setState(() {});
                 },
+                validator: _validateAllowedPostponements,
               ),
               const SizedBox(height: 16),
               
@@ -724,36 +821,20 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
               TextFormField(
                 controller: _postponementsUsedController,
                 decoration: const InputDecoration(
-                  labelText: 'Kullanılan Erteleme Sayısı',
+                  labelText: _postponementsUsedLabel,
                   border: OutlineInputBorder(),
                   hintText: 'Müşteri tarafından kullanılan erteleme sayısı',
                 ),
                 keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Lütfen kullanılan erteleme sayısını girin.';
-                  }
-                  
-                  final postponements = int.tryParse(value);
-                  if (postponements == null) {
-                    return 'Geçerli bir sayı girin.';
-                  }
-                  
-                  // Max is the admin-editable allowed postponements value above
-                  final allowedPostponements =
-                      int.tryParse(_allowedPostponementsController.text) ?? 0;
-                  
-                  if (postponements < 0) {
-                    return 'Erteleme sayısı negatif olamaz.';
-                  }
-                  
-                  if (postponements > allowedPostponements) {
-                    return 'Erteleme sayısı izin verilen maksimum değeri ($allowedPostponements) aşamaz.';
-                  }
-                  
-                  return null;
-                },
+                onChanged: (_) => setState(() {}),
+                validator: _validatePostponementsUsed,
               ),
+
+              // Aşım kaydı engellemez; formun en sonunda uyarı olarak durur.
+              if (_isPostponementOverLimit) ...[
+                const SizedBox(height: 16),
+                _buildPostponementOverLimitWarning(),
+              ],
             ],
           ),
         ),
@@ -776,213 +857,277 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     );
   }
 
+  /// Kullanılan erteleme sayısı izin verileni aştığında formun en altında
+  /// görünen uyarı. Kaydı engellemez: randevu dialoglarında hak yokken de
+  /// erteleme yapılabildiği için bu durum geçerli bir veridir.
+  Widget _buildPostponementOverLimitWarning() {
+    final int used = int.tryParse(_postponementsUsedController.text) ?? 0;
+    final int allowed =
+        int.tryParse(_allowedPostponementsController.text) ?? 0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.shade400),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded,
+              color: Colors.orange.shade800, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Erteleme hakkı aşılmış: $used / $allowed',
+                  style: TextStyle(
+                    color: Colors.orange.shade900,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Danışan izin verilen erteleme sayısından fazla erteleme '
+                  'kullanmış. Bu paketi kaydetmeyi engellemez; düzeltmek '
+                  'isterseniz yukarıdaki iki alanı güncelleyebilirsiniz.',
+                  style: TextStyle(
+                    color: Colors.orange.shade900,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _updateSubscription() async {
-    if (_formKey.currentState!.validate()) {
-      if (_status == SubActiveStatus.frozen && _freezeDate == null) {
+    // Doğrulama düşerse hatalı alan formun kaydırılmamış bir yerinde kalıp
+    // gözden kaçabiliyordu; hangi alanın neden hatalı olduğu dialogla
+    // gösteriliyor.
+    if (!_formKey.currentState!.validate()) {
+      final List<String> errors = _validationErrors();
+      await DialogUtils.openError(
+        context,
+        title: _validationErrorTitle,
+        message: errors.isEmpty
+            ? _validationErrorFallback
+            : errors.join('\n'),
+      );
+      return;
+    }
+
+    if (_status == SubActiveStatus.frozen && _freezeDate == null) {
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Paket donduruldu olarak işaretlendi. Lütfen dondurulma tarihini seçin.',
+      );
+      return;
+    }
+
+    if (_meetingType == SubsMeetingType.hybrid) {
+      int online = int.tryParse(_onlineMeetingsController.text) ?? 0;
+      int faceToFace = int.tryParse(_faceToFaceMeetingsController.text) ?? 0;
+      int total = int.tryParse(_totalMeetingsController.text) ?? 0;
+      
+      if (online + faceToFace != total) {
         await DialogUtils.openError(
           context,
           title: 'Hata',
-          message: 'Paket donduruldu olarak işaretlendi. Lütfen dondurulma tarihini seçin.',
+          message: 'Online ve yüz yüze görüşme sayıları toplamı, toplam görüşme sayısına eşit olmalıdır.',
         );
         return;
       }
+    }
 
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      final userId = widget.subscription.userId;
+      final subscriptionId = widget.subscription.subscriptionId;
+      final totalMeetings = int.parse(_totalMeetingsController.text);
+      
+      // Admin-editable allowed postponements (pre-filled with the auto-calculated value)
+      final allowedPostponements = int.parse(_allowedPostponementsController.text);
+
+      // Weight-tracking packages are free: no fee and no payment. When the
+      // admin marks the payment as not received, nothing is considered paid.
+      // Alanlar tam lira; modeldeki double'a yalnızca yazarken çevrilir.
+      final double totalAmount = _isWeightTracking
+          ? 0.0
+          : parseWholeLiraOrNull(_totalAmountController.text)!.toDouble();
+      final double amountPaid = (_isWeightTracking || !_isPaymentReceived)
+          ? 0.0
+          : parseWholeLiraOrNull(_amountPaidController.text)!.toDouble();
+      
+      final String notes = _notesController.text.trim();
+
+      // Create an update map with raw data - no subscription model objects
+      final Map<String, dynamic> updateData = {
+        'packageName': _packageNameController.text,
+        'packageType': _packageType?.label,
+        'notes': notes.isNotEmpty ? notes : null,
+        'startDate': _startDate!,
+        'totalMeetings': totalMeetings,
+        'allowedPostponements': allowedPostponements,
+        'postponementsUsed': int.parse(_postponementsUsedController.text),
+        'totalAmount': totalAmount,
+        'amountPaid': amountPaid,
+        'status': _status.label,
+        'meetingType': _meetingType.label,
+        // Store the freeze date for frozen packages; clear it otherwise so a
+        // package that gets unfrozen doesn't keep a stale freeze date.
+        'freezeDate': _status == SubActiveStatus.frozen ? _freezeDate : null,
+        'updateDate': DateTime.now(),
+        'updateUser': null, // TODO: Add current user ID if available
+      };
+      
+      // Add hybrid meeting details if applicable
       if (_meetingType == SubsMeetingType.hybrid) {
-        int online = int.tryParse(_onlineMeetingsController.text) ?? 0;
-        int faceToFace = int.tryParse(_faceToFaceMeetingsController.text) ?? 0;
-        int total = int.tryParse(_totalMeetingsController.text) ?? 0;
-        
-        if (online + faceToFace != total) {
-          await DialogUtils.openError(
-            context,
-            title: 'Hata',
-            message: 'Online ve yüz yüze görüşme sayıları toplamı, toplam görüşme sayısına eşit olmalıdır.',
-          );
-          return;
+        updateData['onlineMeetings'] = int.parse(_onlineMeetingsController.text);
+        updateData['faceToFaceMeetings'] = int.parse(_faceToFaceMeetingsController.text);
+      } else {
+        // Set these to null if not hybrid
+        updateData['onlineMeetings'] = null;
+        updateData['faceToFaceMeetings'] = null;
+      }
+
+      // Acquire providers before awaits to avoid context issues
+      final subProvider = Provider.of<SubProvider>(context, listen: false);
+      final paymentProvider =
+          Provider.of<PaymentProvider>(context, listen: false);
+
+      final double oldTotalAmount = widget.subscription.totalAmount;
+      final double newTotalAmount = totalAmount;
+
+      // Use the SubProvider to update the subscription
+      await subProvider.updateSubscription(
+        userId: userId,
+        subscriptionId: subscriptionId,
+        updateData: updateData,
+      );
+
+      // Reconcile the linked payment record with the "Ödeme Alındı mı?"
+      // selection: create one when payment is now received but none exists,
+      // keep it in sync when it already exists, or delete it when payment is
+      // no longer received. Weight-tracking packages never carry a payment.
+      if (!_isWeightTracking) {
+        if (_isPaymentReceived) {
+          if (_completedPayments.isEmpty) {
+            await paymentProvider.addPayment(
+              userId: userId,
+              subscription: SubscriptionModel(
+                subscriptionId: subscriptionId,
+                userId: userId,
+                packageName: _packageNameController.text,
+                startDate: _startDate!,
+                totalMeetings: totalMeetings,
+                allowedPostponements: allowedPostponements,
+                totalAmount: totalAmount,
+                meetingType: _meetingType,
+              ),
+              amount: amountPaid,
+              paymentDate: _startDate,
+              status: PaymentStatus.completed,
+              paymentType: _paymentType ?? PaymentType.nakit,
+              notes: 'Paket ödemesi: ${_packageNameController.text}',
+            );
+          } else {
+            // Only send a new payment type when the admin actually changed it.
+            final PaymentType? changedPaymentType =
+                (_paymentType != null && _paymentType != _originalPaymentType)
+                    ? _paymentType
+                    : null;
+            await paymentProvider.syncSubscriptionLinkedPayments(
+              userId: userId,
+              subscriptionId: subscriptionId,
+              newPaymentType: changedPaymentType,
+              oldAmount: oldTotalAmount,
+              newAmount: newTotalAmount,
+            );
+          }
+        } else {
+          // Payment no longer received: remove the linked completed
+          // record(s). Planned payments are never deleted from here; they
+          // are managed from the payments tab.
+          for (final payment in _completedPayments) {
+            // This dialog has already written the package's amountPaid above,
+            // so the delete must not subtract the amount a second time.
+            await paymentProvider.deletePayment(
+              payment.paymentId,
+              userId,
+              adjustSubscriptionTotal: false,
+            );
+          }
+        }
+
+        // Apply a changed planned date to the linked planned payment
+        // record(s) so the payment stays in sync with this dialog.
+        if (_isPaymentPlanned && _plannedPayments.isNotEmpty) {
+          final DateTime? newPlannedDate =
+              parseDayMonthYear(_plannedDateController.text);
+          if (newPlannedDate != null) {
+            for (final payment in _plannedPayments) {
+              final DateTime? currentDueDate = payment.dueDate;
+              if (currentDueDate == null ||
+                  !DateUtils.isSameDay(currentDueDate, newPlannedDate)) {
+                await paymentProvider.updatePaymentDueDate(
+                  userId: userId,
+                  paymentId: payment.paymentId,
+                  dueDate: newPlannedDate,
+                );
+              }
+            }
+          }
+          // Keep the planned payment's amount mirroring the package total
+          // when it changed (no-op if the amounts already match).
+          if (!_isPaymentReceived) {
+            await paymentProvider.syncSubscriptionLinkedPayments(
+              userId: userId,
+              subscriptionId: subscriptionId,
+              oldAmount: oldTotalAmount,
+              newAmount: newTotalAmount,
+            );
+          }
         }
       }
 
-      try {
+      if (!mounted) return;
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Paket başarıyla güncellendi.',
+      );
+      
+      // Close dialog first, then notify parent about the update
+      // Re-checked after the await: the widget may be gone by now.
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      
+      // Call the update callback after dialog is closed
+      widget.onSubscriptionUpdated();
+    } catch (e) {
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Paket güncellenirken bir hata oluştu: $e',
+      );
+    } finally {
+      if (mounted) {
         setState(() {
-          _isLoading = true;
+          _isLoading = false;
         });
-
-        final userId = widget.subscription.userId;
-        final subscriptionId = widget.subscription.subscriptionId;
-        final totalMeetings = int.parse(_totalMeetingsController.text);
-        
-        // Admin-editable allowed postponements (pre-filled with the auto-calculated value)
-        final allowedPostponements = int.parse(_allowedPostponementsController.text);
-
-        // Weight-tracking packages are free: no fee and no payment. When the
-        // admin marks the payment as not received, nothing is considered paid.
-        // Alanlar tam lira; modeldeki double'a yalnızca yazarken çevrilir.
-        final double totalAmount = _isWeightTracking
-            ? 0.0
-            : parseWholeLiraOrNull(_totalAmountController.text)!.toDouble();
-        final double amountPaid = (_isWeightTracking || !_isPaymentReceived)
-            ? 0.0
-            : parseWholeLiraOrNull(_amountPaidController.text)!.toDouble();
-        
-        final String notes = _notesController.text.trim();
-
-        // Create an update map with raw data - no subscription model objects
-        final Map<String, dynamic> updateData = {
-          'packageName': _packageNameController.text,
-          'packageType': _packageType?.label,
-          'notes': notes.isNotEmpty ? notes : null,
-          'startDate': _startDate!,
-          'totalMeetings': totalMeetings,
-          'allowedPostponements': allowedPostponements,
-          'postponementsUsed': int.parse(_postponementsUsedController.text),
-          'totalAmount': totalAmount,
-          'amountPaid': amountPaid,
-          'status': _status.label,
-          'meetingType': _meetingType.label,
-          // Store the freeze date for frozen packages; clear it otherwise so a
-          // package that gets unfrozen doesn't keep a stale freeze date.
-          'freezeDate': _status == SubActiveStatus.frozen ? _freezeDate : null,
-          'updateDate': DateTime.now(),
-          'updateUser': null, // TODO: Add current user ID if available
-        };
-        
-        // Add hybrid meeting details if applicable
-        if (_meetingType == SubsMeetingType.hybrid) {
-          updateData['onlineMeetings'] = int.parse(_onlineMeetingsController.text);
-          updateData['faceToFaceMeetings'] = int.parse(_faceToFaceMeetingsController.text);
-        } else {
-          // Set these to null if not hybrid
-          updateData['onlineMeetings'] = null;
-          updateData['faceToFaceMeetings'] = null;
-        }
-
-        // Acquire providers before awaits to avoid context issues
-        final subProvider = Provider.of<SubProvider>(context, listen: false);
-        final paymentProvider =
-            Provider.of<PaymentProvider>(context, listen: false);
-
-        final double oldTotalAmount = widget.subscription.totalAmount;
-        final double newTotalAmount = totalAmount;
-
-        // Use the SubProvider to update the subscription
-        await subProvider.updateSubscription(
-          userId: userId,
-          subscriptionId: subscriptionId,
-          updateData: updateData,
-        );
-
-        // Reconcile the linked payment record with the "Ödeme Alındı mı?"
-        // selection: create one when payment is now received but none exists,
-        // keep it in sync when it already exists, or delete it when payment is
-        // no longer received. Weight-tracking packages never carry a payment.
-        if (!_isWeightTracking) {
-          if (_isPaymentReceived) {
-            if (_completedPayments.isEmpty) {
-              await paymentProvider.addPayment(
-                userId: userId,
-                subscription: SubscriptionModel(
-                  subscriptionId: subscriptionId,
-                  userId: userId,
-                  packageName: _packageNameController.text,
-                  startDate: _startDate!,
-                  totalMeetings: totalMeetings,
-                  allowedPostponements: allowedPostponements,
-                  totalAmount: totalAmount,
-                  meetingType: _meetingType,
-                ),
-                amount: amountPaid,
-                paymentDate: _startDate,
-                status: PaymentStatus.completed,
-                paymentType: _paymentType ?? PaymentType.nakit,
-                notes: 'Paket ödemesi: ${_packageNameController.text}',
-              );
-            } else {
-              // Only send a new payment type when the admin actually changed it.
-              final PaymentType? changedPaymentType =
-                  (_paymentType != null && _paymentType != _originalPaymentType)
-                      ? _paymentType
-                      : null;
-              await paymentProvider.syncSubscriptionLinkedPayments(
-                userId: userId,
-                subscriptionId: subscriptionId,
-                newPaymentType: changedPaymentType,
-                oldAmount: oldTotalAmount,
-                newAmount: newTotalAmount,
-              );
-            }
-          } else {
-            // Payment no longer received: remove the linked completed
-            // record(s). Planned payments are never deleted from here; they
-            // are managed from the payments tab.
-            for (final payment in _completedPayments) {
-              // This dialog has already written the package's amountPaid above,
-              // so the delete must not subtract the amount a second time.
-              await paymentProvider.deletePayment(
-                payment.paymentId,
-                userId,
-                adjustSubscriptionTotal: false,
-              );
-            }
-          }
-
-          // Apply a changed planned date to the linked planned payment
-          // record(s) so the payment stays in sync with this dialog.
-          if (_isPaymentPlanned && _plannedPayments.isNotEmpty) {
-            final DateTime? newPlannedDate =
-                parseDayMonthYear(_plannedDateController.text);
-            if (newPlannedDate != null) {
-              for (final payment in _plannedPayments) {
-                final DateTime? currentDueDate = payment.dueDate;
-                if (currentDueDate == null ||
-                    !DateUtils.isSameDay(currentDueDate, newPlannedDate)) {
-                  await paymentProvider.updatePaymentDueDate(
-                    userId: userId,
-                    paymentId: payment.paymentId,
-                    dueDate: newPlannedDate,
-                  );
-                }
-              }
-            }
-            // Keep the planned payment's amount mirroring the package total
-            // when it changed (no-op if the amounts already match).
-            if (!_isPaymentReceived) {
-              await paymentProvider.syncSubscriptionLinkedPayments(
-                userId: userId,
-                subscriptionId: subscriptionId,
-                oldAmount: oldTotalAmount,
-                newAmount: newTotalAmount,
-              );
-            }
-          }
-        }
-
-        if (!mounted) return;
-        await DialogUtils.openInfo(
-          context,
-          title: 'Başarılı',
-          message: 'Paket başarıyla güncellendi.',
-        );
-        
-        // Close dialog first, then notify parent about the update
-        // Re-checked after the await: the widget may be gone by now.
-        if (!mounted) return;
-        Navigator.of(context).pop();
-        
-        // Call the update callback after dialog is closed
-        widget.onSubscriptionUpdated();
-      } catch (e) {
-        if (!mounted) return;
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message: 'Paket güncellenirken bir hata oluştu: $e',
-        );
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
       }
     }
   }
