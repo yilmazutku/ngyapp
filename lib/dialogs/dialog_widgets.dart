@@ -4,6 +4,29 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 
+/// Randevu ekleme/düzenleme dialoglarındaki tarih satırlarının etiketleri.
+///
+/// Randevu "Ertelendi" iken kartta iki tarih birden görünür: randevunun kendi
+/// tarihi ve ertelendiği tarih. Bu yüzden o durumda ilk tarihin etiketi de
+/// ayrışır, aksi hâlde iki satır da "Tarih" der ve hangisinin hangisi olduğu
+/// anlaşılmaz.
+class AppointmentDateLabels {
+  AppointmentDateLabels._();
+
+  static const String date = 'Tarih';
+  static const String firstDate = 'İlk Tarih';
+
+  /// Randevu kartlarında satır etiketi olarak kullanılan biçim.
+  static const String postponedDate = 'Ertelendiği Tarih';
+
+  /// Dialoglarda bölüm başlığı olarak kullanılan büyük harfli biçim. Dart'ın
+  /// [String.toUpperCase] eşlemesi "i" harfini "I" yaptığı için elle yazılır.
+  static const String postponedDateHeading = 'ERTELENDİĞİ TARİH';
+
+  /// Randevunun kendi tarihinin etiketi; [isPostponed] ise "İlk Tarih".
+  static String dateLabel(bool isPostponed) => isPostponed ? firstDate : date;
+}
+
 /// Parses two "HH" / "MM" text controllers into a [TimeOfDay], or returns null
 /// when either value is missing or out of range. Shared by the appointment
 /// dialogs, which enter the time via [HourMinuteField] instead of a dial picker.

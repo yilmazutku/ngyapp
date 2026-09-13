@@ -16,13 +16,13 @@ import '../widgets/app_bar_with_back.dart';
 /// - Lists all users with search functionality
 /// - Search by name, surname, or email
 /// - Alfabetik sıralı liste (Danışanlar Özet sayfasındaki sıralamayla aynı)
-/// - Yürürlükteki paketi olmayan danışanlar soluk gösterilir ve
+/// - Aktif paketi olmayan danışanlar soluk gösterilir ve
 ///   e-postalarının yanında "AKTİF PAKETİ YOK" rozeti taşır
 /// Data Flow:
 /// 1. Fetches users via UserProvider.fetchUsers()
 /// 2. Displays searchable list
 /// 3. Paket bilgisi liste çizildikten sonra ayrıca yüklenir
-///    ([SubProvider.fetchUsersWithLivePackage])
+///    ([SubProvider.fetchUsersWithActivePackage])
 /// 4. On tap -> CustomerSummaryPage
 class AdminUsersPage extends StatefulWidget {
   const AdminUsersPage({super.key});
@@ -56,8 +56,9 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// Loading state indicator
   bool _isLoading = true;
 
-  /// Yürürlükteki (aktif ya da dondurulmuş) paketi olan danışanların
-  /// kimlikleri. Liste çizildikten sonra doldurulur.
+  /// Aktif (Aktif/Haftalık ya da Aktif/Kilo Takip) paketi olan danışanların
+  /// kimlikleri. Dondurulmuş ve tamamlanmış paketler aktif sayılmaz. Liste
+  /// çizildikten sonra doldurulur.
   Set<String> _usersWithPackage = const {};
 
   /// Paket bilgisi hâlâ yükleniyor mu. Yüklenirken hiçbir satıra "AKTİF
@@ -128,7 +129,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   int _sortByDisplayName(UserModel a, UserModel b) =>
       compareSearchText(_displayNameOf(a), _displayNameOf(b));
 
-  /// Hangi danışanın yürürlükteki paketi olduğunu yükler; kalanlar listede
+  /// Hangi danışanın aktif paketi olduğunu yükler; kalanlar listede
   /// soluk gösterilip "AKTİF PAKETİ YOK" rozeti alır.
   ///
   /// Paket bilgisi sayfanın asıl işi değil: okunamazsa liste yine çalışır,
@@ -147,7 +148,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
     try {
       final Set<String> owners =
-          await subProvider.fetchUsersWithLivePackage(customerIds);
+          await subProvider.fetchUsersWithActivePackage(customerIds);
       if (!mounted) return;
       setState(() {
         _usersWithPackage = owners;
@@ -164,7 +165,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   bool _isCustomer(UserModel user) =>
       user.role == _customerRole && !ChatManager.isAdminUid(user.userId);
 
-  /// [user] paketsiz mi: paket bilgisi gelmiş bir danışan, yürürlükteki paketi
+  /// [user] aktif paketsiz mi: paket bilgisi gelmiş bir danışan, aktif paketi
   /// olanlar arasında değilse. Bilgi yüklenirken hiç kimse paketsiz sayılmaz.
   bool _hasNoPackage(UserModel user) =>
       !_packagesLoading &&
@@ -383,7 +384,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// - Email address
   /// - Navigation arrow
   ///
-  /// Yürürlükteki paketi olmayan danışanın kartı soluk çizilir (soluk zemin,
+  /// Aktif paketi olmayan danışanın kartı soluk çizilir (soluk zemin,
   /// gri avatar ve gri yazı); e-postasının yanındaki kırmızı "AKTİF PAKETİ
   /// YOK" rozeti kartın tek canlı renkli ögesi olduğu için hemen göze çarpar.
   Widget _buildUserList() {
@@ -508,8 +509,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   }
 }
 
-/// Paketi olmayan danışanı belli eden rozet: e-postanın yanında, kırmızı
-/// zeminde büyük ve kalın harflerle.
+/// Aktif paketi olmayan danışanı belli eden rozet: e-postanın yanında,
+/// kırmızı zeminde büyük ve kalın harflerle.
 class _NoPackageBadge extends StatelessWidget {
   static const String _label = 'AKTİF PAKETİ YOK';
 
