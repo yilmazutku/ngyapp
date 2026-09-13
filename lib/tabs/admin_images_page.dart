@@ -17,7 +17,7 @@ import '../widgets/app_bar_with_back.dart';
 /// - Search by name, surname, or email
 /// - Alfabetik sıralı liste (Danışanlar Özet sayfasındaki sıralamayla aynı)
 /// - Yürürlükteki paketi olmayan danışanlar soluk gösterilir ve
-///   e-postalarının yanında "PAKETİ YOK" rozeti taşır
+///   e-postalarının yanında "AKTİF PAKETİ YOK" rozeti taşır
 /// Data Flow:
 /// 1. Fetches users via UserProvider.fetchUsers()
 /// 2. Displays searchable list
@@ -60,8 +60,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// kimlikleri. Liste çizildikten sonra doldurulur.
   Set<String> _usersWithPackage = const {};
 
-  /// Paket bilgisi hâlâ yükleniyor mu. Yüklenirken hiçbir satıra "PAKETİ YOK"
-  /// yazılmaz: bilgi gelmeden danışan paketsiz sanılmasın.
+  /// Paket bilgisi hâlâ yükleniyor mu. Yüklenirken hiçbir satıra "AKTİF
+  /// PAKETİ YOK" yazılmaz: bilgi gelmeden danışan paketsiz sanılmasın.
   bool _packagesLoading = true;
 
   @override
@@ -129,7 +129,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
       compareSearchText(_displayNameOf(a), _displayNameOf(b));
 
   /// Hangi danışanın yürürlükteki paketi olduğunu yükler; kalanlar listede
-  /// soluk gösterilip "PAKETİ YOK" rozeti alır.
+  /// soluk gösterilip "AKTİF PAKETİ YOK" rozeti alır.
   ///
   /// Paket bilgisi sayfanın asıl işi değil: okunamazsa liste yine çalışır,
   /// yalnızca rozet gösterilmez.
@@ -384,8 +384,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// - Navigation arrow
   ///
   /// Yürürlükteki paketi olmayan danışanın kartı soluk çizilir (soluk zemin,
-  /// gri avatar ve gri yazı); e-postasının yanındaki kırmızı "PAKETİ YOK"
-  /// rozeti kartın tek canlı renkli ögesi olduğu için hemen göze çarpar.
+  /// gri avatar ve gri yazı); e-postasının yanındaki kırmızı "AKTİF PAKETİ
+  /// YOK" rozeti kartın tek canlı renkli ögesi olduğu için hemen göze çarpar.
   Widget _buildUserList() {
     return ListView.builder(
       itemCount: _filteredUsers.length,
@@ -511,7 +511,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 /// Paketi olmayan danışanı belli eden rozet: e-postanın yanında, kırmızı
 /// zeminde büyük ve kalın harflerle.
 class _NoPackageBadge extends StatelessWidget {
-  static const String _label = 'PAKETİ YOK';
+  static const String _label = 'AKTİF PAKETİ YOK';
 
   const _NoPackageBadge();
 
