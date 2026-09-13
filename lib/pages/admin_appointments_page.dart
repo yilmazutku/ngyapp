@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../dialogs/add_appointment_dialog.dart';
+import '../dialogs/dialog_widgets.dart';
 import '../models/appointment_model.dart';
 import '../models/event_model.dart';
 import '../models/user_model.dart';
@@ -1466,7 +1467,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               'Kullanıcı: ${appointment.user?.fullName ?? 'Bilinmiyor'}\n'
                   'Tür: ${appointment.meetingType.label}\n'
                   'Durum: ${appointment.status.label}'
-                  '${isPostponed ? '\nOrijinal: ${_fullFmt.format(appointment.appointmentDateTime)}\nErtelenen: ${_fullFmt.format(appointment.postponedDate!)}' : ''}',
+                  '${isPostponed ? '\n${AppointmentDateLabels.firstDate}: ${_fullFmt.format(appointment.appointmentDateTime)}\n${AppointmentDateLabels.postponedDate}: ${_fullFmt.format(appointment.postponedDate!)}' : ''}',
             ),
             trailing: Wrap(
               alignment: WrapAlignment.end,

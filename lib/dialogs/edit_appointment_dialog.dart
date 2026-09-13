@@ -576,7 +576,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                   ),
                 ListTile(
                   title: const Text(
-                    'Ertelenen Tarih',
+                    AppointmentDateLabels.postponedDateHeading,
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: _postponedDate != null
@@ -687,7 +687,9 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                 });
               },
               label: 'Tarih Seçin',
-              selectedLabel: 'Tarih',
+              selectedLabel: AppointmentDateLabels.dateLabel(
+                _appointmentStatus == AppointmentStatus.postponed,
+              ),
               firstDate: DateTime(2000),
               lastDate: DateTime(2100),
             ),

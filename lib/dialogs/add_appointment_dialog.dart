@@ -703,7 +703,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                     ),
                   ListTile(
                     title: const Text(
-                      'Ertelenen Tarih',
+                      AppointmentDateLabels.postponedDateHeading,
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: _postponedDate != null
@@ -757,7 +757,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   selectedDate: _selectedDate,
                   onDateSelected: _onDateSelected,
                   label: 'Tarih Seçin',
-                  selectedLabel: 'Tarih',
+                  selectedLabel: AppointmentDateLabels.dateLabel(
+                    _selectedStatus == AppointmentStatus.postponed,
+                  ),
                   // Allow selecting past dates (e.g. logging a missed/late
                   // appointment). Lower bound kept wide; default selected date
                   // is today, which stays within [firstDate, lastDate].
@@ -767,7 +769,11 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               ] else ...[
                 // Show selected date as read-only when date is pre-selected
                 ListTile(
-                  title: const Text('Tarih'),
+                  title: Text(
+                    AppointmentDateLabels.dateLabel(
+                      _selectedStatus == AppointmentStatus.postponed,
+                    ),
+                  ),
                   subtitle: Text(
                     DateFormatter.formatNumericDate(_selectedDate),
                     style: const TextStyle(fontWeight: FontWeight.bold),

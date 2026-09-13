@@ -151,21 +151,15 @@ class SubProvider extends ChangeNotifier {
     return _fetchSubscriptionsOfUsers(userIds, activeLabels);
   }
 
-  /// Verilen danışanlardan **yürürlükteki paketi olanların** kimlikleri.
+  /// Verilen danışanlardan **aktif paketi olanların** kimlikleri.
   ///
-  /// Yürürlükteki paket: aktif (Aktif/Haftalık, Aktif/Kilo Takip) ya da
-  /// dondurulmuş bir paket. Dondurulmuş paket duran ama var olan bir pakettir,
-  /// bu yüzden burada "paketi var" sayılır; tamamlanmış paket sayılmaz.
-  /// Kullanıcı Yönetimi sayfası "PAKETİ YOK" rozetini bu kümede olmayan
-  /// danışanlara koyar.
-  Future<Set<String>> fetchUsersWithLivePackage(List<String> userIds) async {
-    final List<String> liveLabels = SubActiveStatus.values
-        .where((status) => status.isActive || status == SubActiveStatus.frozen)
-        .map((status) => status.label)
-        .toList();
-
+  /// Aktif paket tanımı [fetchActiveSubscriptionsOfUsers] ile aynıdır
+  /// ([SubActiveStatus.isActive]: Aktif/Haftalık veya Aktif/Kilo Takip).
+  /// Dondurulmuş ve tamamlanmış paketler aktif sayılmaz. Kullanıcı Yönetimi
+  /// sayfası "AKTİF PAKETİ YOK" rozetini bu kümede olmayan danışanlara koyar.
+  Future<Set<String>> fetchUsersWithActivePackage(List<String> userIds) async {
     final Map<String, SubscriptionModel> byUser =
-        await _fetchSubscriptionsOfUsers(userIds, liveLabels);
+        await fetchActiveSubscriptionsOfUsers(userIds);
     return byUser.keys.toSet();
   }
 
