@@ -49,7 +49,9 @@ class AdminMealPhotosPage extends StatefulWidget {
 class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _pageTitle = 'Öğün Fotoğrafları';
   static const String _refreshLabel = 'Yenile';
-  static const String _mockLabel = 'Test Verisi';
+  // Test verisi yükleme şimdilik kapalı; geri açılırken bu sabit ve aşağıdaki
+  // "Test Verisi" butonu birlikte yorumdan çıkarılmalı.
+  // static const String _mockLabel = 'Test Verisi';
   static const String _searchHint = 'Danışan ara (ad soyad / e-posta)';
   static const String _mealFilterTitle = 'Öğün';
   static const String _loadingText = 'Fotoğraflar yükleniyor...';
@@ -410,13 +412,14 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       appBar: AppBarWithBack(
         title: _pageTitle,
         actions: [
-          LabeledActionButton(
-            icon: Icons.science_outlined,
-            label: _mockLabel,
-            tooltip: 'Test için sahte öğün fotoğrafı yükle',
-            onPressed: _isLoading ? null : _openMockPage,
-          ),
-          const SizedBox(width: 8),
+          // Test verisi yükleme şimdilik kapalı.
+          // LabeledActionButton(
+          //   icon: Icons.science_outlined,
+          //   label: _mockLabel,
+          //   tooltip: 'Test için sahte öğün fotoğrafı yükle',
+          //   onPressed: _isLoading ? null : _openMockPage,
+          // ),
+          // const SizedBox(width: 8),
           LabeledActionButton(
             icon: Icons.refresh,
             label: _refreshLabel,
