@@ -252,13 +252,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     if (isNewUserPostponement && _selectedSubscriptionId != null) {
       final remaining = _remainingPostponements ?? 0;
       if (remaining <= 0) {
-        final proceedAnyway = await DialogUtils.openConfirm(
-          context,
-          title: 'Erteleme Hakkı Yok',
-          message: 'Danışanın erteleme hakkı bulunmamaktadır. Yine de bu randevuyu ertelemek istediğinize emin misiniz?',
-          confirmText: 'Evet',
-          cancelText: 'Hayır',
-        );
+        final proceedAnyway =
+            await PostponementNotices.confirmNoRightsLeft(context);
 
         if (!proceedAnyway) return;
       }
@@ -316,7 +311,14 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
           delta: -1,
         );
         if (!mounted) return;
-        await PostponementNotices.informRightReturned(context);
+        // The right comes back either because the appointment is planned again
+        // or because the postponement is no longer the customer's doing; the
+        // notice has to name the one that actually happened.
+        if (clearsPostponement) {
+          await PostponementNotices.informRightReturnedByReschedule(context);
+        } else {
+          await PostponementNotices.informRightReturnedBySourceChange(context);
+        }
         if (!mounted) return;
       }
 

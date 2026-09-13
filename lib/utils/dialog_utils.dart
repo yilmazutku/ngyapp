@@ -6,10 +6,35 @@ class DialogUtils {
   /// where the eye expects an ordinary dialog body.
   static const String _attentionLeadIn = '\n\n\n';
 
+  /// How much larger than the theme's own text an attention notice is drawn.
+  static const double _attentionTitleScale = 1.25;
+  static const double _attentionMessageScale = 1.45;
+
   /// Turkish-aware upper case: the default mapping turns "i" into "I" and
   /// leaves "ı" alone, which reads wrong in Turkish.
   static String _upperTr(String text) =>
       text.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
+
+  static TextStyle _attentionTitleStyle(BuildContext context) {
+    final TextStyle base =
+        Theme.of(context).textTheme.titleLarge ?? const TextStyle();
+    return base.copyWith(
+      color: Colors.red,
+      fontWeight: FontWeight.bold,
+      fontSize: (base.fontSize ?? 20) * _attentionTitleScale,
+    );
+  }
+
+  static TextStyle _attentionMessageStyle(BuildContext context) {
+    final TextStyle base =
+        Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
+    return base.copyWith(
+      color: Colors.red,
+      fontWeight: FontWeight.bold,
+      fontSize: (base.fontSize ?? 14) * _attentionMessageScale,
+      height: 1.4,
+    );
+  }
 
   /// Shows a notice the admin must not skim past: the whole message in red,
   /// bold, upper case, and pushed down by a few blank lines.
@@ -28,19 +53,12 @@ class DialogUtils {
       builder: (context) => AlertDialog(
         title: Text(
           _upperTr(title),
-          style: const TextStyle(
-            color: Colors.red,
-            fontWeight: FontWeight.bold,
-          ),
+          style: _attentionTitleStyle(context),
         ),
         content: SingleChildScrollView(
           child: Text(
             '$_attentionLeadIn${_upperTr(message)}',
-            style: const TextStyle(
-              color: Colors.red,
-              fontWeight: FontWeight.bold,
-              height: 1.4,
-            ),
+            style: _attentionMessageStyle(context),
           ),
         ),
         actions: [
@@ -51,6 +69,44 @@ class DialogUtils {
         ],
       ),
     );
+  }
+
+  /// Attention-styled counterpart of [openConfirm]: same red, bold, enlarged
+  /// notice as [openAttentionInfo], but the admin has to answer it.
+  static Future<bool> openAttentionConfirm(
+    BuildContext context, {
+    required String title,
+    required String message,
+    String confirmText = 'Evet',
+    String cancelText = 'Hayır',
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          _upperTr(title),
+          style: _attentionTitleStyle(context),
+        ),
+        content: SingleChildScrollView(
+          child: Text(
+            '$_attentionLeadIn${_upperTr(message)}',
+            style: _attentionMessageStyle(context),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(cancelText),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(confirmText),
+          ),
+        ],
+      ),
+    );
+
+    return result == true;
   }
 
   /// Shows a confirmation dialog with a message and an OK button

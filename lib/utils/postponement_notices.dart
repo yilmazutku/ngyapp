@@ -11,8 +11,9 @@ import 'dialog_utils.dart';
 /// such an appointment deliberately does **not** give the right back — the
 /// customer did ask for the postponement — but the admin is told, because an
 /// admin-side mistake can then only be corrected from the package editor.
-/// Putting the appointment back to "Planlandı" is the one case where the right
-/// is returned automatically.
+/// The right comes back automatically in two cases: the appointment goes back
+/// to "Planlandı", or its postponement source is switched away from the
+/// customer — each with its own notice below.
 class PostponementNotices {
   PostponementNotices._();
 
@@ -26,9 +27,21 @@ class PostponementNotices {
       'erteleme hakkını düzeltmek isterseniz paket düzenleme kısmından '
       'ayarlayınız.';
 
-  static const String _rightReturnedMessage =
+  static const String _rightReturnedByRescheduleMessage =
       'Randevu tekrar planlandı durumuna alındı. Bu randevu için kullanılan '
       'erteleme hakkı danışana geri verildi.';
+
+  /// Shown when the appointment stays postponed but the source is no longer
+  /// the customer, so the spent right goes back without any status change.
+  static const String _rightReturnedBySourceMessage =
+      'Erteleme kaynağı ofis kaynaklı olarak değiştirildi. Bu randevu için '
+      'kullanılan erteleme hakkı danışana geri verildi.';
+
+  static const String _noRightsLeftTitle = 'Erteleme Hakkı Yok';
+
+  static const String _noRightsLeftMessage =
+      'Danışan erteleme hakkı bulunmamaktadır. Erteleme sebebini danışan '
+      'kaynaklı yaparsanız erteleme hakkı eksiye düşecektir.';
 
   /// Whether [appointment] consumed one of the customer's postponement rights,
   /// i.e. whether any of the notices below are relevant at all.
@@ -56,11 +69,31 @@ class PostponementNotices {
 
   /// Tells the admin the right was given back after the appointment went back
   /// to "Planlandı".
-  static Future<void> informRightReturned(BuildContext context) {
+  static Future<void> informRightReturnedByReschedule(BuildContext context) {
     return DialogUtils.openAttentionInfo(
       context,
       title: _title,
-      message: _rightReturnedMessage,
+      message: _rightReturnedByRescheduleMessage,
+    );
+  }
+
+  /// Tells the admin the right was given back because the postponement source
+  /// was switched away from the customer, with the status left as it was.
+  static Future<void> informRightReturnedBySourceChange(BuildContext context) {
+    return DialogUtils.openAttentionInfo(
+      context,
+      title: _title,
+      message: _rightReturnedBySourceMessage,
+    );
+  }
+
+  /// Asks the admin whether to record a customer-originated postponement even
+  /// though no right is left, which pushes the counter below zero.
+  static Future<bool> confirmNoRightsLeft(BuildContext context) {
+    return DialogUtils.openAttentionConfirm(
+      context,
+      title: _noRightsLeftTitle,
+      message: _noRightsLeftMessage,
     );
   }
 }
