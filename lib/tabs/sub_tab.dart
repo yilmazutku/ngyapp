@@ -558,6 +558,19 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             const Text('Başlangıç: ', style: TextStyle(fontWeight: FontWeight.bold)),
             Text(_df.format(s.startDate)),
           ]),
+          const SizedBox(height: 4),
+          Row(children: [
+            const Text('Erteleme: ', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              '${s.postponementsUsed}/${s.allowedPostponements}',
+              style: noPostponeLeft && s.allowedPostponements > 0
+                  ? TextStyle(
+                      color: Colors.red.shade700,
+                      fontWeight: FontWeight.bold,
+                    )
+                  : null,
+            ),
+          ]),
 
           // Freeze date shown for frozen packages.
           if (s.status == SubActiveStatus.frozen) ...[
@@ -593,15 +606,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             ),
 
           const SizedBox(height: 8),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Kalan: ${s.remainingMeetings}/${s.totalMeetings} görüşme',style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            Text(
-              'Erteleme: ${s.postponementsUsed}/${s.allowedPostponements}',
-              style: noPostponeLeft && s.allowedPostponements > 0
-                  ? TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)
-                  : null,
-            ),
-          ]),
+          Text('Kalan: ${s.remainingMeetings}/${s.totalMeetings} görüşme',style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           
           // Payment information (hidden for free weight-tracking packages)
           if (showPayment) ...[
