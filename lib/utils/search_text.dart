@@ -58,6 +58,15 @@ List<String> searchWordsOf(String input) {
       .toList();
 }
 
+/// Ad soyad gibi metinleri alfabetik sıralamak için karşılaştırıcı.
+///
+/// Karşılaştırma [normalizeSearchText] ile katlanmış metin üzerinden yapılır:
+/// Türkçe harfler ASCII karşılıklarının yerine oturur ("Çağla" C ile D
+/// arasında kalır). Doğrudan `compareTo` kullanılsa bu harfler UTF-16
+/// sırasında Z'den sonra geldiği için listenin en sonuna düşerdi.
+int compareSearchText(String a, String b) =>
+    normalizeSearchText(a).compareTo(normalizeSearchText(b));
+
 /// Bir kaydın önceden hesaplanmış arama kelimeleri, sorguya uyuyor mu.
 ///
 /// Sorgu birden fazla kelimeyse ("ayşe yıl") hepsinin ayrı ayrı bir kelimenin

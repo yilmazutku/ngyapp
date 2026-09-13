@@ -7,6 +7,7 @@ import '../models/customer_summary_row.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../models/user_model.dart';
+import '../utils/search_text.dart';
 
 /// Aggregates, for every non-admin customer that owns a subscription with a
 /// given status (e.g. Aktif/Haftalık, Aktif/Kilo Takip, Donduruldu), the data
@@ -47,8 +48,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
       );
 
       final result = rows.whereType<CustomerSummaryRow>().toList()
-        ..sort((a, b) =>
-            a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()));
+        ..sort((a, b) => compareSearchText(a.fullName, b.fullName));
 
       return result;
     } catch (e) {
@@ -131,6 +131,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
       userId: user.userId,
       dosyaNo: dosyaNo,
       fullName: fullName.isEmpty ? '(İsimsiz)' : fullName,
+      email: user.email,
       paymentDate: payment.date,
       paymentAmount: payment.amount,
       paymentType: payment.type,

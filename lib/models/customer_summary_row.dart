@@ -41,6 +41,11 @@ class CustomerSummaryRow {
   final SummaryCell dosyaNo;
   final String fullName;
 
+  /// Danışanın e-postası. Tabloda bir sütunu yoktur; sayfanın arama kutusu
+  /// danışanı ad soyad ve dosya numarasının yanında e-postasıyla da bulsun
+  /// diye satırda taşınır.
+  final String email;
+
   /// Payment shown for the row's subscription: the latest completed one, or the
   /// next planned one when nothing has been collected yet (see
   /// [paymentIsPlanned]). Empty cells when the package carries no payment at
@@ -92,6 +97,7 @@ class CustomerSummaryRow {
     required this.userId,
     required this.dosyaNo,
     required this.fullName,
+    this.email = '',
     required this.paymentDate,
     required this.paymentAmount,
     required this.paymentType,
