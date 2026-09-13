@@ -24,6 +24,7 @@ import '../utils/search_text.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/search_field.dart';
 import '../widgets/status_note.dart';
 
 /// TEST ARACI: seçilen danışanlar adına geçici diyet + sahte öğün fotoğrafı
@@ -761,24 +762,10 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
           child: Row(
             children: [
               Expanded(
-                child: TextField(
+                child: SearchField(
                   controller: _searchController,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    labelText: _searchHint,
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchQuery.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.clear),
-                            tooltip: 'Aramayı temizle',
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _searchQuery = '');
-                            },
-                          ),
-                    border: const OutlineInputBorder(),
-                  ),
+                  label: _searchHint,
+                  maxWidth: double.infinity,
                   onChanged: (value) => setState(() => _searchQuery = value),
                 ),
               ),

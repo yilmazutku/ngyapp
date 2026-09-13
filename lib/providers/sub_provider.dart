@@ -148,7 +148,33 @@ class SubProvider extends ChangeNotifier {
         .map((status) => status.label)
         .toList();
 
-    final Map<String, SubscriptionModel> activeByUser = {};
+    return _fetchSubscriptionsOfUsers(userIds, activeLabels);
+  }
+
+  /// Verilen danışanlardan **yürürlükteki paketi olanların** kimlikleri.
+  ///
+  /// Yürürlükteki paket: aktif (Aktif/Haftalık, Aktif/Kilo Takip) ya da
+  /// dondurulmuş bir paket. Dondurulmuş paket duran ama var olan bir pakettir,
+  /// bu yüzden burada "paketi var" sayılır; tamamlanmış paket sayılmaz.
+  /// Kullanıcı Yönetimi sayfası "PAKETİ YOK" rozetini bu kümede olmayan
+  /// danışanlara koyar.
+  Future<Set<String>> fetchUsersWithLivePackage(List<String> userIds) async {
+    final List<String> liveLabels = SubActiveStatus.values
+        .where((status) => status.isActive || status == SubActiveStatus.frozen)
+        .map((status) => status.label)
+        .toList();
+
+    final Map<String, SubscriptionModel> byUser =
+        await _fetchSubscriptionsOfUsers(userIds, liveLabels);
+    return byUser.keys.toSet();
+  }
+
+  /// Verilen danışanlardan durumu [statusLabels] içinde olan bir paketi
+  /// bulunanlar: `userId -> paket`. Böyle bir paketi olmayan danışan dönen
+  /// map'te bulunmaz.
+  Future<Map<String, SubscriptionModel>> _fetchSubscriptionsOfUsers(
+      List<String> userIds, List<String> statusLabels) async {
+    final Map<String, SubscriptionModel> subByUser = {};
 
     // Danışan sayısı büyüdükçe tüm sorguları aynı anda açmamak için
     // USER_BATCH_SIZE'lık paralel gruplar hâlinde ilerlenir.
@@ -159,27 +185,28 @@ class SubProvider extends ChangeNotifier {
       final List<String> batch = userIds.sublist(start, end);
 
       final List<SubscriptionModel?> results = await Future.wait(
-        batch.map((userId) => _findActiveSubscription(userId, activeLabels)),
+        batch.map((userId) => _findSubscriptionByStatus(userId, statusLabels)),
       );
 
       for (int i = 0; i < batch.length; i++) {
-        final SubscriptionModel? active = results[i];
-        if (active != null) activeByUser[batch[i]] = active;
+        final SubscriptionModel? found = results[i];
+        if (found != null) subByUser[batch[i]] = found;
       }
     }
 
-    return activeByUser;
+    return subByUser;
   }
 
-  /// Tek danışanın aktif paketi; yoksa (ya da sorgu hata verirse) null.
-  Future<SubscriptionModel?> _findActiveSubscription(
-      String userId, List<String> activeLabels) async {
+  /// Tek danışanın durumu [statusLabels] içinde olan paketi; yoksa (ya da
+  /// sorgu hata verirse) null. Birden fazlaysa başlangıç tarihi en yeni olan.
+  Future<SubscriptionModel?> _findSubscriptionByStatus(
+      String userId, List<String> statusLabels) async {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
           .collection('subscriptions')
-          .where('status', whereIn: activeLabels)
+          .where('status', whereIn: statusLabels)
           .get();
 
       final List<SubscriptionModel> subs = [];

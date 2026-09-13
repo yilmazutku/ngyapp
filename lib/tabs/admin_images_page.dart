@@ -4,19 +4,26 @@ import 'package:provider/provider.dart';
 
 import '../models/user_model.dart';
 import '../providers/chat_manager_new.dart';
+import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../pages/customer_sum.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/search_text.dart';
 import '../widgets/app_bar_with_back.dart';
 
 /// Admin page for viewing all users.
 /// Features:
 /// - Lists all users with search functionality
 /// - Search by name, surname, or email
+/// - Alfabetik sıralı liste (Danışanlar Özet sayfasındaki sıralamayla aynı)
+/// - Yürürlükteki paketi olmayan danışanlar soluk gösterilir ve
+///   e-postalarının yanında "PAKETİ YOK" rozeti taşır
 /// Data Flow:
 /// 1. Fetches users via UserProvider.fetchUsers()
 /// 2. Displays searchable list
-/// 3. On tap -> CustomerSummaryPage
+/// 3. Paket bilgisi liste çizildikten sonra ayrıca yüklenir
+///    ([SubProvider.fetchUsersWithLivePackage])
+/// 4. On tap -> CustomerSummaryPage
 class AdminUsersPage extends StatefulWidget {
   const AdminUsersPage({super.key});
 
@@ -25,6 +32,10 @@ class AdminUsersPage extends StatefulWidget {
 }
 
 class _AdminUsersPageState extends State<AdminUsersPage> {
+  /// Paket durumu yalnızca danışanlar için anlamlıdır; yöneticilere rozet
+  /// konmaz.
+  static const String _customerRole = 'customer';
+
   // === State Variables ===
   
   /// Future for fetching all users from Firestore
@@ -45,6 +56,14 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// Loading state indicator
   bool _isLoading = true;
 
+  /// Yürürlükteki (aktif ya da dondurulmuş) paketi olan danışanların
+  /// kimlikleri. Liste çizildikten sonra doldurulur.
+  Set<String> _usersWithPackage = const {};
+
+  /// Paket bilgisi hâlâ yükleniyor mu. Yüklenirken hiçbir satıra "PAKETİ YOK"
+  /// yazılmaz: bilgi gelmeden danışan paketsiz sanılmasın.
+  bool _packagesLoading = true;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +74,10 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// 
   /// Sets up the users list and handles errors gracefully.
   /// Updates loading state and filtered list upon completion.
+  ///
+  /// Liste alfabetik sıralı gelir (bkz. [_sortByDisplayName]); paket bilgisi
+  /// liste çizildikten sonra ayrıca yüklenir ([_loadPackageOwners]) ki sayfa
+  /// paket sorguları bitene kadar boş beklemesin.
   void _loadUsers() {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     _usersFuture = userProvider.fetchUsers();
@@ -73,13 +96,16 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         return u.name.trim().isNotEmpty &&
             u.surname.trim().isNotEmpty &&
             u.email.trim().isNotEmpty;
-      }).toList();
+      }).toList()
+        ..sort(_sortByDisplayName);
 
       setState(() {
         _allUsers = validUsers;
         _filteredUsers = validUsers;
         _isLoading = false;
       });
+
+      _loadPackageOwners(validUsers);
     }).catchError((error, stackTrace) {
       if (!mounted) {
         return;
@@ -87,9 +113,63 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
       
       setState(() {
         _isLoading = false;
+        _packagesLoading = false;
       });
     });
   }
+
+  /// Listede gösterilen ad: ad-soyad boşsa (profili doldurulmamış yönetici
+  /// kayıtları) e-posta kullanılır. Sıralama da bu ada göre yapılır.
+  String _displayNameOf(UserModel user) =>
+      user.fullName.isEmpty ? user.email : user.fullName;
+
+  /// Alfabetik sıralama; Danışanlar Özet sayfasıyla aynı karşılaştırıcıyı
+  /// kullanır ki iki sayfada da Türkçe harfler doğru yere otursun.
+  int _sortByDisplayName(UserModel a, UserModel b) =>
+      compareSearchText(_displayNameOf(a), _displayNameOf(b));
+
+  /// Hangi danışanın yürürlükteki paketi olduğunu yükler; kalanlar listede
+  /// soluk gösterilip "PAKETİ YOK" rozeti alır.
+  ///
+  /// Paket bilgisi sayfanın asıl işi değil: okunamazsa liste yine çalışır,
+  /// yalnızca rozet gösterilmez.
+  Future<void> _loadPackageOwners(List<UserModel> users) async {
+    final subProvider = Provider.of<SubProvider>(context, listen: false);
+    final List<String> customerIds = users
+        .where(_isCustomer)
+        .map((user) => user.userId)
+        .toList();
+
+    if (customerIds.isEmpty) {
+      setState(() => _packagesLoading = false);
+      return;
+    }
+
+    try {
+      final Set<String> owners =
+          await subProvider.fetchUsersWithLivePackage(customerIds);
+      if (!mounted) return;
+      setState(() {
+        _usersWithPackage = owners;
+        _packagesLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _packagesLoading = false);
+    }
+  }
+
+  /// Paket durumu aranan kayıt mı: yönetici olmayan, rolü `customer` olan
+  /// kullanıcılar.
+  bool _isCustomer(UserModel user) =>
+      user.role == _customerRole && !ChatManager.isAdminUid(user.userId);
+
+  /// [user] paketsiz mi: paket bilgisi gelmiş bir danışan, yürürlükteki paketi
+  /// olanlar arasında değilse. Bilgi yüklenirken hiç kimse paketsiz sayılmaz.
+  bool _hasNoPackage(UserModel user) =>
+      !_packagesLoading &&
+      _isCustomer(user) &&
+      !_usersWithPackage.contains(user.userId);
 
   /// Filters the user list based on search query.
   /// 
@@ -302,6 +382,10 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// - Full name (name + surname)
   /// - Email address
   /// - Navigation arrow
+  ///
+  /// Yürürlükteki paketi olmayan danışanın kartı soluk çizilir (soluk zemin,
+  /// gri avatar ve gri yazı); e-postasının yanındaki kırmızı "PAKETİ YOK"
+  /// rozeti kartın tek canlı renkli ögesi olduğu için hemen göze çarpar.
   Widget _buildUserList() {
     return ListView.builder(
       itemCount: _filteredUsers.length,
@@ -314,31 +398,53 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         // Admin accounts cannot be deleted (mirrors the server-side guard), so
         // the delete action is only offered for regular users.
         final isAdmin = ChatManager.isAdminUid(user.userId);
+        final hasNoPackage = _hasNoPackage(user);
+        final Color? fadedTextColor =
+            hasNoPackage ? Colors.grey.shade600 : null;
         
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-          elevation: 2,
+          elevation: hasNoPackage ? 1 : 2,
+          color: hasNoPackage ? Colors.grey.shade200 : null,
           child: ListTile(
             leading: CircleAvatar(
-              backgroundColor: Colors.blue.shade100,
+              backgroundColor:
+                  hasNoPackage ? Colors.grey.shade300 : Colors.blue.shade100,
               child: Text(
                 initial,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.blue.shade700,
+                  color:
+                      hasNoPackage ? Colors.grey.shade600 : Colors.blue.shade700,
                 ),
               ),
             ),
             title: Text(
               fullName,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: fadedTextColor,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            subtitle: Text(
-              user.email,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            subtitle: Row(
+              children: [
+                // Rozet dar ekranda da tam görünsün diye kısalan taraf
+                // e-postadır.
+                Flexible(
+                  child: Text(
+                    user.email,
+                    style: TextStyle(color: fadedTextColor),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (hasNoPackage) ...[
+                  const SizedBox(width: 8),
+                  const _NoPackageBadge(),
+                ],
+              ],
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -399,5 +505,33 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+}
+
+/// Paketi olmayan danışanı belli eden rozet: e-postanın yanında, kırmızı
+/// zeminde büyük ve kalın harflerle.
+class _NoPackageBadge extends StatelessWidget {
+  static const String _label = 'PAKETİ YOK';
+
+  const _NoPackageBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 3.0),
+      decoration: BoxDecoration(
+        color: Colors.red.shade700,
+        borderRadius: BorderRadius.circular(4.0),
+      ),
+      child: const Text(
+        _label,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 14.0,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
   }
 }

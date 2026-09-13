@@ -16,6 +16,7 @@ import '../widgets/app_bar_with_back.dart';
 import '../widgets/filter_chip_group.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/meal_image_card.dart';
+import '../widgets/search_field.dart';
 import '../widgets/status_note.dart';
 import 'admin_mock_meal_photos_page.dart';
 
@@ -570,34 +571,14 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: _searchFieldMaxWidth),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                isDense: true,
-                labelText: _searchHint,
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchQuery.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        tooltip: 'Aramayı temizle',
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _searchQuery = '';
-                            _applyFilters();
-                          });
-                        },
-                      ),
-                border: const OutlineInputBorder(),
-              ),
-              onChanged: (value) => setState(() {
-                _searchQuery = value;
-                _applyFilters();
-              }),
-            ),
+          SearchField(
+            controller: _searchController,
+            label: _searchHint,
+            maxWidth: _searchFieldMaxWidth,
+            onChanged: (value) => setState(() {
+              _searchQuery = value;
+              _applyFilters();
+            }),
           ),
           const SizedBox(width: 24),
           Expanded(

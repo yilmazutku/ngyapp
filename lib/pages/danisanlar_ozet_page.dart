@@ -8,8 +8,11 @@ import '../providers/customer_summary_provider.dart';
 import '../providers/summary_colors_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/search_text.dart';
 import 'customer_sum.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/search_field.dart';
+import '../widgets/status_note.dart';
 
 /// Sayfanın app bar mavisi. Sayfa içindeki "Yenile" butonu da aynı tonu
 /// kullanır.
@@ -37,7 +40,16 @@ class DanisanlarOzetPage extends StatefulWidget {
 
 class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     with SingleTickerProviderStateMixin {
+  static const String _searchHint =
+      'Danışan ara (dosya no / ad soyad / e-posta)';
+
   late final TabController _tabController;
+
+  final TextEditingController _searchController = TextEditingController();
+
+  /// Arama kutusundaki sorgu. Sayfada tek bir kutu vardır ve sorgu her üç
+  /// sekmeye birden uygulanır: sekme değiştirince arama korunur.
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -49,6 +61,7 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -106,6 +119,7 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
                   status: SubActiveStatus.activeWeekly,
                   emptyMessage:
                       'Aktif/Haftalık paketi olan danışan bulunamadı.',
+                  searchQuery: _searchQuery,
                   completedAppointmentColor: _completedAppointmentColor,
                   burnedAppointmentColor: _burnedAppointmentColor,
                 ),
@@ -113,6 +127,7 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
                   status: SubActiveStatus.activeWeightTracking,
                   emptyMessage:
                       'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
+                  searchQuery: _searchQuery,
                   completedAppointmentColor: _completedAppointmentColor,
                   burnedAppointmentColor: _burnedAppointmentColor,
                   // Weight-tracking packages have no payment; hide payment
@@ -122,6 +137,7 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
                 _CustomerSummaryTab(
                   status: SubActiveStatus.frozen,
                   emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
+                  searchQuery: _searchQuery,
                   completedAppointmentColor: _completedAppointmentColor,
                   burnedAppointmentColor: _burnedAppointmentColor,
                 ),
@@ -133,38 +149,55 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     );
   }
 
-  /// Tabloların üstündeki açıklama şeridi: "(P)" işareti, siyah seans kutusu ve
-  /// seans hücrelerinin renkleri. Renklerin kendisi Ayarlar sayfasından seçilir;
-  /// burada yalnızca hangi rengin neyi gösterdiği açıklanır. Her sekmede
-  /// görünür; dar ekranda taşmak yerine alt satıra kayar.
+  /// Sayfanın üst şeridi: arama kutusu ve altında renklerin açıklaması. Her
+  /// sekmede görünür.
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Wrap(
-          spacing: 16,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            _legendEntry(
-              Icon(Icons.info_outline, size: 16, color: Colors.grey.shade700),
-              '$_plannedMark = Planlandı',
-            ),
-            _legendEntry(
-              _legendSwatch(Colors.black87),
-              '= Paketin görüşme sayısı dışındaki seans',
-            ),
-            _legendEntry(
-              _legendSwatch(_completedAppointmentColor),
-              '= Yapılmış randevu',
-            ),
-            _legendEntry(
-              _legendSwatch(_burnedAppointmentColor),
-              '= Yakılmış randevu',
-            ),
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SearchField(
+            controller: _searchController,
+            label: _searchHint,
+            onChanged: (value) => setState(() => _searchQuery = value),
+          ),
+          const SizedBox(height: 10),
+          _buildLegend(),
+        ],
+      ),
+    );
+  }
+
+  /// Açıklama şeridi: "(P)" işareti, siyah seans kutusu ve seans hücrelerinin
+  /// renkleri. Renklerin kendisi Ayarlar sayfasından seçilir; burada yalnızca
+  /// hangi rengin neyi gösterdiği açıklanır. Dar ekranda taşmak yerine alt
+  /// satıra kayar.
+  Widget _buildLegend() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _legendEntry(
+            Icon(Icons.info_outline, size: 16, color: Colors.grey.shade700),
+            '$_plannedMark = Planlandı',
+          ),
+          _legendEntry(
+            _legendSwatch(Colors.black87),
+            '= Paketin görüşme sayısı dışındaki seans',
+          ),
+          _legendEntry(
+            _legendSwatch(_completedAppointmentColor),
+            '= Yapılmış randevu',
+          ),
+          _legendEntry(
+            _legendSwatch(_burnedAppointmentColor),
+            '= Yakılmış randevu',
+          ),
+        ],
       ),
     );
   }
@@ -200,6 +233,19 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
   }
 }
 
+/// Tablodaki bir satır ve o satırın arama kelimeleri.
+///
+/// Kelimeler satır yüklenirken bir kez hesaplanır; her tuş vuruşunda yeniden
+/// üretilmez. Danışan dosya numarası, ad soyadı ve e-postasıyla aranabilir.
+class _SearchableRow {
+  final CustomerSummaryRow row;
+  final List<String> searchWords;
+
+  _SearchableRow(this.row)
+      : searchWords =
+            searchWordsOf('${row.dosyaNo.text} ${row.fullName} ${row.email}');
+}
+
 /// Loads and renders the customer-summary table for a single subscription
 /// [status]. Keeps its own scroll/loading state so switching tabs does not
 /// discard already-loaded data.
@@ -207,6 +253,11 @@ class _CustomerSummaryTab extends StatefulWidget {
   final SubActiveStatus status;
   final String emptyMessage;
   final bool showPayment;
+
+  /// Sayfanın arama kutusundaki sorgu. Boşken tüm satırlar listelenir; doluyken
+  /// yalnızca uyan satırlar tabloya girer (bkz.
+  /// [_CustomerSummaryTabState._applySearch]).
+  final String searchQuery;
 
   /// Seans hücrelerinin arkaplan renkleri: "Yapıldı" ve "Yakıldı" randevular
   /// için ayrı ayrı. Sayfa sahibi olduğu için yukarıdan geçirilir: renk
@@ -217,6 +268,7 @@ class _CustomerSummaryTab extends StatefulWidget {
   const _CustomerSummaryTab({
     required this.status,
     required this.emptyMessage,
+    required this.searchQuery,
     required this.completedAppointmentColor,
     required this.burnedAppointmentColor,
     this.showPayment = true,
@@ -228,12 +280,21 @@ class _CustomerSummaryTab extends StatefulWidget {
 
 class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     with AutomaticKeepAliveClientMixin {
+  static const String _noSearchResultText =
+      'Aramanıza uyan danışan bulunamadı.';
+
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
 
   bool _loading = true;
   String? _error;
-  List<CustomerSummaryRow> _rows = const [];
+
+  /// Bu sekmenin yüklenmiş tüm satırları (arama uygulanmamış hâli).
+  List<_SearchableRow> _rows = const [];
+
+  /// Aramadan geçen satırlar; tablo bunları çizer. Sonuç saklanır: liste her
+  /// yeniden çizimde değil, yalnızca satırlar ya da sorgu değişince hesaplanır.
+  List<CustomerSummaryRow> _visibleRows = const [];
 
   @override
   bool get wantKeepAlive => true;
@@ -242,6 +303,14 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _CustomerSummaryTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchQuery != widget.searchQuery) {
+      setState(_applySearch);
+    }
   }
 
   @override
@@ -265,8 +334,9 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
           await provider.fetchCustomerSummariesByStatus(widget.status);
       if (!mounted) return;
       setState(() {
-        _rows = rows;
+        _rows = rows.map((row) => _SearchableRow(row)).toList();
         _loading = false;
+        _applySearch();
       });
     } catch (e) {
       if (!mounted) return;
@@ -314,13 +384,45 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildTotalCountHeader(),
-        Expanded(
-          child: _rows.isEmpty
-              ? Center(child: Text(widget.emptyMessage))
-              : _buildTable(),
-        ),
+        Expanded(child: _buildRowsArea()),
       ],
     );
+  }
+
+  /// Tablo ya da onun yerine geçen bilgi notu: sekmede hiç danışan yoksa
+  /// sekmenin kendi boş mesajı, arama hiçbir satıra uymuyorsa Öğün
+  /// Fotoğrafları sayfasındakiyle aynı "aramaya uyan yok" notu gösterilir.
+  Widget _buildRowsArea() {
+    if (_rows.isEmpty) return Center(child: Text(widget.emptyMessage));
+    if (_visibleRows.isEmpty) {
+      return const StatusNote(
+        icon: Icons.search_off,
+        text: _noSearchResultText,
+      );
+    }
+    return _buildTable();
+  }
+
+  /// Sorguyu satırlara uygulayıp [_visibleRows] sonucunu tazeler.
+  ///
+  /// Eşleştirme Öğün Fotoğrafları sayfasıyla aynı kuralı kullanır
+  /// ([matchesSearchWords]): sorgu kelimelerinin her biri satırın bir
+  /// kelimesinin **başına** uymalıdır; Türkçe harfler ASCII karşılıklarına
+  /// katlandığı için "İnci" yazan da "inci" yazan da bulur.
+  void _applySearch() {
+    final List<String> queryWords = searchWordsOf(widget.searchQuery);
+    _visibleRows = _rows
+        .where((entry) => matchesSearchWords(queryWords, entry.searchWords))
+        .map((entry) => entry.row)
+        .toList();
+  }
+
+  /// Başlıktaki sayı: arama yokken sekmedeki danışan sayısı, arama varken
+  /// "görünen / toplam" biçiminde kaç danışanın süzüldüğü.
+  String get _countText {
+    final String visible = 'Toplam Danışan Sayısı: ${_visibleRows.length}';
+    if (_visibleRows.length == _rows.length) return visible;
+    return '$visible / ${_rows.length}';
   }
 
   /// A small banner in the top-left showing the number of customers listed in
@@ -349,7 +451,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
                   Icon(Icons.people, size: 18, color: _appBarColor),
                   const SizedBox(width: 6),
                   Text(
-                    'Toplam Danışan Sayısı: ${_rows.length}',
+                    _countText,
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
@@ -402,7 +504,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
                 ),
                 border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
                 columns: _buildColumns(),
-                rows: _rows.map(_buildRow).toList(),
+                rows: _visibleRows.map(_buildRow).toList(),
               ),
             ),
           ),
@@ -509,7 +611,9 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       if (!mounted) return;
       if (deletedUserId is String && deletedUserId.isNotEmpty) {
         setState(() {
-          _rows = _rows.where((r) => r.userId != deletedUserId).toList();
+          _rows =
+              _rows.where((r) => r.row.userId != deletedUserId).toList();
+          _applySearch();
         });
       }
     } catch (e) {
