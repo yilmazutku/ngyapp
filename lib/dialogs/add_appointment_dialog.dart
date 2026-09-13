@@ -12,6 +12,7 @@ import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/postponement_notices.dart';
 import '../utils/time_picker_utils.dart';
 import '../dialogs/dialog_widgets.dart'; // Import dialog widgets
 import '../dialogs/overlap_warning_dialog.dart';
@@ -346,14 +347,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         _postponedBy == PostponeSource.user;
     if (isUserPostponement && _selectedSubscription != null) {
       if (!_selectedSubscription!.hasPostponementsLeft) {
-        final proceedAnyway = await DialogUtils.openConfirm(
-          context,
-          title: 'Erteleme Hakkı Yok',
-          message:
-              'Danışanın erteleme hakkı bulunmamaktadır. Yine de bu randevuyu ertelemek istediğinize emin misiniz?',
-          confirmText: 'Evet',
-          cancelText: 'Hayır',
-        );
+        final proceedAnyway =
+            await PostponementNotices.confirmNoRightsLeft(context);
         if (!proceedAnyway) return;
       }
     }
