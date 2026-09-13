@@ -48,7 +48,8 @@ class MealUploadPage extends StatefulWidget {
   State<MealUploadPage> createState() => _MealUploadPageState();
 }
 
-class _MealUploadPageState extends State<MealUploadPage> {
+class _MealUploadPageState extends State<MealUploadPage>
+    with WidgetsBindingObserver {
   Map<Meals, bool> checkedStates = {
     for (var meal in Meals.dietValues) meal: false,
   };
@@ -71,6 +72,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   bool _isUploading = false;
   Timer? _uploadTimeoutTimer;
+
+  /// Gece yarısını geçtiğimizde sayfayı yeni güne çeviren zamanlayıcı.
+  Timer? _dayRolloverTimer;
 
   late Future<void> _mealContentsFuture;
   DateTime now = DateTime.now();
@@ -95,7 +99,10 @@ class _MealUploadPageState extends State<MealUploadPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    now = DateTime.now();
     _mealContentsFuture = _fetchMealStatesAndContents();
+    _scheduleDayRolloverCheck();
     _notificationService.initialize();
     _mealReminderService.initialize();
 
@@ -110,6 +117,54 @@ class _MealUploadPageState extends State<MealUploadPage> {
     // Schedule meal reminders when page loads (if user has notifications enabled)
     _scheduleMealRemindersIfEnabled();
   }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _refreshIfDayChanged();
+    }
+  }
+
+  /// Gün değiştiyse (00:00 geçildiyse) sayfayı yeni güne çevirir: önceki günün
+  /// öğün durumları ekranda kalmaz, her şey yeni günün dokümanından okunur.
+  /// Sayfa açılışında, uygulama öne geldiğinde ve gece yarısı çalışır.
+  void _refreshIfDayChanged() {
+    final DateTime current = DateTime.now();
+    if (_isSameDay(now, current)) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      now = current;
+      checkedStates = {
+        for (final meal in Meals.dietValues) meal: false,
+      };
+      _mealImages = {};
+      _waterIntakeLiters = 0.0;
+      _stepsController.text = '0';
+      _mealContentsFuture = _fetchMealStatesAndContents();
+    });
+    _scheduleDayRolloverCheck();
+  }
+
+  /// Sayfa açıkken gece yarısını geçersek kontrolün kendiliğinden çalışması
+  /// için bir sonraki 00:00'a zamanlayıcı kurar.
+  void _scheduleDayRolloverCheck() {
+    _dayRolloverTimer?.cancel();
+    final DateTime current = DateTime.now();
+    final DateTime nextMidnight =
+        DateTime(current.year, current.month, current.day + 1);
+    _dayRolloverTimer = Timer(
+      nextMidnight.difference(current) + const Duration(seconds: 1),
+      _refreshIfDayChanged,
+    );
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   /// Prevents a leading zero from being prepended to the steps input.
   ///
@@ -165,6 +220,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
   }
 
   Future<void> _fetchMealStatesAndContents() async {
+    // Her çekimde gün bilgisi tazelenir: 00:00 geçildiyse önceki günün
+    // öğün durumları çekilmez.
+    now = DateTime.now();
     try {
       // Pull the admin-configured special lines first so the meal formatter
       // recognizes every marker (built-in + admin) when rendering the plan.
@@ -365,6 +423,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
     );
   }
 
+  // Buton yoruma alındığı için şu an çağrılmıyor; fonksiyonalite olduğu gibi
+  // duruyor, buton geri açıldığında ignore kaldırılmalı.
+  // ignore: unused_element
   Future<void> _uploadMealImage(Meals mealCategory) async {
     // 1) Choose image source (gallery or camera)
     final ImageSource? source = await _chooseSource();
@@ -1068,34 +1129,37 @@ class _MealUploadPageState extends State<MealUploadPage> {
       // Tracking controls only for the active (today's) menu.
       trailing: interactive
           ? [
-              const SizedBox(width: 6),
+              // "Yükle" butonu şimdilik kapalı: bu sayfadan fotoğraf
+              // yüklenmiyor. Geri açılırken aşağıdaki blok ve
+              // [_uploadMealImage] üzerindeki ignore birlikte kaldırılmalı.
+              // const SizedBox(width: 6),
               // Upload button: "Yükle" label to the LEFT of the camera icon.
-              InkWell(
-                onTap: () => _uploadMealImage(mealCategory),
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Yükle',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blue.shade600,
-                        ),
-                      ),
-                      const SizedBox(width: 3),
-                      Icon(
-                        Icons.camera_alt_outlined,
-                        size: 18,
-                        color: Colors.blue.shade600,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              // InkWell(
+              //   onTap: () => _uploadMealImage(mealCategory),
+              //   borderRadius: BorderRadius.circular(6),
+              //   child: Padding(
+              //     padding: const EdgeInsets.all(4),
+              //     child: Row(
+              //       mainAxisSize: MainAxisSize.min,
+              //       children: [
+              //         Text(
+              //           'Yükle',
+              //           style: TextStyle(
+              //             fontSize: 12,
+              //             fontWeight: FontWeight.w600,
+              //             color: Colors.blue.shade600,
+              //           ),
+              //         ),
+              //         const SizedBox(width: 3),
+              //         Icon(
+              //           Icons.camera_alt_outlined,
+              //           size: 18,
+              //           color: Colors.blue.shade600,
+              //         ),
+              //       ],
+              //     ),
+              //   ),
+              // ),
               const SizedBox(width: 2),
               SizedBox(
                 width: 22,
@@ -1495,6 +1559,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _dayRolloverTimer?.cancel();
     _uploadTimeoutTimer?.cancel();
     _stepsFocusNode.removeListener(_handleStepsFocusChange);
     _stepsFocusNode.dispose();
