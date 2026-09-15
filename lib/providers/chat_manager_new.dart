@@ -192,16 +192,19 @@ class ChatManager extends ChangeNotifier {
         .map((snap) => snap.docs.map((d) => MessageData.fromSnapshot(d)).toList());
   }
 
-  /// Sohbette bir fotoğrafın mesajını adresinden ([imageUrl]) bulur ve mesajın
-  /// kimliğini döndürür.
+  /// Sohbette bir fotoğrafın mesajını adresinden ([imageUrl]) bulur.
   ///
   /// Öğün fotoğrafı sohbete yüklenirken mesaja fotoğrafın indirme adresi
   /// yazılır (bkz. `MealManager.uploadMealImg`), bu yüzden eşleme adres
   /// üzerinden yapılır. Sohbete hiç düşmemiş bir fotoğraf için null döner.
   ///
+  /// Dönen mesaj kimliğinin yanında üzerindeki tepkileri de taşır: fotoğrafa
+  /// sohbet dışından ifade bırakılırken bırakanın o mesajdaki mevcut ifadesi
+  /// buradan okunur ([toggleReaction] için gereken `currentEmoji`).
+  ///
   /// Sorgu tek alan üzerinde (`imageUrl` eşitliği): Firestore'da kendiliğinden
   /// indekslidir, bileşik indeks gerekmez.
-  Future<String?> locateImageMessage(String chatId, String imageUrl) async {
+  Future<MessageData?> findImageMessage(String chatId, String imageUrl) async {
     if (imageUrl.isEmpty) return null;
 
     final QuerySnapshot<Map<String, dynamic>> matches = await _chatDoc(chatId)
@@ -211,7 +214,7 @@ class ChatManager extends ChangeNotifier {
         .get();
     if (matches.docs.isEmpty) return null;
 
-    return matches.docs.first.id;
+    return MessageData.fromSnapshot(matches.docs.first);
   }
 
   /// Returns a live stream of every photo the *user* (chatId == userId) has

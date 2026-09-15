@@ -18,6 +18,7 @@ import '../widgets/app_bar_with_back.dart';
 import '../widgets/filter_chip_group.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/meal_image_card.dart';
+import '../widgets/reaction_picker.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_note.dart';
 import 'admin_mock_meal_photos_page.dart';
@@ -42,6 +43,16 @@ import 'chat_page_new.dart';
 /// yatay bir şerit hâlinde, her fotoğrafın altında öğün adı ve yükleme saati
 /// ile listelenir. Sayfanın kendisi dikey kaydırılır; iki yönde de kaydırma
 /// çubuğu görünür durumdadır.
+/// Fotoğrafa sağ tıklandığında (dokunmatikte uzun basıldığında) açılan
+/// menüdeki işlemler.
+enum _PhotoAction {
+  /// Sohbeti fotoğrafın mesajında açar.
+  goToChat,
+
+  /// Fotoğrafın sohbetteki mesajına ifade bırakır.
+  react,
+}
+
 class AdminMealPhotosPage extends StatefulWidget {
   const AdminMealPhotosPage({super.key});
 
@@ -71,14 +82,25 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _emptyTodayText = 'Bugün fotoğraf yüklenmemiş.';
   static const String _emptyOtherDayText = 'Bu gün fotoğraf yüklenmemiş.';
   static const String _goToChatLabel = 'Chate git';
+  static const String _reactLabel = 'İfade Bırak';
   static const String _chatLookupText = 'Sohbetteki mesaj aranıyor...';
   static const String _chatNotFoundTitle = 'Mesaj Bulunamadı';
   static const String _chatNotFoundText =
       'Bu fotoğrafın sohbette bir mesajı yok; sohbete düşmeden yüklenmiş '
       'olabilir.';
+  static const String _reactNotFoundText =
+      'Bu fotoğrafın sohbette bir mesajı yok; ifade yalnızca sohbetteki '
+      'mesaja bırakılabilir.';
   static const String _chatErrorTitle = 'Hata';
   static const String _chatErrorText =
       'Sohbete gidilemedi. Lütfen tekrar deneyin.';
+  static const String _reactErrorText =
+      'İfade bırakılamadı. Lütfen tekrar deneyin.';
+  static const String _reactionSavedText = 'İfade bırakıldı:';
+  static const String _reactionRemovedText = 'İfade kaldırıldı.';
+
+  /// İfade sonrası bilgi şeridinin ekranda kalma süresi.
+  static const Duration _reactionFeedbackDuration = Duration(seconds: 2);
 
   /// Öğün filtresindeki seçenekler. Ara öğünler tek seçenekte toplanır:
   /// [Meals.firstmid] üçünü birden temsil eder (bkz. [_matchesMealFilter]),
@@ -416,8 +438,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     await _load();
   }
 
-  /// Fotoğrafa sağ tıklandığında (dokunmatikte uzun basıldığında) açılan
-  /// menü. Şimdilik tek seçenek: fotoğrafın sohbetteki mesajına gitmek.
+  /// Fotoğrafa sağ tıklandığında (dokunmatikte uzun basıldığında) açılan menü:
+  /// fotoğrafın sohbetteki mesajına gitmek ya da o mesaja ifade bırakmak.
   Future<void> _openPhotoMenu(
     _ClientPhotoGroup group,
     MealModel photo,
@@ -427,45 +449,59 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         Overlay.of(context).context.findRenderObject();
     if (overlay is! RenderBox) return;
 
-    final bool? goToChat = await showMenu<bool>(
+    final _PhotoAction? action = await showMenu<_PhotoAction>(
       context: context,
       position: RelativeRect.fromRect(
         globalPosition & Size.zero,
         Offset.zero & overlay.size,
       ),
       items: const [
-        PopupMenuItem<bool>(
-          value: true,
+        PopupMenuItem<_PhotoAction>(
+          value: _PhotoAction.goToChat,
           child: ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.chat_bubble_outline),
             title: Text(_goToChatLabel),
           ),
         ),
+        PopupMenuItem<_PhotoAction>(
+          value: _PhotoAction.react,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.add_reaction_outlined),
+            title: Text(_reactLabel),
+          ),
+        ),
       ],
     );
 
-    if (goToChat != true) return;
+    if (action == null) return;
     // Menü açıkken sayfadan çıkılmış olabilir.
     if (!mounted) return;
-    await _goToChatMessage(group, photo);
+
+    switch (action) {
+      case _PhotoAction.goToChat:
+        await _goToChatMessage(group, photo);
+      case _PhotoAction.react:
+        await _leaveReaction(group, photo, globalPosition);
+    }
   }
 
-  /// Fotoğrafın sohbetteki mesajını bulur ve sohbeti o mesajda açar.
+  /// Fotoğrafın sohbetteki mesajını yükleme diyaloğu eşliğinde arar.
   ///
   /// Öğün fotoğrafı sohbete yüklenirken mesaja aynı indirme adresi yazıldığı
-  /// için eşleme adres üzerinden yapılır; sohbete düşmemiş bir fotoğrafta
-  /// (ör. "Planım" sayfasından yüklenmiş eski bir kayıt) mesaj bulunamaz.
-  ///
-  /// Mesaj sohbetin gösterdiği son 50 mesajdan eskiyse sohbet her zamanki gibi
-  /// en alttan açılır.
-  Future<void> _goToChatMessage(
+  /// için eşleme adres üzerinden yapılır. Mesaj yoksa (ör. "Planım"
+  /// sayfasından yüklenmiş, sohbete düşmemiş eski bir kayıt) ya da arama
+  /// başarısız olursa kullanıcıya diyalog gösterilip null dönülür; çağıran
+  /// yalnızca sonucu kontrol eder.
+  Future<MessageData?> _findChatMessage(
     _ClientPhotoGroup group,
-    MealModel photo,
-  ) async {
+    MealModel photo, {
+    required String notFoundText,
+    required String errorText,
+  }) async {
     final ChatManager chatManager =
         Provider.of<ChatManager>(context, listen: false);
-    final NavigatorState navigator = Navigator.of(context);
 
     bool loadingOpen = false;
     if (mounted) {
@@ -474,7 +510,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     }
 
     try {
-      final String? messageId = await chatManager.locateImageMessage(
+      final MessageData? message = await chatManager.findImageMessage(
         group.user.userId,
         photo.imageUrl,
       );
@@ -483,35 +519,117 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
       }
-      if (!mounted) return;
+      if (!mounted) return null;
 
-      if (messageId == null) {
+      if (message == null) {
         await DialogUtils.openInfo(
           context,
           title: _chatNotFoundTitle,
-          message: _chatNotFoundText,
+          message: notFoundText,
         );
-        return;
+        return null;
       }
 
-      await navigator.push(
-        MaterialPageRoute(
-          builder: (_) => ChatPage(
-            overrideChatId: group.user.userId,
-            focusMessageId: messageId,
-          ),
-        ),
-      );
+      return message;
     } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
       }
+      if (!mounted) return null;
+      await DialogUtils.openError(
+        context,
+        title: _chatErrorTitle,
+        message: errorText,
+      );
+      return null;
+    }
+  }
+
+  /// Sohbeti fotoğrafın mesajında açar.
+  ///
+  /// Mesaj sohbetin gösterdiği son 50 mesajdan eskiyse sohbet her zamanki gibi
+  /// en alttan açılır.
+  Future<void> _goToChatMessage(
+    _ClientPhotoGroup group,
+    MealModel photo,
+  ) async {
+    final NavigatorState navigator = Navigator.of(context);
+
+    final MessageData? message = await _findChatMessage(
+      group,
+      photo,
+      notFoundText: _chatNotFoundText,
+      errorText: _chatErrorText,
+    );
+    if (message == null) return;
+    if (!mounted) return;
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => ChatPage(
+          overrideChatId: group.user.userId,
+          focusMessageId: message.id,
+        ),
+      ),
+    );
+  }
+
+  /// Fotoğrafın sohbetteki mesajına ifade bırakır.
+  ///
+  /// Sohbetteki uzun basma ile aynı seçici açılır ve ifade aynı yere yazılır
+  /// (mesaj dokümanındaki `reactions.<uid>`, bkz. [ChatManager.toggleReaction]):
+  /// sohbete girildiğinde fotoğrafın altında görünür ve danışana giden bildirim
+  /// de aynı şekilde çalışır. Bırakanın o mesajdaki mevcut ifadesi seçicide
+  /// işaretli gelir; aynı ifadeye basmak onu kaldırır.
+  Future<void> _leaveReaction(
+    _ClientPhotoGroup group,
+    MealModel photo,
+    Offset globalPosition,
+  ) async {
+    final ChatManager chatManager =
+        Provider.of<ChatManager>(context, listen: false);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    final MessageData? message = await _findChatMessage(
+      group,
+      photo,
+      notFoundText: _reactNotFoundText,
+      errorText: _reactErrorText,
+    );
+    if (message == null) return;
+    if (!mounted) return;
+
+    final String? currentEmoji = message.reactions[chatManager.userId];
+    final String? selected = await showReactionPicker(
+      context,
+      globalPosition: globalPosition,
+      currentEmoji: currentEmoji,
+    );
+    if (selected == null) return;
+
+    try {
+      await chatManager.toggleReaction(
+        group.user.userId,
+        message.id,
+        selected,
+        currentEmoji: currentEmoji,
+      );
+
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(selected == currentEmoji
+              ? _reactionRemovedText
+              : '$_reactionSavedText $selected'),
+          duration: _reactionFeedbackDuration,
+        ),
+      );
+    } catch (e) {
       if (!mounted) return;
       await DialogUtils.openError(
         context,
         title: _chatErrorTitle,
-        message: _chatErrorText,
+        message: _reactErrorText,
       );
     }
   }
