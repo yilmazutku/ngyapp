@@ -43,13 +43,14 @@ class ChatPage extends StatefulWidget {
   /// - If non-null: Opens the specified user's chat (admin only)
   final String? overrideChatId;
 
-  /// Açılışta gidilecek mesaj. Verilirse sohbet, en yeni mesaj yerine bu
-  /// mesajda açılır ve mesaj kısa süre vurgulanır (bkz. [_buildMessageList]).
-  /// Öğün Fotoğrafları sayfasındaki "Chate git" bunu kullanır
+  /// Açılışta gidilecek mesajın kimliği. Verilirse ve mesaj yüklenen son
+  /// mesajlar arasındaysa sohbet, en yeni mesaj yerine o mesajda açılır ve
+  /// mesaj kısa süre vurgulanır (bkz. [_buildMessageList]). Öğün Fotoğrafları
+  /// sayfasındaki "Chate git" bunu kullanır
   /// (bkz. [ChatManager.locateImageMessage]).
-  final ChatMessageTarget? focusTarget;
+  final String? focusMessageId;
 
-  const ChatPage({super.key, this.overrideChatId, this.focusTarget});
+  const ChatPage({super.key, this.overrideChatId, this.focusMessageId});
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -544,14 +545,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Get or create the cached messages stream
-  ///
-  /// Hedef mesaj verilmişse akış, o mesajı da kapsayacak kadar geniş açılır;
-  /// yoksa varsayılan sayfa boyu kullanılır.
   Stream<List<MessageData>> _getMessagesStream(ChatManager chat) {
-    _messagesStream ??= chat.messagesStreamFor(
-      _chatId,
-      limit: widget.focusTarget?.messageLimit ?? ChatManager.defaultMessageLimit,
-    );
+    _messagesStream ??= chat.messagesStreamFor(_chatId);
     return _messagesStream!;
   }
 
@@ -705,18 +700,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Mesaj listesi.
   ///
-  /// Hedef mesaj yoksa (ya da yüklenen mesajlar arasında değilse) sohbet her
-  /// zamanki gibi en yeni mesajdan açılır. Hedef varsa liste ikiye bölünür:
-  /// hedef ve ondan eski mesajlar viewport'un sıfır noktasına oturan
-  /// ("center") sliver'a, hedeften yeni mesajlar ise onun altına konur.
-  /// Böylece aradaki yüzlerce mesaj hiç kurulmadan doğrudan hedef mesaja
-  /// açılır; liste yine tek parça gibi kaydırılır (yukarı eskiye, aşağı
-  /// yeniye).
+  /// Hedef mesaj yoksa -- ya da yüklenen son mesajlar arasında değilse (sohbet
+  /// son 50 mesajı gösterir) -- sohbet her zamanki gibi en yeni mesajdan
+  /// açılır. Hedef varsa liste ikiye bölünür: hedef ve ondan eski mesajlar
+  /// viewport'un sıfır noktasına oturan ("center") sliver'a, hedeften yeni
+  /// mesajlar ise onun altına konur. Böylece aradaki mesajlar hiç kurulmadan
+  /// doğrudan hedef mesaja açılır; liste yine tek parça gibi kaydırılır
+  /// (yukarı eskiye, aşağı yeniye).
   Widget _buildMessageList(ChatManager chat, List<MessageData> items) {
-    final ChatMessageTarget? target = widget.focusTarget;
-    final int targetIndex = target == null
+    final String? focusMessageId = widget.focusMessageId;
+    final int targetIndex = focusMessageId == null
         ? -1
-        : items.indexWhere((message) => message.id == target.messageId);
+        : items.indexWhere((message) => message.id == focusMessageId);
 
     if (targetIndex < 0) {
       return ListView.builder(
@@ -763,7 +758,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final bool canReact = _isAdminUser
         ? msg.senderId == _chatId
         : ChatManager.isAdminUid(msg.senderId);
-    final bool isFocusTarget = msg.id == widget.focusTarget?.messageId;
+    final bool isFocusTarget = msg.id == widget.focusMessageId;
 
     return _MessageBubble(
       // Anahtar yalnızca hedef mesajda: ortalama bu anahtarla yapılır.

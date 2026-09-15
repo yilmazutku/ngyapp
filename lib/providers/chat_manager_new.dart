@@ -80,25 +80,6 @@ class MessageData {
   }
 }
 
-/// Sohbette belirli bir mesaja gitmek için gereken bilgi.
-///
-/// [ChatManager.locateImageMessage] üretir, sohbet sayfası tüketir: sohbet
-/// [messageLimit] kadar mesaj yükleyip [messageId] mesajına kaydırılır.
-class ChatMessageTarget {
-  /// Gidilecek mesajın Firestore doküman kimliği.
-  final String messageId;
-
-  /// Hedef mesajın akışa girmesi için yüklenmesi gereken mesaj sayısı.
-  /// Sohbet varsayılan olarak son [ChatManager.defaultMessageLimit] mesajı
-  /// gösterir; daha eski bir mesaj bu sayfa büyütülmeden ekrana gelmez.
-  final int messageLimit;
-
-  const ChatMessageTarget({
-    required this.messageId,
-    required this.messageLimit,
-  });
-}
-
 /// Enum to distinguish between different types of upload operations.
 /// Used for UI feedback and progress tracking.
 enum UploadKind { 
@@ -127,14 +108,6 @@ class ChatManager extends ChangeNotifier {
   
   /// Maximum allowed image size: 5MB
   final MAX_IMG_SIZE = 5 * 1024 * 1024;
-
-  /// Sohbet akışının varsayılan sayfa boyu: son 50 mesaj.
-  static const int defaultMessageLimit = 50;
-
-  /// Eski bir mesaja gidilirken o mesajın üstünde (daha eskide) kaç mesaj
-  /// daha yükleneceği. Hedef, listenin en tepesine yapışmadan bağlamıyla
-  /// birlikte görünsün diye.
-  static const int _messagesAboveTarget = 20;
   
   /// Admin user IDs - these users have elevated permissions and are participants in all chats
   static const Set<String> adminIds = {
@@ -203,42 +176,32 @@ class ChatManager extends ChangeNotifier {
       db.collection('chats').doc(chatId);
 
   /// Returns a query for messages in a specific chat, ordered by creation time (newest first)
-  /// Limited to [limit] most recent messages for performance
-  Query<Map<String, dynamic>> _messagesQuery(String chatId, int limit) =>
-      _chatDoc(chatId)
-          .collection('messages')
-          .orderBy('createdAt', descending: true)
-          .limit(limit);
+  /// Limited to 50 most recent messages for performance
+  Query<Map<String, dynamic>> _messagesQuery(String chatId) => _chatDoc(chatId)
+      .collection('messages')
+      .orderBy('createdAt', descending: true)
+      .limit(50);
 
   /// Returns a stream of messages for a specific chat.
-  /// Messages are ordered newest-first and limited to [limit].
+  /// Messages are ordered newest-first and limited to 50.
   ///
   /// Usage: Used by UI to reactively display messages.
-  ///
-  /// [limit] yalnızca eski bir mesaja gidilirken büyütülür (bkz.
-  /// [locateImageMessage]); normal açılışta varsayılan sayfa boyu kullanılır.
-  Stream<List<MessageData>> messagesStreamFor(
-    String chatId, {
-    int limit = defaultMessageLimit,
-  }) {
-    return _messagesQuery(chatId, limit)
+  Stream<List<MessageData>> messagesStreamFor(String chatId) {
+    return _messagesQuery(chatId)
         .snapshots()
         .map((snap) => snap.docs.map((d) => MessageData.fromSnapshot(d)).toList());
   }
 
-  /// Sohbette bir fotoğrafın mesajını adresinden ([imageUrl]) bulur ve o
-  /// mesaja gitmek için gereken bilgiyi döndürür.
+  /// Sohbette bir fotoğrafın mesajını adresinden ([imageUrl]) bulur ve mesajın
+  /// kimliğini döndürür.
   ///
   /// Öğün fotoğrafı sohbete yüklenirken mesaja fotoğrafın indirme adresi
   /// yazılır (bkz. `MealManager.uploadMealImg`), bu yüzden eşleme adres
   /// üzerinden yapılır. Sohbete hiç düşmemiş bir fotoğraf için null döner.
   ///
-  /// Sorguların ikisi de tek alan üzerinde: `imageUrl` eşitliği ve `createdAt`
-  /// aralığı Firestore'da kendiliğinden indekslidir, bileşik indeks gerekmez.
-  Future<ChatMessageTarget?> locateImageMessage(
-    String chatId,
-    String imageUrl,
-  ) async {
+  /// Sorgu tek alan üzerinde (`imageUrl` eşitliği): Firestore'da kendiliğinden
+  /// indekslidir, bileşik indeks gerekmez.
+  Future<String?> locateImageMessage(String chatId, String imageUrl) async {
     if (imageUrl.isEmpty) return null;
 
     final QuerySnapshot<Map<String, dynamic>> matches = await _chatDoc(chatId)
@@ -248,36 +211,7 @@ class ChatManager extends ChangeNotifier {
         .get();
     if (matches.docs.isEmpty) return null;
 
-    final MessageData message = MessageData.fromSnapshot(matches.docs.first);
-    int messageLimit = defaultMessageLimit;
-
-    // Hedeften yeni kaç mesaj varsa sayfa boyu en az o kadar olmalı; yoksa
-    // eski mesaj akışa hiç girmez. Sunucu tarihi henüz yazılmamış (çok yeni)
-    // bir mesaj zaten varsayılan sayfada görünür.
-    //
-    // Sayım yapılamazsa varsayılan sayfa boyuyla devam edilir: sohbet yine
-    // açılır, yakın tarihli fotoğraflar yine bulunur.
-    final Timestamp? createdAt = message.createdAt;
-    if (createdAt != null) {
-      try {
-        final AggregateQuerySnapshot newer = await _chatDoc(chatId)
-            .collection('messages')
-            .where('createdAt', isGreaterThan: createdAt)
-            .count()
-            .get();
-        final int? newerCount = newer.count;
-        if (newerCount != null) {
-          messageLimit =
-              max(defaultMessageLimit, newerCount + 1 + _messagesAboveTarget);
-        }
-      } catch (e) {
-      }
-    }
-
-    return ChatMessageTarget(
-      messageId: message.id,
-      messageLimit: messageLimit,
-    );
+    return matches.docs.first.id;
   }
 
   /// Returns a live stream of every photo the *user* (chatId == userId) has

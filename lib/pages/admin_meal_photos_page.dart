@@ -456,6 +456,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Öğün fotoğrafı sohbete yüklenirken mesaja aynı indirme adresi yazıldığı
   /// için eşleme adres üzerinden yapılır; sohbete düşmemiş bir fotoğrafta
   /// (ör. "Planım" sayfasından yüklenmiş eski bir kayıt) mesaj bulunamaz.
+  ///
+  /// Mesaj sohbetin gösterdiği son 50 mesajdan eskiyse sohbet her zamanki gibi
+  /// en alttan açılır.
   Future<void> _goToChatMessage(
     _ClientPhotoGroup group,
     MealModel photo,
@@ -471,7 +474,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     }
 
     try {
-      final ChatMessageTarget? target = await chatManager.locateImageMessage(
+      final String? messageId = await chatManager.locateImageMessage(
         group.user.userId,
         photo.imageUrl,
       );
@@ -482,7 +485,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       }
       if (!mounted) return;
 
-      if (target == null) {
+      if (messageId == null) {
         await DialogUtils.openInfo(
           context,
           title: _chatNotFoundTitle,
@@ -495,7 +498,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         MaterialPageRoute(
           builder: (_) => ChatPage(
             overrideChatId: group.user.userId,
-            focusTarget: target,
+            focusMessageId: messageId,
           ),
         ),
       );
