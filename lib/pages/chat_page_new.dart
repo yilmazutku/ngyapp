@@ -42,8 +42,14 @@ class ChatPage extends StatefulWidget {
   /// - If null: Opens the current user's own chat
   /// - If non-null: Opens the specified user's chat (admin only)
   final String? overrideChatId;
-  
-  const ChatPage({super.key, this.overrideChatId});
+
+  /// Açılışta gidilecek mesaj. Verilirse sohbet, en yeni mesaj yerine bu
+  /// mesajda açılır ve mesaj kısa süre vurgulanır (bkz. [_buildMessageList]).
+  /// Öğün Fotoğrafları sayfasındaki "Chate git" bunu kullanır
+  /// (bkz. [ChatManager.locateImageMessage]).
+  final ChatMessageTarget? focusTarget;
+
+  const ChatPage({super.key, this.overrideChatId, this.focusTarget});
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -67,6 +73,33 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Cached messages stream to prevent recreation on rebuilds
   Stream<List<MessageData>>? _messagesStream;
+
+  /// [ChatPage.focusTarget] ile gelen mesajın baloncuğuna takılan anahtar:
+  /// mesajın ekranda kurulup kurulmadığı bununla izlenir.
+  final GlobalKey _focusMessageKey = GlobalKey();
+
+  /// Hedef mesajı taşıyan sliver'ın anahtarı; viewport'un sıfır noktası
+  /// (bkz. [_buildMessageList]).
+  static const Key _focusCenterKey = ValueKey<String>('focusCenterSliver');
+
+  /// Hedef mesajı ortalama bir kez yapılır (mesaj listeye ilk girdiğinde).
+  bool _focusRevealStarted = false;
+
+  /// Hedef mesaj şu an vurgulu mu: ortalandıktan sonra kısa süre yanar.
+  bool _focusHighlighted = false;
+
+  /// Hedef baloncuğun kurulmasını beklerken en fazla kaç kare denenir. Mesaj
+  /// zaten ilk karede kurulu olur; bu, gecikmeli bir kareye karşı emniyet payı.
+  static const int _maxFocusRevealAttempts = 10;
+
+  /// Hedef mesajın ekrandaki yeri: 0.5 = tam orta.
+  static const double _focusAlignment = 0.5;
+
+  /// Hedefi ortalama süresi.
+  static const Duration _focusRevealDuration = Duration(milliseconds: 300);
+
+  /// Vurgunun ekranda kalma süresi.
+  static const Duration _focusHighlightDuration = Duration(seconds: 2);
 
   @override
   void initState() {
@@ -511,9 +544,60 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Get or create the cached messages stream
+  ///
+  /// Hedef mesaj verilmişse akış, o mesajı da kapsayacak kadar geniş açılır;
+  /// yoksa varsayılan sayfa boyu kullanılır.
   Stream<List<MessageData>> _getMessagesStream(ChatManager chat) {
-    _messagesStream ??= chat.messagesStreamFor(_chatId);
+    _messagesStream ??= chat.messagesStreamFor(
+      _chatId,
+      limit: widget.focusTarget?.messageLimit ?? ChatManager.defaultMessageLimit,
+    );
     return _messagesStream!;
+  }
+
+  /// İlk çizimden sonra hedef mesajı ortalamayı bir kez planlar.
+  void _scheduleFocusReveal() {
+    if (_focusRevealStarted) return;
+
+    _focusRevealStarted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _revealFocusedMessage();
+    });
+  }
+
+  /// Hedef mesajı ekranın ortasına getirir ve kısa süre vurgular.
+  ///
+  /// Mesaj, sıfır noktasına oturan sliver'ın ilk çocuğu olduğu için ilk karede
+  /// zaten kuruludur ve ekranın alt kenarında durur; buradaki hareket onu
+  /// ortaya alır.
+  Future<void> _revealFocusedMessage() async {
+    for (int attempt = 0; attempt < _maxFocusRevealAttempts; attempt++) {
+      final BuildContext? bubbleContext = _focusMessageKey.currentContext;
+      if (bubbleContext != null && bubbleContext.mounted) {
+        await Scrollable.ensureVisible(
+          bubbleContext,
+          alignment: _focusAlignment,
+          duration: _focusRevealDuration,
+          curve: Curves.easeOut,
+        );
+        await _flashFocusHighlight();
+        return;
+      }
+
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
+  }
+
+  /// Hedef mesajı kısa süre vurgular; kullanıcı hangi mesaja geldiğini görsün.
+  Future<void> _flashFocusHighlight() async {
+    if (!mounted) return;
+    setState(() => _focusHighlighted = true);
+
+    await Future<void>.delayed(_focusHighlightDuration);
+    if (!mounted) return;
+    setState(() => _focusHighlighted = false);
   }
 
   /// Toggle the current viewer's reaction on [message].
@@ -603,32 +687,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 if (items.isEmpty) {
                   return const Center(child: Text('Henüz mesaj yok.'));
                 }
-                
-                return ListView.builder(
-                  controller: chat.scrollController,
-                  reverse: true, // Newest messages at bottom
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final msg = items[i];
-                    // Both sides can react (WhatsApp-style) to messages the
-                    // *other* party sent. `_chatId` equals the chat owner's
-                    // (user's) UID, so `senderId == _chatId` means the message
-                    // came from the user; an admin UID means it came from the
-                    // office. Reacting to your own message stays disabled on
-                    // both sides.
-                    final canReact = _isAdminUser
-                        ? msg.senderId == _chatId
-                        : ChatManager.isAdminUid(msg.senderId);
-                    return _MessageBubble(
-                      message: msg,
-                      isMe: msg.senderId == _currentUid,
-                      myUid: _currentUid,
-                      canReact: canReact,
-                      onImageTap: (url) => _showImageDialog(context, url),
-                      onToggleReaction: _handleToggleReaction,
-                    );
-                  },
-                );
+
+                return _buildMessageList(chat, items);
               },
             ),
           ),
@@ -640,6 +700,81 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           ),
         ],
       ),
+    );
+  }
+
+  /// Mesaj listesi.
+  ///
+  /// Hedef mesaj yoksa (ya da yüklenen mesajlar arasında değilse) sohbet her
+  /// zamanki gibi en yeni mesajdan açılır. Hedef varsa liste ikiye bölünür:
+  /// hedef ve ondan eski mesajlar viewport'un sıfır noktasına oturan
+  /// ("center") sliver'a, hedeften yeni mesajlar ise onun altına konur.
+  /// Böylece aradaki yüzlerce mesaj hiç kurulmadan doğrudan hedef mesaja
+  /// açılır; liste yine tek parça gibi kaydırılır (yukarı eskiye, aşağı
+  /// yeniye).
+  Widget _buildMessageList(ChatManager chat, List<MessageData> items) {
+    final ChatMessageTarget? target = widget.focusTarget;
+    final int targetIndex = target == null
+        ? -1
+        : items.indexWhere((message) => message.id == target.messageId);
+
+    if (targetIndex < 0) {
+      return ListView.builder(
+        controller: chat.scrollController,
+        reverse: true, // Newest messages at bottom
+        itemCount: items.length,
+        itemBuilder: (context, i) => _buildMessageBubble(items[i]),
+      );
+    }
+
+    _scheduleFocusReveal();
+
+    return CustomScrollView(
+      controller: chat.scrollController,
+      reverse: true, // Newest messages at bottom
+      center: _focusCenterKey,
+      slivers: [
+        // Hedeften yeni mesajlar: sıfır noktasının altında, yeniye doğru.
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, i) => _buildMessageBubble(items[targetIndex - 1 - i]),
+            childCount: targetIndex,
+          ),
+        ),
+        // Hedef ve ondan eski mesajlar: sıfır noktasından yukarı doğru.
+        SliverList(
+          key: _focusCenterKey,
+          delegate: SliverChildBuilderDelegate(
+            (context, i) => _buildMessageBubble(items[targetIndex + i]),
+            childCount: items.length - targetIndex,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Tek bir mesaj baloncuğu; listenin iki biçimi de bunu kullanır.
+  Widget _buildMessageBubble(MessageData msg) {
+    // Both sides can react (WhatsApp-style) to messages the *other* party
+    // sent. `_chatId` equals the chat owner's (user's) UID, so
+    // `senderId == _chatId` means the message came from the user; an admin UID
+    // means it came from the office. Reacting to your own message stays
+    // disabled on both sides.
+    final bool canReact = _isAdminUser
+        ? msg.senderId == _chatId
+        : ChatManager.isAdminUid(msg.senderId);
+    final bool isFocusTarget = msg.id == widget.focusTarget?.messageId;
+
+    return _MessageBubble(
+      // Anahtar yalnızca hedef mesajda: ortalama bu anahtarla yapılır.
+      key: isFocusTarget ? _focusMessageKey : null,
+      message: msg,
+      highlighted: isFocusTarget && _focusHighlighted,
+      isMe: msg.senderId == _currentUid,
+      myUid: _currentUid,
+      canReact: canReact,
+      onImageTap: (url) => _showImageDialog(context, url),
+      onToggleReaction: _handleToggleReaction,
     );
   }
 
@@ -800,6 +935,10 @@ class _MessageBubble extends StatelessWidget {
   /// Whether a long-press on this bubble should open the reaction picker.
   final bool canReact;
 
+  /// Mesaj şu an vurgulu mu ("Chate git" ile bu mesaja gelindiğinde kısa süre
+  /// arka planı yanar).
+  final bool highlighted;
+
   final void Function(String url) onImageTap;
 
   /// Called with the tapped emoji when the viewer picks a reaction.
@@ -811,13 +950,18 @@ class _MessageBubble extends StatelessWidget {
   ];
 
   const _MessageBubble({
+    super.key,
     required this.message,
     required this.isMe,
     required this.myUid,
     required this.canReact,
+    required this.highlighted,
     required this.onImageTap,
     required this.onToggleReaction,
   });
+
+  /// Vurgunun açılıp kapanma süresi.
+  static const Duration _highlightFadeDuration = Duration(milliseconds: 300);
 
   String _formatTime(DateTime dt) {
     final now = DateTime.now();
@@ -910,8 +1054,15 @@ class _MessageBubble extends StatelessWidget {
           )
         : content;
 
-    return Padding(
+    return AnimatedContainer(
+      duration: _highlightFadeDuration,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         crossAxisAlignment: align,
         mainAxisSize: MainAxisSize.min,

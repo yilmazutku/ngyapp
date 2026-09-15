@@ -7,10 +7,12 @@ import '../models/meal_model.dart';
 import '../models/mock_test_run.dart';
 import '../models/subs_model.dart';
 import '../models/user_model.dart';
+import '../providers/chat_manager_new.dart';
 import '../providers/meal_state_and_upload_manager.dart';
 import '../providers/mock_test_data_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
+import '../utils/dialog_utils.dart';
 import '../utils/search_text.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/filter_chip_group.dart';
@@ -19,6 +21,7 @@ import '../widgets/meal_image_card.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_note.dart';
 import 'admin_mock_meal_photos_page.dart';
+import 'chat_page_new.dart';
 
 /// Yönetici sayfası: **aktif paketi olan** danışanların **seçilen güne** ait
 /// öğün fotoğraflarını tek ekranda toplar. Sayfa bugünle açılır; üstteki tarih
@@ -67,6 +70,15 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _nextDayTooltip = 'Sonraki gün';
   static const String _emptyTodayText = 'Bugün fotoğraf yüklenmemiş.';
   static const String _emptyOtherDayText = 'Bu gün fotoğraf yüklenmemiş.';
+  static const String _goToChatLabel = 'Chate git';
+  static const String _chatLookupText = 'Sohbetteki mesaj aranıyor...';
+  static const String _chatNotFoundTitle = 'Mesaj Bulunamadı';
+  static const String _chatNotFoundText =
+      'Bu fotoğrafın sohbette bir mesajı yok; sohbete düşmeden yüklenmiş '
+      'olabilir.';
+  static const String _chatErrorTitle = 'Hata';
+  static const String _chatErrorText =
+      'Sohbete gidilemedi. Lütfen tekrar deneyin.';
 
   /// Öğün filtresindeki seçenekler. Ara öğünler tek seçenekte toplanır:
   /// [Meals.firstmid] üçünü birden temsil eder (bkz. [_matchesMealFilter]),
@@ -404,6 +416,103 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     await _load();
   }
 
+  /// Fotoğrafa sağ tıklandığında (dokunmatikte uzun basıldığında) açılan
+  /// menü. Şimdilik tek seçenek: fotoğrafın sohbetteki mesajına gitmek.
+  Future<void> _openPhotoMenu(
+    _ClientPhotoGroup group,
+    MealModel photo,
+    Offset globalPosition,
+  ) async {
+    final RenderObject? overlay =
+        Overlay.of(context).context.findRenderObject();
+    if (overlay is! RenderBox) return;
+
+    final bool? goToChat = await showMenu<bool>(
+      context: context,
+      position: RelativeRect.fromRect(
+        globalPosition & Size.zero,
+        Offset.zero & overlay.size,
+      ),
+      items: const [
+        PopupMenuItem<bool>(
+          value: true,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.chat_bubble_outline),
+            title: Text(_goToChatLabel),
+          ),
+        ),
+      ],
+    );
+
+    if (goToChat != true) return;
+    // Menü açıkken sayfadan çıkılmış olabilir.
+    if (!mounted) return;
+    await _goToChatMessage(group, photo);
+  }
+
+  /// Fotoğrafın sohbetteki mesajını bulur ve sohbeti o mesajda açar.
+  ///
+  /// Öğün fotoğrafı sohbete yüklenirken mesaja aynı indirme adresi yazıldığı
+  /// için eşleme adres üzerinden yapılır; sohbete düşmemiş bir fotoğrafta
+  /// (ör. "Planım" sayfasından yüklenmiş eski bir kayıt) mesaj bulunamaz.
+  Future<void> _goToChatMessage(
+    _ClientPhotoGroup group,
+    MealModel photo,
+  ) async {
+    final ChatManager chatManager =
+        Provider.of<ChatManager>(context, listen: false);
+    final NavigatorState navigator = Navigator.of(context);
+
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: _chatLookupText);
+      loadingOpen = true;
+    }
+
+    try {
+      final ChatMessageTarget? target = await chatManager.locateImageMessage(
+        group.user.userId,
+        photo.imageUrl,
+      );
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (!mounted) return;
+
+      if (target == null) {
+        await DialogUtils.openInfo(
+          context,
+          title: _chatNotFoundTitle,
+          message: _chatNotFoundText,
+        );
+        return;
+      }
+
+      await navigator.push(
+        MaterialPageRoute(
+          builder: (_) => ChatPage(
+            overrideChatId: group.user.userId,
+            focusTarget: target,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: _chatErrorTitle,
+        message: _chatErrorText,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<_ClientPhotoGroup> visible = _visibleGroups;
@@ -658,6 +767,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
                 // danışanın şerit kaydırma konumu kendinde kalır.
                 key: ValueKey<String>(group.user.userId),
                 group: group,
+                onPhotoMenu: (photo, globalPosition) =>
+                    _openPhotoMenu(group, photo, globalPosition),
                 stripController: _stripControllerFor(group.user.userId),
                 photoWidth: photoWidth,
                 stripHeight: stripHeight,
@@ -743,6 +854,10 @@ class _ClientPhotoGroup {
 class _ClientPhotoSection extends StatelessWidget {
   final _ClientPhotoGroup group;
 
+  /// Bir fotoğrafa sağ tıklandığında (ya da uzun basıldığında) çağrılır;
+  /// menü [globalPosition] noktasında açılır.
+  final void Function(MealModel photo, Offset globalPosition) onPhotoMenu;
+
   /// Bu danışanın şeridine ait kontrolcü; [Scrollbar] ile paylaşılır.
   final ScrollController stripController;
 
@@ -759,6 +874,7 @@ class _ClientPhotoSection extends StatelessWidget {
   const _ClientPhotoSection({
     super.key,
     required this.group,
+    required this.onPhotoMenu,
     required this.stripController,
     required this.photoWidth,
     required this.stripHeight,
@@ -824,14 +940,25 @@ class _ClientPhotoSection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
           itemCount: group.photos.length,
           separatorBuilder: (context, index) => const SizedBox(width: _photoGap),
-          itemBuilder: (context, index) => SizedBox(
-            width: photoWidth,
-            child: MealImageCard(
-              meal: group.photos[index],
-              dialogImageHeight: dialogImageHeight,
-              backfillUserId: group.user.userId,
-            ),
-          ),
+          itemBuilder: (context, index) {
+            final MealModel photo = group.photos[index];
+            return SizedBox(
+              width: photoWidth,
+              // Sağ tık masaüstünde, uzun basma dokunmatikte aynı menüyü açar.
+              // Karta sol tık (büyütme) [MealImageCard] içinde kalır.
+              child: GestureDetector(
+                onSecondaryTapDown: (details) =>
+                    onPhotoMenu(photo, details.globalPosition),
+                onLongPressStart: (details) =>
+                    onPhotoMenu(photo, details.globalPosition),
+                child: MealImageCard(
+                  meal: photo,
+                  dialogImageHeight: dialogImageHeight,
+                  backfillUserId: group.user.userId,
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
