@@ -936,7 +936,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     // import stops and names the meals that need a time in the document.
     final List<String> mealsWithoutTime = _mealsWithoutTime();
     if (mealsWithoutTime.isNotEmpty) {
-      log.warn('Import stopped, meals without a time: {}', [mealsWithoutTime]);
       final String missingList =
           mealsWithoutTime.map((meal) => '•  $meal').join('\n');
       await DialogUtils.openError(
