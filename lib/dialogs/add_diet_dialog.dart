@@ -36,6 +36,21 @@ class AddDietDialog extends StatefulWidget {
 }
 
 class _AddDietDialogState extends State<AddDietDialog> {
+  static const String kNoContentTitle = 'Diyet İçeriği Okunamadı';
+  static const String kNoContentMessage =
+      'Bu Word dosyasından hiçbir öğün içeriği çıkarılamadı, diyet '
+      'yüklenmedi.\n\n'
+      'Dosyadaki öğün başlıklarının (SABAH, ÖĞLE, ARA, AKŞAM ...) beklenen '
+      'biçimde yazıldığını kontrol edip dosyayı tekrar seçin.';
+
+  static const String kMissingTimeTitle = 'Öğün Saati Eksik';
+  static const String kMissingTimeIntro =
+      'Aşağıdaki öğünlerin saati Word dosyasından okunamadı, diyet '
+      'yüklenmedi:';
+  static const String kMissingTimeHint =
+      'Öğün başlığına saatini ekleyip (örn. "SABAH (09:00)") dosyayı tekrar '
+      'seçin.';
+
   // Weekday (Hafta İçi) meal list. Always present.
   List<Map<String, dynamic>> weekdaySubtitles = [];
 
@@ -135,6 +150,34 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   bool get _weekendHasContent =>
       weekendSubtitles.any((s) => (s['content'] as List).isNotEmpty);
+
+  /// Whether the parsed document produced any meal content at all. False means
+  /// the docx could not be read the way the parser expects.
+  bool get _hasAnyParsedContent =>
+      weekdaySubtitles.any((s) => (s['content'] as List).isNotEmpty) ||
+      _weekendHasContent;
+
+  /// Meals that carry content but whose header had no readable time, in menu
+  /// order. Entries are labelled with their section when the diet has a
+  /// separate weekend menu, so the admin knows which one to fix.
+  List<String> _mealsWithoutTime() {
+    final List<String> missing = [];
+
+    void collect(List<Map<String, dynamic>> list, String? sectionLabel) {
+      for (final subtitle in list) {
+        final content = subtitle['content'];
+        if (content is! List || content.isEmpty) continue;
+        if ((subtitle['time'] ?? '').toString().trim().isNotEmpty) continue;
+        final name = subtitle['name'];
+        missing.add(sectionLabel == null ? '$name' : '$name — $sectionLabel');
+      }
+    }
+
+    final bool split = _weekendHasContent;
+    collect(weekdaySubtitles, split ? DietSection.weekday.label : null);
+    if (split) collect(weekendSubtitles, DietSection.weekend.label);
+    return missing;
+  }
 
   Future<void> _fetchSubscriptions() async {
     setState(() {
@@ -878,6 +921,32 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   /// Modified to use DietProvider instead of direct Firestore operations
   Future<void> _uploadContentToFirestore() async {
+    // Nothing usable came out of the document: stop rather than replacing the
+    // user's plan with an empty diet.
+    if (!_hasAnyParsedContent) {
+      await DialogUtils.openError(
+        context,
+        title: kNoContentTitle,
+        message: kNoContentMessage,
+      );
+      return;
+    }
+
+    // A meal without a time would be shown as 00:00 on the user's plan, so the
+    // import stops and names the meals that need a time in the document.
+    final List<String> mealsWithoutTime = _mealsWithoutTime();
+    if (mealsWithoutTime.isNotEmpty) {
+      log.warn('Import stopped, meals without a time: {}', [mealsWithoutTime]);
+      final String missingList =
+          mealsWithoutTime.map((meal) => '•  $meal').join('\n');
+      await DialogUtils.openError(
+        context,
+        title: kMissingTimeTitle,
+        message: '$kMissingTimeIntro\n\n$missingList\n\n$kMissingTimeHint',
+      );
+      return;
+    }
+
     // If the diet references a recipe but no PDF was attached, confirm before
     // continuing so the admin has a chance to add it.
     if (_hasRecipeMarker && _recipePdfBytes == null) {
