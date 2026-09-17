@@ -167,6 +167,11 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Arama + öğün filtresi uygulanmış hâli (bkz. [_applyFilters]).
   List<_ClientPhotoGroup> _visibleGroups = const [];
 
+  /// Fotoğraf adresi -> o fotoğrafın sohbetteki mesajına bırakılan tepkiler
+  /// (uid -> emoji). Kartların köşesindeki rozet buradan çizilir; fotoğraflarla
+  /// aynı anda, ayrı bir sorgu kümesiyle doldurulur (bkz. [_load]).
+  final Map<String, Map<String, String>> _reactionsByImageUrl = {};
+
   String _searchQuery = '';
   Meals? _mealFilter;
 
@@ -202,10 +207,11 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Sayfayı iki aşamada doldurur.
   ///
   /// 1. Danışan listesi (aktif paketliler) gelir gelmez kartlar çizilir.
-  /// 2. Fotoğraflar partiler hâlinde gelir ve her parti ekrana işlenir.
+  /// 2. Fotoğraflar ve fotoğraflara bırakılmış tepkiler **aynı anda** istenir;
+  ///    iki sorgu kümesi birbirini beklemez, her parti geldikçe ekrana işlenir.
   ///
   /// Böylece tüm danışanların sorgusu bitene kadar boş ekran beklenmez; sayfa
-  /// dolarak açılır.
+  /// dolarak açılır ve tepkiler yükleme süresine ek yük bindirmez.
   ///
   /// [day] verilmezse o an seçili gün yeniden yüklenir; böylece "Yenile"
   /// seçili günü korur.
@@ -216,6 +222,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final subProvider = Provider.of<SubProvider>(context, listen: false);
     final mealManager = Provider.of<MealManager>(context, listen: false);
+    final chatManager = Provider.of<ChatManager>(context, listen: false);
     final mockProvider =
         Provider.of<MockTestDataProvider>(context, listen: false);
     final DateTime targetDay = day ?? _day;
@@ -229,9 +236,10 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       _photosLoading = true;
       _errorText = null;
       // Gün değişti: eski günün kartları hemen kalksın, ekranda yanlış güne
-      // ait fotoğraf durmasın.
+      // ait fotoğraf ya da tepki durmasın.
       _groups = const [];
       _visibleGroups = const [];
+      _reactionsByImageUrl.clear();
     });
 
     try {
@@ -273,9 +281,17 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
       if (activeCustomers.isEmpty) return;
 
-      // 2. aşama: fotoğraflar parti parti gelir ve geldikçe işlenir.
-      await mealManager.fetchMealsOfUsersForDate(
-        userIds: activeCustomers.map((user) => user.userId).toList(),
+      // 2. aşama: fotoğraflar ve tepkileri yan yana istenir. İkisi de aynı
+      // danışan listesini partiler hâlinde tarar; toplam süre ikisinin toplamı
+      // değil, uzun olanı kadardır.
+      final List<String> userIds =
+          activeCustomers.map((user) => user.userId).toList();
+
+      // Şerit altındaki "yükleniyor" satırı fotoğraflarla ilgili: tepkileri
+      // beklemeden, fotoğraflar biter bitmez kalkar.
+      final Future<void> photos = mealManager
+          .fetchMealsOfUsersForDate(
+        userIds: userIds,
         date: targetDay,
         onBatch: (batch) {
           if (!mounted || loadId != _loadId || batch.isEmpty) return;
@@ -284,10 +300,26 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
             _applyFilters();
           });
         },
-      );
+      )
+          .then((_) {
+        if (!mounted || loadId != _loadId) return;
+        setState(() => _photosLoading = false);
+      });
 
-      if (!mounted || loadId != _loadId) return;
-      setState(() => _photosLoading = false);
+      // Tepkiler sayfanın asıl işi değil: okunamazsa rozet çıkmaz, fotoğraflar
+      // yine gösterilir. Bu yüzden hatası yükleme akışını düşürmez.
+      final Future<void> reactions = chatManager
+          .fetchImageReactionsOfUsersForDate(
+            userIds: userIds,
+            date: targetDay,
+            onBatch: (batch) {
+              if (!mounted || loadId != _loadId || batch.isEmpty) return;
+              setState(() => _reactionsByImageUrl.addAll(batch));
+            },
+          )
+          .catchError((Object e) => <String, Map<String, String>>{});
+
+      await Future.wait<void>([photos, reactions]);
     } catch (e) {
       if (!mounted || loadId != _loadId) return;
       setState(() {
@@ -616,6 +648,26 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         currentEmoji: currentEmoji,
       );
 
+      // Kart rozeti hemen tazelenir: sunucudan yeni okuma beklenmez. Taban,
+      // az önce okunan mesajın tepkileri; üstüne bu işlem yazılır.
+      if (mounted) {
+        setState(() {
+          final Map<String, String> updated =
+              Map<String, String>.from(message.reactions);
+          if (selected == currentEmoji) {
+            updated.remove(chatManager.userId);
+          } else {
+            updated[chatManager.userId] = selected;
+          }
+
+          if (updated.isEmpty) {
+            _reactionsByImageUrl.remove(photo.imageUrl);
+          } else {
+            _reactionsByImageUrl[photo.imageUrl] = updated;
+          }
+        });
+      }
+
       messenger.showSnackBar(
         SnackBar(
           content: Text(selected == currentEmoji
@@ -890,6 +942,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
                 group: group,
                 onPhotoMenu: (photo, globalPosition) =>
                     _openPhotoMenu(group, photo, globalPosition),
+                reactionsByImageUrl: _reactionsByImageUrl,
                 stripController: _stripControllerFor(group.user.userId),
                 photoWidth: photoWidth,
                 stripHeight: stripHeight,
@@ -979,6 +1032,10 @@ class _ClientPhotoSection extends StatelessWidget {
   /// menü [globalPosition] noktasında açılır.
   final void Function(MealModel photo, Offset globalPosition) onPhotoMenu;
 
+  /// Fotoğraf adresi -> o fotoğrafa bırakılan tepkiler; kart rozetleri buradan
+  /// çizilir. Tepkisi olmayan fotoğraf bu map'te bulunmaz.
+  final Map<String, Map<String, String>> reactionsByImageUrl;
+
   /// Bu danışanın şeridine ait kontrolcü; [Scrollbar] ile paylaşılır.
   final ScrollController stripController;
 
@@ -996,6 +1053,7 @@ class _ClientPhotoSection extends StatelessWidget {
     super.key,
     required this.group,
     required this.onPhotoMenu,
+    required this.reactionsByImageUrl,
     required this.stripController,
     required this.photoWidth,
     required this.stripHeight,
@@ -1076,6 +1134,8 @@ class _ClientPhotoSection extends StatelessWidget {
                   meal: photo,
                   dialogImageHeight: dialogImageHeight,
                   backfillUserId: group.user.userId,
+                  reactions:
+                      reactionsByImageUrl[photo.imageUrl] ?? const {},
                 ),
               ),
             );

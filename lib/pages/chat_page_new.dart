@@ -12,6 +12,7 @@ import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
+import 'package:ngy_app/widgets/reaction_badge.dart';
 import 'package:ngy_app/widgets/reaction_picker.dart';
 import 'package:ngy_app/pages/user_media_gallery_page.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
@@ -1065,7 +1066,7 @@ class _MessageBubble extends StatelessWidget {
           body,
           // Reactions left on this message (shown to everyone in the chat).
           if (message.reactions.isNotEmpty)
-            _ReactionBadge(reactions: message.reactions),
+            ReactionBadge(reactions: message.reactions),
         ],
       ),
     );
@@ -1082,68 +1083,6 @@ class _MessageBubble extends StatelessWidget {
     if (selected != null) {
       onToggleReaction(message, selected);
     }
-  }
-}
-
-/// Small pill shown under a message with the reactions left on it.
-///
-/// Identical emojis are aggregated, with a count shown when more than one
-/// person left the same reaction. The badge overlaps slightly onto the
-/// bubble's bottom edge, WhatsApp-style.
-class _ReactionBadge extends StatelessWidget {
-  final Map<String, String> reactions;
-
-  const _ReactionBadge({required this.reactions});
-
-  @override
-  Widget build(BuildContext context) {
-    // Collapse duplicate emojis into "emoji xN".
-    final counts = <String, int>{};
-    for (final emoji in reactions.values) {
-      counts[emoji] = (counts[emoji] ?? 0) + 1;
-    }
-    if (counts.isEmpty) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-
-    return Transform.translate(
-      offset: const Offset(0, -6), // overlap onto the bubble's bottom edge
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: theme.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: theme.dividerColor.withOpacity(0.4)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final entry in counts.entries) ...[
-              Text(entry.key, style: const TextStyle(fontSize: 14)),
-              if (entry.value > 1)
-                Padding(
-                  padding: const EdgeInsets.only(left: 2, right: 4),
-                  child: Text(
-                    '${entry.value}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurface.withOpacity(0.7),
-                    ),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 }
 
