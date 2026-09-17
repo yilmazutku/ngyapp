@@ -217,6 +217,108 @@ class ChatManager extends ChangeNotifier {
     return MessageData.fromSnapshot(matches.docs.first);
   }
 
+  /// Tepki sorgularında aynı anda kaç danışanın sohbeti açılır. Öğün
+  /// sorgularıyla aynı ölçekte tutuldu (bkz. `MealManager.USER_BATCH_SIZE`):
+  /// iki yükleme yan yana koştuğunda açılan bağlantı sayısı dengeli kalsın.
+  static const int reactionsUserBatchSize = 20;
+
+  /// Gün penceresinin iki ucuna eklenen pay. Fotoğrafın hangi güne ait
+  /// sayılacağını danışanın saati belirler (öğün dokümanı `yyyy-MM-dd` ile
+  /// isimlenir), mesajın `createdAt` alanını ise sunucu yazar; gece yarısına
+  /// yakın yüklemelerde ya da saati kaymış bir cihazda ikisi farklı güne
+  /// düşebiliyor. Pencere biraz geniş tutulunca mesaj yine bulunur;
+  /// eşleştirme fotoğraf adresi üzerinden olduğu için fazladan okunan mesaj
+  /// yanlış bir rozet üretmez.
+  static const Duration reactionsDayMargin = Duration(minutes: 10);
+
+  /// ADMIN ÇAĞIRIR: Verilen danışanların [date] gününde sohbetlerine düşmüş
+  /// fotoğraflarının tepkilerini, fotoğraf adresine göre döndürür
+  /// (adres -> (uid -> emoji)).
+  ///
+  /// Öğün fotoğrafı sohbete yüklenirken mesaja fotoğrafın indirme adresi
+  /// yazılır ([findImageMessage] ile aynı eşleme), bu yüzden dönen map'in
+  /// anahtarı doğrudan fotoğrafın adresidir. Adresler danışanlar arasında
+  /// benzersiz olduğundan tek map bütün sayfaya yeter.
+  ///
+  /// Yalnızca tepkisi olan fotoğraflar döner. Sorgu tek alan üzerinde
+  /// (`createdAt` aralığı) olduğu için bileşik indeks gerekmez ve yalnızca o
+  /// günün mesajları okunur.
+  ///
+  /// [onBatch] verilirse her parti biter bitmez o partinin sonucuyla çağrılır:
+  /// çağıran taraf tüm danışanları beklemeden rozetleri çizmeye başlayabilir.
+  Future<Map<String, Map<String, String>>> fetchImageReactionsOfUsersForDate({
+    required List<String> userIds,
+    required DateTime date,
+    void Function(Map<String, Map<String, String>> batchResult)? onBatch,
+  }) async {
+    final DateTime dayStart = DateTime(date.year, date.month, date.day);
+    final Timestamp start =
+        Timestamp.fromDate(dayStart.subtract(reactionsDayMargin));
+    final Timestamp end = Timestamp.fromDate(
+        dayStart.add(const Duration(days: 1) + reactionsDayMargin));
+
+    final Map<String, Map<String, String>> reactionsByImageUrl = {};
+
+    for (int from = 0; from < userIds.length; from += reactionsUserBatchSize) {
+      final int to = from + reactionsUserBatchSize < userIds.length
+          ? from + reactionsUserBatchSize
+          : userIds.length;
+
+      final List<Map<String, Map<String, String>>> batchResults =
+          await Future.wait(
+        userIds
+            .sublist(from, to)
+            .map((userId) => _fetchImageReactionsForDay(userId, start, end)),
+      );
+
+      final Map<String, Map<String, String>> batchReactions = {};
+      for (final Map<String, Map<String, String>> result in batchResults) {
+        batchReactions.addAll(result);
+      }
+
+      if (batchReactions.isEmpty) continue;
+      reactionsByImageUrl.addAll(batchReactions);
+      onBatch?.call(batchReactions);
+    }
+
+    return reactionsByImageUrl;
+  }
+
+  /// Tek bir sohbetin [start] ile [end] arasındaki fotoğraflı mesajlarının
+  /// tepkileri. Tepkiler sayfanın asıl işi değil: okunamazsa boş dönülür,
+  /// fotoğraflar yine gösterilir.
+  Future<Map<String, Map<String, String>>> _fetchImageReactionsForDay(
+    String chatId,
+    Timestamp start,
+    Timestamp end,
+  ) async {
+    final Map<String, Map<String, String>> reactions = {};
+
+    try {
+      final QuerySnapshot<Map<String, dynamic>> snapshot = await _chatDoc(chatId)
+          .collection('messages')
+          .where('createdAt', isGreaterThanOrEqualTo: start)
+          .where('createdAt', isLessThan: end)
+          .get();
+
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs) {
+        final Map<String, dynamic> data = doc.data();
+        final String imageUrl = (data['imageUrl'] as String?) ?? '';
+        if (imageUrl.isEmpty) continue;
+
+        final Map<String, String> parsed =
+            MessageData.parseReactions(data['reactions']);
+        if (parsed.isEmpty) continue;
+
+        reactions[imageUrl] = parsed;
+      }
+    } catch (e) {
+    }
+
+    return reactions;
+  }
+
   /// Returns a live stream of every photo the *user* (chatId == userId) has
   /// uploaded to their chat, newest first.
   ///

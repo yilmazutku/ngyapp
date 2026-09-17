@@ -9,6 +9,7 @@ import '../models/meal_model.dart';
 import '../providers/meal_state_and_upload_manager.dart';
 import 'chat_image_preview.dart';
 import 'meal_thumbnail_image.dart';
+import 'reaction_badge.dart';
 
 /// Multiplier from a thumbnail's size to the enlarged detail-dialog image height.
 const double kMealDialogMultiplier = 2.8;
@@ -70,11 +71,18 @@ class MealImageCard extends StatelessWidget {
   /// gerekmez. Sohbet galerisi gibi öğün kaydı olmayan yerlerde verilmez.
   final String? backfillUserId;
 
+  /// Fotoğrafın sohbetteki mesajına bırakılan tepkiler (uid -> emoji). Boş
+  /// değilse küçük görselin köşesinde rozet olarak görünür; sohbetteki
+  /// rozetle aynı toplamayı kullanır (bkz. [reactionCountsOf]). Tepki
+  /// gösterilmeyen ekranlarda verilmez.
+  final Map<String, String> reactions;
+
   const MealImageCard({
     super.key,
     required this.meal,
     required this.dialogImageHeight,
     this.backfillUserId,
+    this.reactions = const {},
   });
 
   // Card metrics (previously the kMealCard* constants in ImagesTab).
@@ -157,6 +165,12 @@ class MealImageCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (reactions.isNotEmpty)
+                      Positioned(
+                        right: 4,
+                        bottom: 4,
+                        child: _MealReactionBadge(reactions: reactions),
+                      ),
                     if (imageCount > 1)
                       Positioned(
                         top: 4,
@@ -242,6 +256,53 @@ class MealImageCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Küçük görselin köşesindeki tepki rozeti: fotoğrafın sohbetteki mesajına
+/// bırakılan ifadeler. Aynı emojiler tek rozette toplanır, birden fazla kişi
+/// bıraktıysa sayısı yazılır. Fotoğrafın üstünde durduğu için sohbetteki açık
+/// rozet yerine, kartın fotoğraf sayısı rozetiyle aynı koyu zemin kullanılır.
+class _MealReactionBadge extends StatelessWidget {
+  final Map<String, String> reactions;
+
+  const _MealReactionBadge({required this.reactions});
+
+  static const double _emojiSize = 12;
+  static const double _countSize = 11;
+
+  @override
+  Widget build(BuildContext context) {
+    final Map<String, int> counts = reactionCountsOf(reactions);
+    if (counts.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final MapEntry<String, int> entry in counts.entries) ...[
+            Text(entry.key, style: const TextStyle(fontSize: _emojiSize)),
+            if (entry.value > 1)
+              Padding(
+                padding: const EdgeInsets.only(left: 2),
+                child: Text(
+                  '${entry.value}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: _countSize,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+          ],
+        ],
       ),
     );
   }
