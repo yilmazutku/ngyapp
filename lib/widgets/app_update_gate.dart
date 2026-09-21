@@ -20,6 +20,13 @@ import '../utils/dialog_utils.dart';
 ///
 /// The check itself runs on every launch regardless of who is signed in, or
 /// whether anyone is.
+///
+/// **Mobile only.** On Windows and macOS this widget is a plain pass-through:
+/// it returns [child] untouched, registers no lifecycle observer and schedules
+/// no check. Those builds are installed by hand and have no store listing, so
+/// there is nowhere to send the user. The guard lives here as well as in
+/// [AppUpdateProvider.checkForUpdate] so that no desktop code path can reach
+/// a prompt even if the widget is reused elsewhere.
 class AppUpdateGate extends StatefulWidget {
   final Widget child;
 
@@ -44,6 +51,8 @@ class _AppUpdateGateState extends State<AppUpdateGate>
   @override
   void initState() {
     super.initState();
+    // Desktop: nothing to observe and nothing to check.
+    if (!AppUpdateProvider.isSupported) return;
     WidgetsBinding.instance.addObserver(this);
     // After the first frame: the app is already on screen and the auth stream
     // is already running, so nothing waits on this.
@@ -52,7 +61,11 @@ class _AppUpdateGateState extends State<AppUpdateGate>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    // removeObserver is a no-op when it was never added, but keeping the guard
+    // symmetric with initState makes the desktop path obvious.
+    if (AppUpdateProvider.isSupported) {
+      WidgetsBinding.instance.removeObserver(this);
+    }
     super.dispose();
   }
 
@@ -141,6 +154,8 @@ class _AppUpdateGateState extends State<AppUpdateGate>
 
   @override
   Widget build(BuildContext context) {
+    if (!AppUpdateProvider.isSupported) return widget.child;
+
     final blocking = _blockingUpdate;
     return Stack(
       fit: StackFit.expand,

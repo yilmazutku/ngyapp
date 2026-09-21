@@ -3,6 +3,12 @@
 Uygulama her açılışta "daha yeni bir sürüm var mı?" kontrolü yapar ve gerekiyorsa
 kullanıcıyı **App Store**'a veya **Google Play**'e yönlendirir.
 
+> **Sadece mobil.** Kontrol yalnızca **iOS** ve **Android**'de çalışır.
+> **Windows ve macOS**'ta hiç devreye girmez: karşılaştırma yapılmaz, Firestore
+> okunmaz, uyarı veya engelleme ekranı gösterilmez. Bu build'ler elle kuruluyor,
+> yönlendirilecek bir mağaza listelemesi yok. Ayrıntı için aşağıdaki
+> "5. Platform sınırı".
+
 İlgili dosyalar:
 
 | Dosya | Görevi |
@@ -83,7 +89,25 @@ Firestore dökümanındaki `iosAppId` alanına girilene kadar kontrol **iOS'ta
 sessiz kalır** — kullanıcıya hiçbir yere gitmeyen bir buton göstermemek için.
 Android tarafı paket adı bilindiği için ek ayar istemez.
 
-## 5. Oturumun etkilenmemesi
+## 5. Platform sınırı (sadece iOS/Android)
+
+Tek kaynak: `AppUpdateProvider.isSupported` → `Platform.isAndroid || Platform.isIOS`.
+
+Kontrol iki ayrı yerde bu bayrağa bakar, böylece masaüstünde bir uyarıya giden
+hiçbir kod yolu kalmaz:
+
+1. **`AppUpdateGate`** — masaüstünde `child`'ı olduğu gibi döndürür; lifecycle
+   observer eklemez, ilk frame sonrası kontrolü hiç planlamaz, `Stack`/engelleme
+   katmanı kurmaz. Yani widget ağaca girse bile tamamen şeffaftır.
+2. **`AppUpdateProvider.checkForUpdate`** — masaüstünde Firestore'a gitmeden
+   `null` döner. Widget dışından çağrılsa bile sonuç değişmez.
+
+macOS'ta `Platform.isMacOS` true, `isIOS` false olduğu için kontrol kapalıdır.
+Apple Silicon Mac'lerde "Designed for iPad" olarak çalışan iOS build'i ise
+`isIOS` true verir; o gerçekten bir App Store uygulaması olduğu için kontrolün
+çalışması doğrudur.
+
+## 6. Oturumun etkilenmemesi
 
 Kontrol, Firebase Auth'a hiç dokunmaz: kullanıcıyı okumaz, çıkış yaptırmaz ve
 auth stream'inin önüne geçmez. `AppUpdateGate`, `AuthWrapper`'ı hemen kurar ve
