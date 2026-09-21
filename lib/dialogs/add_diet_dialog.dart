@@ -45,11 +45,12 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   static const String kMissingTimeTitle = 'Öğün Saati Eksik';
   static const String kMissingTimeIntro =
-      'Aşağıdaki öğünlerin saati Word dosyasından okunamadı, diyet '
-      'yüklenmedi:';
+      'Öğün başlıkları, saati parantez içinde taşımak zorundadır:\n'
+      '    AKŞAM (19:30) :\n\n'
+      'Aşağıdaki öğünlerde bu biçim bulunamadı, diyet yüklenmedi:';
   static const String kMissingTimeHint =
-      'Öğün başlığına saatini ekleyip (örn. "SABAH (09:00)") dosyayı tekrar '
-      'seçin.';
+      'Word dosyasındaki öğün başlıklarını bu biçime getirip dosyayı tekrar '
+      'seçin. Saat tahmin edilmez; parantezsiz yazılan saat kabul edilmez.';
 
   // Weekday (Hafta İçi) meal list. Always present.
   List<Map<String, dynamic>> weekdaySubtitles = [];
@@ -157,26 +158,32 @@ class _AddDietDialogState extends State<AddDietDialog> {
       weekdaySubtitles.any((s) => (s['content'] as List).isNotEmpty) ||
       _weekendHasContent;
 
-  /// Meals that carry content but whose header had no readable time, in menu
-  /// order. Entries are labelled with their section when the diet has a
-  /// separate weekend menu, so the admin knows which one to fix.
-  List<String> _mealsWithoutTime() {
-    final List<String> missing = [];
+  /// Meals that carry content but whose header did not provide a valid
+  /// parenthesised time, in menu order. Each entry names the meal and quotes
+  /// the header line from the document so the admin sees exactly what to fix.
+  /// Entries are labelled with their section when the diet has a separate
+  /// weekend menu.
+  List<String> _mealsWithBadTimeHeader() {
+    final List<String> problems = [];
 
     void collect(List<Map<String, dynamic>> list, String? sectionLabel) {
       for (final subtitle in list) {
         final content = subtitle['content'];
         if (content is! List || content.isEmpty) continue;
         if ((subtitle['time'] ?? '').toString().trim().isNotEmpty) continue;
-        final name = subtitle['name'];
-        missing.add(sectionLabel == null ? '$name' : '$name — $sectionLabel');
+
+        final name = sectionLabel == null
+            ? '${subtitle['name']}'
+            : '${subtitle['name']} — $sectionLabel';
+        final header = (subtitle['headerLine'] ?? '').toString().trim();
+        problems.add(header.isEmpty ? name : '$name   →   "$header"');
       }
     }
 
     final bool split = _weekendHasContent;
     collect(weekdaySubtitles, split ? DietSection.weekday.label : null);
     if (split) collect(weekendSubtitles, DietSection.weekend.label);
-    return missing;
+    return problems;
   }
 
   Future<void> _fetchSubscriptions() async {
@@ -790,29 +797,27 @@ class _AddDietDialogState extends State<AddDietDialog> {
       if (foundSubtitle.isNotEmpty) {
         currentSubtitle = foundSubtitle;
 
-        // A meal-header line leads with the meal name and its time, e.g.
-        // "ÖĞLE (11:30): yulaf ezmesi". We read the time from this line, and
-        // any food glued onto the header after the separator ":" is real
-        // content, so it is captured as the meal's first content row instead
-        // of being discarded.
-        final timeMatch = RegExp(r'(\d{1,2}[:.](\d{2}))').firstMatch(line);
+        // Remember the raw header so a rejected meal can be reported with the
+        // exact line the admin has to fix in the document.
+        currentSubtitle['headerLine'] = line;
+
+        // The meal header must carry its time in parentheses, e.g.
+        // "AKŞAM (19:30) :". Nothing else counts: a header without a
+        // parenthesised, valid time leaves 'time' empty on purpose, and
+        // [_mealsWithBadTimeHeader] then stops the whole import. Guessing a
+        // time from a stray number used to turn "ARA ÖĞÜN 1" into 01:00.
+        final timeMatch =
+            RegExp(r'\(\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*\)').firstMatch(line);
         // Index from which to search for the separator ":" that precedes any
         // inline food. Starting after the time skips the time's own ":".
         int contentSearchStart = 0;
         if (timeMatch != null) {
-          String timeStr = timeMatch.group(0)!;
-          // Ensure consistent format with colon
-          timeStr = timeStr.replaceAll('.', ':');
-          currentSubtitle['time'] = timeStr;
           contentSearchStart = timeMatch.end;
-        } else {
-          // If no time found, try to extract just numbers that might represent time
-          final numberMatch = RegExp(r'(\d{1,2})').firstMatch(line);
-          if (numberMatch != null) {
-            final hour = int.tryParse(numberMatch.group(0)!);
-            if (hour != null && hour >= 0 && hour <= 23) {
-              currentSubtitle['time'] = '$hour:00';
-            }
+          final int? hour = int.tryParse(timeMatch.group(1)!);
+          final int? minute = int.tryParse(timeMatch.group(2)!);
+          if (hour != null && minute != null && hour <= 23 && minute <= 59) {
+            currentSubtitle['time'] = '${hour.toString().padLeft(2, '0')}:'
+                '${minute.toString().padLeft(2, '0')}';
           }
         }
 
@@ -934,7 +939,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
     // A meal without a time would be shown as 00:00 on the user's plan, so the
     // import stops and names the meals that need a time in the document.
-    final List<String> mealsWithoutTime = _mealsWithoutTime();
+    final List<String> mealsWithoutTime = _mealsWithBadTimeHeader();
     if (mealsWithoutTime.isNotEmpty) {
       final String missingList =
           mealsWithoutTime.map((meal) => '•  $meal').join('\n');
