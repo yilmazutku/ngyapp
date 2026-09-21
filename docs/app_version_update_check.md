@@ -59,17 +59,50 @@ değil).
 
 ## 2. Firestore kuralı
 
-Kontrolün **giriş yapmamış** kullanıcılarda da çalışması için bu dökümanın
-herkese açık okunabilir olması gerekir. Aksi hâlde login ekranındaki bir
-kullanıcı için okuma reddedilir ve kontrol sessizce atlanır (uygulama yine de
-normal çalışır, sadece uyarı çıkmaz).
+Kurallar Firebase Console'dan yönetiliyor (repoda `firestore.rules` yok).
+
+Mevcut kural `admininput` altını girişli kullanıcıya açıyor:
 
 ```
-match /admininput/appVersion {
-  allow read: if true;
-  allow write: if <admin koşulu>;
+match /admininput/{document=**} {
+  allow read: if isAuth();
 }
 ```
+
+Bu, oturumu açık kullanıcılar için yeterli. Ama kontrol **login ekranında da**
+çalışıyor; orada `isAuth()` false olduğu için okuma reddedilir ve kontrol o
+kullanıcıda sessiz kalır. Sonuç: çok eski sürümdeki bir kullanıcı girişten önce
+engellenemez, ancak bir sonraki açılışta (artık girişli olduğu için)
+engellenir.
+
+Girişten önce de çalışması için **sadece bu tek dökümanı** herkese açın —
+`admininput` altındaki diğer her şey girişli kalmaya devam eder:
+
+```
+// ── App version check (giriş öncesi de okunur) ─────────
+// Sürüm kontrolü login ekranında da çalışıyor. Yalnızca bu döküman
+// herkese açık; admininput altındaki diğer her şey isAuth() istiyor.
+match /admininput/appVersion {
+  allow read: if true;
+}
+
+// ── Admin input (timeslots, durations, special lines, colors) ──
+match /admininput/{document=**} {
+  allow read: if isAuth();
+}
+```
+
+İki blok çakışmıyor: Firestore'da eşleşen `allow` kuralları **VEYA**'lanır, yani
+daha dar olan blok geniş olanı ezmez, sadece ek izin verir. Yazma için ayrı
+kural gerekmiyor; en üstteki `match /{document=**} { allow read, write: if
+isAdmin(); }` bloğu admin yazmalarını zaten karşılıyor.
+
+Dışarı açılan veri: sürüm numaraları, App Store id'si, paket adı ve uyarı
+metni. Hepsi zaten mağaza listelemesinden görülebilen bilgiler; kişisel veri
+yok.
+
+**Bu adımı atlarsanız** uygulama yine sorunsuz çalışır — kontrol sadece giriş
+yapmamış kullanıcıda sessiz kalır.
 
 ## 3. Yeni sürüm çıkarken yapılacaklar
 
