@@ -51,8 +51,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
       'Aşağıdaki öğünlerde saat bulunamadı, diyet yüklenmedi:';
   static const String kMissingTimeHint =
       'Word dosyasındaki öğün başlıklarına saati ekleyip dosyayı tekrar '
-      'seçin. Saat tahmin edilmez: "ARA 200gr üzüm" gibi bir başlıktaki sayı '
-      'saat sayılmaz.';
+      'seçin. Saat iki nokta ile yazılmalıdır (12:30); nokta ile yazılan '
+      '(12.30) kabul edilmez. Saat tahmin de edilmez: "ARA 200gr üzüm" gibi '
+      'bir başlıktaki sayı saat sayılmaz.';
 
   // Weekday (Hafta İçi) meal list. Always present.
   List<Map<String, dynamic>> weekdaySubtitles = [];
@@ -803,17 +804,19 @@ class _AddDietDialogState extends State<AddDietDialog> {
         // exact line the admin has to fix in the document.
         currentSubtitle['headerLine'] = line;
 
-        // The header must spell the meal's time out as HH:mm. Parentheses are
-        // optional -- "AKŞAM (19:30) :" and "AKŞAM 19:30 :" are both fine --
-        // and a parenthesised time wins when the line carries both, so a
-        // measurement written before it cannot be mistaken for the time.
+        // The header must spell the meal's time out as HH:mm, with a colon:
+        // the documents only ever use "12:30", never "12.30", and accepting a
+        // dot would let a measurement like "1.50 litre" pass as 01:50.
+        // Parentheses are optional -- "AKŞAM (19:30) :" and "AKŞAM 19:30 :"
+        // are both fine -- and a parenthesised time wins when the line carries
+        // both, so a number written before the time cannot be mistaken for it.
         // What is never done is guessing: a bare number such as the "200" in
         // "ARA 200gr üzüm" must not become 20:00. When no HH:mm is present the
         // time stays empty and [_mealsWithBadTimeHeader] stops the import.
         final RegExpMatch? timeMatch =
-            RegExp(r'\(\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*\)')
+            RegExp(r'\(\s*(\d{1,2})\s*:\s*(\d{2})\s*\)')
                     .firstMatch(line) ??
-                RegExp(r'(\d{1,2})[:.](\d{2})').firstMatch(line);
+                RegExp(r'(\d{1,2}):(\d{2})').firstMatch(line);
         // Index from which to search for the separator ":" that precedes any
         // inline food. Starting after the time skips the time's own ":".
         int contentSearchStart = 0;
