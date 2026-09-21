@@ -24,7 +24,7 @@ Alanların hepsi opsiyoneldir:
 
 | Alan | Tip | Anlamı |
 | --- | --- | --- |
-| `enabled` | bool | `false` ise kontrol tamamen kapanır. Varsayılan açık. |
+| `isCheckVersion` | bool | Ana anahtar. `false` ise uygulama bu özellik hiç eklenmemiş gibi davranır: karşılaştırma yok, uyarı yok, engelleme yok. Alan yoksa `true` kabul edilir. |
 | `latestVersion` | string | Yayınlanan en yeni sürüm, ör. `"1.0.2"`. Bundan eskisini kullananlara **kapatılabilir** uyarı çıkar. |
 | `minSupportedVersion` | string | Çalışmasına izin verilen en eski sürüm. Bundan eskisini kullananlar **güncelleyene kadar** uygulamayı kullanamaz. |
 | `iosLatestVersion` / `androidLatestVersion` | string | Mağazaya özel `latestVersion`. Biri hâlâ incelemedeyken diğeri yayına çıktıysa kullanılır; ortak alanı ezer. |
@@ -37,11 +37,15 @@ Alanların hepsi opsiyoneldir:
 
 ```json
 {
-  "latestVersion": "1.0.2",
+  "isCheckVersion": true,
+  "latestVersion": "1.0.3",
   "minSupportedVersion": "1.0.0",
   "iosAppId": "1234567890"
 }
 ```
+
+Kontrolü tamamen kapatmak için tek yapılacak `isCheckVersion`'ı `false` yapmak;
+uygulama sürümü yeniden yayınlamaya gerek kalmadan eski davranışına döner.
 
 Sürümler `1.0.10 > 1.0.9` olacak şekilde sayısal karşılaştırılır; `+11` gibi
 build numaraları yok sayılır (mağaza kullanıcıya sürüm adını gösterir, build'i
@@ -87,5 +91,5 @@ kontrol arka planda dönerken oturum her zamanki gibi geri yüklenir. Zorunlu
 güncelleme ekranı açıkken bile alttaki uygulama ağacı ayakta kalır.
 
 Kontrolün başarısız olduğu her durum (ağ yok, döküman yok, okuma izni yok,
-6 saniyelik zaman aşımı, bozuk veri) "güncelleme yok" olarak sonuçlanır; hiçbiri
-kullanıcıyı uygulamanın önünde bekletmez.
+6 saniyelik zaman aşımı, bozuk veri, `isCheckVersion: false`) "güncelleme yok"
+olarak sonuçlanır; hiçbiri kullanıcıyı uygulamanın önünde bekletmez.

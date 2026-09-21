@@ -15,7 +15,9 @@ enum AppUpdateAction {
 /// resolved for the platform the app is running on.
 ///
 /// Document fields (all optional; a missing document simply means "no update"):
-/// - [enabledField]: set to `false` to switch the whole check off.
+/// - [isCheckVersionField]: master switch. `false` makes the app behave
+///   exactly as it did before this check existed: no comparison, no prompt,
+///   no blocking screen. Defaults to `true` when the field is missing.
 /// - [latestVersionField]: newest published version, e.g. `"1.0.2"`.
 ///   Users below it get a dismissible prompt.
 /// - [minSupportedVersionField]: oldest version still allowed to run.
@@ -35,7 +37,7 @@ enum AppUpdateAction {
 class AppUpdateInfo {
   // Firestore field names, kept together so the admin document and the parser
   // cannot drift apart.
-  static const String enabledField = 'enabled';
+  static const String isCheckVersionField = 'isCheckVersion';
   static const String latestVersionField = 'latestVersion';
   static const String minSupportedVersionField = 'minSupportedVersion';
   static const String iosLatestVersionField = 'iosLatestVersion';
@@ -100,7 +102,9 @@ class AppUpdateInfo {
     required String currentVersion,
     required bool isIos,
   }) {
-    if (data == null || data[enabledField] == false) return null;
+    // Missing field means on: a document that only carries version numbers
+    // still works, and the flag is only ever needed to turn the check off.
+    if (data == null || data[isCheckVersionField] == false) return null;
 
     final latest = _stringOf(
             data, isIos ? iosLatestVersionField : androidLatestVersionField) ??
