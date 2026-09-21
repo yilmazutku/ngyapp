@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/appointment_model.dart';
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/appointment_manager.dart';
@@ -34,8 +33,6 @@ class BulkAddPage extends StatefulWidget {
 class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
   /// Note stamped on every record created through this bulk page.
   static const String _bulkNote = 'Toplu ekleme ile eklendi';
-
-  final Logger logger = Logger.forClass(BulkAddPage);
 
   final List<_ApptEntry> _apptEntries = [];
   final List<_PaymentEntry> _paymentEntries = [];
@@ -152,7 +149,6 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
         });
       }
     } catch (e) {
-      logger.err('Error bulk adding appointments: {}', [e]);
       if (mounted) {
         stopLoading();
         await DialogUtils.openError(
@@ -270,7 +266,6 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
         });
       }
     } catch (e) {
-      logger.err('Error bulk adding payments: {}', [e]);
       if (mounted) {
         stopLoading();
         await DialogUtils.openError(

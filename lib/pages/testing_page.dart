@@ -3,19 +3,15 @@ import 'package:provider/provider.dart';
 
 import '../models/appointment_color_palette.dart';
 import '../models/appointment_duration_config.dart';
-import '../models/logger.dart';
 import '../models/special_line_model.dart';
+import '../models/summary_color_config.dart';
 import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_durations_provider.dart';
 import '../providers/special_lines_provider.dart';
+import '../providers/summary_colors_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/appointment_color_picker.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger _specialLinesLogger = Logger.forClass(_SpecialLinesSection);
-final Logger _appointmentColorsLogger =
-    Logger.forClass(_AppointmentColorsSection);
-final Logger _appointmentDurationsLogger =
-    Logger.forClass(_AppointmentDurationsSection);
 
 class TestingPage extends StatefulWidget {
   const TestingPage({super.key});
@@ -40,6 +36,8 @@ class _TestingPageState extends State<TestingPage> {
                 _SpecialLinesSection(),
                 SizedBox(height: 16),
                 _AppointmentColorsSection(),
+                SizedBox(height: 16),
+                _SummaryColorsSection(),
                 SizedBox(height: 16),
                 _AppointmentDurationsSection(),
               ],
@@ -88,8 +86,6 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
         _loading = false;
       });
     } catch (e) {
-      _specialLinesLogger
-          .err('Failed to load admin special lines: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _loading = false);
       await DialogUtils.openError(
@@ -123,8 +119,6 @@ class _SpecialLinesSectionState extends State<_SpecialLinesSection> {
         message: successMessage,
       );
     } catch (e) {
-      _specialLinesLogger
-          .err('Failed to save admin special lines: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _saving = false);
       await DialogUtils.openError(
@@ -589,8 +583,6 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
         _loading = false;
       });
     } catch (e) {
-      _appointmentColorsLogger
-          .err('Failed to load appointment colors: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _loading = false);
       await DialogUtils.openError(
@@ -639,8 +631,6 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
         message: 'Randevu renkleri güncellendi.',
       );
     } catch (e) {
-      _appointmentColorsLogger
-          .err('Failed to save appointment colors: {}', [e.toString()]);
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -759,7 +749,7 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
-          _ColorSwatch(color: effectiveColor),
+          PaletteSwatch(color: effectiveColor),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -797,42 +787,7 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               ),
-              items: [
-                DropdownMenuItem<String?>(
-                  value: null,
-                  child: Row(
-                    children: [
-                      _ColorSwatch(
-                        color: slot.defaultOption.color,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Varsayılan (${slot.defaultOption.label})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                for (final opt in AppointmentColorPalette.options)
-                  DropdownMenuItem<String?>(
-                    value: opt.id,
-                    child: Row(
-                      children: [
-                        _ColorSwatch(color: opt.color, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            opt.label,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
+              items: appointmentColorDropdownItems(slot.defaultOption),
               onChanged: _saving
                   ? null
                   : (value) {
@@ -848,22 +803,309 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
   }
 }
 
-class _ColorSwatch extends StatelessWidget {
-  const _ColorSwatch({required this.color, this.size = 24});
+// ---------------------------------------------------------------------------
+// "Danışanlar Özet" table colors section.
+// Lets the admin pick the background color of the seans cells — separately for
+// the appointments that were held ("Yapıldı") and the ones that were burned
+// ("Yakıldı") — from the same curated palette as the appointment cards.
+// Stored at `admininput/summaryColors`; the summary table reads it through
+// `SummaryColorsRegistry`.
+// ---------------------------------------------------------------------------
+class _SummaryColorsSection extends StatefulWidget {
+  const _SummaryColorsSection();
 
-  final Color color;
-  final double size;
+  @override
+  State<_SummaryColorsSection> createState() => _SummaryColorsSectionState();
+}
+
+class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
+  static const String _sampleDate = '01.09.2026';
+
+  bool _loading = true;
+  bool _saving = false;
+
+  /// Working copy of the selected palette option id per slot. A null value
+  /// means "use the built-in default" (i.e. no override saved for that slot).
+  final Map<SummaryColorSlot, String?> _draft = {};
+
+  /// Snapshot of the saved selections, used to enable/disable the Save button.
+  Map<SummaryColorSlot, String?> _saved = const {};
+
+  @override
+  void initState() {
+    super.initState();
+    for (final slot in SummaryColorSlot.values) {
+      _draft[slot] = null;
+    }
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+    try {
+      final provider =
+          Provider.of<SummaryColorsProvider>(context, listen: false);
+      final overrides = await provider.fetchColors(force: true);
+      if (!mounted) return;
+      setState(() {
+        _saved = _asFullMap(overrides);
+        _draft
+          ..clear()
+          ..addAll(_saved);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Danışanlar Özet renkleri yüklenirken bir hata oluştu.',
+      );
+    }
+  }
+
+  /// Kaydedilmemiş slotları da null ile doldurur: draft ile saved aynı
+  /// anahtarları taşısın ki karşılaştırma güvenilir olsun.
+  Map<SummaryColorSlot, String?> _asFullMap(
+      Map<SummaryColorSlot, String> overrides) {
+    final full = <SummaryColorSlot, String?>{};
+    for (final slot in SummaryColorSlot.values) {
+      full[slot] = overrides[slot];
+    }
+    return full;
+  }
+
+  bool get _hasUnsavedChanges {
+    for (final slot in SummaryColorSlot.values) {
+      if (_draft[slot] != _saved[slot]) return true;
+    }
+    return false;
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: 'Renkler kaydediliyor...');
+      loadingOpen = true;
+    }
+    try {
+      final provider =
+          Provider.of<SummaryColorsProvider>(context, listen: false);
+      await provider.saveColors(_draft);
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (!mounted) return;
+      setState(() => _saved = Map<SummaryColorSlot, String?>.from(_draft));
+      await DialogUtils.openInfo(
+        context,
+        title: 'Başarılı',
+        message: 'Danışanlar Özet renkleri güncellendi.',
+      );
+    } catch (e) {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Danışanlar Özet renkleri kaydedilirken bir hata oluştu.',
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _resetToDefaults() async {
+    final confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Varsayılana Döndür',
+      message: 'Seans renkleri varsayılana döndürülecek. '
+          'Devam etmek istiyor musunuz?',
+      confirmText: 'Sıfırla',
+      cancelText: 'İptal',
+    );
+    if (!confirmed) return;
+    if (!mounted) return;
+    setState(() {
+      for (final slot in SummaryColorSlot.values) {
+        _draft[slot] = null;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.black26),
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
       ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.table_chart_outlined, size: 28),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Danışanlar Özet Renkleri',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Danışanlar Özet tablosundaki seans sütunlarının arkaplan rengini '
+              'buradan seçebilirsiniz: yapılmış ve yakılmış randevular için ayrı '
+              'ayrı. Tarih yazısı seçilen renge göre otomatik olarak okunabilir '
+              'kalır.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
+              Column(
+                children: [
+                  for (final slot in SummaryColorSlot.values) ...[
+                    _buildSlotRow(slot),
+                    if (slot != SummaryColorSlot.values.last)
+                      const Divider(height: 1),
+                  ],
+                ],
+              ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: (_loading || _saving) ? null : _resetToDefaults,
+                  icon: const Icon(Icons.restore),
+                  label: const Text('Varsayılana Döndür'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  onPressed: (_loading || _saving || !_hasUnsavedChanges)
+                      ? null
+                      : _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('Kaydet'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSlotRow(SummaryColorSlot slot) {
+    final selectedId = _draft[slot];
+    final selectedOption = AppointmentColorPalette.findById(selectedId);
+    final effectiveColor = selectedOption?.color ?? slot.defaultOption.color;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              PaletteSwatch(color: effectiveColor),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      slot.label,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      selectedId == null
+                          ? 'Varsayılan: ${slot.defaultOption.label}'
+                          : 'Seçili: ${selectedOption?.label ?? '—'}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 200,
+                child: DropdownButtonFormField<String?>(
+                  isExpanded: true,
+                  value: selectedId,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  items: appointmentColorDropdownItems(slot.defaultOption),
+                  onChanged: _saving
+                      ? null
+                      : (value) => setState(() => _draft[slot] = value),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _buildPreview(effectiveColor),
+        ],
+      ),
+    );
+  }
+
+  /// Shows the seans cell exactly as the summary table renders it, so the
+  /// admin can check the date stays readable before saving.
+  Widget _buildPreview(Color background) {
+    return Row(
+      children: [
+        Text(
+          'Önizleme:',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            _sampleDate,
+            style: TextStyle(
+              color: SummaryColorsRegistry.readableTextColor(background),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -931,8 +1173,6 @@ class _AppointmentDurationsSectionState
         _loading = false;
       });
     } catch (e) {
-      _appointmentDurationsLogger
-          .err('Failed to load appointment durations: {}', [e.toString()]);
       if (!mounted) return;
       setState(() => _loading = false);
       await DialogUtils.openError(
@@ -1005,8 +1245,6 @@ class _AppointmentDurationsSectionState
         message: 'Randevu süreleri güncellendi.',
       );
     } catch (e) {
-      _appointmentDurationsLogger
-          .err('Failed to save appointment durations: {}', [e.toString()]);
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;

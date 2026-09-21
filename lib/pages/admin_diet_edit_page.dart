@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/diet_model.dart';
 import '../models/diet_section.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/special_line_model.dart';
 import '../providers/diet_provider.dart';
@@ -32,8 +31,6 @@ class DietEditPage extends StatefulWidget {
 }
 
 class _DietEditPageState extends State<DietEditPage> {
-  final Logger logger = Logger.forClass(DietEditPage);
-
   /// Weekday (Hafta İçi) meals — always present.
   late Map<String, dynamic> _editableData;
 
@@ -77,9 +74,6 @@ class _DietEditPageState extends State<DietEditPage> {
           .fetchSpecialLines();
       if (mounted) setState(() {});
     } catch (e) {
-      logger.warn(
-          'Could not load admin special lines, falling back to built-ins only: {}',
-          [e.toString()]);
     }
   }
 
@@ -1067,8 +1061,6 @@ class _DietEditPageState extends State<DietEditPage> {
         _isLoading = false;
       });
 
-      logger.err('Error saving diet: {}', [e]);
-      
       await DialogUtils.openError(
         context,
         title: 'Hata',

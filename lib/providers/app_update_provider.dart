@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 
 import '../constants/app_constants.dart';
 import '../models/app_update_info.dart';
-import '../models/logger.dart';
 
 /// Reads the admin-managed version rules from `admininput/appVersion` and
 /// decides whether the running build should ask the user to update.
@@ -20,7 +19,6 @@ import '../models/logger.dart';
 /// deal with: no network, missing document, denied read, timeout or malformed
 /// data all leave the app running as before.
 class AppUpdateProvider extends ChangeNotifier {
-  final Logger logger = Logger.forClass(AppUpdateProvider);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Whether this platform ships through a store we can send the user to.
@@ -39,26 +37,20 @@ class AppUpdateProvider extends ChangeNotifier {
   Future<AppUpdateInfo?> checkForUpdate({
     String currentVersion = AppConstants.appVersion,
   }) async {
-    if (!isSupported) {
-      logger.debug('Update check skipped: platform has no app store');
-      return null;
-    }
+    // Windows and macOS builds are installed by hand: no store to link to.
+    if (!isSupported) return null;
 
     try {
       final snapshot =
           await _docRef.get().timeout(AppUpdateConstants.checkTimeout);
-      final info = AppUpdateInfo.resolve(
+      return AppUpdateInfo.resolve(
         data: snapshot.data(),
         currentVersion: currentVersion,
         isIos: Platform.isIOS,
       );
-      logger.info('Update check: current={} outcome={}',
-          [currentVersion, info?.action.name ?? 'up-to-date']);
-      return info;
-    } catch (e) {
+    } catch (_) {
       // Deliberately swallowed: the check is an extra, never a gate the user
       // can get stuck behind.
-      logger.warn('Update check failed, continuing without it: {}', [e]);
       return null;
     }
   }

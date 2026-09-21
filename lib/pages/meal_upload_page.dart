@@ -8,24 +8,23 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/diet_goals.dart';
 import '../models/diet_section.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../providers/daily_data_provider.dart';
 import '../providers/diet_provider.dart';
 import '../providers/meal_state_and_upload_manager.dart';
 import '../providers/special_lines_provider.dart';
+import '../utils/diet_menu_parser.dart';
 import '../utils/dialog_utils.dart';
-import '../utils/meal_formatter.dart';
 import '../utils/pdf_launcher.dart';
 import '../services/notification_service.dart';
 import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/chat_image_preview.dart';
+import '../widgets/diet_plan_view.dart';
 import '../widgets/loading_overlay.dart';
 import 'dart:async';
-
-final Logger logger = Logger.forClass(MealUploadPage);
 
 /// Set to false to hide font size adjustment controls
 const bool IS_TESTING = false;
@@ -45,45 +44,37 @@ class MealUploadPage extends StatefulWidget {
     required this.onImageUploaded,
   });
 
-  static String formatTimeOfDay24(TimeOfDay time) {
-    final now = DateTime.now();
-    final dateTime =
-        DateTime(now.year, now.month, now.day, time.hour, time.minute);
-    return DateFormat('HH:mm').format(dateTime);
-  }
-
   @override
   State<MealUploadPage> createState() => _MealUploadPageState();
 }
 
-class _MealUploadPageState extends State<MealUploadPage> {
+class _MealUploadPageState extends State<MealUploadPage>
+    with WidgetsBindingObserver {
   Map<Meals, bool> checkedStates = {
     for (var meal in Meals.dietValues) meal: false,
   };
 
   // Weekday (Hafta İçi) menu.
-  Map<Meals, List<String>> mealContents = {};
-  Map<Meals, TimeOfDay> mealTimes = {
-    for (var meal in Meals.dietValues) meal: const TimeOfDay(hour: 0, minute: 0),
-  };
+  DietMenu _weekdayMenu = const DietMenu.empty();
 
   // Weekend (Hafta Sonu) menu. Only populated when the active diet defines one.
-  Map<Meals, List<String>> _weekendMealContents = {};
-  Map<Meals, TimeOfDay> _weekendMealTimes = {};
-
-  /// True when the active diet has a distinct weekend menu, in which case the
-  /// plan is split into "Hafta İçi" and "Hafta Sonu" sections.
-  bool _hasWeekendMenu = false;
+  DietMenu _weekendMenu = const DietMenu.empty();
 
   /// Download URL of the active diet's attached recipe PDF, if any. Drives the
   /// tappable "*tarifi ektedir" link inside the meal content.
   String? _recipePdfUrl;
+
+  /// Goal lines of the active diet, shown above the first meal.
+  DietGoals _goals = const DietGoals.empty();
 
   /// Today's uploaded images per meal type.
   Map<Meals, List<String>> _mealImages = {};
 
   bool _isUploading = false;
   Timer? _uploadTimeoutTimer;
+
+  /// Gece yarısını geçtiğimizde sayfayı yeni güne çeviren zamanlayıcı.
+  Timer? _dayRolloverTimer;
 
   late Future<void> _mealContentsFuture;
   DateTime now = DateTime.now();
@@ -108,7 +99,10 @@ class _MealUploadPageState extends State<MealUploadPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    now = DateTime.now();
     _mealContentsFuture = _fetchMealStatesAndContents();
+    _scheduleDayRolloverCheck();
     _notificationService.initialize();
     _mealReminderService.initialize();
 
@@ -123,6 +117,54 @@ class _MealUploadPageState extends State<MealUploadPage> {
     // Schedule meal reminders when page loads (if user has notifications enabled)
     _scheduleMealRemindersIfEnabled();
   }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _refreshIfDayChanged();
+    }
+  }
+
+  /// Gün değiştiyse (00:00 geçildiyse) sayfayı yeni güne çevirir: önceki günün
+  /// öğün durumları ekranda kalmaz, her şey yeni günün dokümanından okunur.
+  /// Sayfa açılışında, uygulama öne geldiğinde ve gece yarısı çalışır.
+  void _refreshIfDayChanged() {
+    final DateTime current = DateTime.now();
+    if (_isSameDay(now, current)) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      now = current;
+      checkedStates = {
+        for (final meal in Meals.dietValues) meal: false,
+      };
+      _mealImages = {};
+      _waterIntakeLiters = 0.0;
+      _stepsController.text = '0';
+      _mealContentsFuture = _fetchMealStatesAndContents();
+    });
+    _scheduleDayRolloverCheck();
+  }
+
+  /// Sayfa açıkken gece yarısını geçersek kontrolün kendiliğinden çalışması
+  /// için bir sonraki 00:00'a zamanlayıcı kurar.
+  void _scheduleDayRolloverCheck() {
+    _dayRolloverTimer?.cancel();
+    final DateTime current = DateTime.now();
+    final DateTime nextMidnight =
+        DateTime(current.year, current.month, current.day + 1);
+    _dayRolloverTimer = Timer(
+      nextMidnight.difference(current) + const Duration(seconds: 1),
+      _refreshIfDayChanged,
+    );
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   /// Prevents a leading zero from being prepended to the steps input.
   ///
@@ -152,9 +194,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
           }
         });
       }
-      logger.debug('Loaded expanded meals: {}', [expandedList]);
     } catch (e) {
-      logger.err('Error loading expanded meals: {}', [e.toString()]);
     }
   }
 
@@ -167,9 +207,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
           .map((entry) => entry.key)
           .toList();
       await prefs.setStringList(_expandedMealsKey, expandedList);
-      logger.debug('Saved expanded meals: {}', [expandedList]);
     } catch (e) {
-      logger.err('Error saving expanded meals: {}', [e.toString()]);
     }
   }
 
@@ -178,11 +216,13 @@ class _MealUploadPageState extends State<MealUploadPage> {
     try {
       await _mealReminderService.scheduleMealReminders(widget.userId);
     } catch (e) {
-      logger.err('Error scheduling meal reminders: {}', [e.toString()]);
     }
   }
 
   Future<void> _fetchMealStatesAndContents() async {
+    // Her çekimde gün bilgisi tazelenir: 00:00 geçildiyse önceki günün
+    // öğün durumları çekilmez.
+    now = DateTime.now();
     try {
       // Pull the admin-configured special lines first so the meal formatter
       // recognizes every marker (built-in + admin) when rendering the plan.
@@ -190,42 +230,32 @@ class _MealUploadPageState extends State<MealUploadPage> {
         await Provider.of<SpecialLinesProvider>(context, listen: false)
             .fetchSpecialLines();
       } catch (e) {
-        logger.warn(
-            'Could not load admin special lines, falling back to built-ins only: {}',
-            [e.toString()]);
       }
 
       // Fetch the latest diet document (weekday + optional weekend menus).
-      // Re-checked after the await: the widget may be gone by now.
+      // Checked before the await so `context` is safe to read, and again after
+      // it so setState never runs on a disposed widget.
       if (!mounted) return;
       final dietProvider = Provider.of<DietProvider>(context, listen: false);
       final diet = await dietProvider.fetchLatestDietDocument(widget.userId);
 
-      if (diet == null) {
-        logger.warn('No diet lists found for the user.');
-      }
-
-      final weekday = _parseMenu(diet?.subtitles);
-      final weekend = _parseMenu(diet?.weekendSubtitles);
-
+      if (!mounted) return;
       setState(() {
-        mealContents = weekday.contents;
-        mealTimes = weekday.times;
-        _weekendMealContents = weekend.contents;
-        _weekendMealTimes = weekend.times;
-        // Only treat as split when the weekend menu actually has content.
-        _hasWeekendMenu =
-            weekend.contents.values.any((c) => c.isNotEmpty);
+        _weekdayMenu = DietMenu.fromSubtitles(diet?.subtitles);
+        _weekendMenu = DietMenu.fromSubtitles(diet?.weekendSubtitles);
         _recipePdfUrl = diet?.recipePdfUrl;
+        _goals = diet?.goals ?? const DietGoals.empty();
       });
 
       // Fetch meal states using provider
-      // Re-checked after the await: the widget may be gone by now.
+      // Checked before the await so `context` is safe to read, and again after
+      // it so setState never runs on a disposed widget.
       if (!mounted) return;
       final mealManager = Provider.of<MealManager>(context, listen: false);
       final fetchedStates =
           await mealManager.fetchMealStates(widget.userId, date: now);
 
+      if (!mounted) return;
       setState(() {
         checkedStates = fetchedStates;
       });
@@ -234,72 +264,21 @@ class _MealUploadPageState extends State<MealUploadPage> {
       await _refreshMealImages();
 
       // Fetch daily data using provider
-      // Re-checked after the await: the widget may be gone by now.
+      // Checked before the await so `context` is safe to read, and again after
+      // it so setState never runs on a disposed widget.
       if (!mounted) return;
       final dailyDataProvider =
           Provider.of<DailyDataProvider>(context, listen: false);
       final dailyData =
-          await dailyDataProvider.fetchDailyDataForDate(widget.userId, date:now);
+          await dailyDataProvider.fetchDailyDataForDate(widget.userId, date: now);
 
+      if (!mounted) return;
       setState(() {
         _stepsController.text = dailyData.steps.toString();
-              _waterIntakeLiters = (dailyData.waterIntake as num).toDouble();
-            });
-        } catch (e) {
-      logger.err('Error fetching meal states or contents: {}', [e.toString()]);
-    }
-  }
-
-  /// Parses a raw diet menu map (keyed by [Meals] enum name) into per-meal
-  /// content lists and times. Returns empty maps when [subtitles] is null.
-  ({Map<Meals, List<String>> contents, Map<Meals, TimeOfDay> times}) _parseMenu(
-      Map<String, dynamic>? subtitles) {
-    final Map<Meals, List<String>> contents = {};
-    final Map<Meals, TimeOfDay> times = {};
-
-    if (subtitles == null) return (contents: contents, times: times);
-
-    for (final entry in subtitles.entries) {
-      final meal = Meals.fromName(entry.key);
-      if (meal == null) {
-        logger.warn('Skipping unmatched meal: {}', [entry.key]);
-        continue;
-      }
-      final mealData = entry.value as Map<String, dynamic>;
-
-      contents[meal] = List<String>.from(
-        (mealData['content'] as List<dynamic>)
-            .map((item) => item['content'].toString()),
-      );
-      times[meal] = _parseTime(mealData['time'] as String?);
-    }
-
-    return (contents: contents, times: times);
-  }
-
-  /// Converts a stored time string ("HH:mm" or "HH.mm") to a [TimeOfDay],
-  /// defaulting to midnight when missing or unparseable.
-  TimeOfDay _parseTime(String? timeString) {
-    if (timeString == null || timeString.isEmpty) {
-      return const TimeOfDay(hour: 0, minute: 0);
-    }
-    try {
-      if (timeString.contains(':')) {
-        final parts = timeString.split(':');
-        if (parts.length == 2) {
-          final hour = int.tryParse(parts[0]);
-          final minute = int.tryParse(parts[1]);
-          if (hour != null && minute != null) {
-            return TimeOfDay(hour: hour, minute: minute);
-          }
-        }
-      } else {
-        return TimeOfDay.fromDateTime(DateFormat('HH:mm').parse(timeString));
-      }
+        _waterIntakeLiters = (dailyData.waterIntake as num).toDouble();
+      });
     } catch (e) {
-      logger.err('Error when parsing the time of dietlist:{}', [e.toString()]);
     }
-    return const TimeOfDay(hour: 0, minute: 0);
   }
 
   /// Fetches today's meal images from MealManager and updates [_mealImages].
@@ -327,7 +306,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         _mealImages = map;
       });
     } catch (e) {
-      logger.err('Error refreshing meal images: {}', [e]);
     }
   }
 
@@ -345,7 +323,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
     }
 
     var status = await permission.status;
-    logger.info('Photo permission initial status: {}', [status.toString()]);
 
     // Already granted or limited access - proceed
     if (status.isGranted || status.isLimited) {
@@ -356,9 +333,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting photo permission...');
       status = await permission.request();
-      logger.info('Photo permission after request: {}', [status.toString()]);
       
       if (status.isGranted || status.isLimited) {
         return true;
@@ -388,7 +363,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
   /// Shows a dialog to open Settings if permission is permanently denied.
   Future<bool> _checkCameraPermission() async {
     var status = await Permission.camera.status;
-    logger.info('Camera permission initial status: {}', [status.toString()]);
 
     // Already granted - proceed
     if (status.isGranted) {
@@ -399,9 +373,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied or restricted
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting camera permission...');
       status = await Permission.camera.request();
-      logger.info('Camera permission after request: {}', [status.toString()]);
       
       if (status.isGranted) {
         return true;
@@ -428,8 +400,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   /// Show dialog to choose image source (gallery or camera)
   Future<ImageSource?> _chooseSource() async {
-    logger.debug('Opening image source selection dialog');
-    
     return showDialog<ImageSource>(
       context: context,
       builder: (_) => AlertDialog(
@@ -438,14 +408,12 @@ class _MealUploadPageState extends State<MealUploadPage> {
         actions: [
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: gallery');
               Navigator.pop(context, ImageSource.gallery);
             },
             child: const Text('Galeri'),
           ),
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: camera');
               Navigator.pop(context, ImageSource.camera);
             },
             child: const Text('Kamera'),
@@ -455,21 +423,21 @@ class _MealUploadPageState extends State<MealUploadPage> {
     );
   }
 
+  // Buton yoruma alındığı için şu an çağrılmıyor; fonksiyonalite olduğu gibi
+  // duruyor, buton geri açıldığında ignore kaldırılmalı.
+  // ignore: unused_element
   Future<void> _uploadMealImage(Meals mealCategory) async {
     // 1) Choose image source (gallery or camera)
     final ImageSource? source = await _chooseSource();
     if (source == null) {
-      logger.debug('Meal upload cancelled: No source selected');
       return;
     }
-    logger.debug('Image source selected: {}', [source.name]);
 
     // 2) Check permission based on selected source
     final hasPermission = source == ImageSource.camera
         ? await _checkCameraPermission()
         : await _checkPhotoPermission();
     if (!hasPermission) {
-      logger.info('Permission denied for {}, aborting upload', [source.name]);
       return;
     }
 
@@ -562,7 +530,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         );
       }
     } catch (e) {
-      logger.err('Error in _uploadMealImage: {}', [e.toString()]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -617,7 +584,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
         message: 'Günlük verileriniz başarıyla kaydedildi.',
       );
     } catch (e) {
-      logger.err('Error saving daily data: {}', [e.toString()]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -635,7 +601,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   @override
   Widget build(BuildContext context) {
-    logger.info('Building MealUploadPage');
     const defaultMealTime = TimeOfDay(hour: 0, minute: 0);
 
     return Scaffold(
@@ -653,8 +618,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               } else if (snapshot.hasError) {
-                logger.err('Error in FutureBuilder: {}',
-                    [snapshot.error ?? 'snapshot error']);
                 return Center(child: Text('Error: ${snapshot.error}'));
               } else {
                 return SingleChildScrollView(
@@ -677,6 +640,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
                         _buildViewUploadsButton(),
 
                         const SizedBox(height: 8),
+
+                        // Diet-wide goal lines, above the first meal.
+                        if (_goals.hasAny) DietGoalsCard(goals: _goals),
 
                         // Meals Section with collapsible tiles (split into
                         // weekday/weekend sections when the diet has both).
@@ -1028,10 +994,9 @@ class _MealUploadPageState extends State<MealUploadPage> {
   /// weekend menu. Only the section matching today is interactive (check-off +
   /// photo upload); the other is shown read-only for reference.
   Widget _buildMealsArea(TimeOfDay defaultMealTime) {
-    if (!_hasWeekendMenu) {
+    if (!_weekendMenu.hasContent) {
       return _buildMealsSection(
-        contents: mealContents,
-        times: mealTimes,
+        menu: _weekdayMenu,
         interactive: true,
         defaultMealTime: defaultMealTime,
       );
@@ -1045,8 +1010,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
         _buildMealsSection(
           section: DietSection.weekday,
           sectionIcon: Icons.calendar_view_week,
-          contents: mealContents,
-          times: mealTimes,
+          menu: _weekdayMenu,
           interactive: !weekendToday,
           isToday: !weekendToday,
           defaultMealTime: defaultMealTime,
@@ -1055,8 +1019,7 @@ class _MealUploadPageState extends State<MealUploadPage> {
         _buildMealsSection(
           section: DietSection.weekend,
           sectionIcon: Icons.weekend,
-          contents: _weekendMealContents,
-          times: _weekendMealTimes,
+          menu: _weekendMenu,
           interactive: weekendToday,
           isToday: weekendToday,
           defaultMealTime: defaultMealTime,
@@ -1067,17 +1030,14 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   /// Builds one menu's meal tiles (optionally under a section header).
   Widget _buildMealsSection({
-    required Map<Meals, List<String>> contents,
-    required Map<Meals, TimeOfDay> times,
+    required DietMenu menu,
     required bool interactive,
     required TimeOfDay defaultMealTime,
     DietSection? section,
     IconData? sectionIcon,
     bool isToday = false,
   }) {
-    final mealsWithContent = Meals.dietValues
-        .where((meal) => (contents[meal] ?? []).isNotEmpty)
-        .toList();
+    final mealsWithContent = menu.mealsWithContent;
 
     // Weekday-only diets keep the original full-page empty state.
     if (mealsWithContent.isEmpty && section == null) {
@@ -1102,7 +1062,11 @@ class _MealUploadPageState extends State<MealUploadPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (section != null)
-          _buildSectionHeader(section, sectionIcon, isToday),
+          DietSectionHeader(
+            section: section,
+            icon: sectionIcon,
+            isToday: isToday,
+          ),
         if (mealsWithContent.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
@@ -1117,55 +1081,12 @@ class _MealUploadPageState extends State<MealUploadPage> {
         else
           ...mealsWithContent.map((meal) => _buildMealTile(
                 mealCategory: meal,
-                contents: contents[meal] ?? [],
-                mealTime: times[meal] ?? defaultMealTime,
+                contents: menu.linesOf(meal),
+                mealTime: menu.timeOf(meal, defaultMealTime),
                 interactive: interactive,
                 expansionKey: _expansionKey(meal, section: section),
               )),
       ],
-    );
-  }
-
-  /// Header shown above a weekday/weekend section, with a "Bugün" / "Referans"
-  /// chip so the user knows which menu is the active (trackable) one today.
-  Widget _buildSectionHeader(
-      DietSection section, IconData? icon, bool isToday) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8, left: 2),
-      child: Row(
-        children: [
-          Icon(icon ?? Icons.restaurant_menu,
-              size: 20, color: Colors.deepOrange.shade700),
-          const SizedBox(width: 8),
-          Text(
-            section.label,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.deepOrange.shade800,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: isToday ? Colors.green.shade50 : Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isToday ? Colors.green.shade200 : Colors.grey.shade300,
-              ),
-            ),
-            child: Text(
-              isToday ? 'Bugün' : 'Referans',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: isToday ? Colors.green.shade700 : Colors.grey.shade600,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1179,183 +1100,115 @@ class _MealUploadPageState extends State<MealUploadPage> {
     required bool interactive,
     required String expansionKey,
   }) {
-    final isExpanded = _expandedMeals[expansionKey] ?? false;
     final isChecked = interactive && (checkedStates[mealCategory] ?? false);
     // Whether a photo has actually been uploaded for this meal today. Drives
     // the "Yüklendi / Yüklü Değil" status, independently of the checkbox.
     final hasPhoto =
         interactive && (_mealImages[mealCategory]?.isNotEmpty ?? false);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          key: PageStorageKey(expansionKey),
-          initiallyExpanded: isExpanded,
-          onExpansionChanged: (expanded) {
-            setState(() {
-              _expandedMeals[expansionKey] = expanded;
-            });
-            _saveExpandedMeals();
-          },
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          collapsedShape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          leading: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: !interactive
-                  ? Colors.blueGrey.shade50
-                  : (isChecked ? Colors.green.shade50 : Colors.deepOrange.shade50),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              !interactive
-                  ? Icons.restaurant_menu
-                  : (isChecked ? Icons.check_circle : Icons.restaurant),
-              size: 18,
-              color: !interactive
-                  ? Colors.blueGrey.shade400
-                  : (isChecked
-                      ? Colors.green.shade600
-                      : Colors.deepOrange.shade600),
-            ),
-          ),
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  mealCategory.displayLabel,
+    return DietMealTile(
+      mealCategory: mealCategory,
+      contents: contents,
+      mealTime: mealTime,
+      expansionKey: expansionKey,
+      expanded: _expandedMeals[expansionKey] ?? false,
+      onExpansionChanged: (expanded) {
+        setState(() {
+          _expandedMeals[expansionKey] = expanded;
+        });
+        _saveExpandedMeals();
+      },
+      tone: !interactive
+          ? DietMealTone.reference
+          : (isChecked ? DietMealTone.completed : DietMealTone.active),
+      titleFontSize: _titleFontSize,
+      contentFontSize: _contentFontSize,
+      onRecipeTap: (_recipePdfUrl == null || _recipePdfUrl!.isEmpty)
+          ? null
+          : () => openPdfUrl(context, _recipePdfUrl),
+      // Tracking controls only for the active (today's) menu.
+      trailing: interactive
+          ? [
+              // "Yükle" butonu şimdilik kapalı: bu sayfadan fotoğraf
+              // yüklenmiyor. Geri açılırken aşağıdaki blok ve
+              // [_uploadMealImage] üzerindeki ignore birlikte kaldırılmalı.
+              // const SizedBox(width: 6),
+              // Upload button: "Yükle" label to the LEFT of the camera icon.
+              // InkWell(
+              //   onTap: () => _uploadMealImage(mealCategory),
+              //   borderRadius: BorderRadius.circular(6),
+              //   child: Padding(
+              //     padding: const EdgeInsets.all(4),
+              //     child: Row(
+              //       mainAxisSize: MainAxisSize.min,
+              //       children: [
+              //         Text(
+              //           'Yükle',
+              //           style: TextStyle(
+              //             fontSize: 12,
+              //             fontWeight: FontWeight.w600,
+              //             color: Colors.blue.shade600,
+              //           ),
+              //         ),
+              //         const SizedBox(width: 3),
+              //         Icon(
+              //           Icons.camera_alt_outlined,
+              //           size: 18,
+              //           color: Colors.blue.shade600,
+              //         ),
+              //       ],
+              //     ),
+              //   ),
+              // ),
+              const SizedBox(width: 2),
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: Checkbox(
+                  value: isChecked,
+                  onChanged: (bool? newValue) async {
+                    setState(() {
+                      checkedStates[mealCategory] = newValue ?? false;
+                    });
+                    await Provider.of<MealManager>(context, listen: false)
+                        .updateMealState(
+                            widget.userId, now, mealCategory, newValue ?? false);
+                    if (newValue == true) {
+                      await _mealReminderService
+                          .cancelMealReminder(mealCategory);
+                    }
+                  },
+                  activeColor: Colors.green.shade600,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ]
+          : const <Widget>[],
+      // Upload status for today's menu: green "Yüklendi" + tick when a photo
+      // exists, otherwise red "Yüklü Değil" + cross.
+      subtitle: interactive
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  hasPhoto ? 'Yüklendi' : 'Yüklü Değil',
                   style: TextStyle(
-                    fontSize: _titleFontSize,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: !interactive
-                        ? Colors.blueGrey.shade700
-                        : (isChecked
-                            ? Colors.green.shade700
-                            : Colors.deepOrange.shade700),
+                    color:
+                        hasPhoto ? Colors.green.shade700 : Colors.red.shade700,
                   ),
                 ),
-              ),
-              // Time badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  MealUploadPage.formatTimeOfDay24(mealTime),
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-              ),
-              // Tracking controls only for the active (today's) menu.
-              if (interactive) ...[
-                const SizedBox(width: 6),
-                // Upload button: "Yükle" label to the LEFT of the camera icon.
-                InkWell(
-                  onTap: () => _uploadMealImage(mealCategory),
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Yükle',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.blue.shade600,
-                          ),
-                        ),
-                        const SizedBox(width: 3),
-                        Icon(
-                          Icons.camera_alt_outlined,
-                          size: 18,
-                          color: Colors.blue.shade600,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 2),
-                // Checkbox
-                SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: Checkbox(
-                    value: isChecked,
-                    onChanged: (bool? newValue) async {
-                      setState(() {
-                        checkedStates[mealCategory] = newValue ?? false;
-                      });
-                      await Provider.of<MealManager>(context, listen: false)
-                          .updateMealState(
-                              widget.userId, now, mealCategory, newValue ?? false);
-                      if (newValue == true) {
-                        await _mealReminderService
-                            .cancelMealReminder(mealCategory);
-                      }
-                    },
-                    activeColor: Colors.green.shade600,
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                const SizedBox(width: 4),
+                Icon(
+                  hasPhoto ? Icons.check_circle : Icons.cancel,
+                  size: 14,
+                  color: hasPhoto ? Colors.green.shade600 : Colors.red.shade600,
                 ),
               ],
-            ],
-          ),
-          // Upload status for today's menu: green "Yüklendi" + tick when a
-          // photo exists, otherwise red "Yüklü Değil" + cross.
-          subtitle: interactive
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      hasPhoto ? 'Yüklendi' : 'Yüklü Değil',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: hasPhoto
-                            ? Colors.green.shade700
-                            : Colors.red.shade700,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      hasPhoto ? Icons.check_circle : Icons.cancel,
-                      size: 14,
-                      color:
-                          hasPhoto ? Colors.green.shade600 : Colors.red.shade600,
-                    ),
-                  ],
-                )
-              : null,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: MealFormatter.formatMealContentWithOptions(
-                contents.map((content) => {'content': content}).toList(),
-                fontSize: _contentFontSize,
-                onRecipeTap: (_recipePdfUrl == null || _recipePdfUrl!.isEmpty)
-                    ? null
-                    : () => openPdfUrl(context, _recipePdfUrl),
-              ),
-            ),
-          ],
-        ),
-      ),
+            )
+          : null,
     );
   }
 
@@ -1550,9 +1403,6 @@ class _MealUploadPageState extends State<MealUploadPage> {
                                                       }
                                                       setSheetState(() {});
                                                     } catch (e) {
-                                                      logger.err(
-                                                          'Error deleting meal image: {}',
-                                                          [e]);
                                                       // Guarded on ctx, the
                                                       // sheet's own context.
                                                       if (ctx.mounted) {
@@ -1709,6 +1559,8 @@ class _MealUploadPageState extends State<MealUploadPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _dayRolloverTimer?.cancel();
     _uploadTimeoutTimer?.cancel();
     _stepsFocusNode.removeListener(_handleStepsFocusChange);
     _stepsFocusNode.dispose();

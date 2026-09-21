@@ -39,7 +39,7 @@ bool isWeekendDate(DateTime date) =>
 ///
 /// Returns null when [line] is not a section marker.
 DietSection? detectDietSectionMarker(String line) {
-  final normalized = _lettersOnly(line);
+  final normalized = lettersOnly(line);
   if (normalized == 'haftasonu') return DietSection.weekend;
   if (normalized == 'haftaici') return DietSection.weekday;
   return null;
@@ -48,7 +48,11 @@ DietSection? detectDietSectionMarker(String line) {
 /// Lower-cases [input], maps Turkish-specific letters to their ASCII base and
 /// drops every non-letter character (spaces, punctuation, digits). So
 /// "HAFTA SONU:" and "HAFTASONU" both collapse to "haftasonu".
-String _lettersOnly(String input) {
+///
+/// Turkish-aware on purpose: Dart's [String.toLowerCase] maps "I" to "i"
+/// rather than "ı", so a plain lower-case comparison would miss all-caps
+/// Turkish words.
+String lettersOnly(String input) {
   const turkish = {
     'ı': 'i',
     'İ': 'i',

@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../utils/date_input_utils.dart';
@@ -33,8 +32,6 @@ class EditPaymentDialog extends StatefulWidget {
 
 class _EditPaymentDialogState extends State<EditPaymentDialog> 
     with LoadingStateMixin {
-  final Logger logger = Logger.forClass(EditPaymentDialog);
-
   final TextEditingController _amountController = TextEditingController();
   DateTime? _selectedPaymentDate;
   DateTime? _selectedDueDate;
@@ -94,7 +91,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
           if (_selectedSubscriptionId != null) {
             final exists = subscriptions.any((s) => s.subscriptionId == _selectedSubscriptionId);
             if (!exists) {
-              logger.warn('Selected subscription $_selectedSubscriptionId no longer exists, resetting to Paketsiz');
               _selectedSubscriptionId = null;
             }
           }
@@ -103,7 +99,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
         });
       }
     } catch (e) {
-      logger.err('Error loading subscriptions: {}', [e]);
       if (mounted) {
         setState(() {
           _loadingSubscriptions = false;
@@ -344,7 +339,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
-      logger.err('Error deleting payment ${widget.payment.paymentId}: {}', [e]);
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -383,9 +377,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
     setState(() {
       if (pickedFile != null) {
         _dekontImage = File(pickedFile.path);
-        logger.info('Dekont image selected: ${pickedFile.path}');
-      } else {
-        logger.err('No dekont image selected.');
       }
     });
   }
@@ -394,7 +385,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
     // Amount validation
     final rawAmount = _amountController.text;
     if (rawAmount.trim().isEmpty) {
-      logger.warn('Amount is required on _updatePayment.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -406,7 +396,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
     }
     final parsedAmount = _parseAmountOrNull(rawAmount);
     if (parsedAmount == null) {
-      logger.warn('Invalid amount input: "{}"', [rawAmount]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -442,7 +431,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
       }
     } else {
       if (_selectedDueDate == null && _selectedPaymentDate == null) {
-        logger.err('Either Payment Date or Due Date must be selected.');
         if (mounted) {
           await DialogUtils.openError(
             context,
@@ -458,55 +446,27 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
     final oldPayment = widget.payment;
     final oldAmount = oldPayment.amount;
     final oldStatus = oldPayment.status;
-    final oldPaymentDate = oldPayment.paymentDate;
-    final oldDueDate = oldPayment.dueDate;
-    final oldDekontUrl = oldPayment.dekontUrl;
-    final oldPaymentDateStr =
-    oldPaymentDate != null ? df.format(oldPaymentDate) : 'null';
-    final oldDueDateStr =
-    oldDueDate != null ? df.format(oldDueDate) : 'null';
-
     final newAmount = parsedAmount;
-    final newStatus = _paymentStatus;
-    final newPaymentDateStr =
-    _selectedPaymentDate != null ? df.format(_selectedPaymentDate!) : 'null';
-    final newDueDateStr =
-    _selectedDueDate != null ? df.format(_selectedDueDate!) : 'null';
-
-    logger.info('Payment update initiated for payment ${oldPayment.paymentId}:');
-    logger.info('- Amount: $oldAmount -> $newAmount');
-    logger.info('- Status: ${oldStatus.label} -> ${newStatus.label}');
-    logger.info('- Payment Date: $oldPaymentDateStr -> $newPaymentDateStr');
-    logger.info('- Due Date: $oldDueDateStr -> $newDueDateStr');
-    logger.info('- Dekont Image: ${oldDekontUrl != null ? "Present" : "None"} -> ${_dekontImage != null ? "New image selected" : (oldDekontUrl != null ? "Unchanged" : "None")}');
-    if (oldPayment.subscriptionId != null) {
-      logger.info('- Associated subscription: ${oldPayment.subscriptionId}');
-    }
 
     startLoading();
 
     try {
       String? dekontUrl = widget.payment.dekontUrl;
       if (_dekontImage != null) {
-        logger.info('Uploading new dekont image for payment ${oldPayment.paymentId}');
         final storageRef = FirebaseStorage.instance
             .ref()
             .child('payments')
             .child('${widget.payment.paymentId}_${DateTime.now().millisecondsSinceEpoch}');
         await storageRef.putFile(_dekontImage!);
         dekontUrl = await storageRef.getDownloadURL();
-        logger.info('New dekont image uploaded successfully, URL: $dekontUrl');
       }
 
       final amountDifference = newAmount - oldAmount;
-      logger.info('Amount difference: $amountDifference');
 
       final String? oldSubscriptionId = widget.payment.subscriptionId;
       final String? newSubscriptionId = _selectedSubscriptionId;
       final bool subscriptionChanged = oldSubscriptionId != newSubscriptionId;
       final statusChanged = oldStatus != _paymentStatus;
-      logger.info('Status changed: $statusChanged');
-      logger.info('Subscription changed: $subscriptionChanged (from $oldSubscriptionId to $newSubscriptionId)');
 
       final updatedPayment = PaymentModel(
         paymentId: widget.payment.paymentId,
@@ -531,20 +491,15 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
       if (!mounted) return;
       final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
       final subProvider = paymentProvider.subProvider;
-      logger.info('Updating payment in database...');
       await paymentProvider.updatePayment(updatedPayment);
-      logger.info('Payment ${updatedPayment.paymentId} updated successfully in database');
 
       // Handle subscription amount adjustments
       if (subscriptionChanged || statusChanged || (oldStatus == PaymentStatus.completed && amountDifference != 0)) {
-        logger.info('Processing subscription adjustments...');
-        
         if (subscriptionChanged) {
           // Subscription changed: remove from old, add to new
           
           // Step 1: Remove amount from old subscription if it was completed
           if (oldSubscriptionId != null && oldStatus == PaymentStatus.completed) {
-            logger.info('Removing amount from old subscription $oldSubscriptionId');
             await subProvider.adjustAmountPaid(
               userId: widget.payment.userId,
               subscriptionId: oldSubscriptionId,
@@ -554,7 +509,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
           
           // Step 2: Add amount to new subscription if it is completed
           if (newSubscriptionId != null && _paymentStatus == PaymentStatus.completed) {
-            logger.info('Adding amount to new subscription $newSubscriptionId');
             await subProvider.adjustAmountPaid(
               userId: widget.payment.userId,
               subscriptionId: newSubscriptionId,
@@ -563,20 +517,16 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
           }
         } else if (newSubscriptionId != null) {
           // Same subscription, but amount or status changed
-          logger.info('Same subscription - adjusting amount for subscription $newSubscriptionId');
 
           double adjustmentAmount = 0;
           if (statusChanged) {
             if (_paymentStatus == PaymentStatus.completed && oldStatus != PaymentStatus.completed) {
               adjustmentAmount = newAmount;
-              logger.info('Status changed to completed - adding full amount $newAmount');
             } else if (_paymentStatus != PaymentStatus.completed && oldStatus == PaymentStatus.completed) {
               adjustmentAmount = -oldAmount;
-              logger.info('Status changed from completed - subtracting old amount $oldAmount');
             }
           } else if (_paymentStatus == PaymentStatus.completed && amountDifference != 0) {
             adjustmentAmount = amountDifference;
-            logger.info('Amount changed for completed payment - adjusting by $amountDifference');
           }
 
           await subProvider.adjustAmountPaid(
@@ -593,12 +543,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
       // tab refetches and shows the updated amount.
       subProvider.markChanged();
 
-      logger.info('Payment update completed successfully:');
-      logger.info('- Final Amount: $newAmount');
-      logger.info('- Final Status: ${_paymentStatus.label}');
-      logger.info('- Final Payment Date: $newPaymentDateStr');
-      logger.info('- Final Due Date: $newDueDateStr');
-
       widget.onPaymentUpdated();
       if (mounted) {
         await DialogUtils.popThenInfo(
@@ -608,13 +552,6 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
         );
       }
     } catch (e) {
-      logger.err('Error updating payment ${widget.payment.paymentId}: {}', [e]);
-      logger.err('Failed update details:');
-      logger.err('- Old Amount: $oldAmount, New Amount: $parsedAmount');
-      logger.err('- Old Status: ${oldStatus.label}, New Status: ${_paymentStatus.label}');
-      logger.err('- Old Payment Date: $oldPaymentDateStr, New Payment Date: ${_selectedPaymentDate != null ? df.format(_selectedPaymentDate!) : 'null'}');
-      logger.err('- Old Due Date: $oldDueDateStr, New Due Date: ${_selectedDueDate != null ? df.format(_selectedDueDate!) : 'null'}');
-
       if (mounted) {
         await DialogUtils.openError(
           context,

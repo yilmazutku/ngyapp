@@ -2,11 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../models/event_model.dart';
-import '../models/logger.dart';
 
 class EventProvider extends ChangeNotifier {
-  final Logger logger = Logger.forClass(EventProvider);
-
   static CollectionReference get eventsCollection =>
       FirebaseFirestore.instance.collection('admininput').doc('events').collection('items');
 
@@ -21,11 +18,8 @@ class EventProvider extends ChangeNotifier {
       final events =
           snapshot.docs.map((doc) => EventModel.fromDocument(doc)).toList();
 
-      logger.info('Fetched {} events for range {}-{}',
-          [events.length, startDate, endDate]);
       return events;
     } catch (e) {
-      logger.err('Error fetching events: {}', [e]);
       rethrow;
     }
   }
@@ -41,11 +35,9 @@ class EventProvider extends ChangeNotifier {
         createDate: event.createDate,
       );
       await docRef.set(newEvent.toMap());
-      logger.info('Event created: {}', [newEvent]);
       notifyListeners();
       return newEvent;
     } catch (e) {
-      logger.err('Error creating event: {}', [e]);
       rethrow;
     }
   }
@@ -57,11 +49,9 @@ class EventProvider extends ChangeNotifier {
         'startDateTime': Timestamp.fromDate(event.startDateTime),
         'endDateTime': Timestamp.fromDate(event.endDateTime),
       });
-      logger.info('Event updated: {}', [event]);
       notifyListeners();
       return event;
     } catch (e) {
-      logger.err('Error updating event: {}', [e]);
       rethrow;
     }
   }
@@ -69,10 +59,8 @@ class EventProvider extends ChangeNotifier {
   Future<void> deleteEvent(String eventId) async {
     try {
       await eventsCollection.doc(eventId).delete();
-      logger.info('Event deleted: {}', [eventId]);
       notifyListeners();
     } catch (e) {
-      logger.err('Error deleting event: {}', [e]);
       rethrow;
     }
   }

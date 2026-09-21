@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/payment_model.dart';
-import '../models/logger.dart';
 import '../providers/payment_provider.dart';
+import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
 /// A page that displays a user's payments, grouped as overdue, then planned,
 /// then completed, newest first inside each group. No filters: the client is
 /// looking at their own handful of payments, not searching a ledger.
-/// Overdue first, then planned, then completed.
 class UserPaymentsPage extends StatefulWidget {
   final String userId;
 
@@ -23,22 +22,15 @@ class UserPaymentsPage extends StatefulWidget {
 }
 
 class _UserPaymentsPageState extends State<UserPaymentsPage> {
-  final Logger _logger = Logger.forClass(UserPaymentsPage);
-
-  /// All payments fetched for this user.
-  List<PaymentModel> _allPayments = [];
-
-  /// A filtered list of payments based on status, date range, etc.
-  List<PaymentModel> _filteredPayments = [];
+  /// The user's payments, already ordered for display by [_sortForDisplay].
+  List<PaymentModel> _payments = [];
 
   /// Whether we're loading data (show a spinner).
   bool _isLoading = false;
 
-
   @override
   void initState() {
     super.initState();
-    _logger.info('Initializing UserPaymentsPage for userId=${widget.userId}.');
     _fetchUserPayments();
   }
 
@@ -47,57 +39,51 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
   // --------------------------------------------------
 
   /// Fetch user payments from PaymentProvider.
-  /// If there's an error, shows a dialog in Turkish.
-  void _fetchUserPayments() {
+  /// If there's an error, shows an error dialog in Turkish.
+  Future<void> _fetchUserPayments() async {
     setState(() => _isLoading = true);
 
-    final paymentProvider = Provider.of<PaymentProvider>(context, listen: false);
-    paymentProvider
-        .fetchPayments(
-      null,
-      userId: widget.userId,
-      showAllPayments: true,
-    )
-        .then((payments) {
-      _logger.info('Fetched ${payments.length} payments for user ${widget.userId}.');
+    final paymentProvider =
+        Provider.of<PaymentProvider>(context, listen: false);
+
+    try {
+      final payments = await paymentProvider.fetchPayments(
+        null,
+        userId: widget.userId,
+        showAllPayments: true,
+      );
+
+      if (!mounted) return;
       setState(() {
-        _allPayments = payments;
-        _applyFilters(); // Apply filters after fetching
+        _payments = _sortForDisplay(payments);
         _isLoading = false;
       });
-    }).catchError((error, stackTrace) {
-      _logger.err('Error fetching payments: {}', [error]);
-      _logger.err('Stack trace: {}', [stackTrace]);
+    } catch (error) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-
-      _showMessageDialog('Ödemeler alınırken bir hata oluştu.');
-    });
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Ödemeler alınırken bir hata oluştu.',
+      );
+    }
   }
 
   // --------------------------------------------------
-  // Filtering & Sorting
+  // Sorting
   // --------------------------------------------------
 
-  /// 1) Filter by status (if any).
-  /// 2) Filter by date range (if any).
-  /// 3) Finally, group-sort:
-  ///     - Overdue first
-  ///     - Planned
-  ///     - Completed
-  ///    and within each group, sort by date ascending/descending.
-  void _applyFilters() {
-    _logger.info('Applying filters in UserPaymentsPage.');
+  /// Orders payments for display: overdue first, then planned, then completed,
+  /// and newest first inside each group.
+  List<PaymentModel> _sortForDisplay(List<PaymentModel> payments) {
+    final sorted = List<PaymentModel>.from(payments);
 
-    List<PaymentModel> filtered = List.from(_allPayments);
-
-    // Group sort: Overdue -> Planned -> Completed
-    filtered.sort((a, b) {
+    sorted.sort((a, b) {
       final scoreA = _getStatusScore(a);
       final scoreB = _getStatusScore(b);
 
-      // Compare group scores first
+      // Compare group scores first: Overdue (0) < Planned (1) < Completed (2).
       if (scoreA != scoreB) {
-        // Overdue (0) < Planned (1) < Completed (2)
         return scoreA.compareTo(scoreB);
       }
 
@@ -114,11 +100,7 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
       return dateB.compareTo(dateA);
     });
 
-    setState(() {
-      _filteredPayments = filtered;
-    });
-
-    _logger.info('Filtering complete. After all filters: ${_filteredPayments.length} payments.');
+    return sorted;
   }
 
   /// Returns an integer that represents the "priority" of the payment.
@@ -131,35 +113,11 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
   }
 
   // --------------------------------------------------
-  // Dialogs
-  // --------------------------------------------------
-
-  /// Show a dialog with a message in Turkish.
-  void _showMessageDialog(String message) {
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Mesaj'),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Kapat'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // --------------------------------------------------
   // Build Methods
   // --------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
-    _logger.info('Building UserPaymentsPage UI for userId=${widget.userId}.');
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Ödemelerim',
@@ -170,18 +128,18 @@ class _UserPaymentsPageState extends State<UserPaymentsPage> {
     );
   }
 
-  /// Builds the scrollable list of filtered payments. If empty, show a placeholder message.
+  /// Builds the scrollable list of payments. If empty, show a placeholder message.
   Widget _buildPaymentsList() {
-    if (_filteredPayments.isEmpty) {
+    if (_payments.isEmpty) {
       return const Center(
         child: Text('Henüz görüntülenecek bir ödeme bulunmuyor.'),
       );
     }
 
     return ListView.builder(
-      itemCount: _filteredPayments.length,
+      itemCount: _payments.length,
       itemBuilder: (BuildContext context, int index) {
-        final payment = _filteredPayments[index];
+        final payment = _payments[index];
 
         // No onTap. The user can't tap the card
         return payment.buildUserPaymentCard(

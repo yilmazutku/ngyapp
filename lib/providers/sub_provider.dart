@@ -1,14 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../models/filter_params.dart';
-
-final Logger logger = Logger.forClass(SubProvider);
 
 /// Provides subscription management functionality, including CRUD operations
 /// for user subscription packages. Implements ChangeNotifier pattern for state management.
 class SubProvider extends ChangeNotifier {
+  /// Toplu (çok danışanlı) sorgularda aynı anda açılan Firestore
+  /// isteği sayısı. Bkz. [fetchActiveSubscriptionsOfUsers].
+  ///
+  /// Her parti bir gidiş-dönüş demek; parti büyüdükçe liste daha az turda
+  /// dolar (bkz. MealManager.USER_BATCH_SIZE).
+  static const int USER_BATCH_SIZE = 20;
+
   bool _subChanged = false;
 
   bool get subChanged => _subChanged;
@@ -20,7 +24,6 @@ class SubProvider extends ChangeNotifier {
     if(_subChanged)
       return;
     _subChanged = true;
-    logger.info('** SUB MARK CHANGED.**');
     notifyListeners();
   }
 
@@ -49,7 +52,6 @@ class SubProvider extends ChangeNotifier {
     if (data == null) {
       final snap = await tx.get(subRef);
       if (!snap.exists) {
-        logger.warn('Sub not found for counter update: user={}, sub={}', [userId, subscriptionId]);
         return;
       }
       data = snap.data() as Map<String, dynamic>;
@@ -63,9 +65,6 @@ class SubProvider extends ChangeNotifier {
 
     final int newCompleted = (currentCompleted + delta).clamp(0, totalMeetings);
     tx.update(subRef, {'meetingsCompleted': newCompleted});
-
-    logger.info('meetingsCompleted adjusted: user={}, sub={}, delta={}, from {} to {}',
-        [userId, subscriptionId, delta, currentCompleted, newCompleted]);
   }
 
   /// Fetches subscriptions for a user
@@ -125,11 +124,98 @@ class SubProvider extends ChangeNotifier {
         }).toList();
       }
       
-      logger.info('Fetched {} subscriptions with filters: {}', [list.length, filterParams?.toDebugMap()]);
       return list;
     } catch (e) {
-      logger.err('Error fetching subscriptions for userId={}: {}', [userId, e]);
       rethrow;
+    }
+  }
+
+  /// Verilen danışanlardan **aktif paketi olanları** döner: `userId -> paket`.
+  ///
+  /// Aktif paket tanımı [SubActiveStatus.isActive] ile aynıdır (Aktif/Haftalık
+  /// veya Aktif/Kilo Takip); yani Danışanlar Özet sayfasının danışanı listeye
+  /// alma koşuluyla birebir aynı kural kullanılır. Aktif paketi olmayan
+  /// danışan dönen map'te bulunmaz.
+  ///
+  /// İş kuralı gereği bir danışanın aynı anda en fazla bir aktif paketi olur;
+  /// veri bozuksa başlangıç tarihi en yeni olan paket kullanılır.
+  /// Tek bir danışanın sorgusu hata verirse o danışan atlanır,
+  /// çağrı bütünüyle düşmez.
+  Future<Map<String, SubscriptionModel>> fetchActiveSubscriptionsOfUsers(
+      List<String> userIds) async {
+    final List<String> activeLabels = SubActiveStatus.values
+        .where((status) => status.isActive)
+        .map((status) => status.label)
+        .toList();
+
+    return _fetchSubscriptionsOfUsers(userIds, activeLabels);
+  }
+
+  /// Verilen danışanlardan **aktif paketi olanların** kimlikleri.
+  ///
+  /// Aktif paket tanımı [fetchActiveSubscriptionsOfUsers] ile aynıdır
+  /// ([SubActiveStatus.isActive]: Aktif/Haftalık veya Aktif/Kilo Takip).
+  /// Dondurulmuş ve tamamlanmış paketler aktif sayılmaz. Kullanıcı Yönetimi
+  /// sayfası "AKTİF PAKETİ YOK" rozetini bu kümede olmayan danışanlara koyar.
+  Future<Set<String>> fetchUsersWithActivePackage(List<String> userIds) async {
+    final Map<String, SubscriptionModel> byUser =
+        await fetchActiveSubscriptionsOfUsers(userIds);
+    return byUser.keys.toSet();
+  }
+
+  /// Verilen danışanlardan durumu [statusLabels] içinde olan bir paketi
+  /// bulunanlar: `userId -> paket`. Böyle bir paketi olmayan danışan dönen
+  /// map'te bulunmaz.
+  Future<Map<String, SubscriptionModel>> _fetchSubscriptionsOfUsers(
+      List<String> userIds, List<String> statusLabels) async {
+    final Map<String, SubscriptionModel> subByUser = {};
+
+    // Danışan sayısı büyüdükçe tüm sorguları aynı anda açmamak için
+    // USER_BATCH_SIZE'lık paralel gruplar hâlinde ilerlenir.
+    for (int start = 0; start < userIds.length; start += USER_BATCH_SIZE) {
+      final int end = start + USER_BATCH_SIZE < userIds.length
+          ? start + USER_BATCH_SIZE
+          : userIds.length;
+      final List<String> batch = userIds.sublist(start, end);
+
+      final List<SubscriptionModel?> results = await Future.wait(
+        batch.map((userId) => _findSubscriptionByStatus(userId, statusLabels)),
+      );
+
+      for (int i = 0; i < batch.length; i++) {
+        final SubscriptionModel? found = results[i];
+        if (found != null) subByUser[batch[i]] = found;
+      }
+    }
+
+    return subByUser;
+  }
+
+  /// Tek danışanın durumu [statusLabels] içinde olan paketi; yoksa (ya da
+  /// sorgu hata verirse) null. Birden fazlaysa başlangıç tarihi en yeni olan.
+  Future<SubscriptionModel?> _findSubscriptionByStatus(
+      String userId, List<String> statusLabels) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('subscriptions')
+          .where('status', whereIn: statusLabels)
+          .get();
+
+      final List<SubscriptionModel> subs = [];
+      for (final doc in snapshot.docs) {
+        try {
+          subs.add(SubscriptionModel.fromDocument(doc));
+        } catch (e) {
+        }
+      }
+      if (subs.isEmpty) return null;
+
+      subs.sort((a, b) => b.startDate.compareTo(a.startDate));
+      return subs.first;
+    } catch (e) {
+      return null;
     }
   }
 
@@ -167,13 +253,11 @@ class SubProvider extends ChangeNotifier {
           .doc(subscriptionId)
           .set(finalData);
 
-      logger.info('New subscription added: {}', [finalData]);
       _subChanged = true;
       notifyListeners();
       
       return subscriptionId;
     } catch (e) {
-      logger.err('Error adding subscription for userId={}: {}', [userId, e]);
       rethrow;
     }
   }
@@ -199,13 +283,10 @@ class SubProvider extends ChangeNotifier {
           .doc(subscriptionId)
           .update(updateData);
 
-      logger.info('Subscription updated: {}', [subscriptionId]);
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error updating subscription id={} for userId={}: {}', 
-          [subscriptionId, userId, e]);
       rethrow;
     }
   }
@@ -323,16 +404,10 @@ class SubProvider extends ChangeNotifier {
       ];
       await _commitDeletesInChunks(db, refsToDelete);
 
-      logger.info(
-        'Subscription {} deleted with {} linked appointment(s) and {} linked payment(s)',
-        [subscriptionId, appointmentsSnap.docs.length, paymentsSnap.docs.length],
-      );
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error deleting subscription id={} for userId={}: {}', 
-          [subscriptionId, userId, e]);
       rethrow;
     }
   }
@@ -382,8 +457,6 @@ class SubProvider extends ChangeNotifier {
       final data = docSnapshot.data();
       return data?['packageName'] as String?;
     } catch (e) {
-      logger.err('Error fetching subscription package name for userId={}, subscriptionId={}: {}', 
-          [userId, subscriptionId, e]);
       return null;
     }
   }
@@ -414,8 +487,6 @@ class SubProvider extends ChangeNotifier {
 
       final snap = await subRef.get();
       if (!snap.exists) {
-        logger.warn('Sub not found for postponement update: user={}, sub={}',
-            [userId, subscriptionId]);
         return false;
       }
 
@@ -433,18 +504,11 @@ class SubProvider extends ChangeNotifier {
           'updateUser': updateUser,
         });
       }
-      logger.info(
-        'postponementsUsed adjusted: user={}, sub={}, delta={}, applied={}, from {}',
-        [userId, subscriptionId, delta, appliedDelta, current],
-      );
 
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err(
-          'Error adjusting postponementsUsed for userId={}, subscriptionId={}: {}',
-          [userId, subscriptionId, e]);
       return false;
     }
   }
@@ -483,8 +547,6 @@ class SubProvider extends ChangeNotifier {
 
       final snap = await subRef.get();
       if (!snap.exists) {
-        logger.warn('Sub not found for amountPaid update: user={}, sub={}',
-            [userId, subscriptionId]);
         return false;
       }
 
@@ -499,17 +561,11 @@ class SubProvider extends ChangeNotifier {
       if (appliedDelta != 0) {
         await subRef.update({'amountPaid': FieldValue.increment(appliedDelta)});
       }
-      logger.info(
-        'amountPaid adjusted: user={}, sub={}, delta={}, applied={}, from {}',
-        [userId, subscriptionId, delta, appliedDelta, current],
-      );
 
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error adjusting amountPaid for userId={}, subscriptionId={}: {}',
-          [userId, subscriptionId, e]);
       return false;
     }
   }
@@ -564,13 +620,10 @@ class SubProvider extends ChangeNotifier {
         await subRef.delete();
       }
 
-      logger.info('Subscription deleted: {}', [subscriptionId]);
       _subChanged = true;
       notifyListeners();
       return true;
     } catch (e) {
-      logger.err('Error deleting subscription id={} for userId={}: {}', 
-          [subscriptionId, userId, e]);
       rethrow;
     }
   }

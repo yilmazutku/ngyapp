@@ -5,7 +5,6 @@ import 'package:excel/excel.dart' as excel;
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/user_model.dart';
 
@@ -19,8 +18,6 @@ import '../models/user_model.dart';
 /// result, the caller owns the loading indicator and the info/error dialogs.
 class PaymentExportUtil {
   PaymentExportUtil._();
-
-  static final Logger _log = Logger('PaymentExportUtil');
 
   static const String _defaultSheetName = 'Sheet1';
   static const String _totalRowLabel = 'TOPLAM';
@@ -73,7 +70,6 @@ class PaymentExportUtil {
     );
 
     if (savePath == null) {
-      _log.info('Excel export cancelled by the user');
       return null;
     }
 
@@ -94,16 +90,12 @@ class PaymentExportUtil {
     required Map<String, UserModel> userById,
     required String titleLabel,
   }) async {
-    _log.info('Exporting {} payments to Excel ({})', [payments.length, titleLabel]);
-
     final bytes = _buildWorkbook(
       payments: payments,
       userById: userById,
       titleLabel: titleLabel,
     );
     await File(targetPath).writeAsBytes(bytes, flush: true);
-
-    _log.info('Excel export written to {}', [targetPath]);
   }
 
   /// Encodes the workbook: a title row, the payment rows, a total row and a

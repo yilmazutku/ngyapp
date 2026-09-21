@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../models/logger.dart';
 import '../services/fcm_service.dart';
 import '../services/meal_reminder_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/app_bar_with_back.dart';
-
-final Logger log = Logger.forClass(ChangePasswordPage);
 
 class ChangePasswordPage extends StatefulWidget {
   const ChangePasswordPage({super.key});
@@ -40,11 +37,9 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
         password: currentPassword,
       );
       await user.reauthenticateWithCredential(credential);
-      log.info('User re-authenticated successfully.');
 
       // Update the password
       await user.updatePassword(newPassword);
-      log.info('Password updated successfully.');
 
       // Cancel all local notifications before signing out
       await NotificationService().cancelAllNotifications();
@@ -52,7 +47,6 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       // Remove FCM token and sign the user out
       await FcmService().removeFcmToken();
       await FirebaseAuth.instance.signOut();
-      log.info('User signed out. Redirect to login page.');
 
       setState(() {
         _statusMessage = 'Şifre başarıyla değiştirildi. Lütfen tekrar giriş yapınız..';
@@ -65,7 +59,6 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       setState(() {
         _statusMessage = 'Şifre değiştirilemedi. Lütfen destek isteyiniz.';
       });
-      log.info('Failed to update password: $e');
     }
   }
 

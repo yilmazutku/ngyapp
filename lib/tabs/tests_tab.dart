@@ -5,13 +5,10 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../models/logger.dart';
 import '../providers/test_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger log = Logger.forClass(TestsTab);
 
 /// Tests tab behaves like Tanita explorer: header + list + upload in-place
 /// Accepts PDFs and images (jpg/jpeg/png/webp/heic)
@@ -100,14 +97,11 @@ class _TestsTabState extends State<TestsTab> {
           // Guard against pathologically large files that would otherwise make
           // the upload very slow and risk crashing the app on Windows desktop.
           if (file.size > kMaxUploadBytes) {
-            log.warn('Attachment too large, skipping: {} ({} bytes)',
-                [file.name, file.size]);
             failed.add('${file.name} (çok büyük, en fazla $kMaxUploadSizeLabel)');
             continue;
           }
           final path = file.path;
           if (path == null) {
-            log.warn('No file path for attachment: {}', [file.name]);
             failed.add('${file.name} (dosya okunamadı)');
             continue;
           }
@@ -119,7 +113,6 @@ class _TestsTabState extends State<TestsTab> {
             );
             success++;
           } catch (e) {
-            log.err('Error uploading test attachment {}: {}', [file.name, e]);
             failed.add(e is UploadTimeoutException
                 ? '${file.name} (${e.userMessage})'
                 : file.name);

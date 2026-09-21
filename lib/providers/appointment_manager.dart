@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../models/appointment_model.dart';
-import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../models/filter_params.dart';
 import '../providers/sub_provider.dart'; // << make sure this path matches your project
@@ -10,7 +9,6 @@ class AppointmentManager extends ChangeNotifier {
   static const String _fieldMeetingsCompleted = 'meetingsCompleted';
   static const String _fieldMeetingsBurned = 'meetingsBurned';
 
-  final Logger logger = Logger.forClass(AppointmentManager);
   final SubProvider subProvider;
 
   AppointmentManager({required this.subProvider});
@@ -95,12 +93,6 @@ class AppointmentManager extends ChangeNotifier {
 
       // An appointment without a subscription is normal; only a named-but-gone
       // subscription is worth warning about.
-      if (counterField != null && (subId?.isNotEmpty ?? false) && !touchesSub) {
-        logger.warn(
-          'Sub missing during add: user={}, sub={}',
-          [appointment.userId, subId],
-        );
-      }
 
       final batch = db.batch();
       batch.set(apptRef, appointment.toMap());
@@ -114,10 +106,7 @@ class AppointmentManager extends ChangeNotifier {
       if (touchesSub) {
         subProvider.markChanged();
       }
-
-      logger.info('Appointment added: {}', [appointment]);
     } catch (e) {
-      logger.err('Error adding appointment: {}', [e]);
       rethrow;
     }
   }
@@ -147,12 +136,6 @@ class AppointmentManager extends ChangeNotifier {
       final prevSnap = await apptRef.get();
       final Map<String, dynamic>? prev =
           prevSnap.exists ? prevSnap.data() as Map<String, dynamic> : null;
-
-      if (prev == null) {
-        logger.info(
-            'updateAppointment: previous appointment not found, treating as add. apptId={}',
-            [updated.appointmentId]);
-      }
 
       final String? prevSubId =
           prev == null ? null : prev['subscriptionId'] as String?;
@@ -186,21 +169,11 @@ class AppointmentManager extends ChangeNotifier {
       if (releasesPrev) {
         if (prevExists) {
           addDelta(prevSubId, prevField, -1);
-        } else {
-          logger.warn(
-            'Prev sub missing during update decrement ({}): user={}, sub={}',
-            [prevField, updated.userId, prevSubId],
-          );
         }
       }
       if (claimsNew) {
         if (newExists) {
           addDelta(newSubId, newField, 1);
-        } else {
-          logger.warn(
-            'New sub missing during update increment ({}): user={}, sub={}',
-            [newField, updated.userId, newSubId],
-          );
         }
       }
 
@@ -217,10 +190,7 @@ class AppointmentManager extends ChangeNotifier {
       if (subChanged) {
         subProvider.markChanged();
       }
-
-      logger.info('Appointment updated: {}', [updated]);
     } catch (e) {
-      logger.err('Error updating appointment: {}', [e]);
       rethrow;
     }
   }
@@ -240,10 +210,6 @@ class AppointmentManager extends ChangeNotifier {
           if (counter.value != 0) counter.key: FieldValue.increment(counter.value),
       };
       if (updates.isEmpty) continue;
-      logger.info(
-        'Subscription counters user={}, sub={}, deltas={}',
-        [userId, entry.key, entry.value],
-      );
       batch.update(_subRef(userId, entry.key), updates);
       queued = true;
     }
@@ -266,10 +232,6 @@ class AppointmentManager extends ChangeNotifier {
 
       final snap = await apptRef.get();
       if (!snap.exists) {
-        logger.warn(
-          'deleteAppointment: appointment not found, user={}, appt={}',
-          [userId, appointmentId],
-        );
         return false;
       }
 
@@ -284,10 +246,6 @@ class AppointmentManager extends ChangeNotifier {
       final batch = db.batch();
       batch.delete(apptRef);
       if (touchesSub) {
-        logger.info(
-          'deleteAppointment: decrement {} for user={}, sub={}',
-          [counterField, userId, subId],
-        );
         batch.update(_subRef(userId, subId!), <String, Object?>{
           counterField: FieldValue.increment(-1),
         });
@@ -298,11 +256,8 @@ class AppointmentManager extends ChangeNotifier {
         subProvider.markChanged();
       }
 
-      logger.info('Appointment deletedBy={}: appointmentId={}',
-          [deletedBy, appointmentId]);
       return true;
     } catch (e) {
-      logger.err('Error deleting appointment: {}', [e]);
       rethrow;
     }
   }
@@ -356,7 +311,6 @@ class AppointmentManager extends ChangeNotifier {
       query = query.orderBy('appointmentDateTime', descending: false);
 
       final snapshot = await query.get();
-      logger.info('snapshot.iscache={}',[snapshot.metadata.isFromCache]);
       var appointments = snapshot.docs.map((doc) => AppointmentModel.fromDocument(doc)).toList();
 
       // Apply client-side search filter if needed (Firestore doesn't support full-text search efficiently)
@@ -366,10 +320,8 @@ class AppointmentManager extends ChangeNotifier {
           return a.notes?.toLowerCase().contains(searchLower) ?? false;
         }).toList();
       }
-      logger.info('Appointments fetched successfully with filters: {}', [filterParams?.toDebugMap()]);
       return appointments;
     } catch (e) {
-      logger.err('Error fetching appointments: {}', [e]);
       rethrow;
     }
   }
@@ -495,10 +447,8 @@ class AppointmentManager extends ChangeNotifier {
         filtered = filtered.where((a) => statusesFilter.contains(a.status)).toList();
       }
 
-      logger.info('Fetched {} appointments with user data (Firebase + client filtering)', [filtered.length]);
       return filtered;
     } catch (e) {
-      logger.err('Error fetching appointments with users: {}', [e]);
       rethrow;
     }
   }

@@ -4,14 +4,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import '../models/diet_model.dart';
-import '../models/logger.dart';
 import '../models/filter_params.dart';
+import '../models/mock_test_run.dart';
 import '../utils/storage_upload.dart';
 
 /// Manages diet data for users
 /// Provides functionality for fetching, creating, updating, and deleting diet documents
 class DietProvider extends ChangeNotifier {
-  final Logger logger = Logger.forClass(DietProvider);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Returns true when any meal key or content line in [subtitles] contains
@@ -59,20 +58,16 @@ class DietProvider extends ChangeNotifier {
           .get();
 
       if (querySnapshot.docs.isEmpty) {
-        logger.info('No diet lists found for user {}', [userId]);
         return null;
       }
 
       final latestDoc = querySnapshot.docs.first;
       if (latestDoc.data()['subtitles'] == null) {
-        logger.warn('Latest diet list has no subtitles for user {}', [userId]);
         return null;
       }
 
-      logger.info('Found latest diet document for user {}', [userId]);
       return DietDocument.fromSnapshot(latestDoc);
     } catch (e) {
-      logger.err('Error fetching latest diet document: {}', [e]);
       rethrow;
     }
   }
@@ -120,8 +115,7 @@ class DietProvider extends ChangeNotifier {
         try {
           final diet = DietDocument.fromSnapshot(doc);
           diets.add(diet);
-        } catch (e, s) {
-          logger.err('Error parsing diet document ${doc.id}: {}, {}', [e,s]);
+        } catch (e) {
           // Continue with next document instead of failing completely
           continue;
         }
@@ -144,10 +138,8 @@ class DietProvider extends ChangeNotifier {
         }).toList();
       }
 
-      logger.info('Fetched ${diets.length} diets for user $userId with filters: {}', [filterParams?.toDebugMap()]);
       return diets;
-    } catch (e, s) {
-      logger.err('Error fetching diets: $e', [s]);
+    } catch (e) {
       return [];
     }
   }
@@ -233,8 +225,7 @@ class DietProvider extends ChangeNotifier {
             if (matchCount > 0) {
               matchCounts[diet.docId] = matchCount;
             }
-          } catch (e, s) {
-            logger.err('Error searching diet content: $e', [s]);
+          } catch (e) {
             // On error, include the diet in results to avoid hiding data due to errors
             return true;
           }
@@ -258,14 +249,11 @@ class DietProvider extends ChangeNotifier {
             final bDate = b.uploadTime ?? DateTime(1900);
             return bDate.compareTo(aDate);
           });
-          
-          logger.info('Sorted diets by relevance for query: $searchQuery');
         }
       }
       
       return allDiets;
-    } catch (e, s) {
-      logger.err('Error searching diets: $e', [s]);
+    } catch (e) {
       return [];
     }
   }
@@ -285,27 +273,78 @@ class DietProvider extends ChangeNotifier {
     Uint8List? fileBytes,
   }) async {
     try {
+      // Keep the admin's own file name (see [uploadSourceFile]); the recipe is
+      // opened for reading, so it stays inline instead of forcing a download.
+      final safeName = sanitizeStorageFileName(fileName, fallback: 'tarif.pdf');
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final storagePath = 'users/$userId/dietRecipes/recipe_$ts.pdf';
+      final storagePath = 'users/$userId/dietRecipes/$ts/$safeName';
 
       final ref = FirebaseStorage.instance.ref().child(storagePath);
       await uploadFileToStorage(
         ref: ref,
-        metadata: SettableMetadata(contentType: 'application/pdf'),
+        metadata: SettableMetadata(
+          contentType: 'application/pdf',
+          contentDisposition: inlineContentDisposition(safeName),
+        ),
         filePath: filePath,
         bytes: fileBytes,
       );
       final downloadUrl = await ref.getDownloadURL();
 
-      logger.info('Recipe PDF uploaded. userId=$userId path=$storagePath');
       return {
         'url': downloadUrl,
         'path': storagePath,
-        'name': fileName,
+        'name': safeName,
       };
-    } catch (e, s) {
-      logger.err('Error uploading recipe PDF: $e', [s]);
+    } catch (e) {
       return null;
+    }
+  }
+
+  Future<Map<String, String>?> uploadSourceFile({
+    required String userId,
+    required String fileName,
+    String? filePath,
+    Uint8List? fileBytes,
+  }) async {
+    try {
+      // The uploaded document keeps its original name so it downloads under
+      // that name; the timestamp is a folder segment, which keeps object names
+      // unique without touching the file name itself.
+      final safeName = sanitizeStorageFileName(fileName, fallback: 'diyet.docx');
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final storagePath = 'users/$userId/dietSources/$ts/$safeName';
+
+      final ref = FirebaseStorage.instance.ref().child(storagePath);
+      await uploadFileToStorage(
+        ref: ref,
+        metadata: SettableMetadata(
+          contentType: kDocxContentType,
+          contentDisposition: attachmentContentDisposition(safeName),
+        ),
+        filePath: filePath,
+        bytes: fileBytes,
+      );
+      final downloadUrl = await ref.getDownloadURL();
+
+      return {
+        'url': downloadUrl,
+        'path': storagePath,
+        'name': safeName,
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Best-effort removal of a Cloud Storage object by its full path. Never
+  /// throws: a failed cleanup must not break the calling flow.
+  Future<void> deleteStorageFile(String? storagePath) async {
+    final path = (storagePath ?? '').trim();
+    if (path.isEmpty) return;
+    try {
+      await FirebaseStorage.instance.ref().child(path).delete();
+    } catch (e) {
     }
   }
 
@@ -324,27 +363,69 @@ class DietProvider extends ChangeNotifier {
           .collection('dietLists')
           .doc(docId);
 
-      // Best-effort: remove the attached recipe PDF from Storage first so it
-      // doesn't get orphaned. A missing/failed delete never blocks removing
-      // the diet document itself.
+      // Best-effort: remove the attached files (recipe PDF, imported Word
+      // document) from Storage first so they don't get orphaned. A
+      // missing/failed delete never blocks removing the diet document itself.
       try {
         final snap = await docRef.get();
-        final recipePath = (snap.data()?['recipePdfPath'] as String?)?.trim();
-        if (recipePath != null && recipePath.isNotEmpty) {
-          await FirebaseStorage.instance.ref().child(recipePath).delete();
-          logger.info('Deleted recipe PDF for diet $docId at $recipePath');
+        final data = snap.data();
+        for (final field in const ['recipePdfPath', 'sourceFilePath']) {
+          await deleteStorageFile(data?[field] as String?);
         }
       } catch (e) {
-        logger.warn('Could not delete recipe PDF for diet $docId: $e');
       }
 
       await docRef.delete();
-      logger.info('Deleted diet document: $docId');
       notifyListeners();
-    } catch (e, s) {
-      logger.err('Error deleting diet document: $e', [s]);
+    } catch (e) {
       rethrow;
     }
+  }
+
+  /// Bir danışanın [kMockTestDataField] işaretli (yani test aracının
+  /// oluşturduğu) diyetlerinin id'leri.
+  ///
+  /// Temizleme adımının güvenlik ağı: defter kaydı eksik kalsa bile işaretli
+  /// diyet danışanın üstünde unutulmaz.
+  Future<List<String>> fetchMockTestDietIds(String userId) async {
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('dietLists')
+        .where(kMockTestDataField, isEqualTo: true)
+        .get();
+
+    return snapshot.docs.map((doc) => doc.id).toList();
+  }
+
+  /// Mock test aracının oluşturduğu geçici diyeti siler.
+  ///
+  /// Emniyet kilidi: doküman [kMockTestDataField] işaretini taşımıyorsa
+  /// DOKUNULMAZ ve `false` döner. Böylece kayıt bozulsa bile danışanın gerçek
+  /// diyeti bu yoldan silinemez.
+  ///
+  /// Doküman zaten yoksa da `false` döner (silinecek bir şey kalmamıştır).
+  Future<bool> deleteMockTestDiet({
+    required String userId,
+    required String docId,
+  }) async {
+    final docRef = _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('dietLists')
+        .doc(docId);
+
+    final snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      return false;
+    }
+
+    if (snapshot.data()?[kMockTestDataField] != true) {
+      return false;
+    }
+
+    await deleteDiet(userId: userId, docId: docId);
+    return true;
   }
 
   /// Creates a new diet document in Firestore
@@ -376,11 +457,9 @@ class DietProvider extends ChangeNotifier {
           .collection('dietLists')
           .add(dietData);
 
-      logger.info('Created new diet document with ID: ${docRef.id}');
       notifyListeners();
       return docRef.id;
-    } catch (e, s) {
-      logger.err('Error creating diet document: $e', [s]);
+    } catch (e) {
       rethrow;
     }
   }
@@ -446,11 +525,9 @@ class DietProvider extends ChangeNotifier {
           .doc(docId)
           .update(updatedData);
 
-      logger.info('Updated diet document: $docId');
       notifyListeners();
       return true;
-    } catch (e, s) {
-      logger.err('Error updating diet document: $e', [s]);
+    } catch (e) {
       return false;
     }
   }
@@ -461,24 +538,31 @@ class DietProvider extends ChangeNotifier {
   /// @param subtitles The weekday meal data to store
   /// @param weekendSubtitles Optional weekend (Hafta Sonu) menu; stored only
   ///   when non-null and non-empty
-  /// @param subscriptionId The ID of the subscription associated with this diet
+  /// @param subscriptionId Optional ID of the subscription associated with this
+  ///   diet; omitted from the document when null or empty
   /// 
   /// @return The ID of the newly created diet document
   Future<String?> uploadDiet({
     required String userId,
     required Map<String, dynamic> subtitles,
-    required String subscriptionId,
+    String? subscriptionId,
     Map<String, dynamic>? weekendSubtitles,
     String? displayName, //optional TODO ileride dialogtan belki girilir
     String? recipePdfUrl,
     String? recipePdfPath,
     String? recipePdfName,
+    String? sourceFileUrl,
+    String? sourceFilePath,
+    String? sourceFileName,
+    String? waterGoal,
+    String? sportGoal,
   }) async {
     try {
       final now=DateTime.now();
       final Map<String, dynamic> dietData = {
         'uploadTime': FieldValue.serverTimestamp(),
-        'subscriptionId': subscriptionId,
+        if (subscriptionId != null && subscriptionId.isNotEmpty)
+          'subscriptionId': subscriptionId,
         'subtitles': subtitles,
         if (weekendSubtitles != null && weekendSubtitles.isNotEmpty)
           'weekendSubtitles': weekendSubtitles,
@@ -491,6 +575,14 @@ class DietProvider extends ChangeNotifier {
           'recipePdfPath': recipePdfPath,
         if (recipePdfName != null && recipePdfName.isNotEmpty)
           'recipePdfName': recipePdfName,
+        if (sourceFileUrl != null && sourceFileUrl.isNotEmpty)
+          'sourceFileUrl': sourceFileUrl,
+        if (sourceFilePath != null && sourceFilePath.isNotEmpty)
+          'sourceFilePath': sourceFilePath,
+        if (sourceFileName != null && sourceFileName.isNotEmpty)
+          'sourceFileName': sourceFileName,
+        if (waterGoal != null && waterGoal.isNotEmpty) 'waterGoal': waterGoal,
+        if (sportGoal != null && sportGoal.isNotEmpty) 'sportGoal': sportGoal,
       };
 
       final docRef = await _firestore
@@ -499,11 +591,9 @@ class DietProvider extends ChangeNotifier {
           .collection('dietLists')
           .add(dietData);
 
-      logger.info('Diet list uploaded with ID: ${docRef.id}');
       notifyListeners();
       return docRef.id;
-    } catch (e, s) {
-      logger.err('Error uploading diet list: $e', [s]);
+    } catch (e) {
       return null;
     }
   }

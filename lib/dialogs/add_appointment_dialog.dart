@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/appointment_model.dart';
 import '../models/user_model.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../providers/appointment_durations_provider.dart';
 import '../providers/appointment_manager.dart';
@@ -13,12 +12,11 @@ import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../utils/postponement_notices.dart';
 import '../utils/time_picker_utils.dart';
 import '../dialogs/dialog_widgets.dart'; // Import dialog widgets
 import '../dialogs/overlap_warning_dialog.dart';
 import '../widgets/loading_overlay.dart';
-
-final Logger logger = Logger.forClass(AddAppointmentDialog);
 
 class AddAppointmentDialog extends StatefulWidget {
   final DateTime? selectedDate;
@@ -187,7 +185,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
           _selectedUser = user;
         });
       } else {
-        logger.err('User not found with ID: {}', [widget.userId]);
         if (mounted) {
           await DialogUtils.openError(
             context,
@@ -197,7 +194,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         }
       }
     } catch (e) {
-      logger.err('Error loading user details: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -261,7 +257,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         }
       }
     } catch (e) {
-      logger.err('Error fetching subscriptions: {}', [e]);
       setState(() {
         _isLoadingSubscriptions = false;
       });
@@ -285,7 +280,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         _filteredUsers = users;
       });
     } catch (e) {
-      logger.err('Error loading users: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -301,7 +295,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
     setState(() {
       _selectedDate = date;
     });
-    logger.info('Selected date: {}', [date]);
   }
 
   Future<void> _saveAppointment() async {
@@ -354,14 +347,8 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         _postponedBy == PostponeSource.user;
     if (isUserPostponement && _selectedSubscription != null) {
       if (!_selectedSubscription!.hasPostponementsLeft) {
-        final proceedAnyway = await DialogUtils.openConfirm(
-          context,
-          title: 'Erteleme Hakkı Yok',
-          message:
-              'Danışanın erteleme hakkı bulunmamaktadır. Yine de bu randevuyu ertelemek istediğinize emin misiniz?',
-          confirmText: 'Evet',
-          cancelText: 'Hayır',
-        );
+        final proceedAnyway =
+            await PostponementNotices.confirmNoRightsLeft(context);
         if (!proceedAnyway) return;
       }
     }
@@ -432,7 +419,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               },
             );
           } catch (e) {
-            logger.err('Error updating postponement: {}', [e]);
           }
         }
 
@@ -446,7 +432,6 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
         );
       }
     } catch (e) {
-      logger.err('Error adding appointment: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -718,7 +703,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                     ),
                   ListTile(
                     title: const Text(
-                      'Ertelenen Tarih',
+                      AppointmentDateLabels.postponedDateHeading,
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: _postponedDate != null
@@ -772,7 +757,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
                   selectedDate: _selectedDate,
                   onDateSelected: _onDateSelected,
                   label: 'Tarih Seçin',
-                  selectedLabel: 'Tarih',
+                  selectedLabel: AppointmentDateLabels.dateLabel(
+                    _selectedStatus == AppointmentStatus.postponed,
+                  ),
                   // Allow selecting past dates (e.g. logging a missed/late
                   // appointment). Lower bound kept wide; default selected date
                   // is today, which stays within [firstDate, lastDate].
@@ -782,7 +769,11 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               ] else ...[
                 // Show selected date as read-only when date is pre-selected
                 ListTile(
-                  title: const Text('Tarih'),
+                  title: Text(
+                    AppointmentDateLabels.dateLabel(
+                      _selectedStatus == AppointmentStatus.postponed,
+                    ),
+                  ),
                   subtitle: Text(
                     DateFormatter.formatNumericDate(_selectedDate),
                     style: const TextStyle(fontWeight: FontWeight.bold),

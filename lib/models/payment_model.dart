@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import 'logger.dart';
 import '../widgets/labeled_action_button.dart';
 
 class PaymentModel {
@@ -319,8 +318,6 @@ extension PaymentModelUI on PaymentModel {
     );
   }
 }
-
-final Logger logger = Logger.forClass(PaymentStatus);
 
 enum PaymentStatus {
   completed('Tamamlandı'),

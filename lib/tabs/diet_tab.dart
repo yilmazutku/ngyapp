@@ -6,18 +6,16 @@ import 'package:provider/provider.dart';
 import '../dialogs/add_diet_dialog.dart';
 import '../models/diet_model.dart';
 import '../models/filter_params.dart';
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/subs_model.dart';
 import '../pages/admin_diet_edit_page.dart';
+import '../pages/diet_user_view_page.dart';
 import '../providers/diet_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/pdf_launcher.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
-
-final Logger dietEditLogger = Logger.forClass(DietEditPage);
 
 class DietTab extends BaseTab<DietProvider> {
   const DietTab({super.key, required super.userId})
@@ -40,8 +38,6 @@ class DietTab extends BaseTab<DietProvider> {
 }
 
 class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
-  final Logger logger = Logger.forClass(_DietTabState);
-
   // Smooth scrolling & visible scrollbar for long lists
   final ScrollController _listCtrl = ScrollController();
 
@@ -217,7 +213,6 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
 
       return selected;
     } catch (e) {
-      logger.err('Error selecting subscription: {}', [e]);
       if (context.mounted) {
         await DialogUtils.openError(context, title: 'Hata', message: 'Paketler yüklenirken bir hata oluştu: $e');
       }
@@ -230,6 +225,12 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
       key: key,
       dietDoc: dietDoc,
       matchCount: matchCount,
+      onUserView: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => DietUserViewPage(dietDoc: dietDoc)),
+        );
+      },
       onView: () {
         navigateAndRefresh(
           context,
@@ -237,7 +238,6 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
         );
       },
       onDelete: () async {
-        dietEditLogger.info('Attempting to delete diet: {} ({})', [dietDoc.displayName, dietDoc.docId]);
         try {
           final confirmed = await DialogUtils.openConfirm(
             context,
@@ -252,8 +252,7 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
             await dietProvider.deleteDiet(userId: widget.userId, docId: dietDoc.docId);
             if (mounted) refreshData();
           }
-        } catch (e, s) {
-          dietEditLogger.err('Unexpected error during diet deletion flow: {} \nStack trace: {}', [e, s.toString()]);
+        } catch (e) {
           if (context.mounted) {
             DialogUtils.openError(context, title: 'Hata', message: 'Diyet silinirken bir hata oluştu: $e');
           }
@@ -300,12 +299,11 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
                   children: [
                     ElevatedButton.icon(
                       onPressed: () async {
-                        final selectedSub = await _selectSubscription(context, widget.userId);
-                        if (selectedSub == null) return;
-                        if (!context.mounted) return;
+                        // The package is resolved inside the dialog (and shown
+                        // in the preview), so importing never stops to ask.
                         await showDialog(
                           context: context,
-                          builder: (context) => AddDietDialog(userId: widget.userId, selectedSubscription: selectedSub),
+                          builder: (context) => AddDietDialog(userId: widget.userId),
                         );
                         if (mounted) refreshData();
                       },
@@ -376,10 +374,16 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
 }
 
 class DietCard extends StatelessWidget {
+  static const String userViewLabel = 'Danışan Nasıl Görüyor?';
+  static const String recipeLabel = 'Ekli Tarif';
+  static const String sourceFileLabel = 'Kaynak Word Dosyası';
+  static const String openAttachmentHint = 'Görüntülemek için dokunun';
+
   final DietDocument dietDoc;
   final VoidCallback onView;
   final VoidCallback onDelete;
   final VoidCallback onEdit;
+  final VoidCallback onUserView;
   final int? matchCount;
 
   const DietCard({
@@ -388,6 +392,7 @@ class DietCard extends StatelessWidget {
     required this.onView,
     required this.onDelete,
     required this.onEdit,
+    required this.onUserView,
     this.matchCount,
   });
 
@@ -520,8 +525,44 @@ class DietCard extends StatelessWidget {
             // clearly associated with this diet.
             if (dietDoc.hasRecipe) ...[
               const SizedBox(height: 12),
-              _buildRecipeRow(context),
+              _buildAttachmentRow(
+                icon: Icons.picture_as_pdf,
+                color: Colors.red,
+                title: recipeLabel,
+                fileName: dietDoc.recipePdfName,
+                onTap: () => openPdfUrl(context, dietDoc.recipePdfUrl),
+              ),
             ],
+            if (dietDoc.hasSourceFile) ...[
+              const SizedBox(height: 8),
+              _buildAttachmentRow(
+                icon: Icons.description,
+                color: Colors.indigo,
+                title: sourceFileLabel,
+                fileName: dietDoc.sourceFileName,
+                onTap: () => openFileUrl(
+                  context,
+                  dietDoc.sourceFileUrl,
+                  fileLabel: 'Word dosyası',
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            // Full width so the long label never pushes the row into a scroll.
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onUserView,
+                icon: const Icon(Icons.phone_iphone, size: 18),
+                label: const Text(userViewLabel),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.deepPurple,
+                  side: BorderSide(color: Colors.deepPurple.shade200),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             const Divider(height: 1),
             const SizedBox(height: 16),
@@ -573,34 +614,39 @@ class DietCard extends StatelessWidget {
     );
   }
 
-  /// Tappable row showing the diet's attached recipe PDF. Opens the PDF in the
-  /// device's external viewer. Only rendered when [dietDoc.hasRecipe] is true.
-  Widget _buildRecipeRow(BuildContext context) {
-    final label = (dietDoc.recipePdfName?.trim().isNotEmpty ?? false)
-        ? dietDoc.recipePdfName!.trim()
-        : 'Görüntülemek için dokunun';
+  Widget _buildAttachmentRow({
+    required IconData icon,
+    required MaterialColor color,
+    required String title,
+    required String? fileName,
+    required VoidCallback onTap,
+  }) {
+    final trimmed = fileName?.trim();
+    final label = (trimmed != null && trimmed.isNotEmpty)
+        ? trimmed
+        : openAttachmentHint;
 
     return InkWell(
-      onTap: () => openPdfUrl(context, dietDoc.recipePdfUrl),
+      onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.red.shade50,
+          color: color.shade50,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.red.shade200),
+          border: Border.all(color: color.shade200),
         ),
         child: Row(
           children: [
-            Icon(Icons.picture_as_pdf, color: Colors.red.shade600, size: 20),
+            Icon(icon, color: color.shade600, size: 20),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Ekli Tarif',
-                    style: TextStyle(
+                  Text(
+                    title,
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -615,7 +661,7 @@ class DietCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Icon(Icons.open_in_new, color: Colors.red.shade400, size: 18),
+            Icon(Icons.open_in_new, color: color.shade400, size: 18),
           ],
         ),
       ),

@@ -29,7 +29,7 @@ class AppConstants {
   /// version the startup update check compares against the store, so a build
   /// that forgets to bump it here keeps asking its users to update to a
   /// version they already have.
-  static const String appVersion = '1.0.1';
+  static const String appVersion = '1.0.2';
 
   /// The app description shown in various places
   static const String appDescription = 'A new Flutter project.';
@@ -199,9 +199,13 @@ class NotificationConstants {
   // ============================================================
   
   /// The icon resource name for Android local notifications.
-  /// To change: update the icon files in android/app/src/main/res/mipmap-*/ folders
-  /// and update this constant to match the filename (without extension).
-  static const String androidNotificationIcon = '@mipmap/ngy';
+  ///
+  /// Must match a real resource under android/app/src/main/res/. `@mipmap/ngy`
+  /// did not exist, so flutter_local_notifications could not resolve the icon
+  /// and local notifications failed on Android.
+  /// To change: add the icon under android/app/src/main/res/drawable-*/ and
+  /// update this constant to match the filename (without extension).
+  static const String androidNotificationIcon = '@mipmap/ic_launcher';
 }
 
 /// Constants for Push Notification configuration (Cloud Functions).
@@ -230,7 +234,8 @@ class PushNotificationReference {
   /// Location: functions/index.js lines ~141, ~227
   static const String chatImageBody = 'Fotoğraf';
 
-  /// Body template for admin reaction notifications ({emoji} is the reaction).
+  /// Body template for reaction notifications ({emoji} is the reaction), used
+  /// in both directions (admin -> user and user -> admin).
   /// Rendered as e.g. "bir mesajınıza 👍 ifadesi bıraktı".
   /// Location: functions/index.js (CHAT_REACTION_BODY_TEMPLATE)
   static const String chatReactionBodyTemplate =

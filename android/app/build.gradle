@@ -25,19 +25,61 @@ if (flutterVersionName == null) {
 
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file('key.properties')
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+def hasKeystoreConfig = keystorePropertiesFile.exists()
+if (hasKeystoreConfig) {
+    keystorePropertiesFile.withInputStream { stream ->
+        keystoreProperties.load(stream)
+    }
+}
+def keystoreFile = keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+
+// Release imzalama bilgileri eksik oldugunda Gradle ':app:signReleaseBundle'
+// adiminda mesajsiz bir java.lang.NullPointerException firlatiyor. Sebebi
+// anlasilir olsun diye release derlemesinde eksikleri burada net mesajla
+// bildiriyoruz. (Debug derlemesi ve IDE sync etkilenmiyor.)
+def isReleaseBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+if (isReleaseBuild) {
+    def problems = []
+    if (!hasKeystoreConfig) {
+        problems << "android/key.properties dosyasi yok"
+    } else {
+        ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].each { key ->
+            if (!keystoreProperties[key]) {
+                problems << "key.properties icinde '${key}' tanimli degil"
+            }
+        }
+        if (keystoreFile != null && !keystoreFile.exists()) {
+            problems << "keystore dosyasi bulunamadi: ${keystoreFile.absolutePath}"
+        }
+    }
+    if (!problems.isEmpty()) {
+        throw new GradleException(
+            "Release imzalama yapilandirmasi eksik:\n" +
+            problems.collect { " - ${it}" }.join("\n") + "\n\n" +
+            '''android/key.properties su dort satiri icermeli:
+  storePassword=<keystore parolasi>
+  keyPassword=<anahtar parolasi>
+  keyAlias=<anahtar adi>
+  storeFile=C:/Users/<kullanici>/keys/upload-keystore.jks
+
+Not: .properties dosyalarinda ters bolu kacis karakteridir. Windows yollarini
+"C:/Users/..." gibi duz bolu ile (veya ters boluyu iki kez) yazin.'''
+        )
+    }
 }
 
 android {
-    namespace "com.utkuyilmaz.ngy_app"
-    compileSdkVersion 35
-    ndkVersion flutter.ndkVersion
+    namespace = "com.utkuyilmaz.ngy_app"
+    // Google Play, 31 Agustos 2026'dan itibaren yeni surumlerin en az Android 16'yi
+    // (API 36) hedeflemesini sart kosuyor. targetSdk compileSdk'yi asamayacagi icin
+    // ikisi de 36. Flutter surumunden bagimsiz olsun diye acikca yaziliyor.
+    compileSdk = 36
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -49,28 +91,32 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.utkuyilmaz.ngy_app"
-        minSdkVersion 23
-        targetSdkVersion flutter.targetSdkVersion
-        versionCode flutterVersionCode.toInteger()
-        versionName flutterVersionName
-        multiDexEnabled true
+        applicationId = "com.utkuyilmaz.ngy_app"
+        // Flutter 3.41 (CI'da kullanilan surum) en az API 24 istiyor.
+        minSdk = 24
+        targetSdk = 36
+        versionCode = flutterVersionCode.toInteger()
+        versionName = flutterVersionName
+        multiDexEnabled = true
     }
 
     signingConfigs {
         release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
+            keyAlias = keystoreProperties['keyAlias']
+            keyPassword = keystoreProperties['keyPassword']
+            storeFile = keystoreFile
+            storePassword = keystoreProperties['storePassword']
         }
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release
-            minifyEnabled true
-            shrinkResources true
+            // key.properties yoksa (ornegin imza anahtari olmayan bir makinede
+            // yapilan denemeler) debug imzasina duselim; gercek release
+            // derlemesi yukaridaki kontrolde zaten hata veriyor.
+            signingConfig = hasKeystoreConfig ? signingConfigs.release : signingConfigs.debug
+            minifyEnabled = true
+            shrinkResources = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -81,6 +127,10 @@ flutter {
 }
 
 dependencies {
-    implementation platform('com.google.firebase:firebase-bom:32.7.2')
+    // Firebase surumleri elle sabitlenmiyor: FlutterFire eklentileri kendi
+    // firebase-bom'unu uyguluyor (firebase_core -> FirebaseSDKVersion, su an
+    // 33.16.0). Buraya eski bir bom yazmak eklentilerin bekledigi surumlerle
+    // catisiyordu. Gerekirse android/build.gradle icinde
+    // ext.FlutterFire = [FirebaseSDKVersion: "<surum>"] ile ezilebilir.
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }

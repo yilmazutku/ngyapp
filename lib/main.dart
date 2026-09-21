@@ -33,11 +33,11 @@ import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/timeslot_manager.dart';
 
 import 'firebase_options.dart';
-import 'models/logger.dart';
 import 'pages/admin_appointments_page.dart';
 import 'platform/platform_config.dart';
 import 'platform/platform_config_factory.dart';
 import 'pages/admin_create_user_page.dart';
+import 'pages/admin_meal_photos_page.dart';
 import 'pages/admin_payments_page.dart';
 import 'pages/admin_timeslots_page.dart';
 import 'pages/appointments_page.dart';
@@ -57,11 +57,13 @@ import 'providers/diet_provider.dart';
 import 'providers/login_manager.dart';
 import 'providers/meal_state_and_upload_manager.dart';
 import 'providers/meas_provider.dart';
+import 'providers/mock_test_data_provider.dart';
 import 'providers/payment_provider.dart';
 import 'providers/appointment_colors_provider.dart';
 import 'providers/appointment_durations_provider.dart';
 import 'providers/special_lines_provider.dart';
 import 'providers/sub_provider.dart';
+import 'providers/summary_colors_provider.dart';
 import 'providers/test_provider.dart';
 import 'providers/user_provider.dart';
 import 'services/fcm_service.dart';
@@ -78,23 +80,9 @@ import 'widgets/labeled_action_button.dart';
 /// Global platform configuration instance
 late final PlatformConfig platformConfig;
 
-/// Global theme provider instance for early initialization
-//late final ThemeProvider themeProvider;
-
-// === LOGGING FLAGS ===
-// DEBUG: Set to true to enable debug-level messages (log.debug calls)
-// Set to false to suppress debug-level messages in console and file
-const bool DEBUG = false;
-
-// LOGTOFILE: Set to true to save all log messages to file (desktop only)
-// Set to false to disable file logging entirely
-const bool LOGTOFILE = false;
-
 // AUTO_LOGIN: Set to true to auto-login with signInAutomatically() credentials
 // Set to false to use the login form with user-provided email/password
 const bool AUTO_LOGIN = false;
-
-final logger = Logger('MyApp');
 
 /// Global navigator key for notification tap navigation
 final GlobalKey<NavigatorState> navKey = GlobalKey<NavigatorState>();
@@ -107,31 +95,20 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Initialize the logging system
-  await Logger.initialize(debugEnabled: DEBUG, logToFileEnabled: LOGTOFILE);
-  logger.info('Logging system initialized');
-  logger.info('Application started');
   // Initialize date formatting for Turkish locale
   await initializeDateFormatting('tr_TR', null);
   Intl.defaultLocale = 'tr_TR';
-  logger.info('Turkish date formatting initialized');
 
   // Auto-login for development/testing when AUTO_LOGIN is true
   if (AUTO_LOGIN) {
     await signInAutomatically();
   }
 
-  // Initialize theme provider and load saved color preference
-  // themeProvider = ThemeProvider();
-  // await themeProvider.initialize();
-  // logger.info('Theme provider initialized with color: ${themeProvider.primaryColorHex}');
-
   // Initialize platform-specific configuration (notifications, etc.)
   // This uses the Strategy Pattern to handle platform differences
   platformConfig = await PlatformConfigFactory.initializePlatform(
     navigatorKey: navKey,
   );
-  logger.info('Platform initialized: ${platformConfig.platformName}');
 
   runApp(const MyApp());
 
@@ -151,10 +128,8 @@ Future<void> _scheduleMealRemindersForCurrentUser() async {
     if (user != null && MealReminderService().isSupported) {
       await MealReminderService().initialize();
       await MealReminderService().scheduleMealReminders(user.uid);
-      logger.info('Meal reminders scheduled for user ${user.uid}');
     }
   } catch (e) {
-    logger.err('Error scheduling meal reminders at startup: $e');
   }
 }
 
@@ -163,18 +138,11 @@ Future<void> signInAutomatically() async {
   const email = 'utkuyy97@gmail.com';//'denemehesap@gmail.com';
   const password = '612009';
   try {
-    UserCredential userCredential =
     await FirebaseAuth.instance.signInWithEmailAndPassword(
       email: email,
       password: password,
     );
-    logger.info('Signed in with email: ${userCredential.user?.email}');
-  } on FirebaseAuthException catch (e) {
-    if (e.code == 'user-not-found') {
-      logger.warn('No user found for that email.');
-    } else if (e.code == 'wrong-password') {
-      logger.warn('Wrong password provided for that user.');
-    }
+  } on FirebaseAuthException {
   }
 }
 
@@ -208,11 +176,14 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MeasProvider()),
         ChangeNotifierProvider(create: (_) => TestProvider()),
         ChangeNotifierProvider(create: (_) => DietProvider()),
-        ChangeNotifierProvider(create: (_) => SpecialLinesProvider()),
+        ChangeNotifierProvider(create: (_) => MockTestDataProvider()),
+        ChangeNotifierProvider(
+            create: (_) => SpecialLinesProvider()..startListening()),
         ChangeNotifierProvider(create: (_) => AppointmentColorsProvider()),
         ChangeNotifierProvider(create: (_) => AppointmentDurationsProvider()),
         ChangeNotifierProvider(create: (_) => NewsProvider()),
         ChangeNotifierProvider(create: (_) => CustomerSummaryProvider()),
+        ChangeNotifierProvider(create: (_) => SummaryColorsProvider()),
         ChangeNotifierProvider(create: (_) => AppUpdateProvider()),
       ],
       child: AppLifecycleManager(
@@ -365,7 +336,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
       final userProvider = Provider.of<UserProvider>(context, listen: false);
       return await userProvider.hasValidKvkkConsent(userId: userId);
     } catch (e) {
-      logger.err('Error checking KVKK consent: $e');
       return false;
     }
   }
@@ -402,12 +372,7 @@ class _AppLifecycleManagerState extends State<AppLifecycleManager>
     if (state == AppLifecycleState.resumed) {
       // App resumed to foreground - clear the app badge
       // This handles the case when user clears notifications from notification center
-      logger.info('Application resumed, clearing notification badge');
       FcmService().clearBadge();
-    } else if (state == AppLifecycleState.detached) {
-      // App is about to be terminated, clean up resources
-      logger.info('Application is detaching, cleaning up resources');
-      Logger.dispose();
     }
   }
 
@@ -457,23 +422,19 @@ class _HomePageState extends State<HomePage> {
     
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) {
-      logger.debug('_initUnreadStream: no user logged in, skipping');
       return;
     }
     
     final isAdmin = FcmService.isAdmin(userId);
-    logger.info('_initUnreadStream: userId={} isAdmin={}', [userId, isAdmin]);
     
     final chatManager = context.read<ChatManager>();
     
     if (isAdmin) {
       // Admin: count of chats with unread messages
       _unreadChatsStream = chatManager.totalUnreadChatsStream();
-      logger.info('_initUnreadStream: admin unread chats stream initialized');
     } else {
       // Regular user: count of unread messages in their chat
       _unreadChatsStream = chatManager.userUnreadCountStream();
-      logger.info('_initUnreadStream: user unread count stream initialized');
     }
 
     // Pending-payment indicator for the user-side "Ödemelerim" tile. Applies
@@ -559,13 +520,7 @@ class _HomePageState extends State<HomePage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AppointmentsPage(
-          userId: userId,
-          subscriptionId: 'default',
-          onAppointmentAdded: () {
-            // Refresh the UI if needed
-          },
-        ),
+        builder: (_) => AppointmentsPage(userId: userId),
       ),
     );
   }
@@ -585,6 +540,15 @@ class _HomePageState extends State<HomePage> {
       context,
       MaterialPageRoute(
         builder: (_) => const AdminPaymentsPage(),
+      ),
+    );
+  }
+
+  void _navigateToMealPhotos(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AdminMealPhotosPage(),
       ),
     );
   }
@@ -732,6 +696,11 @@ class _HomePageState extends State<HomePage> {
               'icon': Icons.table_chart,
               'label': 'Danışanlar Özet',
               'onTap': () => _navigateToCustomerSummary(context),
+            },
+            {
+              'icon': Icons.photo_library,
+              'label': 'Öğün Fotoğrafları',
+              'onTap': () => _navigateToMealPhotos(context),
             },
             {
               'icon': Icons.image,
@@ -1024,9 +993,6 @@ class _HomePageState extends State<HomePage> {
       iconWidget = StreamBuilder<bool>(
         stream: alertStream,
         builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            logger.warn('Alert stream error: ${snapshot.error}');
-          }
           final showAlert = snapshot.data ?? false;
           return Badge(
             isLabelVisible: showAlert,
@@ -1053,9 +1019,6 @@ class _HomePageState extends State<HomePage> {
       stream: badgeStream,
       builder: (context, snapshot) {
         // Handle stream errors gracefully
-        if (snapshot.hasError) {
-          logger.warn('Badge stream error: ${snapshot.error}');
-        }
 
         final count = snapshot.data ?? 0;
         return Badge(

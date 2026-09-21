@@ -40,13 +40,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _loadUserData() async {
     try {
-      print('Loading data for userId: ${widget.userId}');
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.userId)
           .get();
       final data = userDoc.data();
-      print('User data: $data');
       if (data != null) {
         _nameController.text = data['name'] ?? '';
         _surnameController.text = data['surname'] ?? '';
@@ -60,11 +58,8 @@ class _ProfilePageState extends State<ProfilePage> {
           _mealNotificationsEnabled = data['mealNotificationsEnabled'] ?? true;
           _announcementNotificationsEnabled = data['announcementNotificationsEnabled'] ?? true;
         });
-      } else {
-        print('No data found for userId: ${widget.userId}');
       }
     } catch (e) {
-      print('Error loading user data: $e');
     }
     setState(() {
       _isLoading = false;
@@ -94,9 +89,7 @@ class _ProfilePageState extends State<ProfilePage> {
         'mealNotificationsEnabled': _mealNotificationsEnabled,
         'announcementNotificationsEnabled': _announcementNotificationsEnabled,
       }, SetOptions(merge: true));
-      print('User data saved for userId: ${widget.userId}');
     } catch (e) {
-      print('Error saving user data: $e');
     }
     setState(() {
       _isLoading = false;

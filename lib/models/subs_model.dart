@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
 /// Paket tutarlarını tam liraya çevirir.
 ///
@@ -201,6 +202,20 @@ class SubscriptionModel {
   @override
   String toString() {
     return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, packageType: $packageType, notes: $notes, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, freezeDate: $freezeDate, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
+  }
+
+  /// Paket adını paket süresi ve başlangıç tarihinden üretir:
+  /// "3 Aylık" + 3 Eylül -> "3Aylık_3EylülBaşlangıç".
+  static String buildPackageName({
+    required SubsPackageType? packageType,
+    required DateTime startDate,
+  }) {
+    final monthName = DateFormat('MMMM', 'tr_TR').format(startDate);
+    final datePart = '${startDate.day}$monthName';
+    final durationPart = packageType?.label.replaceAll(' ', '') ?? '';
+    return durationPart.isEmpty
+        ? '${datePart}Başlangıç'
+        : '${durationPart}_${datePart}Başlangıç';
   }
 
   /// Auto-calculates the suggested allowed postponements for a package

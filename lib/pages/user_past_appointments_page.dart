@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/appointment_model.dart';
-import '../models/logger.dart';
 import '../utils/dialog_utils.dart';
 import '../providers/appointment_manager.dart';
 import 'package:provider/provider.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger logger = Logger.forClass(PastAppointmentsPage);
 
 class PastAppointmentsPage extends StatefulWidget {
   final String userId;
@@ -52,8 +49,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
     });
 
     try {
-      logger.info('Fetching all past appointments for user ${widget.userId}...');
-      
       // Use the appointment manager to fetch appointments
       List<AppointmentModel> appointments = await _appointmentService.fetchAppointments(
         null,
@@ -69,7 +64,6 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
 
       _applyFilters();
     } catch (e) {
-      logger.err('Error fetching all past appointments: $e');
       // Re-checked after the await: the widget may be gone by now.
       if (!mounted) return;
       await DialogUtils.openError(
@@ -133,15 +127,12 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
       }
       _currentAppointments =
           _filteredAppointments.sublist(startIndex, endIndex);
-      logger.info(
-          'Displaying appointments for page $_currentPage: $_currentAppointments');
     });
   }
 
   /// Handle page changes by updating _currentPage and setting the current appointments.
   void _changePage(int page) {
     if (page != _currentPage && page >= 1 && page <= _totalPages) {
-      logger.info('Switching to page $page...');
       setState(() {
         _currentPage = page;
       });

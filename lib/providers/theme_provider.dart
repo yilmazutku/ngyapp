@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/logger.dart';
-
-final Logger logger = Logger.forClass(ThemeProvider);
 
 /// Manages app theme color with persistence
 /// Allows changing the primary color of the app and persists the preference
@@ -36,13 +33,10 @@ class ThemeProvider extends ChangeNotifier {
       
       if (savedColorValue != null) {
         _primaryColor = Color(savedColorValue);
-        logger.info('Loaded saved color: $primaryColorHex');
       } else {
         _primaryColor = defaultColor;
-        logger.info('Using default color: $primaryColorHex');
       }
     } catch (e) {
-      logger.err('Error loading color preference: $e');
       _primaryColor = defaultColor;
     }
     
@@ -60,16 +54,13 @@ class ThemeProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_colorKey, color.value);
-      logger.info('Saved color preference: $primaryColorHex');
     } catch (e) {
-      logger.err('Error saving color preference: $e');
     }
   }
 
   /// Reset to the default purple color
   Future<void> resetToDefault() async {
     await setColor(defaultColor);
-    logger.info('Reset to default color: $primaryColorHex');
   }
 
   /// Check if the current color is the default color

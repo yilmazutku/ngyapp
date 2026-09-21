@@ -5,27 +5,20 @@ import 'package:provider/provider.dart';
 import 'package:ngy_app/providers/timeslot_manager.dart';
 
 import '../models/appointment_model.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../providers/appointment_durations_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
+import '../utils/diet_menu_parser.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
-import 'meal_upload_page.dart';
-
-final Logger logger = Logger.forClass(AppointmentsPage);
 
 class AppointmentsPage extends StatefulWidget {
   final String userId;
-  final String subscriptionId;
-  final VoidCallback onAppointmentAdded;
 
   const AppointmentsPage({
     super.key,
     required this.userId,
-    required this.subscriptionId,
-    required this.onAppointmentAdded,
   });
 
   @override
@@ -75,7 +68,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
   @override
   void initState() {
     super.initState();
-    logger.debug('Initializing AppointmentsPage state.');
     // Default to the earliest bookable date (today + minimum lead time).
     _selectedDate = _earliestSelectableDate;
     _fetchAvailableTimes();
@@ -155,9 +147,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       final weekStartDate = DateTime(selectedWeekStart.year, selectedWeekStart.month, selectedWeekStart.day); // Monday 00:00
       final weekEndDate = weekStartDate.add(const Duration(days: 6)); // Sunday 00:00 (end of Saturday)
       
-      logger.debug('Checking for existing appointments in week: {} to {}', 
-        [weekStartDate, weekEndDate]);
-      
       // Statuses that count as "having an appointment"
       const validStatuses = {
         AppointmentStatus.scheduled,
@@ -172,11 +161,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         final isValidStatus = validStatuses.contains(appointment.status);
         final isWithinWeek = !appointmentDate.isBefore(weekStartDate) && // >= Monday 00:00
                              appointmentDate.isBefore(weekEndDate);       // < Sunday 00:00 (i.e., up to Saturday 23:59)
-        
-        if (isValidStatus && isWithinWeek) {
-          logger.debug('Found existing appointment this week: {} status={} date={}', 
-            [appointment.appointmentId, appointment.status, appointmentDate]);
-        }
         
         return isValidStatus && isWithinWeek;
       });
@@ -298,7 +282,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
   }
 
   void _navigateToPastAppointments() {
-    logger.debug('Navigating to past appointments page');
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -461,8 +444,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
 
   @override
   Widget build(BuildContext context) {
-    logger.info('Building AppointmentsPage');
-
     return Scaffold(
       appBar: const AppBarWithBack(
         title: 'Randevularım',
@@ -565,8 +546,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 } else if (snapshot.hasError) {
-                  logger.err(
-                      'Error fetching available times: {}', [snapshot.error!]);
                   return Text(
                       'Zaman dilimleri alınırken bir hata oluştu.');
                 } else {
@@ -589,7 +568,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                       children: availableTimes.map((time) {
                         return ChoiceChip(
                           label: Text(
-                            MealUploadPage.formatTimeOfDay24(time),
+                            formatTimeOfDay24(time),
                             style: TextStyle(
                               color: _selectedTime == time
                                   ? Colors.white
@@ -645,8 +624,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 } else if (snapshot.hasError) {
-                  logger.err(
-                      'Error fetching appointments: {}', [snapshot.error!]);
                   return Text(
                       'Randevular alınırken bir hata oluştu.');
                 } else {
@@ -691,7 +668,6 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     if (upcomingAppointments.isEmpty) {
       return const Text('Gelecek randevunuz bulunmamaktadır.');
     }
-    logger.info('Upcoming Appointments: {}', [upcomingAppointments]);
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -825,10 +801,7 @@ class _PastAppointmentsPageState extends State<PastAppointmentsPage> {
         _totalPages = (pastAppointments.length / _itemsPerPage).ceil();
         _isLoading = false;
       });
-
-      logger.info('Loaded ${pastAppointments.length} past appointments');
     } catch (e) {
-      logger.err('Error loading past appointments: {}', [e]);
       if (mounted) {
         setState(() {
           _isLoading = false;

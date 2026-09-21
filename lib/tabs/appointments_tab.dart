@@ -6,8 +6,10 @@ import '../models/filter_params.dart';
 import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/sub_provider.dart';
+import '../dialogs/dialog_widgets.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/add_appointment_dialog.dart';
+import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import 'basetab.dart';
@@ -735,6 +737,40 @@ class _AppointmentsTabState
 
               const SizedBox(height: 12),
 
+              if (appointment.status == AppointmentStatus.completed &&
+                  appointment.wasPostponed) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'ERTELENEN RANDEVU TAMAMLANDI\'YA ÇEKİLDİ',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    if (appointment.postponedDate != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '${DateFormatter.formatNumericDate(appointment.appointmentDateTime)}'
+                          ' → '
+                          '${DateFormatter.formatNumericDate(appointment.postponedDate!)}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -746,15 +782,15 @@ class _AppointmentsTabState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Orijinal: ${_longDayDf.format(appointment.appointmentDateTime)} ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
+                            '${AppointmentDateLabels.firstDate}: ${_longDayDf.format(appointment.appointmentDateTime)} ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
                           // The postponed date is optional, so it may still be
                           // unset while the new date is being agreed on.
                           Text(
                             appointment.postponedDate != null
-                                ? 'Ertelenen: ${_longDayDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}'
-                                : 'Ertelenen: tarih seçilmedi',
+                                ? '${AppointmentDateLabels.postponedDate}: ${_longDayDf.format(appointment.postponedDate!)} ${DateFormat('HH:mm').format(appointment.postponedDate!)}'
+                                : '${AppointmentDateLabels.postponedDate}: tarih seçilmedi',
                             style: TextStyle(fontWeight: FontWeight.bold,fontSize: 14, color: Colors.grey[700]),
                           ),
                         ],

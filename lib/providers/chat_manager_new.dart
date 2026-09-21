@@ -7,11 +7,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
-
-import 'package:ngy_app/models/logger.dart';
 
 /// Data Transfer Object representing a chat message from Firestore.
 /// 
@@ -108,7 +105,6 @@ class ChatManager extends ChangeNotifier {
   final FirebaseFirestore db;
   final FirebaseAuth auth;
   final FirebaseStorage storage;
-  final Logger logger = Logger.forClass(ChatManager);
   
   /// Maximum allowed image size: 5MB
   final MAX_IMG_SIZE = 5 * 1024 * 1024;
@@ -129,9 +125,7 @@ class ChatManager extends ChangeNotifier {
     required this.db,
     required this.auth,
     required this.storage,
-  }) {
-    logger.info('ChatManager created. currentUser={}', [auth.currentUser?.uid]);
-  }
+  });
 
   // ===== UI Controllers =====
   // These controllers are owned and managed by ChatManager for lifecycle consistency
@@ -172,7 +166,6 @@ class ChatManager extends ChangeNotifier {
   /// Returns the chat ID for a given user UID.
   /// In our one-chat-per-user model, chatId equals the user's UID.
   String chatIdForUser(String uid) {
-    logger.debug('chatIdForUser: uid={}', [uid]);
     return uid;
   }
 
@@ -194,10 +187,136 @@ class ChatManager extends ChangeNotifier {
   ///
   /// Usage: Used by UI to reactively display messages.
   Stream<List<MessageData>> messagesStreamFor(String chatId) {
-    logger.debug('Subscribing to messages stream. chatId={}', [chatId]);
     return _messagesQuery(chatId)
         .snapshots()
         .map((snap) => snap.docs.map((d) => MessageData.fromSnapshot(d)).toList());
+  }
+
+  /// Sohbette bir fotoğrafın mesajını adresinden ([imageUrl]) bulur.
+  ///
+  /// Öğün fotoğrafı sohbete yüklenirken mesaja fotoğrafın indirme adresi
+  /// yazılır (bkz. `MealManager.uploadMealImg`), bu yüzden eşleme adres
+  /// üzerinden yapılır. Sohbete hiç düşmemiş bir fotoğraf için null döner.
+  ///
+  /// Dönen mesaj kimliğinin yanında üzerindeki tepkileri de taşır: fotoğrafa
+  /// sohbet dışından ifade bırakılırken bırakanın o mesajdaki mevcut ifadesi
+  /// buradan okunur ([toggleReaction] için gereken `currentEmoji`).
+  ///
+  /// Sorgu tek alan üzerinde (`imageUrl` eşitliği): Firestore'da kendiliğinden
+  /// indekslidir, bileşik indeks gerekmez.
+  Future<MessageData?> findImageMessage(String chatId, String imageUrl) async {
+    if (imageUrl.isEmpty) return null;
+
+    final QuerySnapshot<Map<String, dynamic>> matches = await _chatDoc(chatId)
+        .collection('messages')
+        .where('imageUrl', isEqualTo: imageUrl)
+        .limit(1)
+        .get();
+    if (matches.docs.isEmpty) return null;
+
+    return MessageData.fromSnapshot(matches.docs.first);
+  }
+
+  /// Tepki sorgularında aynı anda kaç danışanın sohbeti açılır. Öğün
+  /// sorgularıyla aynı ölçekte tutuldu (bkz. `MealManager.USER_BATCH_SIZE`):
+  /// iki yükleme yan yana koştuğunda açılan bağlantı sayısı dengeli kalsın.
+  static const int reactionsUserBatchSize = 20;
+
+  /// Gün penceresinin iki ucuna eklenen pay. Fotoğrafın hangi güne ait
+  /// sayılacağını danışanın saati belirler (öğün dokümanı `yyyy-MM-dd` ile
+  /// isimlenir), mesajın `createdAt` alanını ise sunucu yazar; gece yarısına
+  /// yakın yüklemelerde ya da saati kaymış bir cihazda ikisi farklı güne
+  /// düşebiliyor. Pencere biraz geniş tutulunca mesaj yine bulunur;
+  /// eşleştirme fotoğraf adresi üzerinden olduğu için fazladan okunan mesaj
+  /// yanlış bir rozet üretmez.
+  static const Duration reactionsDayMargin = Duration(minutes: 10);
+
+  /// ADMIN ÇAĞIRIR: Verilen danışanların [date] gününde sohbetlerine düşmüş
+  /// fotoğraflarının tepkilerini, fotoğraf adresine göre döndürür
+  /// (adres -> (uid -> emoji)).
+  ///
+  /// Öğün fotoğrafı sohbete yüklenirken mesaja fotoğrafın indirme adresi
+  /// yazılır ([findImageMessage] ile aynı eşleme), bu yüzden dönen map'in
+  /// anahtarı doğrudan fotoğrafın adresidir. Adresler danışanlar arasında
+  /// benzersiz olduğundan tek map bütün sayfaya yeter.
+  ///
+  /// Yalnızca tepkisi olan fotoğraflar döner. Sorgu tek alan üzerinde
+  /// (`createdAt` aralığı) olduğu için bileşik indeks gerekmez ve yalnızca o
+  /// günün mesajları okunur.
+  ///
+  /// [onBatch] verilirse her parti biter bitmez o partinin sonucuyla çağrılır:
+  /// çağıran taraf tüm danışanları beklemeden rozetleri çizmeye başlayabilir.
+  Future<Map<String, Map<String, String>>> fetchImageReactionsOfUsersForDate({
+    required List<String> userIds,
+    required DateTime date,
+    void Function(Map<String, Map<String, String>> batchResult)? onBatch,
+  }) async {
+    final DateTime dayStart = DateTime(date.year, date.month, date.day);
+    final Timestamp start =
+        Timestamp.fromDate(dayStart.subtract(reactionsDayMargin));
+    final Timestamp end = Timestamp.fromDate(
+        dayStart.add(const Duration(days: 1) + reactionsDayMargin));
+
+    final Map<String, Map<String, String>> reactionsByImageUrl = {};
+
+    for (int from = 0; from < userIds.length; from += reactionsUserBatchSize) {
+      final int to = from + reactionsUserBatchSize < userIds.length
+          ? from + reactionsUserBatchSize
+          : userIds.length;
+
+      final List<Map<String, Map<String, String>>> batchResults =
+          await Future.wait(
+        userIds
+            .sublist(from, to)
+            .map((userId) => _fetchImageReactionsForDay(userId, start, end)),
+      );
+
+      final Map<String, Map<String, String>> batchReactions = {};
+      for (final Map<String, Map<String, String>> result in batchResults) {
+        batchReactions.addAll(result);
+      }
+
+      if (batchReactions.isEmpty) continue;
+      reactionsByImageUrl.addAll(batchReactions);
+      onBatch?.call(batchReactions);
+    }
+
+    return reactionsByImageUrl;
+  }
+
+  /// Tek bir sohbetin [start] ile [end] arasındaki fotoğraflı mesajlarının
+  /// tepkileri. Tepkiler sayfanın asıl işi değil: okunamazsa boş dönülür,
+  /// fotoğraflar yine gösterilir.
+  Future<Map<String, Map<String, String>>> _fetchImageReactionsForDay(
+    String chatId,
+    Timestamp start,
+    Timestamp end,
+  ) async {
+    final Map<String, Map<String, String>> reactions = {};
+
+    try {
+      final QuerySnapshot<Map<String, dynamic>> snapshot = await _chatDoc(chatId)
+          .collection('messages')
+          .where('createdAt', isGreaterThanOrEqualTo: start)
+          .where('createdAt', isLessThan: end)
+          .get();
+
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs) {
+        final Map<String, dynamic> data = doc.data();
+        final String imageUrl = (data['imageUrl'] as String?) ?? '';
+        if (imageUrl.isEmpty) continue;
+
+        final Map<String, String> parsed =
+            MessageData.parseReactions(data['reactions']);
+        if (parsed.isEmpty) continue;
+
+        reactions[imageUrl] = parsed;
+      }
+    } catch (e) {
+    }
+
+    return reactions;
   }
 
   /// Returns a live stream of every photo the *user* (chatId == userId) has
@@ -211,7 +330,6 @@ class ChatManager extends ChangeNotifier {
   /// equality that Firestore indexes automatically — and sorts client-side, so
   /// it needs NO composite index (unlike the ordered [_messagesQuery]).
   Stream<List<MessageData>> userUploadedImagesStream(String userId) {
-    logger.debug('Subscribing to user uploaded images stream. userId={}', [userId]);
     return _chatDoc(userId)
         .collection('messages')
         .where('senderId', isEqualTo: userId)
@@ -232,7 +350,6 @@ class ChatManager extends ChangeNotifier {
         return bt.compareTo(at);
       });
 
-      logger.debug('User uploaded images stream update. userId={} count={}', [userId, images.length]);
       return images;
     });
   }
@@ -259,10 +376,6 @@ class ChatManager extends ChangeNotifier {
         bool incrementUnreadForUser = false,
       }) async {
     final participants = <String>{chatId, ...adminIds}.toList();
-    logger.debug(
-      'Ensuring chat doc. chatId={} participants={} lastMsg="{}" lastImageUrl={} incrementUnreadAdmins={} incrementUnreadUser={}', 
-      [chatId, participants, lastMessage ?? 'none', lastImageUrl ?? 'none', incrementUnreadForAdmins, incrementUnreadForUser]
-    );
     
     // Everything lands in one write. set(merge: true) merges nested maps field
     // by field, so 'adminUnreadCount' can be written as a nested map instead of
@@ -289,8 +402,6 @@ class ChatManager extends ChangeNotifier {
     };
 
     await _chatDoc(chatId).set(data, SetOptions(merge: true));
-
-    logger.debug('Chat doc ensured. chatId={} unreadFor={}', [chatId, unreadFor]);
   }
 
   /// Mark a chat as read for the current admin user.
@@ -304,11 +415,8 @@ class ChatManager extends ChangeNotifier {
   Future<void> markChatAsRead(String chatId) async {
     final currentUid = auth.currentUser?.uid;
     if (currentUid == null || !isAdminUid(currentUid)) {
-      logger.debug('markChatAsRead skipped: not logged in or not admin');
       return;
     }
-    
-    logger.info('Marking chat as read (admin). chatId={} adminUid={}', [chatId, currentUid]);
     
     try {
       await _chatDoc(chatId).update({
@@ -318,10 +426,7 @@ class ChatManager extends ChangeNotifier {
       });
     } catch (e) {
       // Document may not exist yet (e.g. admin opens a new chat before any messages)
-      logger.warn('markChatAsRead: update failed (doc may not exist). chatId={} error={}', [chatId, e]);
     }
-    
-    logger.debug('Chat marked as read (admin). chatId={}', [chatId]);
   }
 
   /// Mark a chat as read for the current regular user.
@@ -331,23 +436,18 @@ class ChatManager extends ChangeNotifier {
   Future<void> markChatAsReadForUser(String chatId) async {
     final currentUid = auth.currentUser?.uid;
     if (currentUid == null) {
-      logger.debug('markChatAsReadForUser skipped: not logged in');
       return;
     }
     
     // Skip if current user is an admin (they use markChatAsRead instead)
     if (isAdminUid(currentUid)) {
-      logger.debug('markChatAsReadForUser skipped: user is admin');
       return;
     }
     
     // Only mark as read if this is the user's own chat
     if (currentUid != chatId) {
-      logger.debug('markChatAsReadForUser skipped: chatId does not match current user');
       return;
     }
-    
-    logger.info('Marking chat as read (user). chatId={} userId={}', [chatId, currentUid]);
     
     await _chatDoc(chatId).set({
       'userUnreadCount': 0,
@@ -355,8 +455,6 @@ class ChatManager extends ChangeNotifier {
       // Remove this user from hasUnreadFor for efficient count queries
       'hasUnreadFor': FieldValue.arrayRemove([currentUid]),
     }, SetOptions(merge: true));
-    
-    logger.debug('Chat marked as read (user). chatId={}', [chatId]);
   }
 
   /// Stream of unread message count for the current regular user.
@@ -367,33 +465,26 @@ class ChatManager extends ChangeNotifier {
   Stream<int> userUnreadCountStream() {
     final currentUid = auth.currentUser?.uid;
     if (currentUid == null) {
-      logger.debug('userUnreadCountStream: returning 0 (not logged in)');
       return Stream.value(0);
     }
     
     // If user is admin, return 0 (admins use totalUnreadChatsStream instead)
     if (isAdminUid(currentUid)) {
-      logger.debug('userUnreadCountStream: returning 0 (user is admin)');
       return Stream.value(0);
     }
-    
-    logger.info('userUnreadCountStream: starting stream for user {}', [currentUid]);
     
     // User's chat ID is their own UID
     return _chatDoc(currentUid)
         .snapshots()
         .map((snapshot) {
           if (!snapshot.exists) {
-            logger.debug('userUnreadCountStream: chat does not exist yet');
             return 0;
           }
           final data = snapshot.data() ?? {};
           final count = (data['userUnreadCount'] ?? 0) as int;
-          logger.debug('User unread count: {}', [count]);
           return count;
         })
         .handleError((error, stackTrace) {
-          logger.err('userUnreadCountStream error: {}', [error]);
           return 0;
         });
   }
@@ -407,11 +498,8 @@ class ChatManager extends ChangeNotifier {
   Stream<int> totalUnreadChatsStream() {
     final currentUid = auth.currentUser?.uid;
     if (currentUid == null || !isAdminUid(currentUid)) {
-      logger.debug('totalUnreadChatsStream: returning 0 (not admin or not logged in)');
       return Stream.value(0);
     }
-    
-    logger.info('totalUnreadChatsStream: starting stream for admin {}', [currentUid]);
     
     // Efficient query: only get chats where this admin has unread messages
     // Instead of fetching ALL chats and filtering client-side
@@ -421,11 +509,9 @@ class ChatManager extends ChangeNotifier {
         .snapshots()
         .map((snapshot) {
           final count = snapshot.docs.length;
-          logger.info('Total unread chats count: {} (efficient query)', [count]);
           return count;
         })
         .handleError((error, stackTrace) {
-          logger.err('totalUnreadChatsStream error: {}', [error]);
           return 0;
         });
   }
@@ -463,10 +549,6 @@ class ChatManager extends ChangeNotifier {
     
     // Guard: Prevent empty messages or concurrent sends
     if (text.isEmpty || _sending) {
-      logger.debug(
-        'sendTextTo skipped. chatId={} isEmpty={} alreadySending={}', 
-        [chatId, text.isEmpty, _sending]
-      );
       return;
     }
 
@@ -474,8 +556,6 @@ class ChatManager extends ChangeNotifier {
     notifyListeners();
     
     try {
-      logger.info('Sending text message. chatId={} senderId={} length={}', [chatId, userId, text.length]);
-      
       // Determine who should get unread notification
       final isUserMessage = !isAdminUid(userId);
       final isAdminMessage = isAdminUid(userId);
@@ -492,7 +572,7 @@ class ChatManager extends ChangeNotifier {
       );
       
       // Add message to subcollection
-      final ref = await _chatDoc(chatId).collection('messages').add({
+      await _chatDoc(chatId).collection('messages').add({
         'chatId': chatId,
         'senderId': userId,
         'text': text,
@@ -500,12 +580,9 @@ class ChatManager extends ChangeNotifier {
         'clientCreatedAt': Timestamp.now(),
       });
       
-      logger.info('Text message sent successfully. messageId={} chatId={}', [ref.id, chatId]);
       messageController.clear();
       
-    } catch (e, st) {
-      logger.err('sendTextTo failed. chatId={} error={}', [chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
+    } catch (e) {
       rethrow;
     } finally {
       _sending = false;
@@ -533,10 +610,6 @@ class ChatManager extends ChangeNotifier {
   Future<void> sendImageTo(String chatId, XFile image) async {
     // Guard: Prevent concurrent operations
     if (_sending || isUploading) {
-      logger.debug(
-        'sendImageTo skipped due to concurrent operation. chatId={} sending={} isUploading={}', 
-        [chatId, sending, isUploading]
-      );
       return;
     }
     
@@ -549,49 +622,32 @@ class ChatManager extends ChangeNotifier {
     StreamSubscription<TaskSnapshot>? sub;
     
     try {
-      logger.info('Starting image send. chatId={} senderId={} srcPath={}', [chatId, userId, image.path]);
-
       // Step 1: Read original file
       final original = File(image.path);
-      final originalSize = await _safeFileLength(original);
-      logger.debug('Original image size: {} bytes ({:.2f} MB)', [originalSize, originalSize / (1024 * 1024)]);
 
       // Step 2: Compress image
-      logger.debug('Starting image compression...');
       tempCompressed = await _compressImage(original);
       final uploadFile = tempCompressed.existsSync() ? tempCompressed : original;
-      final uploadSize = await _safeFileLength(uploadFile);
-      logger.debug('Compression complete. finalSize={} bytes ({:.2f} MB)', [uploadSize, uploadSize / (1024 * 1024)]);
 
       // Step 3: Prepare storage reference
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_${_rand(5)}.jpg';
       final path = 'chats/$chatId/$fileName';
       final ref = storage.ref(path);
       final meta = SettableMetadata(contentType: 'image/jpeg');
-      logger.debug('Storage path: {}', [path]);
 
       // Step 4: Upload with progress tracking
-      int lastLogged = -1;
       final task = ref.putFile(uploadFile, meta);
       _activeTask = task;
       
       sub = task.snapshotEvents.listen((snapshot) {
         if (snapshot.totalBytes > 0) {
-          final pct = ((snapshot.bytesTransferred / snapshot.totalBytes) * 100).floor();
           _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
-          
-          // Log at 0%, 25%, 50%, 75%, 100% to avoid spam
-          if (pct == 100 || pct >= lastLogged + 25 || pct == 0) {
-            lastLogged = pct;
-            logger.debug('Upload progress: {}% ({}/{} bytes)', [pct, snapshot.bytesTransferred, snapshot.totalBytes]);
-          }
           notifyListeners();
         }
       });
 
       await task.whenComplete(() {});
       final url = await ref.getDownloadURL();
-      logger.debug('Upload complete. downloadUrl={}', [url]);
 
       // Step 5: Update chat document with image metadata
       // Determine who should get unread notification
@@ -608,7 +664,7 @@ class ChatManager extends ChangeNotifier {
       );
 
       // Step 6: Add message to subcollection
-      final refMsg = await _chatDoc(chatId).collection('messages').add({
+      await _chatDoc(chatId).collection('messages').add({
         'chatId': chatId,
         'senderId': userId,
         'imageUrl': url,
@@ -616,12 +672,7 @@ class ChatManager extends ChangeNotifier {
         'createdAt': FieldValue.serverTimestamp(),
         'clientCreatedAt': Timestamp.now(),
       });
-      
-      logger.info('Image message sent successfully. messageId={} chatId={} storagePath={}', [refMsg.id, chatId, path]);
-      
-    } catch (e, st) {
-      logger.err('sendImageTo failed. chatId={} error={}', [chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
+    } catch (e) {
       rethrow;
     } finally {
       // Cleanup: Cancel subscription and delete temp files
@@ -630,10 +681,8 @@ class ChatManager extends ChangeNotifier {
       try {
         if (tempCompressed != null && tempCompressed.existsSync()) {
           tempCompressed.deleteSync();
-          logger.debug('Temporary compressed file deleted: {}', [tempCompressed.path]);
         }
       } catch (e) {
-        logger.warn('Failed to delete temporary compressed file: {}', [e]);
       }
       
       // Reset upload state
@@ -641,8 +690,6 @@ class ChatManager extends ChangeNotifier {
       _uploadProgress = null;
       _uploadKind = null;
       notifyListeners();
-      
-      logger.info('Image send operation finished. chatId={}', [chatId]);
     }
   }
 
@@ -667,18 +714,14 @@ class ChatManager extends ChangeNotifier {
   Future<void> setReaction(String chatId, String messageId, String emoji) async {
     final uid = auth.currentUser?.uid;
     if (uid == null) {
-      logger.warn('setReaction skipped: no authenticated user. chatId={} messageId={}', [chatId, messageId]);
       return;
     }
 
-    logger.info('Setting reaction. chatId={} messageId={} uid={} emoji={}', [chatId, messageId, uid, emoji]);
     try {
       await _chatDoc(chatId).collection('messages').doc(messageId).update({
         'reactions.$uid': emoji,
       });
-      logger.debug('Reaction set. chatId={} messageId={}', [chatId, messageId]);
     } catch (e) {
-      logger.err('setReaction failed. chatId={} messageId={} error={}', [chatId, messageId, e]);
       rethrow;
     }
   }
@@ -693,18 +736,14 @@ class ChatManager extends ChangeNotifier {
   Future<void> removeReaction(String chatId, String messageId) async {
     final uid = auth.currentUser?.uid;
     if (uid == null) {
-      logger.warn('removeReaction skipped: no authenticated user. chatId={} messageId={}', [chatId, messageId]);
       return;
     }
 
-    logger.info('Removing reaction. chatId={} messageId={} uid={}', [chatId, messageId, uid]);
     try {
       await _chatDoc(chatId).collection('messages').doc(messageId).update({
         'reactions.$uid': FieldValue.delete(),
       });
-      logger.debug('Reaction removed. chatId={} messageId={}', [chatId, messageId]);
     } catch (e) {
-      logger.err('removeReaction failed. chatId={} messageId={} error={}', [chatId, messageId, e]);
       rethrow;
     }
   }
@@ -734,11 +773,8 @@ class ChatManager extends ChangeNotifier {
   /// Safe to call even if no upload is in progress.
   Future<void> cancelUpload() async {
     try {
-      logger.info('Upload cancellation requested. activeTask={}', [_activeTask != null]);
       await _activeTask?.cancel();
-      logger.info('Upload cancelled successfully');
     } catch (e) {
-      logger.warn('Upload cancellation failed: {}', [e]);
     }
   }
 
@@ -749,7 +785,7 @@ class ChatManager extends ChangeNotifier {
   ///    Storage. This covers both direct chat uploads (chats/{chatId}/...) and
   ///    meal photos that were posted to the chat. Storage deletion is
   ///    best-effort per file: a single failure (e.g. the file was already
-  ///    removed) is logged and does not abort the rest of the operation.
+  ///    removed) is ignored and does not abort the rest of the operation.
   /// 2. Deletes all message documents in the messages subcollection
   ///    (in batches, since a document delete does not cascade to subcollections).
   /// 3. Deletes the chat document itself.
@@ -763,17 +799,13 @@ class ChatManager extends ChangeNotifier {
   Future<void> deleteChat(String chatId) async {
     final currentUid = auth.currentUser?.uid;
     if (currentUid == null || !isAdminUid(currentUid)) {
-      logger.warn('deleteChat denied: caller is not an admin. currentUid={}', [currentUid]);
       throw StateError('Bu işlem için yetkiniz yok.');
     }
-
-    logger.info('Deleting chat. chatId={} adminUid={}', [chatId, currentUid]);
 
     final messagesRef = _chatDoc(chatId).collection('messages');
 
     // Step 1: Fetch all message documents
     final snapshot = await messagesRef.get();
-    logger.debug('Fetched {} messages for deletion. chatId={}', [snapshot.docs.length, chatId]);
 
     // Step 2: Delete referenced images from Storage (best-effort, de-duplicated).
     // refFromURL works for both direct chat uploads and meal photos since both
@@ -788,21 +820,15 @@ class ChatManager extends ChangeNotifier {
     // clearing a busy chat take minutes.
     const storageDeleteConcurrency = 16;
     final urlList = imageUrls.toList();
-    int deletedImages = 0;
     for (int i = 0; i < urlList.length; i += storageDeleteConcurrency) {
       final chunk = urlList.skip(i).take(storageDeleteConcurrency);
-      final results = await Future.wait(chunk.map((url) async {
+      await Future.wait(chunk.map((url) async {
         try {
           await storage.refFromURL(url).delete();
-          return true;
         } catch (e) {
-          logger.warn('Failed to delete chat image from storage. chatId={} url={} error={}', [chatId, url, e]);
-          return false;
         }
       }));
-      deletedImages += results.where((ok) => ok).length;
     }
-    logger.info('Deleted {}/{} chat images from storage. chatId={}', [deletedImages, imageUrls.length, chatId]);
 
     // Step 3: Delete message documents in batches (Firestore limit: 500 ops/batch)
     const batchLimit = 450;
@@ -820,12 +846,10 @@ class ChatManager extends ChangeNotifier {
     if (opCount > 0) {
       await batch.commit();
     }
-    logger.debug('Deleted {} message documents. chatId={}', [snapshot.docs.length, chatId]);
 
     // Step 4: Delete the chat document itself
     await _chatDoc(chatId).delete();
 
-    logger.info('Chat deleted successfully. chatId={}', [chatId]);
     notifyListeners();
   }
 
@@ -856,8 +880,6 @@ class ChatManager extends ChangeNotifier {
     for (final a in attempts) {
       final outPath = _deriveOutPath(current.path);
 
-      logger.debug('[FIC] Compression attempt -> dimensions:{}x{} quality:{}%', [a.w, a.h, a.q]);
-      
       final result = await fic.FlutterImageCompress.compressAndGetFile(
         current.path,
         outPath,
@@ -869,23 +891,19 @@ class ChatManager extends ChangeNotifier {
       );
       
       if (result == null) {
-        logger.warn('[FIC] Compression returned null. outPath={}', [outPath]);
         continue;
       }
       
       final f = File(result.path);
       final size = await _safeFileLength(f);
-      logger.debug('[FIC] Result size: {} bytes ({:.2f} MB)', [size, size / (1024 * 1024)]);
       
       if (size <= MAX_IMG_SIZE) {
-        logger.info('[FIC] Compression successful. finalSize={} bytes', [size]);
         return f;
       }
       
       current = f;
     }
 
-    logger.warn('Compression did not reach target size after all attempts. Using last result or original.');
     return current;
   }
 
@@ -894,7 +912,6 @@ class ChatManager extends ChangeNotifier {
     try {
       return await f.length();
     } catch (e) {
-      logger.warn('Failed to get file length: {}', [e]);
       return -1;
     }
   }
@@ -917,7 +934,6 @@ class ChatManager extends ChangeNotifier {
 
   @override
   void dispose() {
-    logger.info('ChatManager disposed.');
     messageController.dispose();
     scrollController.dispose();
     super.dispose();

@@ -4,17 +4,24 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
-import '../models/logger.dart';
 import '../models/meal_model.dart';
 import '../models/filter_params.dart';
+import '../utils/image_thumbnail.dart';
+import '../utils/storage_upload.dart';
 import '../providers/chat_manager_new.dart';
-
-final Logger logger = Logger.forClass(MealManager);
 
 /// Manages meal state and provides functionality for uploading and fetching meals
 /// Handles the storage and retrieval of meal data from Firestore
 class MealManager extends ChangeNotifier {
 static const MEAL_RANGE_DAYS=7;
+
+  /// Toplu (çok danışanlı) sorgularda aynı anda açılan Firestore
+  /// isteği sayısı. Bkz. [fetchMealsOfUsersForDate].
+  ///
+  /// Her parti bir gidiş-dönüş demek; parti büyüdükçe sayfa daha az turda
+  /// dolar. 20, tek seferde açılan bağlantıyı makul tutarken 100 danışanı
+  /// 5 turda bitirir.
+  static const int USER_BATCH_SIZE = 20;
 
   /// ADMIN CAGIRIR: SON 7 GÜNLÜK MEALLARI ÇEKER
   /// 
@@ -85,7 +92,6 @@ static const MEAL_RANGE_DAYS=7;
       all.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       return all;
     } catch (e) {
-      logger.err('Error fetching meals (unified nested path): {}', [e]);
       rethrow;
     }
   }
@@ -110,8 +116,6 @@ static const MEAL_RANGE_DAYS=7;
         current = current.add(const Duration(days: 1));
       }
       
-      logger.debug('Fetching meals for {} dates in range', [dateKeys.length]);
-      
       // Batch fetch: Get all date documents and their subcollections in parallel
       // This is more efficient than sequential queries
 
@@ -129,12 +133,10 @@ static const MEAL_RANGE_DAYS=7;
             try {
               dateMeals.add(MealModel.fromDocument(doc));
             } catch (e) {
-              logger.err('Error parsing meal document {}: {}', [doc.id, e]);
             }
           }
           return dateMeals;
         } catch (e) {
-          logger.err('Error fetching meals for date {}: {}', [dateKey, e]);
           return <MealModel>[];
         }
       }).toList();
@@ -146,14 +148,62 @@ static const MEAL_RANGE_DAYS=7;
       for (final dateMeals in results) {
         meals.addAll(dateMeals);
       }
-      
-      logger.info('Fetched {} meal images for date range {} to {}',
-        [meals.length, DateFormat('yyyy-MM-dd').format(startDate), DateFormat('yyyy-MM-dd').format(endDate)]);
     } catch (e) {
-      logger.err('Error fetching meal images in range: {}', [e]);
     }
     
     return meals;
+  }
+
+  /// ADMIN ÇAĞIRIR: Verilen danışanların TEK bir güne ait öğün fotoğraflarını
+  /// toplu hâlde çeker.
+  ///
+  /// Öğünler `users/{userId}/meals/{yyyy-MM-dd}/mealEntries` altında tutulur.
+  /// Danışan fotoğrafı ister "Planım" sayfasından ister sohbetten yüklesin
+  /// [uploadMealImg] hep bu dokümanı yazdığı için iki yol da bu tek kaynaktan
+  /// okunur.
+  ///
+  /// Dönen map yalnızca o gün en az bir fotoğrafı olan danışanları içerir;
+  /// listelerdeki öğünler saatine göre eskiden yeniye sıralıdır.
+  ///
+  /// [onBatch] verilirse her parti biter bitmez o partinin sonucuyla çağrılır:
+  /// çağıran taraf tüm danışanları beklemeden ekranı doldurmaya başlayabilir.
+  Future<Map<String, List<MealModel>>> fetchMealsOfUsersForDate({
+    required List<String> userIds,
+    required DateTime date,
+    void Function(Map<String, List<MealModel>> batchResult)? onBatch,
+  }) async {
+    final String dateKey = DateFormat('yyyy-MM-dd').format(date);
+    final Map<String, List<MealModel>> mealsByUser = {};
+
+    // Danışan sayısı büyüdükçe tüm sorguları aynı anda açmamak için
+    // USER_BATCH_SIZE'lık paralel gruplar hâlinde ilerlenir.
+    for (int start = 0; start < userIds.length; start += USER_BATCH_SIZE) {
+      final int end = start + USER_BATCH_SIZE < userIds.length
+          ? start + USER_BATCH_SIZE
+          : userIds.length;
+      final List<String> batch = userIds.sublist(start, end);
+
+      final List<List<MealModel>> batchResults = await Future.wait(
+        batch.map((userId) => _fetchMealImages(userId, date: dateKey)),
+      );
+
+      final Map<String, List<MealModel>> batchMeals = {};
+      for (int i = 0; i < batch.length; i++) {
+        final List<MealModel> withPhotos = batchResults[i]
+            .where((meal) => meal.imageUrls.isNotEmpty)
+            .toList()
+          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+        if (withPhotos.isNotEmpty) {
+          batchMeals[batch[i]] = withPhotos;
+        }
+      }
+
+      mealsByUser.addAll(batchMeals);
+      onBatch?.call(batchMeals);
+    }
+
+    return mealsByUser;
   }
 
   /// Fetches meal images for a specific date
@@ -174,13 +224,9 @@ static const MEAL_RANGE_DAYS=7;
         try {
           meals.add(MealModel.fromDocument(doc));
         } catch (e) {
-          logger.err('Error parsing meal document: {}', [e]);
         }
       }
-      
-      logger.info('Fetched {} meal images for date {}', [meals.length, currentDate]);
     } catch (e) {
-      logger.err('Error fetching meal images: {}', [e]);
     }
     
     return meals;
@@ -198,8 +244,6 @@ Future<String?> uploadMealImg({
   ChatManager? chatManager,
 }) async {
   try {
-    logger.info('Uploading meal photo. meal={}', [meal.name]);
-
     final referenceDate = overrideDate ?? DateTime.now();
     final currentDate = DateFormat('yyyy-MM-dd').format(referenceDate);
     final mealDocRef = FirebaseFirestore.instance
@@ -218,12 +262,10 @@ Future<String?> uploadMealImg({
         previousMealModel = MealModel.fromDocument(mealDoc);
 
         if (!previousMealModel.canAddMoreImages) {
-          logger.warn('Max images reached for meal: {}', [meal.name]);
           return null;
         }
       }
     } catch (e) {
-      logger.err('Error reading previous meal doc: {}', [e]);
     }
 
     final result = await _uploadImg(
@@ -234,18 +276,21 @@ Future<String?> uploadMealImg({
     );
 
     if (!result.isUploadOk || result.downloadUrl == null) {
-      logger.err('Image upload failed: {}', [result.errorMessage ?? 'Unknown error']);
       return null;
     }
 
-    // Append the new URL to existing list
+    // Append the new URL to existing list (küçük görsel listesi de aynı
+    // sırayla büyür; eski kayıtta eksikse boş dizeyle hizalanır).
     final existingUrls = previousMealModel?.imageUrls ?? [];
     final updatedUrls = [...existingUrls, result.downloadUrl!];
+    final existingThumbs = previousMealModel?.alignedThumbUrls() ?? <String>[];
+    final updatedThumbs = [...existingThumbs, result.thumbUrl ?? ''];
 
     final mergedMealModel = MealModel(
       mealId: previousMealModel?.mealId ?? mealDocRef.id,
       mealType: meal,
       imageUrls: updatedUrls,
+      thumbUrls: updatedThumbs,
       subscriptionId: subscriptionId,
       timestamp: referenceDate,
       description: previousMealModel?.description,
@@ -266,21 +311,24 @@ Future<String?> uploadMealImg({
 
     notifyListeners();
 
-    logger.info('Meal upload finished. downloadUrl={}', [result.downloadUrl]);
     return result.downloadUrl;
-  } catch (e, st) {
-    logger.err('Error uploading meal: {}, Stack:', [e, st]);
+  } catch (e) {
     rethrow;
   }
 }
 
 /// Deletes a single image from a meal entry.
 /// If no images remain, the meal is marked as unchecked.
+///
+/// [ignoreStorageFailure] true iken Storage'daki dosya silinemese de (ör.
+/// dosya zaten yok) Firestore kaydı temizlenmeye devam eder. Test verisini
+/// temizleyen akış bunu kullanır: kayıt sistemde asılı kalmamalı.
 Future<void> deleteMealImage({
   required String userId,
   required Meals meal,
   required String imageUrlToDelete,
   DateTime? overrideDate,
+  bool ignoreStorageFailure = false,
 }) async {
   try {
     final referenceDate = overrideDate ?? DateTime.now();
@@ -297,11 +345,28 @@ Future<void> deleteMealImage({
     if (!mealDoc.exists) return;
 
     final mealModel = MealModel.fromDocument(mealDoc);
+    final int index = mealModel.imageUrls.indexOf(imageUrlToDelete);
     final updatedUrls = List<String>.from(mealModel.imageUrls)
       ..remove(imageUrlToDelete);
+    final updatedThumbs = mealModel.alignedThumbUrls();
+    final String? thumbUrlToDelete =
+        index >= 0 ? mealModel.thumbUrlAt(index) : null;
+    if (index >= 0) updatedThumbs.removeAt(index);
 
     // Delete the file from Storage
-    await deleteFile(imageUrlToDelete);
+    try {
+      await deleteFile(imageUrlToDelete);
+    } catch (e) {
+      if (!ignoreStorageFailure) rethrow;
+    }
+
+    // Küçük görsel yardımcı bir dosya: silinemese de kayıt temizlenir.
+    if (thumbUrlToDelete != null) {
+      try {
+        await deleteFile(thumbUrlToDelete);
+      } catch (e) {
+      }
+    }
 
     if (updatedUrls.isEmpty) {
       // No images left — remove the document and uncheck
@@ -313,6 +378,7 @@ Future<void> deleteMealImage({
           mealId: mealModel.mealId,
           mealType: meal,
           imageUrls: updatedUrls,
+          thumbUrls: updatedThumbs,
           subscriptionId: mealModel.subscriptionId,
           timestamp: mealModel.timestamp,
           description: mealModel.description,
@@ -324,10 +390,7 @@ Future<void> deleteMealImage({
     }
 
     notifyListeners();
-    logger.info('Deleted image from meal {}. Remaining: {}',
-        [meal.name, updatedUrls.length]);
   } catch (e) {
-    logger.err('Error deleting meal image: {}', [e]);
     rethrow;
   }
 }
@@ -346,10 +409,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
         meal.name: isChecked, // mark this meal as "checked" for today
       },
     }, SetOptions(merge: true));
-
-    logger.info('Updated state for {} to {} for date {}', [meal.name, isChecked, currentDate]);
   } catch (e) {
-    logger.err('Error updating meal state: {}', [e]);
   }
 }
 
@@ -389,11 +449,8 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       if (chatManager != null) {
         msgData['storagePath'] = 'meals/$userId/${meal.name}';
       }
-      final refMsg = await chatDoc.collection('messages').add(msgData);
-      
-      logger.info('Meal image posted to chat. messageId={}', [refMsg.id]);
+      await chatDoc.collection('messages').add(msgData);
     } catch (e) {
-      logger.err('Error posting to chat: {}', [e]);
     }
   }
   
@@ -429,7 +486,6 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
         }
       }
     } catch (e) {
-      logger.err('Error fetching meal states: {}', [e]);
     }
     
     return checkedStates;
@@ -456,45 +512,137 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     }
 
     try {
-      String fileName = imageFile.name;
       final effectiveDate = overrideDate ?? DateTime.now();
       String date = DateFormat('yyyy-MM-dd').format(effectiveDate);
-      String path;
 
+      // Yüklemeden önce küçültülür: telefondan gelen tam çözünürlüklü fotoğraf
+      // (4-6 MB) yönetici tarafındaki toplu görünümleri yavaşlatıyordu.
+      // Sıkıştırma yapılamayan platformda orijinal yüklenir, akış değişmez.
+      final PreparedUploadImage prepared = await prepareImageForUpload(
+        bytes: await imageFile.readAsBytes(),
+        fileName: imageFile.name,
+        mimeType: imageFile.mimeType,
+      );
+
+      String path;
       if (meal != null) {
-        path = 'users/$userId/mealPhotos/$date/${meal.name}/$fileName';
+        path =
+            'users/$userId/mealPhotos/$date/${meal.name}/${prepared.fileName}';
       } else {
-        path = 'users/$userId/chatPhotos/$date/$fileName';
+        path = 'users/$userId/chatPhotos/$date/${prepared.fileName}';
       }
 
       Reference ref = FirebaseStorage.instance.ref(path);
-     // logger.debug('Uploading file to path: $path');
 
-      // Read the file as bytes
-      Uint8List imageData = await imageFile.readAsBytes();
-
-      // Determine the content type
-      String? mimeType = imageFile.mimeType;
-
-      SettableMetadata metadata = SettableMetadata(contentType: mimeType);
-
-      // UploadTask uploadTask = ref.putData(imageData, metadata);
-      await ref.putData(imageData, metadata);
-
-      // await uploadTask;
+      await ref.putData(
+        prepared.bytes,
+        SettableMetadata(contentType: prepared.contentType),
+      );
 
       // After uploading, get the download URL
       String downloadUrl = await ref.getDownloadURL();
-      logger.info('Uploaded file to path: $path, downloadUrl: $downloadUrl');
-      return UploadResult(downloadUrl: downloadUrl);
-    } on FirebaseException catch (e) {
-      logger.err('FirebaseException Error during file upload: {}',
-          [e.message ?? 'exception does not have message.']);
+
+      // Küçük görsel: liste ekranları orijinal yerine bunu indirir. Üretilemez
+      // ya da yüklenemezse fotoğraf küçük görselsiz kalır, yükleme bozulmaz.
+      final String? thumbUrl = await _uploadThumbnail(ref, prepared.bytes);
+      return UploadResult(downloadUrl: downloadUrl, thumbUrl: thumbUrl);
+    } on FirebaseException {
       rethrow;
     } catch (e2) {
-      logger.err('Unexpected error during file upload: {}', [e2.toString()]);
       rethrow;
     }
+  }
+
+  /// Küçük görseli orijinalin yanına `<ad>_thumb.<uzantı>` adıyla yükler;
+  /// başarısız olursa null döner.
+  Future<String?> _uploadThumbnail(Reference original, Uint8List bytes) async {
+    try {
+      final ThumbnailData? thumb = await generateThumbnail(bytes);
+      if (thumb == null) return null;
+
+      final Reference thumbRef = _thumbnailRefFor(original, thumb.extension);
+      await thumbRef.putData(
+        thumb.bytes,
+        SettableMetadata(contentType: thumb.contentType),
+      );
+      final String url = await thumbRef.getDownloadURL();
+      return url;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Orijinal dosyanın klasöründe, aynı ad + `_thumb` son ekiyle küçük görsel
+  /// yolu. Hem yüklemede hem sonradan üretimde aynı kural kullanılır.
+  Reference _thumbnailRefFor(Reference original, String extension) {
+    final String name = original.name;
+    final int dot = name.lastIndexOf('.');
+    final String base = dot > 0 ? name.substring(0, dot) : name;
+    final Reference? parent = original.parent;
+    final String thumbName = '${base}_thumb$extension';
+    return parent == null
+        ? FirebaseStorage.instance.ref(thumbName)
+        : parent.child(thumbName);
+  }
+
+  /// Küçük görseli olmayan eski bir fotoğraf için küçük görseli üretip
+  /// kaydeder.
+  ///
+  /// Liste ekranı böyle bir fotoğrafı göstermek için orijinali indirmek
+  /// zorunda kalır; indirdiği baytları buraya verir, küçük görsel bir kez
+  /// üretilip yüklenir ve öğün kaydına yazılır. Sonraki her açılışta (ve diğer
+  /// tüm cihazlarda) yalnızca küçük görsel iner.
+  ///
+  /// Kayıt bir işlem (transaction) içinde güncellenir: fotoğraf o arada
+  /// silinmiş ya da listedeki yeri değişmişse yanlış yere yazılmaz.
+  Future<void> backfillThumbnail({
+    required String userId,
+    required Meals meal,
+    required DateTime date,
+    required String imageUrl,
+    required Uint8List originalBytes,
+  }) async {
+    final String dateKey = DateFormat('yyyy-MM-dd').format(date);
+    final DocumentReference<Map<String, dynamic>> mealDocRef =
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .collection('meals')
+            .doc(dateKey)
+            .collection('mealEntries')
+            .doc(meal.name);
+
+    // Aynı fotoğrafı iki cihaz aynı anda açtıysa ikinci üretim boşa gitmesin.
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await mealDocRef.get();
+    if (!snapshot.exists) return;
+    final MealModel current = MealModel.fromDocument(snapshot);
+    final int index = current.imageUrls.indexOf(imageUrl);
+    if (index < 0 || current.thumbUrlAt(index) != null) return;
+
+    final ThumbnailData? thumb = await generateThumbnail(originalBytes);
+    if (thumb == null) return;
+
+    final Reference originalRef = FirebaseStorage.instance.refFromURL(imageUrl);
+    final Reference thumbRef = _thumbnailRefFor(originalRef, thumb.extension);
+    await thumbRef.putData(
+      thumb.bytes,
+      SettableMetadata(contentType: thumb.contentType),
+    );
+    final String thumbUrl = await thumbRef.getDownloadURL();
+
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final DocumentSnapshot<Map<String, dynamic>> fresh =
+          await transaction.get(mealDocRef);
+      if (!fresh.exists) return;
+      final MealModel model = MealModel.fromDocument(fresh);
+      final int freshIndex = model.imageUrls.indexOf(imageUrl);
+      if (freshIndex < 0) return;
+      final List<String> thumbs = model.alignedThumbUrls();
+      if (thumbs[freshIndex].isNotEmpty) return;
+      thumbs[freshIndex] = thumbUrl;
+      transaction.update(mealDocRef, {'thumbUrls': thumbs});
+    });
   }
 
   /// Deletes a file from Firebase Storage
@@ -504,9 +652,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     try {
       final Reference ref = FirebaseStorage.instance.refFromURL(imageUrl);
       await ref.delete();
-      logger.info('Deleted file at URL: $imageUrl');
     } catch (e) {
-      logger.err('Error deleting file at URL {}: {}', [imageUrl, e.toString()]);
       rethrow;
     }
   }
@@ -514,10 +660,13 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
 /// Represents the result of an image upload operation
 class UploadResult {
   final String? downloadUrl;
+
+  /// Küçük görselin adresi; üretilemediyse null (yükleme yine başarılıdır).
+  final String? thumbUrl;
   final String? errorMessage;
 
   /// Indicates whether the upload was successful
   bool get isUploadOk => downloadUrl != null && errorMessage == null;
 
-  UploadResult({this.downloadUrl, this.errorMessage});
+  UploadResult({this.downloadUrl, this.thumbUrl, this.errorMessage});
 }

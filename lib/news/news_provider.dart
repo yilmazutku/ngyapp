@@ -4,13 +4,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
-import '../models/logger.dart';
 import 'news_model.dart';
 
 /// Provider for managing news/announcements CRUD operations
 class NewsProvider extends ChangeNotifier {
-  final Logger _logger = Logger.forClass(NewsProvider);
-
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
@@ -42,11 +39,9 @@ class NewsProvider extends ChangeNotifier {
           .map((doc) => NewsModel.fromDocument(doc))
           .where((news) => news.isVisibleInAnnouncements)
           .toList();
-      _logger.info('Fetched {} published news items', [_newsList.length]);
 
       return _newsList;
     } catch (e) {
-      _logger.err('Error fetching published news: $e');
       rethrow;
     } finally {
       _isLoading = false;
@@ -70,11 +65,9 @@ class NewsProvider extends ChangeNotifier {
 
       _blogList = snapshot.docs.map((doc) => NewsModel.fromDocument(doc)).toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      _logger.info('Fetched {} blog news items', [_blogList.length]);
 
       return _blogList;
     } catch (e) {
-      _logger.err('Error fetching blog news: $e');
       rethrow;
     } finally {
       _isLoading = false;
@@ -94,11 +87,9 @@ class NewsProvider extends ChangeNotifier {
           .get();
 
       _newsList = snapshot.docs.map((doc) => NewsModel.fromDocument(doc)).toList();
-      _logger.info('Fetched {} total news items', [_newsList.length]);
 
       return _newsList;
     } catch (e) {
-      _logger.err('Error fetching all news: $e');
       rethrow;
     } finally {
       _isLoading = false;
@@ -145,12 +136,10 @@ class NewsProvider extends ChangeNotifier {
       );
 
       await docRef.set(news.toMap());
-      _logger.info('News added successfully: ${news.title}');
 
       // Refresh the list
       await fetchAllNews();
     } catch (e) {
-      _logger.err('Error adding news: $e');
       rethrow;
     }
   }
@@ -190,12 +179,9 @@ class NewsProvider extends ChangeNotifier {
         'updatedAt': Timestamp.fromDate(DateTime.now()),
       });
 
-      _logger.info('News updated successfully: $newsId');
-
       // Refresh the list
       await fetchAllNews();
     } catch (e) {
-      _logger.err('Error updating news: $e');
       rethrow;
     }
   }
@@ -213,20 +199,16 @@ class NewsProvider extends ChangeNotifier {
           try {
             final ref = _storage.refFromURL(news.imageUrl!);
             await ref.delete();
-            _logger.info('Deleted image for news: $newsId');
           } catch (e) {
-            _logger.warn('Could not delete image for news $newsId: $e');
           }
         }
       }
 
       await _firestore.collection(_collectionPath).doc(newsId).delete();
-      _logger.info('News deleted successfully: $newsId');
 
       // Refresh the list
       await fetchAllNews();
     } catch (e) {
-      _logger.err('Error deleting news: $e');
       rethrow;
     }
   }
@@ -239,12 +221,9 @@ class NewsProvider extends ChangeNotifier {
         'updatedAt': Timestamp.fromDate(DateTime.now()),
       });
 
-      _logger.info('News $newsId published status changed to: $isPublished');
-
       // Refresh the list
       await fetchAllNews();
     } catch (e) {
-      _logger.err('Error toggling published status: $e');
       rethrow;
     }
   }
@@ -271,10 +250,8 @@ class NewsProvider extends ChangeNotifier {
       final snapshot = await uploadTask;
       final downloadUrl = await snapshot.ref.getDownloadURL();
 
-      _logger.info('Image uploaded to: $downloadUrl');
       return downloadUrl;
     } catch (e) {
-      _logger.err('Error uploading image: $e');
       rethrow;
     }
   }

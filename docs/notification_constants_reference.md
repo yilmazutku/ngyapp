@@ -116,17 +116,25 @@ They notify users/admins about new chat messages.
 | `CHAT_ADMIN_TO_USER_TITLE` | `'Destek'` | Title when admin sends message to user |
 | `CHAT_DEFAULT_BODY` | `'Yeni mesaj'` | Body when message text is empty |
 | `CHAT_IMAGE_BODY` | `'Fotoğraf'` | Body when message is an image |
-| `CHAT_REACTION_BODY_TEMPLATE` | `'bir mesajınıza {emoji} ifadesi bıraktı'` | Body when an admin reacts to the user's message. `{emoji}` is replaced with the reaction (e.g. `👍`). Title is `CHAT_ADMIN_TO_USER_TITLE`. |
+| `CHAT_REACTION_BODY_TEMPLATE` | `'bir mesajınıza {emoji} ifadesi bıraktı'` | Body when one side reacts to the other's message. `{emoji}` is replaced with the reaction (e.g. `👍`). Title is `CHAT_ADMIN_TO_USER_TITLE` for admin→user, the reacting client's name for user→admin. |
 | `CHAT_USER_TO_ADMIN_DEFAULT_TITLE` | `'Kullanıcı mesajı'` | Title when user sends to admin (fallback if name not found) |
 | `CHAT_ANDROID_ICON` | `'ic_notification'` | Android notification icon |
 | `CHAT_ANDROID_COLOR` | `'#075E54'` | Notification color (WhatsApp green) |
 | `CHAT_CHANNEL_ID` | `'chat_messages_v2'` | Android notification channel ID |
 
-**Reaction notifications** are sent by the `notifyUserOnAdminReaction` Cloud
-Function (triggered on message *updates*). When an admin leaves or changes a
-reaction (`reactions.<adminUid> = emoji`) on a message the user sent, the user
-is notified: title `Nilay Göktepe Yılmaz`, body e.g. `bir mesajınıza 👍 ifadesi
-bıraktı`. Removing a reaction does not notify.
+**Reaction notifications** are sent by two mirrored Cloud Functions, both
+triggered on message *updates*. Removing a reaction never notifies, and a
+reaction only notifies the *other* side.
+
+- `notifyUserOnAdminReaction`: an admin leaves or changes a reaction
+  (`reactions.<adminUid> = emoji`) on a message the user sent → the user is
+  notified. Title `Nilay Göktepe Yılmaz` (`CHAT_ADMIN_TO_USER_TITLE`), body
+  e.g. `bir mesajınıza 👍 ifadesi bıraktı`, data `type: 'chat'`.
+- `notifyAdminsOnUserReaction`: the user leaves or changes a reaction
+  (`reactions.<userUid> = emoji`) on a message an admin sent → every admin with
+  an FCM token is notified. Title is the client's `name surname` (falling back
+  to `CHAT_USER_TO_ADMIN_DEFAULT_TITLE`), same body template, data
+  `type: 'chat_admin'` so the tap opens `ChatPage(overrideChatId: chatId)`.
 
 ### Notification Channel (Android)
 **File:** `android/app/src/main/res/values/string.xml`

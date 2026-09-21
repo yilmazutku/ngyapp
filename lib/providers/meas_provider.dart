@@ -2,12 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 // if needed for date formatting
-import '../models/logger.dart';
 import '../models/meas_model.dart';
 import '../models/filter_params.dart';
 import '../utils/storage_upload.dart';
-
-final Logger logger = Logger.forClass(MeasProvider);
 
 /// Manages user measurement data including storage, retrieval, and updates of measurements
 /// Provides functionality for handling measurement changes and PDF uploads
@@ -31,8 +28,6 @@ class MeasProvider extends ChangeNotifier {
   /// @return The document ID of the added measurement
   Future<void> addMeasurement(String userId, MeasurementModel measurement) async {
     try {
-      logger.info('Adding new measurement for userId={}', [userId]);
-      
       await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
@@ -40,16 +35,12 @@ class MeasProvider extends ChangeNotifier {
           .doc(measurement.measurementId)
           .set(measurement.toMap());
 
-      logger.info('Successfully added measurement with id={}', [measurement.measurementId]);
-      
       // Set the measurement changed flag
       _measurementChanged = true;
       
       // Notify listeners to trigger UI updates
       notifyListeners();
     } catch (e) {
-      logger.err('Failed to add measurement for userId={}: {}', [userId, e.toString()]);
-      logger.err('Error stack trace: {}', [StackTrace.current]);
       rethrow;
     }
   }
@@ -59,8 +50,6 @@ class MeasProvider extends ChangeNotifier {
   /// @param measurement The updated measurement model
   Future<void> updateMeasurement(String userId, MeasurementModel measurement) async {
     try {
-      logger.info('Updating measurement for userId={}, measurementId={}', [userId, measurement.measurementId]);
-      
       if (measurement.measurementId.isEmpty) {
         throw ArgumentError('Measurement document ID cannot be null or empty');
       }
@@ -75,17 +64,12 @@ class MeasProvider extends ChangeNotifier {
       final dataMap = measurement.toMap();
       await docRef.update(dataMap);
       
-      logger.info('Successfully updated measurement with id={}', [measurement.measurementId]);
-      
       // Set the measurement changed flag
       _measurementChanged = true;
       
       // Notify listeners to trigger UI updates
       notifyListeners();
     } catch (e) {
-      logger.err('Failed to update measurement for userId={}, measurementId={}: {}', 
-          [userId, measurement.measurementId, e.toString()]);
-      logger.err('Error stack trace: {}', [StackTrace.current]);
       rethrow;
     }
   }
@@ -98,8 +82,6 @@ class MeasProvider extends ChangeNotifier {
   /// @return True if deletion was successful, false otherwise
   Future<bool> deleteMeasurement(String userId, String measurementId) async {
     try {
-      logger.info('Deleting measurement. userId={}, measurementId={}', [userId, measurementId]);
-
       final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
@@ -107,8 +89,6 @@ class MeasProvider extends ChangeNotifier {
           .doc(measurementId);
       await docRef.delete();
           
-      logger.info('Successfully deleted measurement. userId={}, measurementId={}', [userId, measurementId]);
-      
       // Set the measurement changed flag
       _measurementChanged = true;
       
@@ -117,9 +97,6 @@ class MeasProvider extends ChangeNotifier {
       
       return true;
     } catch (e) {
-      logger.err('Failed to delete measurement. userId={}, measurementId={}, error={}', 
-          [userId, measurementId, e.toString()]);
-      logger.err('Error stack trace: {}', [StackTrace.current]);
       return false;
     }
   }
@@ -132,7 +109,6 @@ class MeasProvider extends ChangeNotifier {
   /// @return A list of MeasurementModel objects representing the user's measurements
   Future<List<MeasurementModel>> fetchMeasurements(String userId, {MeasurementFilterParams? filterParams}) async {
     try {
-      logger.info('Fetching measurements for userId={}', [userId]);
       Query query = FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
@@ -166,10 +142,8 @@ class MeasProvider extends ChangeNotifier {
         }).toList();
       }
       
-      logger.info('Fetched {} measurements with filters: {}', [measurements.length, filterParams?.toDebugMap()]);
       return measurements;
     } catch (e) {
-      logger.err('fetchMeasurements err: {}', [e.toString()]);
       return [];
     }
   }
@@ -272,10 +246,8 @@ class MeasProvider extends ChangeNotifier {
         'storagePath': storagePath,
       });
 
-      logger.info('Tanita PDF uploaded: $docId');
       notifyListeners();
     } catch (e) {
-      logger.err('Error uploading Tanita PDF: {}', [e.toString()]);
       rethrow;
     }
   }
@@ -307,10 +279,7 @@ class MeasProvider extends ChangeNotifier {
       try {
         await FirebaseStorage.instance.ref().child(resolvedPath).delete();
       } on FirebaseException catch (e) {
-        if (e.code == 'object-not-found') {
-          logger.warn('Tanita PDF blob not found, deleting metadata only: {}',
-              [resolvedPath]);
-        } else {
+        if (e.code != 'object-not-found') {
           rethrow;
         }
       }
@@ -324,11 +293,8 @@ class MeasProvider extends ChangeNotifier {
           .doc(docId)
           .delete();
 
-      logger.info('Tanita PDF deleted: userId={}, docId={}', [userId, docId]);
       notifyListeners();
     } catch (e) {
-      logger.err('Error deleting Tanita PDF: userId={}, docId={}, e={}',
-          [userId, docId, e.toString()]);
       rethrow;
     }
   }

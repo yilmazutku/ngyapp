@@ -3,9 +3,9 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../dialogs/add_appointment_dialog.dart';
+import '../dialogs/dialog_widgets.dart';
 import '../models/appointment_model.dart';
 import '../models/event_model.dart';
-import '../models/logger.dart';
 import '../models/user_model.dart';
 import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_manager.dart';
@@ -17,8 +17,6 @@ import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
-
-final Logger logger = Logger.forClass(AdminAppointmentsPage);
 
 // Configuration constants
 const bool kIsScrollable = true; // horizontal scrolling
@@ -173,7 +171,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         setState(() => _events = events);
       }
     } catch (e) {
-      logger.err('Error fetching events: {}', [e]);
     }
   }
 
@@ -489,7 +486,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         await Provider.of<AppointmentColorsProvider>(context, listen: false)
             .fetchColors();
       } catch (e) {
-        logger.err('Failed to load appointment colors: {}', [e]);
       }
 
       // Apply filters on Firebase side for better performance
@@ -503,7 +499,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       // Only client-side sorting remains (Firebase doesn't support complex multi-field sorting)
       return _applySorting(fetchedAppointments);
     } catch (e) {
-      logger.err('Randevular getirilirken hata oluştu: {}', [e]);
       return [];
     }
   }
@@ -642,7 +637,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       }
     });
 
-    logger.info('Sorted {} appointments by: {}', [appointments.length, sortOption]);
     return appointments;
   }
 
@@ -697,7 +691,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   /// Show dialog to edit an appointment
   void _showEditAppointmentDialog(BuildContext context, AppointmentModel appointment) {
-    logger.info('opening edit appt dialog for apptId:{}',[appointment.appointmentId]);
     showDialog(
       context: context,
       builder: (_) {
@@ -713,7 +706,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   /// Show dialog to edit an event
   void _showEditEventDialog(BuildContext context, EventModel event) {
-    logger.info('opening edit event dialog for eventId:{}', [event.eventId]);
     showDialog(
       context: context,
       builder: (_) {
@@ -1475,7 +1467,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               'Kullanıcı: ${appointment.user?.fullName ?? 'Bilinmiyor'}\n'
                   'Tür: ${appointment.meetingType.label}\n'
                   'Durum: ${appointment.status.label}'
-                  '${isPostponed ? '\nOrijinal: ${_fullFmt.format(appointment.appointmentDateTime)}\nErtelenen: ${_fullFmt.format(appointment.postponedDate!)}' : ''}',
+                  '${isPostponed ? '\n${AppointmentDateLabels.firstDate}: ${_fullFmt.format(appointment.appointmentDateTime)}\n${AppointmentDateLabels.postponedDate}: ${_fullFmt.format(appointment.postponedDate!)}' : ''}',
             ),
             trailing: Wrap(
               alignment: WrapAlignment.end,
@@ -1583,7 +1575,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
                     } else if (snapshot.hasError) {
-                      logger.err('Randevular getirilirken hata: {}', [snapshot.error ?? '']);
                       return Center(child: Text('Randevular getirilirken hata: ${snapshot.error}'));
                     } else {
                       final appointments = snapshot.data ?? [];

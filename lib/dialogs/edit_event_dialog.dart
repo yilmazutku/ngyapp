@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/event_model.dart';
-import '../models/logger.dart';
 import '../providers/event_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/time_picker_utils.dart';
@@ -27,8 +26,6 @@ class EditEventDialog extends StatefulWidget {
 
 class _EditEventDialogState extends State<EditEventDialog>
     with LoadingStateMixin {
-  static final Logger _logger = Logger.forClass(EditEventDialog);
-
   final _nameController = TextEditingController();
   final DateFormat _dateFmt = DateFormat('dd.MM.yyyy', 'tr_TR');
   final DateFormat _fullFmt = DateFormat('dd.MM.yyyy HH:mm', 'tr_TR');
@@ -188,7 +185,6 @@ class _EditEventDialogState extends State<EditEventDialog>
         message: 'Etkinlik başarıyla güncellendi.',
       );
     } catch (e) {
-      _logger.err('Error updating event: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -231,7 +227,6 @@ class _EditEventDialogState extends State<EditEventDialog>
         message: 'Etkinlik başarıyla silindi.',
       );
     } catch (e) {
-      _logger.err('Error deleting event: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,

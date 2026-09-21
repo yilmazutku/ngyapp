@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../models/appointment_duration_config.dart';
-import '../models/logger.dart';
 
 /// Provider responsible for the admin-configured default appointment durations
 /// stored at `admininput/appointmentDurations` in Firestore.
@@ -18,7 +17,6 @@ class AppointmentDurationsProvider extends ChangeNotifier {
   static const String durationsField = 'durations';
   static const String updatedAtField = 'updatedAt';
 
-  final Logger logger = Logger.forClass(AppointmentDurationsProvider);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool _hasLoaded = false;
@@ -53,11 +51,8 @@ class AppointmentDurationsProvider extends ChangeNotifier {
       }
       AppointmentDurationsRegistry.setOverrides(overrides);
       _hasLoaded = true;
-      logger.info(
-          'Loaded {} admin appointment duration overrides', [overrides.length]);
       return AppointmentDurationsRegistry.snapshot();
     } catch (e) {
-      logger.err('Error fetching admin appointment durations: {}', [e]);
       // Keep whatever was already in the registry; don't mark as loaded so a
       // later screen can retry.
       rethrow;
@@ -80,11 +75,8 @@ class AppointmentDurationsProvider extends ChangeNotifier {
       }, SetOptions(merge: true));
       AppointmentDurationsRegistry.setOverrides(overrides);
       _hasLoaded = true;
-      logger.info(
-          'Saved {} admin appointment duration overrides', [payload.length]);
       notifyListeners();
     } catch (e) {
-      logger.err('Error saving admin appointment durations: {}', [e]);
       rethrow;
     }
   }

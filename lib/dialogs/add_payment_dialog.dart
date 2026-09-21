@@ -8,7 +8,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
@@ -33,7 +32,6 @@ class AddPaymentDialog extends StatefulWidget {
 
 class _AddPaymentDialogState extends State<AddPaymentDialog> 
     with LoadingStateMixin {
-  final Logger logger = Logger.forClass(AddPaymentDialog);
   List<SubscriptionModel> _subscriptions = [];
   SubscriptionModel? _selectedSubscription;
   bool _isLoadingSubscriptions = true;
@@ -69,7 +67,6 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
 
       // No longer show error if no active subscriptions - allow "paketsiz ödeme"
     } catch (e) {
-      logger.err('Error fetching subscriptions: {}', [e]);
       setState(() {
         _isLoadingSubscriptions = false;
       });
@@ -302,16 +299,12 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
     setState(() {
       if (pickedFile != null) {
         _dekontImage = File(pickedFile.path);
-        logger.info('Dekont image selected: ${pickedFile.path}');
-      } else {
-        logger.err('No dekont image selected.');
       }
     });
   }
 
   Future<void> _addPayment() async {
     if (_amountController.text.isEmpty) {
-      logger.err('_addPayment: Amount is required.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -385,8 +378,6 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
 
         // Keep the local model roughly in step for the rest of this dialog.
         _selectedSubscription!.amountPaid += paymentAmount;
-
-        logger.info('Added $paymentAmount to subscription $subscriptionId amountPaid');
       }
 
       widget.onPaymentAdded();
@@ -398,7 +389,6 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
         );
       }
     } catch (e) {
-      logger.err('Error adding payment: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,

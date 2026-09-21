@@ -4,18 +4,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../models/filter_params.dart';
 import '../providers/sub_provider.dart';
 
-final Logger logger = Logger.forClass(PaymentProvider);
-
 /// Provides payment management functionality for handling user payment transactions.
 /// Manages fetching, adding, updating, and deleting payments in the Firestore database.
 class PaymentProvider extends ChangeNotifier {
-  final Logger logger = Logger.forClass(PaymentProvider);
   final SubProvider subProvider;
 
   PaymentProvider({required this.subProvider});
@@ -93,10 +89,8 @@ class PaymentProvider extends ChangeNotifier {
         }).toList();
       }
 
-      logger.info('Fetched {} payments across all users with filters', [payments.length]);
       return payments;
     } catch (e) {
-      logger.err('Error fetching all payments: $e');
       rethrow;
     }
   }
@@ -190,10 +184,8 @@ class PaymentProvider extends ChangeNotifier {
         }
       }
       
-      logger.info('Fetched {} payments with filters: {}', [payments.length, filterParams?.toDebugMap()]);
       return payments;
     } catch (e) {
-      logger.err('Error fetching payments: $e');
       rethrow;
     }
   }
@@ -253,7 +245,6 @@ class PaymentProvider extends ChangeNotifier {
       );
 
       await paymentDocRef.set(paymentModel.toMap());
-      logger.info('Payment added successfully for user $userId');
       
       // Set the flag and notify listeners
       _paymentChanged = true;
@@ -267,7 +258,6 @@ class PaymentProvider extends ChangeNotifier {
       
       // No need to call fetchPayments() here since we're not maintaining a local list
     } catch (e) {
-      logger.err('Error adding payment: $e');
       rethrow; //TODO rethrow yakalanmaları app geneli
     }
   }
@@ -289,11 +279,8 @@ class PaymentProvider extends ChangeNotifier {
       final snapshot = await uploadTask;
       final downloadUrl = await snapshot.ref.getDownloadURL();
 
-      logger.info('Dekont image uploaded to $downloadUrl');
-
       return downloadUrl;
     } catch (e) {
-      logger.err('Error uploading dekont image: $e');
       throw Exception('Error uploading dekont image: $e');
     }
   }
@@ -310,9 +297,6 @@ class PaymentProvider extends ChangeNotifier {
           .doc(updatedPayment.paymentId)
           .update(updatedPayment.toMap());
 
-      logger.info(
-          'Payment updated successfully for user ${updatedPayment.userId}');
-      
       // Notify listeners that a payment was updated
       _paymentChanged = true;
       notifyListeners();
@@ -320,7 +304,6 @@ class PaymentProvider extends ChangeNotifier {
       // Notify SubProvider so sub_tab refreshes
       subProvider.markChanged();
     } catch (e) {
-      logger.err('Error updating payment: $e');
       rethrow;
     }
   }
@@ -343,15 +326,12 @@ class PaymentProvider extends ChangeNotifier {
         'updateDate': Timestamp.fromDate(DateTime.now()),
       });
 
-      logger.info('Payment $paymentId due date updated for user $userId');
-
       _paymentChanged = true;
       notifyListeners();
 
       // Notify SubProvider so sub_tab refreshes
       subProvider.markChanged();
     } catch (e) {
-      logger.err('Error updating payment due date: $e');
       rethrow;
     }
   }
@@ -391,7 +371,6 @@ class PaymentProvider extends ChangeNotifier {
           .get();
 
       if (snapshot.docs.isEmpty) {
-        logger.info('No linked payments found for subscription $subscriptionId');
         return 0;
       }
 
@@ -423,8 +402,6 @@ class PaymentProvider extends ChangeNotifier {
 
       if (updatedCount > 0) {
         await batch.commit();
-        logger.info(
-            'Synced $updatedCount linked payment(s) for subscription $subscriptionId');
         _paymentChanged = true;
         notifyListeners();
         subProvider.markChanged();
@@ -432,7 +409,6 @@ class PaymentProvider extends ChangeNotifier {
 
       return updatedCount;
     } catch (e) {
-      logger.err('Error syncing linked payments for subscription $subscriptionId: $e');
       rethrow;
     }
   }
@@ -487,13 +463,8 @@ class PaymentProvider extends ChangeNotifier {
           subscriptionId: subscriptionId,
           delta: -deleted.amount,
         );
-        logger.info(
-          'Reverted ${deleted.amount} from subscription $subscriptionId after deleting payment $paymentId',
-        );
       }
 
-      logger.info('Payment $paymentId deleted successfully for user $userId');
-      
       // Notify listeners that a payment was deleted
       _paymentChanged = true;
       notifyListeners();
@@ -501,7 +472,6 @@ class PaymentProvider extends ChangeNotifier {
       // Notify SubProvider so sub_tab refreshes
       subProvider.markChanged();
     } catch (e) {
-      logger.err('Error deleting payment: $e');
       rethrow;
     }
   }

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 // Replace with your actual imports
+import '../models/diet_goals.dart'; // Su / Spor hedefi satırları
 import '../models/diet_section.dart'; // Hafta İçi / Hafta Sonu split
-import '../models/logger.dart';
 import '../models/meal_model.dart'; // For Meals enum
 import '../models/special_line_model.dart'; // SpecialLinesRegistry / detect
 import '../models/subs_model.dart'; // Add subscription model import
@@ -15,12 +15,11 @@ import '../providers/sub_provider.dart';
 // Add user provider import
 import '../providers/diet_provider.dart'; // Add diet provider import
 import '../providers/special_lines_provider.dart';
+import '../utils/diet_menu_parser.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/meal_formatter.dart';
 import '../utils/storage_upload.dart';
-
-/// We'll create a logger for this dialog
-final Logger log = Logger.forClass(AddDietDialog);
+import '../widgets/diet_plan_view.dart';
 
 class AddDietDialog extends StatefulWidget {
   final String userId; // Which user to upload diets for
@@ -37,15 +36,32 @@ class AddDietDialog extends StatefulWidget {
 }
 
 class _AddDietDialogState extends State<AddDietDialog> {
+  static const String kNoContentTitle = 'Diyet İçeriği Okunamadı';
+  static const String kNoContentMessage =
+      'Bu Word dosyasından hiçbir öğün içeriği çıkarılamadı, diyet '
+      'yüklenmedi.\n\n'
+      'Dosyadaki öğün başlıklarının (SABAH, ÖĞLE, ARA, AKŞAM ...) beklenen '
+      'biçimde yazıldığını kontrol edip dosyayı tekrar seçin.';
+
+  static const String kMissingTimeTitle = 'Öğün Saati Eksik';
+  static const String kMissingTimeIntro =
+      'Aşağıdaki öğünlerin saati Word dosyasından okunamadı, diyet '
+      'yüklenmedi:';
+  static const String kMissingTimeHint =
+      'Öğün başlığına saatini ekleyip (örn. "SABAH (09:00)") dosyayı tekrar '
+      'seçin.';
+
   // Weekday (Hafta İçi) meal list. Always present.
   List<Map<String, dynamic>> weekdaySubtitles = [];
 
   // Weekend (Hafta Sonu) meal list. Only populated when the docx contained a
-  // standalone "HAFTASONU" line; [_hasWeekend] tracks whether that happened.
+  // standalone "HAFTASONU" line.
   List<Map<String, dynamic>> weekendSubtitles = [];
 
-  // Set true once a "HAFTASONU" marker splits the document into two menus.
-  bool _hasWeekend = false;
+  // Parsed menus in the same shape the user's plan is rendered from, so the
+  // preview matches the "Planım" page one-to-one.
+  DietMenu _weekdayMenu = const DietMenu.empty();
+  DietMenu _weekendMenu = const DietMenu.empty();
 
   // Local file path where docx is saved
   String? _localFilePath;
@@ -53,7 +69,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
   bool _hasParsedPreview = false;
   
   // Subscription related variables
-  List<SubscriptionModel> _subscriptions = [];
   SubscriptionModel? _selectedSubscription;
   bool _isLoadingSubscriptions = false;
   
@@ -66,6 +81,11 @@ class _AddDietDialogState extends State<AddDietDialog> {
   bool _hasRecipeMarker = false;
   Uint8List? _recipePdfBytes;
   String? _recipePdfName;
+  String? _sourceFileName;
+
+  // "Su Hedefi:" / "Spor Hedefi:" lines captured verbatim from the document.
+  String? _waterGoal;
+  String? _sportGoal;
 
   // Add ScrollController to manage scrolling
   late final ScrollController _scrollController;
@@ -83,7 +103,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     // Use pre-selected subscription if provided
     if (widget.selectedSubscription != null) {
       _selectedSubscription = widget.selectedSubscription;
-      _subscriptions = [widget.selectedSubscription!];
     } else {
       // Fetch subscriptions for this user
       _fetchSubscriptions();
@@ -126,8 +145,39 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   /// Whether the parsed weekend menu actually has any content (as opposed to a
   /// stray "HAFTASONU" marker with nothing usable after it).
+  /// Goal lines parsed from the document, in the shape the plan renders them.
+  DietGoals get _goals => DietGoals(water: _waterGoal, sport: _sportGoal);
+
   bool get _weekendHasContent =>
       weekendSubtitles.any((s) => (s['content'] as List).isNotEmpty);
+
+  /// Whether the parsed document produced any meal content at all. False means
+  /// the docx could not be read the way the parser expects.
+  bool get _hasAnyParsedContent =>
+      weekdaySubtitles.any((s) => (s['content'] as List).isNotEmpty) ||
+      _weekendHasContent;
+
+  /// Meals that carry content but whose header had no readable time, in menu
+  /// order. Entries are labelled with their section when the diet has a
+  /// separate weekend menu, so the admin knows which one to fix.
+  List<String> _mealsWithoutTime() {
+    final List<String> missing = [];
+
+    void collect(List<Map<String, dynamic>> list, String? sectionLabel) {
+      for (final subtitle in list) {
+        final content = subtitle['content'];
+        if (content is! List || content.isEmpty) continue;
+        if ((subtitle['time'] ?? '').toString().trim().isNotEmpty) continue;
+        final name = subtitle['name'];
+        missing.add(sectionLabel == null ? '$name' : '$name — $sectionLabel');
+      }
+    }
+
+    final bool split = _weekendHasContent;
+    collect(weekdaySubtitles, split ? DietSection.weekday.label : null);
+    if (split) collect(weekendSubtitles, DietSection.weekend.label);
+    return missing;
+  }
 
   Future<void> _fetchSubscriptions() async {
     setState(() {
@@ -146,31 +196,11 @@ class _AddDietDialogState extends State<AddDietDialog> {
       if (!mounted) return;
 
       setState(() {
-        _subscriptions = activeSubscriptions;
         _isLoadingSubscriptions = false;
-        
-        // Select the first subscription if available
-        if (_subscriptions.isNotEmpty) {
-          _selectedSubscription = _subscriptions.first;
-        } else {
-          _selectedSubscription = null;
-        }
+        _selectedSubscription =
+            activeSubscriptions.isNotEmpty ? activeSubscriptions.first : null;
       });
-      
-      // Show error if no active subscriptions found
-      if (activeSubscriptions.isEmpty) {
-        log.err('No active subscriptions found for user: {}', [widget.userId]);
-        if (mounted) {
-          await DialogUtils.openError(
-            context,
-            title: 'Uyarı',
-            message:
-                'Bu kullanıcının aktif paketi bulunmamaktadır. Diyet listesi eklemek için önce bir paket eklemelisiniz.',
-          );
-        }
-      }
     } catch (e) {
-      log.err('Error fetching subscriptions: {}', [e]);
       if (!mounted) return;
       
       setState(() {
@@ -187,11 +217,17 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final Size screen = MediaQuery.of(context).size;
+    // AlertDialog keeps a 40px inset on each side; stay inside it on phones and
+    // cap the width on desktop so the preview keeps a readable measure.
+    final double dialogWidth = (screen.width - 80).clamp(240.0, 520.0);
+    final double dialogHeight = (screen.height * 0.7).clamp(280.0, 640.0);
+
     return AlertDialog(
       title: const Text('Diyet Yükle'),
       content: SizedBox(
-        width: 400,
-        height: 400,
+        width: dialogWidth,
+        height: dialogHeight,
         child:
             _hasParsedPreview ? _buildParsedContent() : _buildInitialContent(),
       ),
@@ -205,130 +241,162 @@ class _AddDietDialogState extends State<AddDietDialog> {
     );
   }
   
-  /// Initial content with subscription dropdown and pick file button
+  /// Initial content: the package the diet will be attached to (always
+  /// auto-resolved, never asked for) and the file picker.
   Widget _buildInitialContent() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Subscription display/selection
         if (_isLoadingSubscriptions)
           const Center(child: CircularProgressIndicator())
-        else if (widget.selectedSubscription != null)
-          // Display pre-selected subscription as non-editable
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue.shade200),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.blue),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Seçili Paket:',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _selectedSubscription?.packageName ?? '',
-                        style: const TextStyle(fontSize: 16),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          )
         else
-          // Show dropdown only if no pre-selected subscription
-          DropdownButtonFormField<SubscriptionModel>(
-            value: _selectedSubscription,
-            decoration: const InputDecoration(
-              labelText: 'Paket *',
-              border: OutlineInputBorder(),
-              hintText: 'Paket seçin',
-            ),
-            items: _subscriptions.map((sub) {
-              return DropdownMenuItem<SubscriptionModel>(
-                value: sub,
-                child: Text(
-                  sub.packageName,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              );
-            }).toList(),
-            onChanged: (value) {
-              setState(() {
-                _selectedSubscription = value;
-              });
-            },
-          ),
+          _buildSelectedSubscriptionBox(),
         const SizedBox(height: 20),
         ElevatedButton(
-          onPressed: _pickAndSaveFile,
+          onPressed: _isLoadingSubscriptions ? null : _pickAndSaveFile,
           child: const Text('Dosya Seç ve İşle'),
         ),
       ],
     );
   }
 
-  /// 2) Show a preview of parsed subtitles if we have them
+  /// Read-only box showing the package the diet is attached to, or that there
+  /// is none. Informational only: the import never stops to ask.
+  Widget _buildSelectedSubscriptionBox() {
+    final sub = _selectedSubscription;
+    final hasSub = sub != null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: hasSub ? Colors.blue.shade50 : Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: hasSub ? Colors.blue.shade200 : Colors.orange.shade300,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            hasSub ? Icons.check_circle : Icons.warning_amber_rounded,
+            color: hasSub ? Colors.blue : Colors.orange.shade800,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hasSub ? 'Seçili Paket:' : 'Aktif Paket Yok',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  hasSub
+                      ? sub.packageName
+                      : 'Diyet listesi pakete bağlanmadan yüklenecek.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 2) Preview of the parsed diet, rendered exactly the way the user sees it
+  /// on their "Planım" page: one collapsible tile per meal.
   Widget _buildParsedContent() {
     if (_localFilePath == null) {
       return const Center(child: Text('Dosya seçilmedi.'));
     }
 
-    // A scrollable ListView of subtitles
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Text('Dosya kaydedildi: $_localFilePath'),
-        ),
-        // Show selected subscription
-        if (_selectedSubscription != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Text(
-              'Seçili paket: ${_selectedSubscription!.packageName}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        // Recipe attach prompt, shown only when the diet references a recipe.
+        _buildPreviewInfoBar(),
         if (_hasRecipeMarker) _buildRecipeAttachSection(),
+        const SizedBox(height: 8),
         Expanded(
-          // Use ScrollConfiguration to handle overflow properly
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              scrollbars: false,
-              overscroll: false,
-            ),
-            child: ListView(
+          child: Scrollbar(
+            controller: _scrollController,
+            child: SingleChildScrollView(
               controller: _scrollController,
-              children: [
-                // Only label the sections when there are actually two menus.
-                if (_weekendHasContent)
-                  _buildPreviewSectionHeader(DietSection.weekday.label),
-                ...weekdaySubtitles.map(_buildMealPreviewTile),
-                if (_weekendHasContent) ...[
-                  _buildPreviewSectionHeader(DietSection.weekend.label),
-                  ...weekendSubtitles.map(_buildMealPreviewTile),
-                ],
-              ],
+              child: DietPlanView(
+                weekday: _weekdayMenu,
+                weekend: _weekendMenu,
+                goals: _goals,
+                onRecipeTap: _showRecipeLinkInfo,
+                emptyMessage: 'Bu dosyadan öğün içeriği çıkarılamadı.',
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  /// Tells the admin what they are looking at, which file was parsed and which
+  /// package the diet will be attached to.
+  Widget _buildPreviewInfoBar() {
+    final fileName = _localFilePath!.split(RegExp(r'[\\/]')).last;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.phone_iphone, size: 18, color: Colors.blue.shade700),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Kullanıcıya görünecek hâli',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Öğüne dokunarak içeriğini kontrol edebilirsiniz.',
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _selectedSubscription == null
+                ? fileName
+                : '$fileName  •  ${_selectedSubscription!.packageName}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The recipe phrase is a live link on the user's plan; in the preview the
+  /// PDF is not uploaded yet, so tapping it explains what will happen instead.
+  Future<void> _showRecipeLinkInfo() async {
+    await DialogUtils.openInfo(
+      context,
+      title: 'Tarif Bağlantısı',
+      message: 'Kullanıcı bu bağlantıya dokunduğunda eklediğiniz tarif '
+          'PDF\'i açılır.',
     );
   }
 
@@ -395,69 +463,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     );
   }
 
-  /// Section divider used in the preview to separate the weekday and weekend
-  /// menus (shown only when a weekend menu was detected).
-  Widget _buildPreviewSectionHeader(String label) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-      child: Row(
-        children: [
-          const Expanded(child: Divider()),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.blue.shade700,
-              ),
-            ),
-          ),
-          const Expanded(child: Divider()),
-        ],
-      ),
-    );
-  }
-
-  /// Renders a single meal (name + time + content) in the parse preview.
-  Widget _buildMealPreviewTile(Map<String, dynamic> subtitle) {
-    final content = subtitle['content'] as List;
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${subtitle['name']} \t ${subtitle['time']}',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          const SizedBox(height: 8.0),
-          if (content.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Text(
-                'İçerik bulunmamaktadır',
-                style: TextStyle(
-                  color: Colors.grey[500],
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children:
-                    MealFormatter.formatMealContentWithOptions(content),
-              ),
-            ),
-          const SizedBox(height: 16.0),
-        ],
-      ),
-    );
-  }
-
   /// 3) Actions once we have preview: "Vazgeç" or "Onayla"
   List<Widget> _buildParsedButtons() {
     return [
@@ -468,9 +473,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
       _isUploading
           ? const CircularProgressIndicator()
           : ElevatedButton(
-              onPressed: _selectedSubscription == null 
-                  ? null // Disable if no subscription selected
-                  : _uploadContentToFirestore,
+              onPressed: _uploadContentToFirestore,
               child: const Text('Onayla'),
             ),
     ];
@@ -486,9 +489,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       await Provider.of<SpecialLinesProvider>(context, listen: false)
           .fetchSpecialLines();
     } catch (e) {
-      log.warn(
-          'Could not load admin special lines, falling back to built-ins only: {}',
-          [e]);
     }
 
     // Clear any old parse data (rebuild both menus from scratch).
@@ -497,13 +497,15 @@ class _AddDietDialogState extends State<AddDietDialog> {
     for (final subtitle in [...weekdaySubtitles, ...weekendSubtitles]) {
       subtitle['time'] = '';
     }
-    _hasWeekend = false;
     _localFilePath = null;
     _hasParsedPreview = false;
     // Reset any previously detected/attached recipe.
     _hasRecipeMarker = false;
     _recipePdfBytes = null;
     _recipePdfName = null;
+    _sourceFileName = null;
+    _waterGoal = null;
+    _sportGoal = null;
 
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -515,13 +517,23 @@ class _AddDietDialogState extends State<AddDietDialog> {
       try {
         Uint8List? fileBytes = result.files.single.bytes;
         String fileName = result.files.single.name;
+        if (result.files.single.size > kMaxUploadBytes) {
+          if (mounted) {
+            await DialogUtils.openError(
+              context,
+              title: 'Hata',
+              message:
+                  'Seçilen dosya çok büyük (en fazla $kMaxUploadSizeLabel).',
+            );
+          }
+          return;
+        }
+        _sourceFileName = fileName;
         // handleFile is from your file_handler.dart
         if (fileBytes != null) {
           await handleFile(
               fileBytes, fileName, _onFileProcessed, _onFileProcessingError);
         } else {
-          log.warn(
-              'fileBytes is null. cannot continue with handleFile method.');
           if(mounted) {
             DialogUtils.openError(context,
               title: 'Hata',
@@ -533,7 +545,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
         _onFileProcessingError(e.toString());
       }
     } else {
-      log.info('File selection canceled.');
       if (mounted) {
         await _showSnackbar('Dosya seçimi iptal edildi.');
       }
@@ -549,11 +560,20 @@ class _AddDietDialogState extends State<AddDietDialog> {
     _extractSubtitles(text);
     // Detect the "*tarifi ektedir" reference so the admin can attach a recipe.
     _hasRecipeMarker = _detectRecipeMarker();
-    log.info('Recipe marker detected in parsed diet: {}', [_hasRecipeMarker]);
     // Show the preview
     setState(() {
+      _rebuildPreviewMenus();
       _hasParsedPreview = true;
     });
+  }
+
+  /// Converts the freshly parsed meal lists into the same [DietMenu] shape the
+  /// user's plan is rendered from, so the preview and "Planım" stay identical.
+  void _rebuildPreviewMenus() {
+    _weekdayMenu = DietMenu.fromSubtitles(_buildSubtitlesMap(weekdaySubtitles));
+    _weekendMenu = _weekendHasContent
+        ? DietMenu.fromSubtitles(_buildSubtitlesMap(weekendSubtitles))
+        : const DietMenu.empty();
   }
 
   /// Scans the parsed weekday + weekend menus for the "*tarifi ektedir"
@@ -583,7 +603,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       withData: true,
     );
     if (result == null) {
-      log.debug('Recipe PDF selection canceled.');
       return;
     }
 
@@ -591,7 +610,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     // Reject pathologically large PDFs up-front (slow / risk of crashing the
     // app on Windows desktop) instead of holding them in memory.
     if (file.size > kMaxUploadBytes) {
-      log.warn('Recipe PDF too large: {} ({} bytes)', [file.name, file.size]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -603,7 +621,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     }
     final bytes = file.bytes;
     if (bytes == null) {
-      log.warn('Recipe PDF bytes are null.');
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -618,11 +635,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
       _recipePdfBytes = bytes;
       _recipePdfName = file.name;
     });
-    log.info('Recipe PDF selected: {}', [file.name]);
   }
 
   void _onFileProcessingError(String error) {
-    log.err('Error processing file: {}', [error]);
     if (!mounted) return;
     DialogUtils.openError(
       context,
@@ -658,86 +673,11 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   /// EXACT logic from your FileHandlerPage's _extractSubtitles
   void _extractSubtitles(String text) {
-    log.info('text={}', [text]);
-
     final lines = text
         .split(RegExp(r'\r\n|\r|\n'))
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .toList();
-
-    // ----------------------------------------------------------------------
-    // TEMP DIAGNOSTIC (remove after debugging). For every parsed line dumps:
-    //   * exact characters with whitespace made visible,
-    //   * raw codeUnits,
-    //   * whether it is detected as a meal header (and which meal), and
-    //   * what SpecialLinesRegistry.detect() returns (marker + content).
-    //   » = TAB(0x09)  · = SPACE(0x20)  ⍽ = NBSP(0xA0)  ∅ = ZWSP(0x200B)
-    //   \xNN = any other control char (shown by hex code)
-    String visualize(String s) {
-      final sb = StringBuffer();
-      for (final r in s.runes) {
-        switch (r) {
-          case 0x09:
-            sb.write('»');
-            break;
-          case 0x20:
-            sb.write('·');
-            break;
-          case 0xA0:
-            sb.write('⍽');
-            break;
-          case 0x200B:
-            sb.write('∅');
-            break;
-          default:
-            if (r < 0x20) {
-              sb.write('\\x${r.toRadixString(16).padLeft(2, '0')}');
-            } else {
-              sb.writeCharCode(r);
-            }
-        }
-      }
-      return sb.toString();
-    }
-
-    String mealHit(String dl) {
-      final low = dl.toLowerCase();
-      if (_containsMealWord(low, 'sabah', atStart: true) ||
-          _containsMealWord(low, 'kahvaltı', atStart: true)) return 'SABAH';
-      if (_containsMealWord(low, 'öğle', atStart: true)) return 'ÖĞLE';
-      if (_containsMealWord(low, 'akşam', atStart: true)) return 'AKŞAM';
-      if (_containsMealWord(low, 'ara öğün 1', atStart: true)) {
-        return 'ARA ÖĞÜN 1';
-      }
-      if (_containsMealWord(low, 'ara öğün 2', atStart: true)) {
-        return 'ARA ÖĞÜN 2';
-      }
-      if (_containsMealWord(low, 'ara öğün 3', atStart: true)) {
-        return 'ARA ÖĞÜN 3';
-      }
-      if (_containsMealWord(low, 'ara', atStart: true) &&
-          !_containsMealWord(low, 'öğün')) return 'ARA(bare)';
-      return '-';
-    }
-
-    log.info('[DIET-DIAG] Special markers loaded: {}',
-        [SpecialLinesRegistry.all.map((c) => c.toTemplate()).join(' | ')]);
-    for (int d = 0; d < lines.length; d++) {
-      final dl = lines[d];
-      final match = SpecialLinesRegistry.detect(dl);
-      log.info(
-          '[DIET-DIAG] LINE[{}] meal={} text="{}" | detect={} | codeUnits={}', [
-        d,
-        mealHit(dl),
-        visualize(dl),
-        match == null
-            ? 'NONE'
-            : 'marker="${match.markerLabel}" after="${visualize(match.contentAfter)}"',
-        dl.codeUnits,
-      ]);
-    }
-    // -------------------------- END TEMP DIAGNOSTIC --------------------------
 
     // Two parallel meal lists — one for the weekday (Hafta İçi) menu and one
     // for the weekend (Hafta Sonu) menu. Everything parsed before a standalone
@@ -763,14 +703,28 @@ class _AddDietDialogState extends State<AddDietDialog> {
       if (sectionMarker != null) {
         if (sectionMarker == DietSection.weekend) {
           mealMatchers = weekendMatchers;
-          _hasWeekend = true;
-          log.info('Switched to WEEKEND (Hafta Sonu) menu at line {}', [i]);
         } else {
           mealMatchers = weekdayMatchers;
-          log.info('Switched to WEEKDAY (Hafta İçi) menu at line {}', [i]);
         }
         currentSubtitle = null;
         mealSequence = 0;
+        continue;
+      }
+
+      // "Su Hedefi: ..." / "Spor Hedefi: ..." belong to the whole diet, not to
+      // a meal: capture them verbatim and keep them out of the meal content.
+      // Bir satır iki hedefi birden ("Su Hedefi: ...Spor Hedefi: ...") ve
+      // tekrarlanmış hâlde taşıyabildiği için satır parçalara ayrılır; her
+      // hedefin ilk parçası saklanır, tekrarları yok sayılır.
+      final goals = extractDietGoals(line);
+      if (goals.isNotEmpty) {
+        for (final goal in goals) {
+          if (goal.type == DietGoalType.water) {
+            _waterGoal ??= goal.line;
+          } else {
+            _sportGoal ??= goal.line;
+          }
+        }
         continue;
       }
 
@@ -834,7 +788,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       }
 
       if (foundSubtitle.isNotEmpty) {
-        log.info('Found subtitle: {}', [foundSubtitle['name']]);
         currentSubtitle = foundSubtitle;
 
         // A meal-header line leads with the meal name and its time, e.g.
@@ -852,8 +805,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
           timeStr = timeStr.replaceAll('.', ':');
           currentSubtitle['time'] = timeStr;
           contentSearchStart = timeMatch.end;
-          log.info('Extracted time for subtitle {}: {}',
-              [currentSubtitle['name'], currentSubtitle['time']]);
         } else {
           // If no time found, try to extract just numbers that might represent time
           final numberMatch = RegExp(r'(\d{1,2})').firstMatch(line);
@@ -861,8 +812,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
             final hour = int.tryParse(numberMatch.group(0)!);
             if (hour != null && hour >= 0 && hour <= 23) {
               currentSubtitle['time'] = '$hour:00';
-              log.info('Extracted hour for subtitle {}: {}',
-                  [currentSubtitle['name'], currentSubtitle['time']]);
             }
           }
         }
@@ -873,33 +822,14 @@ class _AddDietDialogState extends State<AddDietDialog> {
         if (separatorIdx != -1) {
           final inlineContent = line.substring(separatorIdx + 1).trim();
           if (inlineContent.isNotEmpty) {
-            log.info('Adding inline header content to subtitle {}: {}',
-                [currentSubtitle['name'], inlineContent]);
             _addContentLine(currentSubtitle, inlineContent);
           }
         }
       } else if (currentSubtitle != null) {
         // If we have an active subtitle, treat this line as content
-        log.info('Adding content to subtitle {}: {}',
-            [currentSubtitle['name'], line]);
         _addContentLine(currentSubtitle, line);
       }
     }
-
-    // Check if we found any content across either menu
-    bool foundAnyContent = false;
-    for (var subtitle in [...weekdaySubtitles, ...weekendSubtitles]) {
-      if ((subtitle['content'] as List).isNotEmpty) {
-        foundAnyContent = true;
-        break;
-      }
-    }
-
-    if (!foundAnyContent) {
-      log.warn('No content found in parsed document');
-    }
-    log.info('Parsed weekday+weekend menus. hasWeekend={}, weekendHasContent={}',
-        [_hasWeekend, _weekendHasContent]);
   }
 
   /// Adds a single food line to [currentSubtitle]'s content.
@@ -962,12 +892,10 @@ class _AddDietDialogState extends State<AddDietDialog> {
           }
         }
       } catch (e) {
-        log.warn('Error finding enum for meal: {} - {}', [mealName, e]);
       }
 
       // If we still don't have an enum key, skip this entry
       if (enumKey.isEmpty) {
-        log.warn('Could not find enum key for meal: {}', [mealName]);
         continue;
       }
 
@@ -993,11 +921,27 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   /// Modified to use DietProvider instead of direct Firestore operations
   Future<void> _uploadContentToFirestore() async {
-    if (_selectedSubscription == null) {
+    // Nothing usable came out of the document: stop rather than replacing the
+    // user's plan with an empty diet.
+    if (!_hasAnyParsedContent) {
       await DialogUtils.openError(
         context,
-        title: 'Uyarı',
-        message: 'Lütfen bir paket seçiniz.',
+        title: kNoContentTitle,
+        message: kNoContentMessage,
+      );
+      return;
+    }
+
+    // A meal without a time would be shown as 00:00 on the user's plan, so the
+    // import stops and names the meals that need a time in the document.
+    final List<String> mealsWithoutTime = _mealsWithoutTime();
+    if (mealsWithoutTime.isNotEmpty) {
+      final String missingList =
+          mealsWithoutTime.map((meal) => '•  $meal').join('\n');
+      await DialogUtils.openError(
+        context,
+        title: kMissingTimeTitle,
+        message: '$kMissingTimeIntro\n\n$missingList\n\n$kMissingTimeHint',
       );
       return;
     }
@@ -1047,8 +991,22 @@ class _AddDietDialogState extends State<AddDietDialog> {
           recipeUrl = info['url'];
           recipePath = info['path'];
           recipeName = info['name'];
-        } else {
-          log.warn('Recipe PDF upload failed; diet will be saved without it.');
+        }
+      }
+
+      String? sourceUrl;
+      String? sourcePath;
+      String? sourceName;
+      if ((_localFilePath ?? '').isNotEmpty) {
+        final info = await dietProvider.uploadSourceFile(
+          userId: widget.userId,
+          fileName: _sourceFileName ?? 'diyet.docx',
+          filePath: _localFilePath,
+        );
+        if (info != null) {
+          sourceUrl = info['url'];
+          sourcePath = info['path'];
+          sourceName = info['name'];
         }
       }
 
@@ -1056,11 +1014,21 @@ class _AddDietDialogState extends State<AddDietDialog> {
         userId: widget.userId,
         subtitles: subtitlesMap,
         weekendSubtitles: weekendMap,
-        subscriptionId: _selectedSubscription!.subscriptionId,
+        subscriptionId: _selectedSubscription?.subscriptionId,
         recipePdfUrl: recipeUrl,
         recipePdfPath: recipePath,
         recipePdfName: recipeName,
+        sourceFileUrl: sourceUrl,
+        sourceFilePath: sourcePath,
+        sourceFileName: sourceName,
+        waterGoal: _waterGoal,
+        sportGoal: _sportGoal,
       );
+
+      if (docId == null) {
+        await dietProvider.deleteStorageFile(recipePath);
+        await dietProvider.deleteStorageFile(sourcePath);
+      }
 
       // Check if widget is still mounted before updating state
       if (!mounted) return;
@@ -1070,7 +1038,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
       });
 
       if (docId != null) {
-        log.info('Diet list uploaded with ID: {}', [docId]);
         if (!mounted) return;
         await DialogUtils.openInfo(
           context,
@@ -1095,7 +1062,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
         _isUploading = false;
       });
       
-      log.err('Error uploading diet list: {}', [e.toString()]);
       await DialogUtils.openError(
         context,
         title: 'Hata',

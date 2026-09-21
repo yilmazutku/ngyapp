@@ -98,6 +98,23 @@ class AppointmentModel {
   /// visits never do — see [AppointmentType.countsTowardMeetings].
   bool get countsTowardMeetings => appointmentType.countsTowardMeetings;
 
+  /// Whether the appointment was postponed at some point, whatever its status
+  /// is now. The postponement record is only cleared when the appointment goes
+  /// back to "Planlandı", so it outlives the "Ertelendi" status. Either field
+  /// alone is enough: the new date is optional when the postponement is
+  /// recorded, and appointments predating [postponedBy] carry only the date.
+  bool get wasPostponed => postponedDate != null || postponedBy != null;
+
+  /// Randevunun listelerde gösterilecek tarihi: ertelenmiş bir randevuda
+  /// ertelendiği **yeni** tarih, diğer her durumda planlanan tarih.
+  ///
+  /// Yeni tarih seçilmeden de erteleme kaydedilebildiği için ("Ertelendi" ama
+  /// [postponedDate] boş) o durumda planlanan tarih kullanılır.
+  DateTime get effectiveDateTime =>
+      (status == AppointmentStatus.postponed && postponedDate != null)
+          ? postponedDate!
+          : appointmentDateTime;
+
   @override
   String toString() {
     return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, postponedDate: $postponedDate, postponedBy: $postponedBy, duration: $durationMinutes}';

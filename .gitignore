@@ -80,3 +80,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Android Gradle çıktısı (root /build dışında kalıyor)
+android/build/

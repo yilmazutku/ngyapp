@@ -13,7 +13,11 @@ class ChatImagePreview extends StatelessWidget {
   final double borderRadius;
   final BoxFit fit;
 
-  // Optional: request smaller decoded image to save memory/bandwidth
+  // Optional: request smaller decoded image to save memory/bandwidth.
+  //
+  // UYARI: ikisi birden verilirse çözücü görseli tam o ölçülere sıkıştırır ve
+  // en-boy oranı bozulur. Küçük görsel için normalde yalnızca [cacheWidth]
+  // verilir; yükseklik orandan hesaplanır.
   final int? cacheWidth;
   final int? cacheHeight;
 
@@ -32,11 +36,14 @@ class ChatImagePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
+    // Ölçü verilmediyse ekrandan türetilir. MediaQuery yalnızca gerçekten
+    // gerekince okunur: ölçüsü verilmiş görseller ekran değişimlerinde boşuna
+    // yeniden çizilmesin.
+    final Size? screen =
+        (width == null || height == null) ? MediaQuery.sizeOf(context) : null;
 
-    final imageWidth = width ?? screenWidth * 0.55;
-    final imageHeight = height ?? screenHeight * 0.25;
+    final double imageWidth = width ?? screen!.width * 0.55;
+    final double imageHeight = height ?? screen!.height * 0.25;
 
     return GestureDetector(
       onTap: onTap,

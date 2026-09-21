@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/logger.dart';
 import '../models/meas_model.dart';
 import '../providers/meas_provider.dart';
 import '../utils/dialog_utils.dart';
@@ -24,7 +23,6 @@ class EditMeasurementDialog extends StatefulWidget {
 }
 
 class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
-  final Logger logger = Logger.forClass(EditMeasurementDialog);
   final _formKey = GlobalKey<FormState>();
   bool _isSaving = false;
 
@@ -169,7 +167,6 @@ class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
 
       widget.onMeasurementUpdated(); // parent refresh
     } catch (e) {
-      logger.err('Error updating measurement: {}', [e]);
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -185,7 +182,6 @@ class _EditMeasurementDialogState extends State<EditMeasurementDialog> {
   @override
   Widget build(BuildContext context) {
     final dateLabel = DateFormatter.formatNumericDate(_dateOnly);
-    logger.info('EditMeasDialog build.');
     return AlertDialog(
       title: const Text('Ölçüm Düzenle'),
       content: SingleChildScrollView(

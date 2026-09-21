@@ -8,15 +8,22 @@ class SummaryCell {
   final String text;
   final bool isError;
 
-  const SummaryCell(this.text) : isError = false;
+  /// Seans hücrelerinde randevunun "Yakıldı" (burned) olup olmadığı. Tablo
+  /// yakılmış ve yapılmış seansları ayrı arkaplan renkleriyle gösterir; diğer
+  /// sütunlarda bu bayrak her zaman false'tur.
+  final bool isBurned;
+
+  const SummaryCell(this.text, {this.isBurned = false}) : isError = false;
 
   const SummaryCell.empty()
       : text = '',
-        isError = false;
+        isError = false,
+        isBurned = false;
 
   const SummaryCell.error()
       : text = 'Hata',
-        isError = true;
+        isError = true,
+        isBurned = false;
 
   bool get isEmpty => !isError && text.isEmpty;
 }
@@ -27,9 +34,17 @@ class CustomerSummaryRow {
   /// Max number of session (seans) columns displayed per the requirement.
   static const int maxSeans = 12;
 
+  /// Max number of "erteleme hakkı kullanım tarihi" columns displayed.
+  static const int maxPostponementUses = 3;
+
   final String userId;
   final SummaryCell dosyaNo;
   final String fullName;
+
+  /// Danışanın e-postası. Tabloda bir sütunu yoktur; sayfanın arama kutusu
+  /// danışanı ad soyad ve dosya numarasının yanında e-postasıyla da bulsun
+  /// diye satırda taşınır.
+  final String email;
 
   /// Payment shown for the row's subscription: the latest completed one, or the
   /// next planned one when nothing has been collected yet (see
@@ -59,19 +74,30 @@ class CustomerSummaryRow {
   /// Always [maxSeans] entries; unused trailing slots are empty cells.
   final List<SummaryCell> seans;
 
-  /// Dates of postponed ("Ertelendi") appointments for the active subscription.
-  /// Variable length; the table pads shorter rows to a common width.
-  final List<SummaryCell> postponedDates;
+  /// Number of meetings the active package actually carries
+  /// (SubscriptionModel.totalMeetings). Seans slots at or beyond this index can
+  /// never be filled by this package, so the table greys (blacks) them out.
+  final int totalMeetings;
 
   /// Remaining postponement rights, based on user-originated postponements only
   /// (admin postponements do not reduce it). See
   /// SubscriptionModel.remainingPostponements.
   final SummaryCell remainingPostponements;
 
+  /// Dates on which the customer spent a postponement right: the **originally
+  /// planned** date of each user-originated postponed appointment (not the new
+  /// date it was moved to — that one shows up in [seans] once the appointment
+  /// takes place). Only user-originated postponements consume a right, so
+  /// admin-originated ones are not listed, and an appointment keeps its place
+  /// here after it is completed, because the right stays spent. Always
+  /// [maxPostponementUses] entries; unused trailing slots are empty cells.
+  final List<SummaryCell> postponementUseDates;
+
   const CustomerSummaryRow({
     required this.userId,
     required this.dosyaNo,
     required this.fullName,
+    this.email = '',
     required this.paymentDate,
     required this.paymentAmount,
     required this.paymentType,
@@ -81,7 +107,8 @@ class CustomerSummaryRow {
     required this.notes,
     this.freezeDate = const SummaryCell.empty(),
     required this.seans,
-    required this.postponedDates,
+    this.totalMeetings = maxSeans,
     required this.remainingPostponements,
+    required this.postponementUseDates,
   });
 }

@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:ngy_app/tabs/appointments_tab.dart';
 import '../dialogs/edit_sub_dialog.dart';
 import '../dialogs/add_sub_dialog.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
 import '../models/appointment_model.dart';
 import '../models/filter_params.dart';
@@ -15,7 +14,6 @@ import '../utils/dialog_utils.dart';
 import 'basetab.dart';
 import 'filterable_tab.dart';
 import '../widgets/labeled_action_button.dart';
-final Logger logger = Logger.forClass(SubscriptionsTab);
 class SubscriptionsTab extends BaseTab<SubProvider> {
   const SubscriptionsTab({super.key, required super.userId})
       : super(allDataLabel: 'Tüm Paketler', subscriptionDataLabel: 'Aktif Paketler');
@@ -51,6 +49,19 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   
   // Toggle for appointment status coloring (true = use status colors, false = use neutral teal)
   final bool _isApptStatusColorful = true;
+
+  /// "Randevu Tarihleri" şeridinde gösterilen randevu durumları. Ertelenenler
+  /// de listelenir: kartta paketin bütün randevuları görünsün.
+  static const Set<AppointmentStatus> _visibleApptStatuses = {
+    AppointmentStatus.completed,
+    AppointmentStatus.scheduled,
+    AppointmentStatus.burned,
+    AppointmentStatus.postponed,
+  };
+
+  /// Şeritte en fazla kaç randevu kutucuğu gösterilir; gerisi "Tümünü Göster"
+  /// ile açılır.
+  static const int _maxVisibleAppts = 7;
 
   // Cache formatters & static maps
   static final DateFormat _df = DateFormat('d MMMM y', 'tr_TR');
@@ -123,14 +134,15 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
           showAllAppointments: false,
         );
         
-        // Sort appointments by date
-        appointments.sort((a, b) => a.appointmentDateTime.compareTo(b.appointmentDateTime));
+        // Sort appointments by date. Ertelenen randevuda gösterilen tarih
+        // ertelendiği yeni tarih olduğu için sıralama da ona göre yapılır;
+        // yoksa şeritteki tarihler karışık görünür.
+        appointments.sort((a, b) => a.effectiveDateTime.compareTo(b.effectiveDateTime));
         
         if (mounted) {
           _subscriptionAppointments[cacheKey] = appointments;
         }
       } catch (e) {
-        debugPrint('Error fetching appointments for subscription ${sub.subscriptionId}: $e');
         if (mounted) {
           _subscriptionAppointments[cacheKey] = [];
         }
@@ -525,11 +537,11 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                 border: Border.all(color: Colors.red.shade200),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 16),
+                    Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 18),
                     const SizedBox(width: 4),
                     Text(
                       'Erteleme hakkı kalmadı',
-                      style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12),
+                      style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                   ]),
                 ),
@@ -538,11 +550,27 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
 
           const SizedBox(height: 8),
           Row(children: [
-            const Text('Paket Tipi: ', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Paket Süresi: ', style: TextStyle(fontWeight: FontWeight.bold)),
             Text(s.packageType?.label ?? 'Belirtilmemiş'),
           ]),
           const SizedBox(height: 8),
-          Text('Başlangıç: ${_df.format(s.startDate)}', style: const TextStyle(fontSize: 14)),
+          Row(children: [
+            const Text('Başlangıç: ', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(_df.format(s.startDate)),
+          ]),
+          const SizedBox(height: 4),
+          Row(children: [
+            const Text('Erteleme: ', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              '${s.postponementsUsed}/${s.allowedPostponements}',
+              style: noPostponeLeft && s.allowedPostponements > 0
+                  ? TextStyle(
+                      color: Colors.red.shade700,
+                      fontWeight: FontWeight.bold,
+                    )
+                  : null,
+            ),
+          ]),
 
           // Freeze date shown for frozen packages.
           if (s.status == SubActiveStatus.frozen) ...[
@@ -578,15 +606,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             ),
 
           const SizedBox(height: 8),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Kalan: ${s.remainingMeetings}/${s.totalMeetings} görüşme',style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            Text(
-              'Erteleme: ${s.postponementsUsed}/${s.allowedPostponements}',
-              style: noPostponeLeft && s.allowedPostponements > 0
-                  ? TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)
-                  : null,
-            ),
-          ]),
+          Text('Kalan: ${s.remainingMeetings}/${s.totalMeetings} görüşme',style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           
           // Payment information (hidden for free weight-tracking packages)
           if (showPayment) ...[
@@ -642,15 +662,17 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
             const Divider(height: 1),
             const SizedBox(height: 8),
             
-            // Filter to only show completed, scheduled (planned), and burned appointments
+            // Şeritte gösterilen randevular (bkz. [_visibleApptStatuses]).
             ...() {
               final visibleAppointments = appointments
-                  .where((a) => a.status == AppointmentStatus.completed || a.status == AppointmentStatus.scheduled || a.status == AppointmentStatus.burned)
+                  .where((a) => _visibleApptStatuses.contains(a.status))
                   .toList();
               final hasOtherStatuses = appointments.any(
-                (a) => a.status != AppointmentStatus.completed && a.status != AppointmentStatus.scheduled && a.status != AppointmentStatus.burned,
+                (a) => !_visibleApptStatuses.contains(a.status),
               );
-              final showMoreButton = visibleAppointments.length > 5 || hasOtherStatuses;
+              final showMoreButton =
+                  visibleAppointments.length > _maxVisibleAppts ||
+                      hasOtherStatuses;
               
               return [
                 // Appointment dates header
@@ -658,13 +680,16 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                 
                 const SizedBox(height: 4),
                 
-                // Appointment dates list - show only first 5 of completed/scheduled
+                // Appointment dates list - ilk [_maxVisibleAppts] randevu
                 if (visibleAppointments.isNotEmpty)
                   Wrap(
                     spacing: 8,
                     runSpacing: 4,
-                    children: visibleAppointments.take(7).map((appointment) {
-                      // Use status color if _isApptStatusColorful is true, otherwise use teal
+                    children: visibleAppointments
+                        .take(_maxVisibleAppts)
+                        .map((appointment) {
+                      // Use status color if _isApptStatusColorful is true, otherwise use teal.
+                      // Ertelenen randevu mor görünür (AppointmentStatus.postponed).
                       final Color statusColor = _isApptStatusColorful 
                           ? appointment.status.getColor() 
                           : Colors.teal.shade700;
@@ -686,7 +711,9 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                             Icon(chipIcon, size: 14, color: statusColor),
                             const SizedBox(width: 4),
                             Text(
-                              _df.format(appointment.appointmentDateTime),
+                              // Ertelenen randevuda ertelendiği yeni tarih
+                              // gösterilir (bkz. effectiveDateTime).
+                              _df.format(appointment.effectiveDateTime),
                               style: TextStyle(
                                 color: statusColor,
                                 fontSize: 12,
@@ -846,7 +873,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '${_df.format(appointment.appointmentDateTime)} - ${DateFormat('HH:mm').format(appointment.appointmentDateTime)}',
+                            '${_df.format(appointment.effectiveDateTime)} - ${DateFormat('HH:mm').format(appointment.effectiveDateTime)}',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               color: statusColor,

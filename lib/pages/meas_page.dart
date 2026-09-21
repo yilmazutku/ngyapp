@@ -629,6 +629,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
               points: points,
               color: metric.color,
               unit: metric.unit,
+              title: metric.label,
             ),
             const SizedBox(height: 8),
             Row(

@@ -1,10 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import '../models/logger.dart';
 import '../utils/storage_upload.dart';
-
-final Logger logger = Logger.forClass(TestProvider);
 
 /// Manages Test attachments (PDFs or images)
 /// Storage:  users/{userId}/tests/test_<ts>.<ext>
@@ -56,10 +53,8 @@ class TestProvider extends ChangeNotifier {
         'ext': ext,
       });
 
-      logger.info('Test attachment uploaded. userId={}, docId={}, ext={}', [userId, docId, ext]);
       notifyListeners();
     } catch (e) {
-      logger.err('Error uploading Test attachment for userId={}: {}', [userId, e.toString()]);
       rethrow;
     }
   }
@@ -88,7 +83,6 @@ class TestProvider extends ChangeNotifier {
         };
       }).toList();
     } catch (e) {
-      logger.err('fetchTestAttachmentMetadata err for userId={}: {}', [userId, e.toString()]);
       return [];
     }
   }
@@ -112,10 +106,8 @@ class TestProvider extends ChangeNotifier {
 
       await docRef.delete();
 
-      logger.info('Test attachment deleted. userId={}, docId={}', [userId, docId]);
       notifyListeners();
     } catch (e) {
-      logger.err('deleteTestAttachment err. userId={}, docId={}, e={}', [userId, docId, e.toString()]);
       rethrow;
     }
   }

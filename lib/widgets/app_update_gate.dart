@@ -4,7 +4,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../constants/app_constants.dart';
 import '../models/app_update_info.dart';
-import '../models/logger.dart';
 import '../providers/app_update_provider.dart';
 import '../utils/dialog_utils.dart';
 
@@ -32,8 +31,6 @@ class AppUpdateGate extends StatefulWidget {
 
 class _AppUpdateGateState extends State<AppUpdateGate>
     with WidgetsBindingObserver {
-  final Logger _logger = Logger.forClass(AppUpdateGate);
-
   /// Set while a mandatory update is pending; painted over [widget.child].
   AppUpdateInfo? _blockingUpdate;
 
@@ -135,8 +132,8 @@ class _AppUpdateGateState extends State<AppUpdateGate>
         if (await launchUrl(uri, mode: LaunchMode.externalApplication)) {
           return true;
         }
-      } catch (e) {
-        _logger.warn('Could not open store address {}: {}', [uri, e]);
+      } catch (_) {
+        // This address is unusable on this device; fall through to the next.
       }
     }
     return false;

@@ -4,12 +4,10 @@ import 'package:intl/intl.dart';
 
 import '../models/appointment_model.dart';
 import '../models/customer_summary_row.dart';
-import '../models/logger.dart';
 import '../models/payment_model.dart';
 import '../models/subs_model.dart';
 import '../models/user_model.dart';
-
-final Logger logger = Logger.forClass(CustomerSummaryProvider);
+import '../utils/search_text.dart';
 
 /// Aggregates, for every non-admin customer that owns a subscription with a
 /// given status (e.g. Aktif/Haftalık, Aktif/Kilo Takip, Donduruldu), the data
@@ -44,22 +42,16 @@ class CustomerSummaryProvider extends ChangeNotifier {
           .map((doc) => UserModel.fromDocument(doc))
           .toList();
 
-      logger.info('Building summary for {} customer(s)', [customers.length]);
-
       // 2) Resolve each customer in parallel; null => no matching subscription.
       final rows = await Future.wait(
         customers.map((c) => _buildRowForCustomer(c, status)),
       );
 
       final result = rows.whereType<CustomerSummaryRow>().toList()
-        ..sort((a, b) =>
-            a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()));
+        ..sort((a, b) => compareSearchText(a.fullName, b.fullName));
 
-      logger.info('Summary built: {} customer(s) with {} subscription',
-          [result.length, status.label]);
       return result;
     } catch (e) {
-      logger.err('Error building customer summaries: {}', [e]);
       rethrow;
     }
   }
@@ -69,10 +61,10 @@ class CustomerSummaryProvider extends ChangeNotifier {
   ///
   /// İş kuralı: bir danışanın aynı anda yalnızca **bir** aktif paketi olur.
   /// Sayfanın mantığı bunun üzerine kurulur: önce o tek paket bulunur, satırın
-  /// geri kalanı yalnızca ondan türetilir — ödeme, seans, ertelenen randevular,
-  /// kalan erteleme hakkı, dondurulma tarihi. Danışana ait olup **bu pakete ait
-  /// olmayan** hiçbir veri satıra giremez; paketten bağımsız tek alanlar
-  /// danışanın kimliğidir (dosya no, ad-soyad).
+  /// geri kalanı yalnızca ondan türetilir — ödeme, seans, kalan erteleme
+  /// hakkı, erteleme hakkı kullanım tarihleri, dondurulma tarihi. Danışana ait
+  /// olup **bu pakete ait olmayan** hiçbir veri satıra giremez; paketten
+  /// bağımsız tek alanlar danışanın kimliğidir (dosya no, ad-soyad).
   ///
   /// Per-section failures degrade to "Hata" cells rather than dropping the
   /// whole customer.
@@ -139,6 +131,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
       userId: user.userId,
       dosyaNo: dosyaNo,
       fullName: fullName.isEmpty ? '(İsimsiz)' : fullName,
+      email: user.email,
       paymentDate: payment.date,
       paymentAmount: payment.amount,
       paymentType: payment.type,
@@ -148,8 +141,9 @@ class CustomerSummaryProvider extends ChangeNotifier {
       notes: notes,
       freezeDate: freezeDateCell,
       seans: appts.seans,
-      postponedDates: appts.postponedDates,
+      totalMeetings: activeSub.totalMeetings,
       remainingPostponements: remainingCell,
+      postponementUseDates: appts.postponementUseDates,
     );
   }
 
@@ -157,8 +151,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
   ///
   /// İş kuralı gereği bu sorgu en fazla bir paket döndürmeli
   /// ([SubActiveStatus.isActive] belgesine bakın). Birden fazla çıkıyorsa veri
-  /// bozuktur: durum uyarı olarak loglanır ve sayfanın kararlı kalması için
-  /// başlangıç tarihi en yeni olan paket kullanılır.
+  /// bozuktur: sayfanın kararlı kalması için başlangıç tarihi en yeni olan
+  /// paket kullanılır.
   Future<SubscriptionModel?> _findSubscriptionByStatus(
       String userId, SubActiveStatus status) async {
     try {
@@ -175,34 +169,14 @@ class CustomerSummaryProvider extends ChangeNotifier {
         try {
           subs.add(SubscriptionModel.fromDocument(doc));
         } catch (e) {
-          logger.warn('Skipping malformed subscription {} for user {}: {}',
-              [doc.id, userId, e]);
         }
       }
       if (subs.isEmpty) return null;
 
       subs.sort((a, b) => b.startDate.compareTo(a.startDate));
 
-      if (subs.length > 1) {
-        // Tek aktif paket kuralı bozulmuş: hangi paketlerin çakıştığını yaz ki
-        // veri düzeltilebilsin. Satır en yeni paketle kurulmaya devam eder.
-        logger.warn(
-          'Tek paket kuralı bozuldu: user={} durum={} paket sayısı={} ({}). '
-          'En yenisi kullanılıyor: {}',
-          [
-            userId,
-            status.label,
-            subs.length,
-            subs.map((s) => s.subscriptionId).join(', '),
-            subs.first.subscriptionId,
-          ],
-        );
-      }
-
       return subs.first;
     } catch (e) {
-      logger.err('Error fetching {} subscription for user {}: {}',
-          [status.label, userId, e]);
       return null;
     }
   }
@@ -246,8 +220,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
             planned.add(payment);
           }
         } catch (e) {
-          logger.warn('Skipping malformed payment {} for user {}: {}',
-              [doc.id, userId, e]);
         }
       }
 
@@ -270,8 +242,6 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       return const _PaymentCells.empty();
     } catch (e) {
-      logger.err('Error resolving last payment for user {} sub {}: {}',
-          [userId, subscriptionId, e]);
       return const _PaymentCells.error();
     }
   }
@@ -290,18 +260,29 @@ class CustomerSummaryProvider extends ChangeNotifier {
     );
   }
 
-  /// Resolves both the session (seans) cells and the postponed-appointment
-  /// date cells for the active subscription from a single appointment query.
+  /// Resolves both the session (seans) cells and the postponement-use date
+  /// cells for the active subscription from a single appointment query.
   ///
   /// - Seans: only appointments that actually took place — status "Yapıldı"
-  ///   (completed) or "Yakıldı" (burned) — ordered by [appointmentDateTime];
-  ///   missing dates become "Hata". Always [CustomerSummaryRow.maxSeans]
-  ///   entries. Postponed ("Ertelendi"), still-scheduled and cancelled
-  ///   appointments are intentionally excluded here; a postponed appointment
-  ///   reappears once it is re-marked "Yapıldı" on its new date.
-  /// - Postponed dates: appointments with status "Ertelendi" ordered by
-  ///   [postponedDate]; a postponed appointment with no postponedDate becomes
-  ///   "Hata". Variable length (only the postponed ones).
+  ///   (completed) or "Yakıldı" (burned) — ordered by the date the session was
+  ///   actually held: [postponedDate] when the appointment was postponed,
+  ///   [appointmentDateTime] otherwise. Missing dates become "Hata". Always
+  ///   [CustomerSummaryRow.maxSeans] entries. Postponed ("Ertelendi"),
+  ///   still-scheduled and cancelled appointments are intentionally excluded
+  ///   here; a postponed appointment reappears once it is re-marked "Yapıldı",
+  ///   then under its new date. Burned ones are flagged with
+  ///   [SummaryCell.isBurned] so the table can color them apart from the
+  ///   completed ones.
+  /// - Postponement-use dates: the **originally planned** date
+  ///   ([appointmentDateTime]) of every appointment carrying a user-originated
+  ///   postponement ([PostponeSource.user]) — only those consume a
+  ///   postponement right, so this is when the customer spent one. The status
+  ///   is deliberately not filtered on: the marker survives the appointment
+  ///   being completed, and so does the spent right, so the dates listed here
+  ///   always add up to the package's `postponementsUsed`. The new date the
+  ///   appointment was moved to belongs to the seans columns, not here.
+  ///   Always [CustomerSummaryRow.maxPostponementUses] entries; when more
+  ///   rights were spent, the most recent ones are kept.
   Future<_AppointmentCells> _resolveAppointmentCells(
       String userId, String subscriptionId) async {
     const int max = CustomerSummaryRow.maxSeans;
@@ -312,11 +293,11 @@ class CustomerSummaryProvider extends ChangeNotifier {
           .where('subscriptionId', isEqualTo: subscriptionId)
           .get();
 
-      final seansDates = <DateTime>[];
+      final seansDates = <_SummaryDate>[];
       int seansNullCount = 0;
 
-      final postponedDates = <DateTime>[];
-      int postponedNullCount = 0;
+      final postponementUseDates = <_SummaryDate>[];
+      int postponementUseNullCount = 0;
 
       for (final doc in snap.docs) {
         final data = doc.data();
@@ -330,27 +311,32 @@ class CustomerSummaryProvider extends ChangeNotifier {
         // still-scheduled and cancelled ones are excluded on purpose; a
         // postponed appointment shows up here once it is re-marked "Yapıldı" on
         // its new date.
-        final countsAsSeans = status == AppointmentStatus.completed.label ||
-            status == AppointmentStatus.burned.label;
+        final isBurned = status == AppointmentStatus.burned.label;
+        final countsAsSeans =
+            status == AppointmentStatus.completed.label || isBurned;
         if (countsAsSeans) {
-          final rawDate = data['appointmentDateTime'];
+          // A postponed appointment took place on its new date, so that is the
+          // date the seans box shows.
+          final rawDate = data['postponedDate'] ?? data['appointmentDateTime'];
           if (rawDate is Timestamp) {
-            seansDates.add(rawDate.toDate());
+            seansDates.add(_SummaryDate(rawDate.toDate(), isBurned: isBurned));
           } else {
             // Field expected but missing/null => surface as an error cell.
             seansNullCount++;
           }
         }
 
-        // Collect postponed ("Ertelendi") appointments separately (independent
-        // of the seans filter above).
-        if (status == AppointmentStatus.postponed.label) {
-          final rawPostponed = data['postponedDate'];
-          if (rawPostponed is Timestamp) {
-            postponedDates.add(rawPostponed.toDate());
+        // Collect user-originated postponements separately (independent of the
+        // seans filter above). A postponement right is only spent when the
+        // customer asked for it, and the appointment's originally planned date
+        // is when it was spent. The marker outlives the "Ertelendi" status, so
+        // an appointment that was postponed and later completed still counts.
+        if (data['postponedBy'] == PostponeSource.user.value) {
+          final rawDate = data['appointmentDateTime'];
+          if (rawDate is Timestamp) {
+            postponementUseDates.add(_SummaryDate(rawDate.toDate()));
           } else {
-            // Postponed but the new date is missing => error.
-            postponedNullCount++;
+            postponementUseNullCount++;
           }
         }
       }
@@ -362,28 +348,25 @@ class CustomerSummaryProvider extends ChangeNotifier {
           cap: max,
           padToCap: true,
         ),
-        postponedDates: _buildDateCells(
-          dates: postponedDates,
-          nullCount: postponedNullCount,
-          cap: null,
-          padToCap: false,
+        postponementUseDates: _buildDateCells(
+          dates: postponementUseDates,
+          nullCount: postponementUseNullCount,
+          cap: CustomerSummaryRow.maxPostponementUses,
+          padToCap: true,
         ),
       );
     } catch (e) {
-      logger.err('Error resolving appointments for user {} sub {}: {}',
-          [userId, subscriptionId, e]);
       return _AppointmentCells(
         seans: List<SummaryCell>.filled(max, const SummaryCell.error()),
-        postponedDates: const [SummaryCell.error()],
+        postponementUseDates: List<SummaryCell>.filled(
+            CustomerSummaryRow.maxPostponementUses,
+            const SummaryCell.error()),
       );
     }
   }
 
-  /// Turns sorted dates (+ a count of broken/null dates) into display cells.
-  /// When [cap] is set, keeps the most recent [cap] dates; when [padToCap] is
-  /// true the result is padded with empty cells up to [cap].
-  /// Short meeting-type label for the summary's "Paket Tipi" column:
-  /// Online, Yüzyüze, or Y+O (hybrid = Yüzyüze + Online).
+  /// Short meeting-type label for the summary's "Paket Süresi / Görüşme Türü"
+  /// column: Online, Yüzyüze, or Y+O (hybrid = Yüzyüze + Online).
   String _meetingTypeLabel(SubsMeetingType type) {
     switch (type) {
       case SubsMeetingType.online:
@@ -395,13 +378,16 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
+  /// Turns sorted dates (+ a count of broken/null dates) into display cells.
+  /// When [cap] is set, keeps the most recent [cap] dates; when [padToCap] is
+  /// true the result is padded with empty cells up to [cap].
   List<SummaryCell> _buildDateCells({
-    required List<DateTime> dates,
+    required List<_SummaryDate> dates,
     required int nullCount,
     required int? cap,
     required bool padToCap,
   }) {
-    dates.sort((a, b) => a.compareTo(b));
+    dates.sort((a, b) => a.date.compareTo(b.date));
 
     var trimmed = dates;
     if (cap != null && dates.length > cap) {
@@ -409,7 +395,8 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
 
     final cells = <SummaryCell>[
-      ...trimmed.map((d) => SummaryCell(_dateFormat.format(d))),
+      ...trimmed.map((d) =>
+          SummaryCell(_dateFormat.format(d.date), isBurned: d.isBurned)),
     ];
 
     for (int i = 0; i < nullCount; i++) {
@@ -427,14 +414,25 @@ class CustomerSummaryProvider extends ChangeNotifier {
   }
 }
 
-/// Internal holder for the appointment-derived cells (seans + postponed dates).
+/// Tabloda tarih hücresine dönüşecek tek bir tarih. Seans sütunlarında
+/// [isBurned], randevunun "Yakıldı" olduğunu ve hücrenin farklı bir arkaplan
+/// rengiyle çizileceğini belirtir; diğer sütunlarda her zaman false kalır.
+class _SummaryDate {
+  final DateTime date;
+  final bool isBurned;
+
+  const _SummaryDate(this.date, {this.isBurned = false});
+}
+
+/// Internal holder for the appointment-derived cells (seans + postponement-use
+/// dates).
 class _AppointmentCells {
   final List<SummaryCell> seans;
-  final List<SummaryCell> postponedDates;
+  final List<SummaryCell> postponementUseDates;
 
   const _AppointmentCells({
     required this.seans,
-    required this.postponedDates,
+    required this.postponementUseDates,
   });
 }
 

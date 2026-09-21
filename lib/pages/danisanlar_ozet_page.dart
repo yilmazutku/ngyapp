@@ -2,15 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/customer_summary_row.dart';
-import '../models/logger.dart';
 import '../models/subs_model.dart';
+import '../models/summary_color_config.dart';
 import '../providers/customer_summary_provider.dart';
+import '../providers/summary_colors_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/search_text.dart';
 import 'customer_sum.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/search_field.dart';
+import '../widgets/status_note.dart';
 
-final Logger logger = Logger.forClass(DanisanlarOzetPage);
+/// Sayfanın app bar mavisi. Sayfa içindeki "Yenile" butonu da aynı tonu
+/// kullanır.
+final Color _appBarColor = Colors.blue.shade800;
+
+/// Tahsil edilmemiş ödemelerde tutarın solunda gösterilen işaret. Sayfanın en
+/// üstündeki not da bu işareti açıklar.
+const String _plannedMark = '(P)';
+
+/// Boş bir hücrenin genişliğini tarih hücreleriyle eşitleyen görünmez yer
+/// tutucu: pasif seans kutuları ve erteleme sütunları boşken de daralmaz.
+const String _dateWidthPlaceholder = '00.00.0000';
 
 /// Admin overview: customers grouped by subscription status. The first tab
 /// lists everyone with an *active* subscription; the second lists everyone
@@ -26,30 +40,52 @@ class DanisanlarOzetPage extends StatefulWidget {
 
 class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     with SingleTickerProviderStateMixin {
+  static const String _searchHint =
+      'Danışan ara (dosya no / ad soyad / e-posta)';
+
   late final TabController _tabController;
-  final GlobalKey<_CustomerSummaryTabState> _weeklyKey = GlobalKey();
-  final GlobalKey<_CustomerSummaryTabState> _weightTrackingKey = GlobalKey();
-  final GlobalKey<_CustomerSummaryTabState> _frozenKey = GlobalKey();
+
+  final TextEditingController _searchController = TextEditingController();
+
+  /// Arama kutusundaki sorgu. Sayfada tek bir kutu vardır ve sorgu her üç
+  /// sekmeye birden uygulanır: sekme değiştirince arama korunur.
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadColors());
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  void _refreshCurrent() {
-    final key = switch (_tabController.index) {
-      0 => _weeklyKey,
-      1 => _weightTrackingKey,
-      _ => _frozenKey,
-    };
-    key.currentState?.reload();
+  Color get _completedAppointmentColor =>
+      SummaryColorsRegistry.colorFor(SummaryColorSlot.completedAppointment);
+
+  Color get _burnedAppointmentColor =>
+      SummaryColorsRegistry.colorFor(SummaryColorSlot.burnedAppointment);
+
+  /// Kayıtlı renkleri okur. Sayfa her açıldığında zorlanır ki renkler
+  /// Ayarlar'dan (ya da başka bir cihazdan) değiştirilmişse burada da güncel
+  /// görünsün. Okunamazsa tablo varsayılan renklerle çizilir.
+  ///
+  /// Değerler [SummaryColorsRegistry]'de tutulduğu için burada saklanacak bir
+  /// state yok; setState yalnızca tabloyu yeni renklerle yeniden çizdirir.
+  Future<void> _loadColors() async {
+    if (!mounted) return;
+    final provider = Provider.of<SummaryColorsProvider>(context, listen: false);
+    try {
+      await provider.fetchColors(force: true);
+    } catch (e) {
+    }
+    if (!mounted) return;
+    setState(() {});
   }
 
   @override
@@ -57,15 +93,8 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Danışanlar Özet'),
-        backgroundColor: Colors.blue.shade800,
+        backgroundColor: _appBarColor,
         foregroundColor: Colors.white,
-        actions: [
-          LabeledActionButton(
-            icon: Icons.refresh,
-            label: 'Yenile',
-            onPressed: _refreshCurrent,
-          ),
-        ],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
@@ -79,30 +108,142 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _CustomerSummaryTab(
-            key: _weeklyKey,
-            status: SubActiveStatus.activeWeekly,
-            emptyMessage: 'Aktif/Haftalık paketi olan danışan bulunamadı.',
-          ),
-          _CustomerSummaryTab(
-            key: _weightTrackingKey,
-            status: SubActiveStatus.activeWeightTracking,
-            emptyMessage: 'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
-            // Weight-tracking packages have no payment; hide payment columns.
-            showPayment: false,
-          ),
-          _CustomerSummaryTab(
-            key: _frozenKey,
-            status: SubActiveStatus.frozen,
-            emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
+          _buildTopBar(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _CustomerSummaryTab(
+                  status: SubActiveStatus.activeWeekly,
+                  emptyMessage:
+                      'Aktif/Haftalık paketi olan danışan bulunamadı.',
+                  searchQuery: _searchQuery,
+                  completedAppointmentColor: _completedAppointmentColor,
+                  burnedAppointmentColor: _burnedAppointmentColor,
+                ),
+                _CustomerSummaryTab(
+                  status: SubActiveStatus.activeWeightTracking,
+                  emptyMessage:
+                      'Aktif/Kilo Takip paketi olan danışan bulunamadı.',
+                  searchQuery: _searchQuery,
+                  completedAppointmentColor: _completedAppointmentColor,
+                  burnedAppointmentColor: _burnedAppointmentColor,
+                  // Weight-tracking packages have no payment; hide payment
+                  // columns.
+                  showPayment: false,
+                ),
+                _CustomerSummaryTab(
+                  status: SubActiveStatus.frozen,
+                  emptyMessage: 'Dondurulmuş paketi olan danışan bulunamadı.',
+                  searchQuery: _searchQuery,
+                  completedAppointmentColor: _completedAppointmentColor,
+                  burnedAppointmentColor: _burnedAppointmentColor,
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
+
+  /// Sayfanın üst şeridi: arama kutusu ve altında renklerin açıklaması. Her
+  /// sekmede görünür.
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SearchField(
+            controller: _searchController,
+            label: _searchHint,
+            onChanged: (value) => setState(() => _searchQuery = value),
+          ),
+          const SizedBox(height: 10),
+          _buildLegend(),
+        ],
+      ),
+    );
+  }
+
+  /// Açıklama şeridi: "(P)" işareti, siyah seans kutusu ve seans hücrelerinin
+  /// renkleri. Renklerin kendisi Ayarlar sayfasından seçilir; burada yalnızca
+  /// hangi rengin neyi gösterdiği açıklanır. Dar ekranda taşmak yerine alt
+  /// satıra kayar.
+  Widget _buildLegend() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _legendEntry(
+            Icon(Icons.info_outline, size: 16, color: Colors.grey.shade700),
+            '$_plannedMark = Planlandı',
+          ),
+          _legendEntry(
+            _legendSwatch(Colors.black87),
+            '= Paketin görüşme sayısı dışındaki seans',
+          ),
+          _legendEntry(
+            _legendSwatch(_completedAppointmentColor),
+            '= Yapılmış randevu',
+          ),
+          _legendEntry(
+            _legendSwatch(_burnedAppointmentColor),
+            '= Yakılmış randevu',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legendSwatch(Color color) {
+    return Container(
+      width: 14,
+      height: 14,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: Colors.black26),
+      ),
+    );
+  }
+
+  Widget _legendEntry(Widget marker, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        marker,
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tablodaki bir satır ve o satırın arama kelimeleri.
+///
+/// Kelimeler satır yüklenirken bir kez hesaplanır; her tuş vuruşunda yeniden
+/// üretilmez. Danışan dosya numarası, ad soyadı ve e-postasıyla aranabilir.
+class _SearchableRow {
+  final CustomerSummaryRow row;
+  final List<String> searchWords;
+
+  _SearchableRow(this.row)
+      : searchWords =
+            searchWordsOf('${row.dosyaNo.text} ${row.fullName} ${row.email}');
 }
 
 /// Loads and renders the customer-summary table for a single subscription
@@ -113,10 +254,23 @@ class _CustomerSummaryTab extends StatefulWidget {
   final String emptyMessage;
   final bool showPayment;
 
+  /// Sayfanın arama kutusundaki sorgu. Boşken tüm satırlar listelenir; doluyken
+  /// yalnızca uyan satırlar tabloya girer (bkz.
+  /// [_CustomerSummaryTabState._applySearch]).
+  final String searchQuery;
+
+  /// Seans hücrelerinin arkaplan renkleri: "Yapıldı" ve "Yakıldı" randevular
+  /// için ayrı ayrı. Sayfa sahibi olduğu için yukarıdan geçirilir: renk
+  /// değiştiğinde tablo yeniden çizilir.
+  final Color completedAppointmentColor;
+  final Color burnedAppointmentColor;
+
   const _CustomerSummaryTab({
-    super.key,
     required this.status,
     required this.emptyMessage,
+    required this.searchQuery,
+    required this.completedAppointmentColor,
+    required this.burnedAppointmentColor,
     this.showPayment = true,
   });
 
@@ -126,15 +280,21 @@ class _CustomerSummaryTab extends StatefulWidget {
 
 class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     with AutomaticKeepAliveClientMixin {
-  /// Tahsil edilmemiş ödemelerde tutarın solunda gösterilen işaret.
-  static const String _plannedPaymentMark = '(P)';
+  static const String _noSearchResultText =
+      'Aramanıza uyan danışan bulunamadı.';
 
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
 
   bool _loading = true;
   String? _error;
-  List<CustomerSummaryRow> _rows = const [];
+
+  /// Bu sekmenin yüklenmiş tüm satırları (arama uygulanmamış hâli).
+  List<_SearchableRow> _rows = const [];
+
+  /// Aramadan geçen satırlar; tablo bunları çizer. Sonuç saklanır: liste her
+  /// yeniden çizimde değil, yalnızca satırlar ya da sorgu değişince hesaplanır.
+  List<CustomerSummaryRow> _visibleRows = const [];
 
   @override
   bool get wantKeepAlive => true;
@@ -146,14 +306,19 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
   }
 
   @override
+  void didUpdateWidget(covariant _CustomerSummaryTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchQuery != widget.searchQuery) {
+      setState(_applySearch);
+    }
+  }
+
+  @override
   void dispose() {
     _verticalController.dispose();
     _horizontalController.dispose();
     super.dispose();
   }
-
-  /// Public entry point so the parent page can trigger a refresh.
-  Future<void> reload() => _load();
 
   Future<void> _load() async {
     if (!mounted) return;
@@ -169,11 +334,11 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
           await provider.fetchCustomerSummariesByStatus(widget.status);
       if (!mounted) return;
       setState(() {
-        _rows = rows;
+        _rows = rows.map((row) => _SearchableRow(row)).toList();
         _loading = false;
+        _applySearch();
       });
     } catch (e) {
-      logger.err('Failed to load customer summaries: {}', [e]);
       if (!mounted) return;
       setState(() {
         _error = 'Özet verileri yüklenirken bir hata oluştu.';
@@ -212,63 +377,104 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       );
     }
 
-    if (_rows.isEmpty) {
-      return Center(child: Text(widget.emptyMessage));
-    }
-
-    // Total-count banner (top-left) above the table, showing how many customers
-    // are currently listed in this tab.
+    // Total-count banner + "Yenile" (top-left) above the table, showing how
+    // many customers are currently listed in this tab. Boş sekmede de görünür
+    // ki yenileme her zaman elin altında olsun.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildTotalCountHeader(),
-        Expanded(child: _buildTable()),
+        Expanded(child: _buildRowsArea()),
       ],
     );
   }
 
+  /// Tablo ya da onun yerine geçen bilgi notu: sekmede hiç danışan yoksa
+  /// sekmenin kendi boş mesajı, arama hiçbir satıra uymuyorsa Öğün
+  /// Fotoğrafları sayfasındakiyle aynı "aramaya uyan yok" notu gösterilir.
+  Widget _buildRowsArea() {
+    if (_rows.isEmpty) return Center(child: Text(widget.emptyMessage));
+    if (_visibleRows.isEmpty) {
+      return const StatusNote(
+        icon: Icons.search_off,
+        text: _noSearchResultText,
+      );
+    }
+    return _buildTable();
+  }
+
+  /// Sorguyu satırlara uygulayıp [_visibleRows] sonucunu tazeler.
+  ///
+  /// Eşleştirme Öğün Fotoğrafları sayfasıyla aynı kuralı kullanır
+  /// ([matchesSearchWords]): sorgu kelimelerinin her biri satırın bir
+  /// kelimesinin **başına** uymalıdır; Türkçe harfler ASCII karşılıklarına
+  /// katlandığı için "İnci" yazan da "inci" yazan da bulur.
+  void _applySearch() {
+    final List<String> queryWords = searchWordsOf(widget.searchQuery);
+    _visibleRows = _rows
+        .where((entry) => matchesSearchWords(queryWords, entry.searchWords))
+        .map((entry) => entry.row)
+        .toList();
+  }
+
+  /// Başlıktaki sayı: arama yokken sekmedeki danışan sayısı, arama varken
+  /// "görünen / toplam" biçiminde kaç danışanın süzüldüğü.
+  String get _countText {
+    final String visible = 'Toplam Danışan Sayısı: ${_visibleRows.length}';
+    if (_visibleRows.length == _rows.length) return visible;
+    return '$visible / ${_rows.length}';
+  }
+
   /// A small banner in the top-left showing the number of customers listed in
-  /// this tab (`Toplam Danışan Sayısı`).
+  /// this tab (`Toplam Danışan Sayısı`), with the "Yenile" button right next to
+  /// it. Dar ekranda buton alt satıra kayar.
   Widget _buildTotalCountHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.blue.shade50,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.blue.shade200),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.people, size: 18, color: Colors.blue.shade800),
-              const SizedBox(width: 6),
-              Text(
-                'Toplam Danışan Sayısı: ${_rows.length}',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue.shade900,
-                ),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
               ),
-            ],
-          ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.people, size: 18, color: _appBarColor),
+                  const SizedBox(width: 6),
+                  Text(
+                    _countText,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            LabeledActionButton(
+              icon: Icons.refresh,
+              label: 'Yenile',
+              onPressed: _loading ? null : _load,
+              backgroundColor: _appBarColor,
+              foregroundColor: Colors.white,
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildTable() {
-    // Postponed-date columns are dynamic: use the widest row so every row lines
-    // up, then pad shorter rows with empty cells.
-    final int postponedColumns = _rows.fold<int>(
-      0,
-      (m, r) => r.postponedDates.length > m ? r.postponedDates.length : m,
-    );
-
     // Both scrollbars wrap both scroll views (canonical two-axis pattern) so
     // the vertical and horizontal thumbs are always visible and draggable,
     // even when the table is smaller than the window.
@@ -297,8 +503,8 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
                   color: Colors.black87,
                 ),
                 border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-                columns: _buildColumns(postponedColumns),
-                rows: _rows.map((r) => _buildRow(r, postponedColumns)).toList(),
+                columns: _buildColumns(),
+                rows: _visibleRows.map(_buildRow).toList(),
               ),
             ),
           ),
@@ -307,7 +513,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     );
   }
 
-  List<DataColumn> _buildColumns(int postponedColumns) {
+  List<DataColumn> _buildColumns() {
     return <DataColumn>[
       const DataColumn(label: Text('Dosya No')),
       const DataColumn(label: Text('Ad-Soyad')),
@@ -316,18 +522,18 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         const DataColumn(label: Text('Ödeme Tutarı'), numeric: true),
         const DataColumn(label: Text('Ödeme Şekli')),
       ],
-      const DataColumn(label: Text('Paket Tipi')),
+      const DataColumn(label: Text('Paket Süresi / Görüşme Türü')),
       if (widget.status == SubActiveStatus.frozen)
         const DataColumn(label: Text('Dondurulma Tarihi')),
       for (int i = 1; i <= CustomerSummaryRow.maxSeans; i++)
         DataColumn(label: Text('$i.Seans')),
-      for (int i = 1; i <= postponedColumns; i++)
-        DataColumn(label: Text('$i. Ertelenen Randevu')),
       const DataColumn(label: Text('Kalan Erteleme Hakkı'), numeric: true),
+      for (int i = 1; i <= CustomerSummaryRow.maxPostponementUses; i++)
+        DataColumn(label: Text('$i. Erteleme')),
     ];
   }
 
-  DataRow _buildRow(CustomerSummaryRow row, int postponedColumns) {
+  DataRow _buildRow(CustomerSummaryRow row) {
     return DataRow(
       cells: <DataCell>[
         _cell(row.dosyaNo),
@@ -349,12 +555,13 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         ],
         _cell(row.packageType),
         if (widget.status == SubActiveStatus.frozen) _cell(row.freezeDate),
-        for (final seans in row.seans) _cell(seans),
-        for (int i = 0; i < postponedColumns; i++)
-          _cell(i < row.postponedDates.length
-              ? row.postponedDates[i]
-              : const SummaryCell.empty()),
+        for (int i = 0; i < row.seans.length; i++)
+          _seansCell(row.seans[i], isBeyondPackage: i >= row.totalMeetings),
         _cell(row.remainingPostponements),
+        for (int i = 0; i < CustomerSummaryRow.maxPostponementUses; i++)
+          _dateCell(i < row.postponementUseDates.length
+              ? row.postponementUseDates[i]
+              : const SummaryCell.empty()),
       ],
     );
   }
@@ -394,7 +601,6 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         return;
       }
 
-      logger.info('Opening customer details from summary: userId={}', [row.userId]);
       // The details tab pops back with the deleted user's id when the admin
       // removes them, so the row is dropped here instead of leaving a customer
       // listed who no longer exists.
@@ -405,11 +611,12 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       if (!mounted) return;
       if (deletedUserId is String && deletedUserId.isNotEmpty) {
         setState(() {
-          _rows = _rows.where((r) => r.userId != deletedUserId).toList();
+          _rows =
+              _rows.where((r) => r.row.userId != deletedUserId).toList();
+          _applySearch();
         });
       }
     } catch (e) {
-      logger.err('Could not open customer details for {}: {}', [row.userId, e]);
       closeLoading();
       if (!mounted) return;
       await DialogUtils.openError(
@@ -422,6 +629,82 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
 
   DataCell _cell(SummaryCell cell) =>
       DataCell(Text(cell.text, style: _cellStyle(cell)));
+
+  /// Tarih taşıyan dar sütunlar için hücre: boşken bile sütun bir tarih
+  /// sığdıracak kadar geniş kalsın diye görünmez yer tutucu kullanılır.
+  DataCell _dateCell(SummaryCell cell) => DataCell(
+        cell.isEmpty
+            ? const Text(
+                _dateWidthPlaceholder,
+                style: TextStyle(color: Colors.transparent),
+              )
+            : Text(cell.text, style: _cellStyle(cell)),
+      );
+
+  /// Seans hücresi: randevunun tarihi, admin'in Ayarlar'dan seçtiği arkaplan
+  /// rengiyle vurgulanır. "Yakıldı" randevular ayrı bir renkle gösterilir.
+  /// Yazı rengi arkaplanın parlaklığına göre belirlendiği için tarih her renkte
+  /// okunabilir kalır.
+  ///
+  /// Boş (randevusu olmayan) ve "Hata" hücreleri vurgulanmaz: ilki gösterecek
+  /// bir randevu taşımaz, ikincisi kendi kırmızı hata biçimini korur.
+  ///
+  /// [isBeyondPackage] ise kutu paketin görüşme sayısının dışındadır ve
+  /// [_beyondPackageSeansCell] ile pasif (siyah) gösterilir.
+  DataCell _seansCell(SummaryCell cell, {required bool isBeyondPackage}) {
+    if (isBeyondPackage) return _beyondPackageSeansCell(cell);
+    if (cell.isEmpty || cell.isError) return _cell(cell);
+
+    final background = cell.isBurned
+        ? widget.burnedAppointmentColor
+        : widget.completedAppointmentColor;
+    return DataCell(
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          cell.text,
+          style: TextStyle(
+            color: SummaryColorsRegistry.readableTextColor(background),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Paketin görüşme sayısını aşan seans kutusu: bu paket için hiç
+  /// doldurulmayacağından siyah zeminle pasif gösterilir. Kutunun eni, boşken
+  /// de komşu tarih hücreleriyle aynı kalsın diye görünmez bir tarih
+  /// yer tutucusuyla verilir.
+  DataCell _beyondPackageSeansCell(SummaryCell cell) {
+    const Color background = Colors.black87;
+    final Color foreground = SummaryColorsRegistry.readableTextColor(background);
+    return DataCell(
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: cell.isEmpty
+            ? const Text(
+                _dateWidthPlaceholder,
+                style: TextStyle(color: Colors.transparent),
+              )
+            : Text(
+                cell.text,
+                style: TextStyle(
+                  color: foreground,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+      ),
+    );
+  }
 
   TextStyle _cellStyle(SummaryCell cell) => TextStyle(
         color: cell.isError ? Colors.red.shade700 : null,
@@ -438,7 +721,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         TextSpan(
           children: [
             TextSpan(
-              text: '$_plannedPaymentMark ',
+              text: '$_plannedMark ',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             TextSpan(text: cell.text),

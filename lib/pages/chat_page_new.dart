@@ -2,7 +2,6 @@
 import 'dart:io' show Platform;
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -11,9 +10,10 @@ import 'package:provider/provider.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/meal_model.dart';
-import 'package:ngy_app/models/logger.dart';
 import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
+import 'package:ngy_app/widgets/reaction_badge.dart';
+import 'package:ngy_app/widgets/reaction_picker.dart';
 import 'package:ngy_app/pages/user_media_gallery_page.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
@@ -27,30 +27,37 @@ import '../widgets/labeled_action_button.dart';
 /// - Send text messages
 /// - Send images from gallery or camera
 /// - Upload meal photos
+/// - React to the other party's messages (WhatsApp-style, one per person)
 /// - View message history with timestamps
 /// - Real-time updates via Firestore streams
-/// 
+///
 /// Admin behavior:
 /// - Admins can view any user's chat by passing overrideChatId
 /// - All features are available
-/// 
+///
 /// User behavior:
 /// - Regular users always view their own chat (overrideChatId is null)
-/// - All features including meal upload are available
+/// - All features including meal upload and reactions are available
 class ChatPage extends StatefulWidget {
   /// Optional chat ID override for admin users.
   /// - If null: Opens the current user's own chat
   /// - If non-null: Opens the specified user's chat (admin only)
   final String? overrideChatId;
-  
-  const ChatPage({super.key, this.overrideChatId});
+
+  /// Açılışta gidilecek mesajın kimliği. Verilirse ve mesaj yüklenen son
+  /// mesajlar arasındaysa sohbet, en yeni mesaj yerine o mesajda açılır ve
+  /// mesaj kısa süre vurgulanır (bkz. [_buildMessageList]). Öğün Fotoğrafları
+  /// sayfasındaki "Chate git" bunu kullanır
+  /// (bkz. [ChatManager.locateImageMessage]).
+  final String? focusMessageId;
+
+  const ChatPage({super.key, this.overrideChatId, this.focusMessageId});
 
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
 
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
-  final Logger logger = Logger.forClass(_ChatPageState);
   final ImagePicker _picker = ImagePicker();
   static const _months = [
     '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -65,12 +72,36 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   
   /// Whether the current user is an admin
   late final bool _isAdminUser;
-  
-  /// Whether meal upload should be enabled for this chat view
-  late final bool _canUploadMeals;
-  
+
   /// Cached messages stream to prevent recreation on rebuilds
   Stream<List<MessageData>>? _messagesStream;
+
+  /// [ChatPage.focusTarget] ile gelen mesajın baloncuğuna takılan anahtar:
+  /// mesajın ekranda kurulup kurulmadığı bununla izlenir.
+  final GlobalKey _focusMessageKey = GlobalKey();
+
+  /// Hedef mesajı taşıyan sliver'ın anahtarı; viewport'un sıfır noktası
+  /// (bkz. [_buildMessageList]).
+  static const Key _focusCenterKey = ValueKey<String>('focusCenterSliver');
+
+  /// Hedef mesajı ortalama bir kez yapılır (mesaj listeye ilk girdiğinde).
+  bool _focusRevealStarted = false;
+
+  /// Hedef mesaj şu an vurgulu mu: ortalandıktan sonra kısa süre yanar.
+  bool _focusHighlighted = false;
+
+  /// Hedef baloncuğun kurulmasını beklerken en fazla kaç kare denenir. Mesaj
+  /// zaten ilk karede kurulu olur; bu, gecikmeli bir kareye karşı emniyet payı.
+  static const int _maxFocusRevealAttempts = 10;
+
+  /// Hedef mesajın ekrandaki yeri: 0.5 = tam orta.
+  static const double _focusAlignment = 0.5;
+
+  /// Hedefi ortalama süresi.
+  static const Duration _focusRevealDuration = Duration(milliseconds: 300);
+
+  /// Vurgunun ekranda kalma süresi.
+  static const Duration _focusHighlightDuration = Duration(seconds: 2);
 
   @override
   void initState() {
@@ -86,10 +117,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     
     // Determine if current user is an admin
     _isAdminUser = ChatManager.isAdminUid(_currentUid);
-    
-    // Meal upload is available for all users
-    _canUploadMeals = true;
-    
+
     // Set active chat ID to suppress notifications for this chat
     FcmService().setActiveChatId(_chatId);
     
@@ -99,11 +127,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     } else {
       _markChatAsReadForUser();
     }
-    
-    logger.info(
-      'ChatPage initialized. currentUid={} isAdmin={} chatId={} canUploadMeals={}',
-      [_currentUid, _isAdminUser, _chatId, _canUploadMeals]
-    );
   }
 
   @override
@@ -112,7 +135,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     // Clear active chat ID to resume receiving notifications
     FcmService().clearActiveChatId();
-    logger.info('ChatPage disposed. currentUid={}', [_currentUid]);
     super.dispose();
   }
 
@@ -121,9 +143,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       final chatManager = context.read<ChatManager>();
       await chatManager.markChatAsRead(_chatId);
-      logger.debug('Chat marked as read for admin. chatId={}', [_chatId]);
     } catch (e) {
-      logger.warn('Failed to mark chat as read (admin): {}', [e]);
     }
   }
 
@@ -132,9 +152,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       final chatManager = context.read<ChatManager>();
       await chatManager.markChatAsReadForUser(_chatId);
-      logger.debug('Chat marked as read for user. chatId={}', [_chatId]);
     } catch (e) {
-      logger.warn('Failed to mark chat as read (user): {}', [e]);
     }
   }
 
@@ -153,7 +171,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
 
     if (!confirmed) {
-      logger.debug('Chat deletion cancelled by admin. chatId={}', [_chatId]);
       return;
     }
 
@@ -168,7 +185,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
 
     try {
-      logger.info('Deleting chat (admin). chatId={}', [_chatId]);
       await chat.deleteChat(_chatId);
 
       if (mounted && loadingOpen) {
@@ -184,10 +200,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (mounted) {
         Navigator.of(context).pop();
       }
-    } catch (e, st) {
-      logger.err('Chat deletion failed. chatId={} error={}', [_chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -211,7 +224,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       // App is going to background - allow notifications
       FcmService().clearActiveChatId();
-      logger.info('App backgrounded, cleared active chat ID to allow notifications');
     } else if (state == AppLifecycleState.resumed) {
       // App is back in foreground - suppress notifications for this chat again
       FcmService().setActiveChatId(_chatId);
@@ -221,7 +233,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       } else {
         _markChatAsReadForUser();
       }
-      logger.info('App resumed, re-set active chat ID to suppress in-app notifications');
     }
   }
 
@@ -237,7 +248,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
 
     var status = await permission.status;
-    logger.info('Photo permission initial status: {}', [status.toString()]);
 
     // Already granted or limited access - proceed
     if (status.isGranted || status.isLimited) {
@@ -248,9 +258,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting photo permission...');
       status = await permission.request();
-      logger.info('Photo permission after request: {}', [status.toString()]);
       
       if (status.isGranted || status.isLimited) {
         return true;
@@ -280,7 +288,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Shows a dialog to open Settings if permission is permanently denied.
   Future<bool> _checkCameraPermission() async {
     var status = await Permission.camera.status;
-    logger.info('Camera permission initial status: {}', [status.toString()]);
 
     // Already granted - proceed
     if (status.isGranted) {
@@ -291,9 +298,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // On iOS, 'permanentlyDenied' means user denied and we must go to settings
     // Always try to request first if not permanently denied or restricted
     if (!status.isPermanentlyDenied && !status.isRestricted) {
-      logger.info('Requesting camera permission...');
       status = await Permission.camera.request();
-      logger.info('Camera permission after request: {}', [status.toString()]);
       
       if (status.isGranted) {
         return true;
@@ -326,22 +331,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _pickAndSendImage({Meals? meal}) async {
     final hasPermission = await _checkPhotoPermission();
     if (!hasPermission) {
-      logger.info('Photo permission denied, aborting gallery pick');
       return;
     }
 
     // Re-checked after the await: the widget may be gone by now.
     if (!mounted) return;
     final chat = context.read<ChatManager>();
-    logger.info('Gallery image picker opened. chatId={}', [_chatId]);
 
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image == null) {
-      logger.debug('Gallery image pick cancelled by user');
       return;
     }
-
-    logger.debug('Gallery image selected. path={}', [image.path]);
 
     bool loadingOpen = false;
     if (mounted) {
@@ -350,12 +350,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: meal != null ? 'Öğün fotoğrafı yükleniyor...' : 'Görsel yükleniyor...',
       );
       loadingOpen = true;
-      logger.debug('Loading dialog opened');
     }
 
     try {
       if (meal != null) {
-        logger.info('Starting meal image upload (gallery). meal={} userId={}', [meal.name, _currentUid]);
         // Re-checked after the await: the widget may be gone by now.
         if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
@@ -370,30 +368,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (downloadUrl == null) {
           throw Exception('Öğün fotoğrafı yüklenemedi (downloadUrl is null)');
         }
-        logger.info('Meal upload successful (gallery). meal={} userId={}', [meal.name, _currentUid]);
       } else {
-        logger.debug('Starting image send operation...');
         await chat.sendImageTo(_chatId, image);
-        logger.info('Gallery image sent successfully. chatId={}', [_chatId]);
       }
 
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed');
       }
-
-      if (meal != null && mounted) {
-        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Öğün fotoğrafı yüklendi.');
-      }
-    } catch (e, st) {
-      logger.err('Gallery image send failed. chatId={} error={}', [_chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed (error case)');
       }
 
       if (!mounted) return;
@@ -415,25 +401,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _captureAndSendImage({Meals? meal}) async {
     final hasPermission = await _checkCameraPermission();
     if (!hasPermission) {
-      logger.info('Camera permission denied, aborting capture');
       return;
     }
 
     // Re-checked after the await: the widget may be gone by now.
     if (!mounted) return;
     final chat = context.read<ChatManager>();
-    logger.info('Camera capture opened. chatId={}', [_chatId]);
 
     final XFile? image = await _picker.pickImage(
       source: ImageSource.camera,
       preferredCameraDevice: CameraDevice.rear,
     );
     if (image == null) {
-      logger.debug('Camera capture cancelled by user');
       return;
     }
-
-    logger.debug('Camera image captured. path={}', [image.path]);
 
     bool loadingOpen = false;
     if (mounted) {
@@ -442,12 +423,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: meal != null ? 'Öğün fotoğrafı yükleniyor...' : 'Görsel yükleniyor...',
       );
       loadingOpen = true;
-      logger.debug('Loading dialog opened');
     }
 
     try {
       if (meal != null) {
-        logger.info('Starting meal image upload (camera). meal={} userId={}', [meal.name, _currentUid]);
         // Re-checked after the await: the widget may be gone by now.
         if (!mounted) return;
         final mealStateManager = Provider.of<MealManager>(context, listen: false);
@@ -462,30 +441,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (downloadUrl == null) {
           throw Exception('Öğün fotoğrafı yüklenemedi (downloadUrl is null)');
         }
-        logger.info('Meal upload successful (camera). meal={} userId={}', [meal.name, _currentUid]);
       } else {
-        logger.debug('Starting image send operation...');
         await chat.sendImageTo(_chatId, image);
-        logger.info('Camera image sent successfully. chatId={}', [_chatId]);
       }
 
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed');
       }
-
-      if (meal != null && mounted) {
-        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Öğün fotoğrafı yüklendi.');
-      }
-    } catch (e, st) {
-      logger.err('Camera image send failed. chatId={} error={}', [_chatId, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
-        logger.debug('Loading dialog closed (error case)');
       }
 
       if (!mounted) return;
@@ -505,29 +472,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 2. User selects image source (gallery or camera)
   /// 3. Delegates to [_pickAndSendImage] or [_captureAndSendImage]
   Future<void> _startMealUploadFlow() async {
-    if (!_canUploadMeals) {
-      logger.warn(
-        'Meal upload blocked. currentUid={} overrideChatId={} canUpload={}',
-        [_currentUid, widget.overrideChatId ?? 'null', _canUploadMeals],
-      );
-      return;
-    }
-
-    logger.info('Meal upload flow started. currentUid={}', [_currentUid]);
-
     final Meals? meal = await _chooseMeal();
     if (meal == null) {
-      logger.debug('Meal upload cancelled: No meal selected');
       return;
     }
-    logger.debug('Meal selected: {}', [meal.name]);
 
     final ImageSource? src = await _chooseSource();
     if (src == null) {
-      logger.debug('Meal upload cancelled: No source selected');
       return;
     }
-    logger.debug('Image source selected: {}', [src.name]);
 
     if (src == ImageSource.gallery) {
       await _pickAndSendImage(meal: meal);
@@ -540,8 +493,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 
   /// Returns the selected Meals enum value, or null if cancelled.
   Future<Meals?> _chooseMeal() async {
-    logger.debug('Opening meal chooser bottom sheet');
-    
     return showModalBottomSheet<Meals>(
       context: context,
       builder: (ctx) {
@@ -557,7 +508,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   title: Text(m.label),
                   subtitle: m.defaultTime.isNotEmpty ? Text(m.defaultTime) : null,
                   onTap: () {
-                    logger.debug('Meal selected in bottom sheet: {} ({})', [m.name, m.label]);
                     Navigator.of(ctx).pop(m);
                   },
                 ),
@@ -572,8 +522,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// 
   /// Returns the selected ImageSource, or null if cancelled.
   Future<ImageSource?> _chooseSource() async {
-    logger.debug('Opening image source selection dialog');
-    
     return showDialog<ImageSource>(
       context: context,
       builder: (_) => AlertDialog(
@@ -582,14 +530,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         actions: [
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: gallery');
               Navigator.pop(context, ImageSource.gallery);
             },
             child: const Text('Galeri'),
           ),
           TextButton(
             onPressed: () {
-              logger.debug('Image source selected: camera');
               Navigator.pop(context, ImageSource.camera);
             },
             child: const Text('Kamera'),
@@ -605,25 +551,64 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return _messagesStream!;
   }
 
-  /// Toggle the current (admin) user's reaction on [message].
+  /// İlk çizimden sonra hedef mesajı ortalamayı bir kez planlar.
+  void _scheduleFocusReveal() {
+    if (_focusRevealStarted) return;
+
+    _focusRevealStarted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _revealFocusedMessage();
+    });
+  }
+
+  /// Hedef mesajı ekranın ortasına getirir ve kısa süre vurgular.
   ///
-  /// Tapping the same reaction the user already left removes it; otherwise the
-  /// reaction is set/replaced. The Cloud Function then notifies the user that a
-  /// reaction was left on their message.
+  /// Mesaj, sıfır noktasına oturan sliver'ın ilk çocuğu olduğu için ilk karede
+  /// zaten kuruludur ve ekranın alt kenarında durur; buradaki hareket onu
+  /// ortaya alır.
+  Future<void> _revealFocusedMessage() async {
+    for (int attempt = 0; attempt < _maxFocusRevealAttempts; attempt++) {
+      final BuildContext? bubbleContext = _focusMessageKey.currentContext;
+      if (bubbleContext != null && bubbleContext.mounted) {
+        await Scrollable.ensureVisible(
+          bubbleContext,
+          alignment: _focusAlignment,
+          duration: _focusRevealDuration,
+          curve: Curves.easeOut,
+        );
+        await _flashFocusHighlight();
+        return;
+      }
+
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
+  }
+
+  /// Hedef mesajı kısa süre vurgular; kullanıcı hangi mesaja geldiğini görsün.
+  Future<void> _flashFocusHighlight() async {
+    if (!mounted) return;
+    setState(() => _focusHighlighted = true);
+
+    await Future<void>.delayed(_focusHighlightDuration);
+    if (!mounted) return;
+    setState(() => _focusHighlighted = false);
+  }
+
+  /// Toggle the current viewer's reaction on [message].
+  ///
+  /// Tapping the same reaction the viewer already left removes it; otherwise
+  /// the reaction is set/replaced. A Cloud Function then notifies the other
+  /// party that a reaction was left on their message: the office is notified
+  /// for a client's reaction, the client for the office's.
   Future<void> _handleToggleReaction(MessageData message, String emoji) async {
     final chat = context.read<ChatManager>();
     final current = message.reactions[_currentUid];
-    logger.info(
-      'Toggling reaction. chatId={} messageId={} emoji={} current={}',
-      [_chatId, message.id, emoji, current ?? 'none'],
-    );
 
     try {
       await chat.toggleReaction(_chatId, message.id, emoji, currentEmoji: current);
-    } catch (e, st) {
-      logger.err('Toggle reaction failed. messageId={} error={}', [message.id, e]);
-      if (kDebugMode) logger.debug('Stack trace:\n{}', [st]);
-
+    } catch (e) {
       if (!mounted) return;
       DialogUtils.openError(
         context,
@@ -674,7 +659,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () {
-                        logger.info('Upload cancel button tapped');
                         context.read<ChatManager>().cancelUpload();
                       },
                       child: const Text('İptal'),
@@ -699,27 +683,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 if (items.isEmpty) {
                   return const Center(child: Text('Henüz mesaj yok.'));
                 }
-                
-                return ListView.builder(
-                  controller: chat.scrollController,
-                  reverse: true, // Newest messages at bottom
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final msg = items[i];
-                    // Admins can react (WhatsApp-style) to messages the *user*
-                    // sent. `_chatId` equals the chat owner's (user's) UID, so
-                    // `senderId == _chatId` means the message came from the user.
-                    final canReact = _isAdminUser && msg.senderId == _chatId;
-                    return _MessageBubble(
-                      message: msg,
-                      isMe: msg.senderId == _currentUid,
-                      myUid: _currentUid,
-                      canReact: canReact,
-                      onImageTap: (url) => _showImageDialog(context, url),
-                      onToggleReaction: _handleToggleReaction,
-                    );
-                  },
-                );
+
+                return _buildMessageList(chat, items);
               },
             ),
           ),
@@ -727,12 +692,85 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           // Input row - only rebuilds when sending/uploading state changes
           _ChatInputRow(
             chatId: _chatId,
-            canUploadMeals: _canUploadMeals,
             onMealUpload: _startMealUploadFlow,
-            logger: logger,
           ),
         ],
       ),
+    );
+  }
+
+  /// Mesaj listesi.
+  ///
+  /// Hedef mesaj yoksa -- ya da yüklenen son mesajlar arasında değilse (sohbet
+  /// son 50 mesajı gösterir) -- sohbet her zamanki gibi en yeni mesajdan
+  /// açılır. Hedef varsa liste ikiye bölünür: hedef ve ondan eski mesajlar
+  /// viewport'un sıfır noktasına oturan ("center") sliver'a, hedeften yeni
+  /// mesajlar ise onun altına konur. Böylece aradaki mesajlar hiç kurulmadan
+  /// doğrudan hedef mesaja açılır; liste yine tek parça gibi kaydırılır
+  /// (yukarı eskiye, aşağı yeniye).
+  Widget _buildMessageList(ChatManager chat, List<MessageData> items) {
+    final String? focusMessageId = widget.focusMessageId;
+    final int targetIndex = focusMessageId == null
+        ? -1
+        : items.indexWhere((message) => message.id == focusMessageId);
+
+    if (targetIndex < 0) {
+      return ListView.builder(
+        controller: chat.scrollController,
+        reverse: true, // Newest messages at bottom
+        itemCount: items.length,
+        itemBuilder: (context, i) => _buildMessageBubble(items[i]),
+      );
+    }
+
+    _scheduleFocusReveal();
+
+    return CustomScrollView(
+      controller: chat.scrollController,
+      reverse: true, // Newest messages at bottom
+      center: _focusCenterKey,
+      slivers: [
+        // Hedeften yeni mesajlar: sıfır noktasının altında, yeniye doğru.
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, i) => _buildMessageBubble(items[targetIndex - 1 - i]),
+            childCount: targetIndex,
+          ),
+        ),
+        // Hedef ve ondan eski mesajlar: sıfır noktasından yukarı doğru.
+        SliverList(
+          key: _focusCenterKey,
+          delegate: SliverChildBuilderDelegate(
+            (context, i) => _buildMessageBubble(items[targetIndex + i]),
+            childCount: items.length - targetIndex,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Tek bir mesaj baloncuğu; listenin iki biçimi de bunu kullanır.
+  Widget _buildMessageBubble(MessageData msg) {
+    // Both sides can react (WhatsApp-style) to messages the *other* party
+    // sent. `_chatId` equals the chat owner's (user's) UID, so
+    // `senderId == _chatId` means the message came from the user; an admin UID
+    // means it came from the office. Reacting to your own message stays
+    // disabled on both sides.
+    final bool canReact = _isAdminUser
+        ? msg.senderId == _chatId
+        : ChatManager.isAdminUid(msg.senderId);
+    final bool isFocusTarget = msg.id == widget.focusMessageId;
+
+    return _MessageBubble(
+      // Anahtar yalnızca hedef mesajda: ortalama bu anahtarla yapılır.
+      key: isFocusTarget ? _focusMessageKey : null,
+      message: msg,
+      highlighted: isFocusTarget && _focusHighlighted,
+      isMe: msg.senderId == _currentUid,
+      myUid: _currentUid,
+      canReact: canReact,
+      onImageTap: (url) => _showImageDialog(context, url),
+      onToggleReaction: _handleToggleReaction,
     );
   }
 
@@ -761,7 +799,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Open the gallery listing every photo uploaded by [userId].
   void _openUserMediaGallery(String userId) {
-    logger.info('Opening user media gallery from chat title. userId={}', [userId]);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -791,9 +828,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           final firstName = user.name.trim();
           final lastName = user.surname.trim();
           displayName = lastName.isNotEmpty ? '$firstName $lastName' : firstName;
-          logger.debug('User name loaded for chat title: {}', [displayName]);
-        } else if (snapshot.hasError) {
-          logger.warn('Failed to load user name for chat title: {}', [snapshot.error]);
         }
         
         return Text(
@@ -897,6 +931,10 @@ class _MessageBubble extends StatelessWidget {
   /// Whether a long-press on this bubble should open the reaction picker.
   final bool canReact;
 
+  /// Mesaj şu an vurgulu mu ("Chate git" ile bu mesaja gelindiğinde kısa süre
+  /// arka planı yanar).
+  final bool highlighted;
+
   final void Function(String url) onImageTap;
 
   /// Called with the tapped emoji when the viewer picks a reaction.
@@ -908,13 +946,18 @@ class _MessageBubble extends StatelessWidget {
   ];
 
   const _MessageBubble({
+    super.key,
     required this.message,
     required this.isMe,
     required this.myUid,
     required this.canReact,
+    required this.highlighted,
     required this.onImageTap,
     required this.onToggleReaction,
   });
+
+  /// Vurgunun açılıp kapanma süresi.
+  static const Duration _highlightFadeDuration = Duration(milliseconds: 300);
 
   String _formatTime(DateTime dt) {
     final now = DateTime.now();
@@ -995,7 +1038,7 @@ class _MessageBubble extends StatelessWidget {
       ],
     );
 
-    // Long-press to react (admins, on the user's messages). HitTestBehavior
+    // Long-press to react (on the other party's messages). HitTestBehavior
     // .deferToChild keeps taps on the image working (opens the full-screen
     // viewer) while still recognizing a long-press on the bubble.
     final body = canReact
@@ -1007,8 +1050,15 @@ class _MessageBubble extends StatelessWidget {
           )
         : content;
 
-    return Padding(
+    return AnimatedContainer(
+      duration: _highlightFadeDuration,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         crossAxisAlignment: align,
         mainAxisSize: MainAxisSize.min,
@@ -1016,7 +1066,7 @@ class _MessageBubble extends StatelessWidget {
           body,
           // Reactions left on this message (shown to everyone in the chat).
           if (message.reactions.isNotEmpty)
-            _ReactionBadge(reactions: message.reactions),
+            ReactionBadge(reactions: message.reactions),
         ],
       ),
     );
@@ -1036,225 +1086,14 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-/// Small pill shown under a message with the reactions left on it.
-///
-/// Identical emojis are aggregated, with a count shown when more than one
-/// person left the same reaction. The badge overlaps slightly onto the
-/// bubble's bottom edge, WhatsApp-style.
-class _ReactionBadge extends StatelessWidget {
-  final Map<String, String> reactions;
-
-  const _ReactionBadge({required this.reactions});
-
-  @override
-  Widget build(BuildContext context) {
-    // Collapse duplicate emojis into "emoji xN".
-    final counts = <String, int>{};
-    for (final emoji in reactions.values) {
-      counts[emoji] = (counts[emoji] ?? 0) + 1;
-    }
-    if (counts.isEmpty) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-
-    return Transform.translate(
-      offset: const Offset(0, -6), // overlap onto the bubble's bottom edge
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: theme.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: theme.dividerColor.withOpacity(0.4)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final entry in counts.entries) ...[
-              Text(entry.key, style: const TextStyle(fontSize: 14)),
-              if (entry.value > 1)
-                Padding(
-                  padding: const EdgeInsets.only(left: 2, right: 4),
-                  child: Text(
-                    '${entry.value}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurface.withOpacity(0.7),
-                    ),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The reaction emojis offered in the long-press picker (WhatsApp-style).
-/// Currently thumbs-up and heart, as requested. Add entries here to offer more.
-const List<String> kChatReactionEmojis = ['👍', '❤️'];
-
-/// Show a small WhatsApp-style reaction picker anchored near [globalPosition].
-///
-/// Returns the tapped emoji, or null if dismissed without a choice.
-/// [currentEmoji] (if any) is highlighted so the reactor can see — and tap
-/// again to remove — their existing reaction.
-Future<String?> showReactionPicker(
-  BuildContext context, {
-  required Offset globalPosition,
-  String? currentEmoji,
-}) {
-  final media = MediaQuery.of(context);
-  final size = media.size;
-
-  // Approximate pill size so it can be kept fully on-screen.
-  final pillWidth = kChatReactionEmojis.length * 52.0 + 16.0;
-  const pillHeight = 56.0;
-  const margin = 12.0;
-
-  double left = globalPosition.dx - pillWidth / 2;
-  left = left.clamp(margin, size.width - pillWidth - margin);
-
-  // Prefer showing the pill just above the finger; drop below if no room.
-  double top = globalPosition.dy - pillHeight - 16;
-  if (top < media.padding.top + margin) {
-    top = globalPosition.dy + 16;
-  }
-  top = top.clamp(media.padding.top + margin, size.height - pillHeight - margin);
-
-  return showGeneralDialog<String>(
-    context: context,
-    barrierDismissible: true,
-    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-    barrierColor: Colors.black.withOpacity(0.15),
-    transitionDuration: const Duration(milliseconds: 160),
-    pageBuilder: (ctx, _, __) => const SizedBox.shrink(),
-    transitionBuilder: (ctx, animation, _, __) {
-      final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutBack);
-      return Stack(
-        children: [
-          Positioned(
-            left: left,
-            top: top,
-            child: ScaleTransition(
-              scale: curved,
-              alignment: Alignment.bottomCenter,
-              child: FadeTransition(
-                opacity: animation,
-                child: _ReactionPickerBar(
-                  emojis: kChatReactionEmojis,
-                  currentEmoji: currentEmoji,
-                  onSelected: (emoji) => Navigator.of(ctx).pop(emoji),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    },
-  );
-}
-
-/// The horizontal pill of emoji buttons shown by [showReactionPicker].
-class _ReactionPickerBar extends StatelessWidget {
-  final List<String> emojis;
-  final String? currentEmoji;
-  final ValueChanged<String> onSelected;
-
-  const _ReactionPickerBar({
-    required this.emojis,
-    required this.currentEmoji,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final barColor = isDark ? const Color(0xFF2A2A2E) : Colors.white;
-
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: BoxDecoration(
-          color: barColor,
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.25),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final emoji in emojis)
-              _ReactionPickerButton(
-                emoji: emoji,
-                selected: emoji == currentEmoji,
-                onTap: () => onSelected(emoji),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A single tappable emoji inside the reaction picker. Highlights a circular
-/// background when it is the viewer's current reaction.
-class _ReactionPickerButton extends StatelessWidget {
-  final String emoji;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _ReactionPickerButton({
-    required this.emoji,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final highlight = Theme.of(context).colorScheme.primary.withOpacity(0.16);
-    return InkWell(
-      onTap: onTap,
-      customBorder: const CircleBorder(),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 2),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: selected ? highlight : Colors.transparent,
-          shape: BoxShape.circle,
-        ),
-        child: Text(emoji, style: const TextStyle(fontSize: 28)),
-      ),
-    );
-  }
-}
-
 /// Extracted input row widget - uses Selector for targeted rebuilds
 class _ChatInputRow extends StatefulWidget {
   final String chatId;
-  final bool canUploadMeals;
   final VoidCallback onMealUpload;
-  final Logger logger;
 
   const _ChatInputRow({
     required this.chatId,
-    required this.canUploadMeals,
     required this.onMealUpload,
-    required this.logger,
   });
 
   @override
@@ -1337,13 +1176,12 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              if (widget.canUploadMeals)
-                                _AttachmentOption(
-                                  icon: Icons.restaurant_rounded,
-                                  label: 'Öğün Yükle',
-                                  color: Colors.orange,
-                                  onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onMealUpload),
-                                ),
+                              _AttachmentOption(
+                                icon: Icons.restaurant_rounded,
+                                label: 'Öğün Yükle',
+                                color: Colors.orange,
+                                onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onMealUpload),
+                              ),
                             ],
                           ),
                         )
@@ -1398,14 +1236,10 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                           ? null
                           : () async {
                         final chat = context.read<ChatManager>();
-                        widget.logger.info('Send text button tapped. chatId={}', [widget.chatId]);
                         
                         try {
                           await chat.sendTextTo(widget.chatId);
-                        } catch (e, st) {
-                          widget.logger.err('Send text button handler failed. error={}', [e]);
-                          if (kDebugMode) widget.logger.debug('Stack trace:\n{}', [st]);
-                          
+                        } catch (e) {
                           if (!context.mounted) return;
                           DialogUtils.openError(context, title: 'Mesaj Gönderim Hatası', message: 'Mesaj gönderilemedi.');
                         }

@@ -4,13 +4,10 @@ import 'package:intl/intl.dart';
 
 import '../models/appointment_model.dart';
 import '../models/event_model.dart';
-import '../models/logger.dart';
 import '../models/user_model.dart';
 import 'event_provider.dart';
 
 class TimeslotManager extends ChangeNotifier {
-  final Logger logger = Logger.forClass(TimeslotManager);
-
   TimeslotManager();
 
   // ---------------------- ADMIN TIME SLOTS ----------------------
@@ -28,21 +25,17 @@ class TimeslotManager extends ChangeNotifier {
           .get();
 
       if (!timeslotDoc.exists) {
-        logger.info('No admin time slots for date {}', [dateString]);
         return [];
       }
 
       final data = timeslotDoc.data();
       if (data == null) {
-        logger.err('Document exists but data is null for date {}', [dateString]);
         return [];
       }
 
-      logger.info('Document data for {}: {}', [dateString, data]);
       final List<dynamic> timesList = data['slots'] ?? [];
       return timesList.map<String>((e) => e.toString()).toList();
     } catch (e) {
-      logger.err('Error fetching admin time slots for date {}: {}', [date, e]);
       rethrow;
     }
   }
@@ -58,7 +51,6 @@ class TimeslotManager extends ChangeNotifier {
         );
       }).toList();
     } catch (e) {
-      logger.err('Error fetching admin time slots for date {}: {}', [date, e]);
       rethrow;
     }
   }
@@ -95,16 +87,8 @@ class TimeslotManager extends ChangeNotifier {
         return true;
       }).toList();
 
-      logger.info(
-        'Available time slots for date {}: {}',
-        [date, availableSlots],
-      );
       return availableSlots;
     } catch (e) {
-      logger.err(
-        'Error fetching available time slots for date {}: {}',
-        [date, e],
-      );
       rethrow;
     }
   }
@@ -176,13 +160,7 @@ class TimeslotManager extends ChangeNotifier {
         },
         SetOptions(merge: true),
       );
-
-      logger.info(
-        'Saved {} time slots for date {}',
-        [timeSlots.length, dateString],
-      );
     } catch (e) {
-      logger.err('Error saving time slots for date {}: {}', [date, e]);
       rethrow;
     }
   }
@@ -204,13 +182,7 @@ class TimeslotManager extends ChangeNotifier {
         },
         SetOptions(merge: true),
       );
-
-      logger.info(
-        'Updated time slots for date {}. Total: {}',
-        [dateString, timeSlots.length],
-      );
     } catch (e) {
-      logger.err('Error updating time slots for date {}: {}', [date, e]);
       rethrow;
     }
   }
@@ -250,25 +222,15 @@ class TimeslotManager extends ChangeNotifier {
             'slots': bookedTimeSlots.toList(),
             'updatedAt': FieldValue.serverTimestamp(),
           });
-          logger.info(
-            'Deleted unbooked time slots for date {}. Preserved {} booked slots',
-            [dateString, bookedTimeSlots.length],
-          );
         } else {
           // No booked slots, delete document
           await docRef.delete();
-          logger.info(
-            'Deleted all time slots for date {} (no bookings)',
-            [dateString],
-          );
         }
       } else {
         // Delete all slots regardless of bookings
         await docRef.delete();
-        logger.info('Deleted all time slots for date {}', [dateString]);
       }
     } catch (e) {
-      logger.err('Error deleting time slots for date {}: {}', [date, e]);
       rethrow;
     }
   }
@@ -374,11 +336,6 @@ class TimeslotManager extends ChangeNotifier {
         return am.compareTo(bm);
       });
 
-      logger.info(
-        'Fetched timeslot data for date {}. Stored: {}, Booked: {}',
-        [dateString, storedTimes.length, bookedTimeSlots.length],
-      );
-
       return {
         'storedTimes': storedTimes,
         'adminSlots': adminSlots,
@@ -389,7 +346,6 @@ class TimeslotManager extends ChangeNotifier {
         'events': dayEvents,
       };
     } catch (e) {
-      logger.err('Error fetching timeslot data for date {}: {}', [date, e]);
       rethrow;
     }
   }
@@ -426,7 +382,6 @@ class TimeslotManager extends ChangeNotifier {
       ids.map((id) => usersCollection.doc(id).get().then<DocumentSnapshot<Map<String, dynamic>>?>(
             (doc) => doc,
             onError: (Object e) {
-              logger.warn('Could not read user {}: {}', [id, e]);
               return null;
             },
           )),
@@ -458,13 +413,8 @@ class TimeslotManager extends ChangeNotifier {
           .map((doc) => AppointmentModel.fromDocument(doc))
           .toList();
 
-      logger.info(
-        'Fetched {} appointments for date range {}-{}',
-        [appointments.length, startDate, endDate],
-      );
       return appointments;
     } catch (e) {
-      logger.err('Error fetching appointments for date range: {}', [e]);
       rethrow;
     }
   }
