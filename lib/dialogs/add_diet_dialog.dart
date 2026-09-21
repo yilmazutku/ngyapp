@@ -45,12 +45,14 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
   static const String kMissingTimeTitle = 'Öğün Saati Eksik';
   static const String kMissingTimeIntro =
-      'Öğün başlıkları, saati parantez içinde taşımak zorundadır:\n'
-      '    AKŞAM (19:30) :\n\n'
-      'Aşağıdaki öğünlerde bu biçim bulunamadı, diyet yüklenmedi:';
+      'Öğün başlığında saat "SS:DD" biçiminde yazılmalıdır; parantezli de '
+      'olabilir, parantezsiz de:\n'
+      '    AKŞAM (19:30) :        AKŞAM 19:30 :\n\n'
+      'Aşağıdaki öğünlerde saat bulunamadı, diyet yüklenmedi:';
   static const String kMissingTimeHint =
-      'Word dosyasındaki öğün başlıklarını bu biçime getirip dosyayı tekrar '
-      'seçin. Saat tahmin edilmez; parantezsiz yazılan saat kabul edilmez.';
+      'Word dosyasındaki öğün başlıklarına saati ekleyip dosyayı tekrar '
+      'seçin. Saat tahmin edilmez: "ARA 200gr üzüm" gibi bir başlıktaki sayı '
+      'saat sayılmaz.';
 
   // Weekday (Hafta İçi) meal list. Always present.
   List<Map<String, dynamic>> weekdaySubtitles = [];
@@ -801,13 +803,17 @@ class _AddDietDialogState extends State<AddDietDialog> {
         // exact line the admin has to fix in the document.
         currentSubtitle['headerLine'] = line;
 
-        // The meal header must carry its time in parentheses, e.g.
-        // "AKŞAM (19:30) :". Nothing else counts: a header without a
-        // parenthesised, valid time leaves 'time' empty on purpose, and
-        // [_mealsWithBadTimeHeader] then stops the whole import. Guessing a
-        // time from a stray number used to turn "ARA ÖĞÜN 1" into 01:00.
-        final timeMatch =
-            RegExp(r'\(\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*\)').firstMatch(line);
+        // The header must spell the meal's time out as HH:mm. Parentheses are
+        // optional -- "AKŞAM (19:30) :" and "AKŞAM 19:30 :" are both fine --
+        // and a parenthesised time wins when the line carries both, so a
+        // measurement written before it cannot be mistaken for the time.
+        // What is never done is guessing: a bare number such as the "200" in
+        // "ARA 200gr üzüm" must not become 20:00. When no HH:mm is present the
+        // time stays empty and [_mealsWithBadTimeHeader] stops the import.
+        final RegExpMatch? timeMatch =
+            RegExp(r'\(\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*\)')
+                    .firstMatch(line) ??
+                RegExp(r'(\d{1,2})[:.](\d{2})').firstMatch(line);
         // Index from which to search for the separator ":" that precedes any
         // inline food. Starting after the time skips the time's own ":".
         int contentSearchStart = 0;
