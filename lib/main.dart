@@ -48,6 +48,7 @@ import 'pages/meal_upload_page.dart';
 import 'pages/meas_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/user_payments_page.dart';
+import 'providers/app_update_provider.dart';
 import 'providers/appointment_manager.dart';
 import 'providers/customer_summary_provider.dart';
 import 'providers/daily_data_provider.dart';
@@ -73,6 +74,7 @@ import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
 import 'pages/testing_page.dart';
+import 'widgets/app_update_gate.dart';
 import 'widgets/labeled_action_button.dart';
 
 /// Global platform configuration instance
@@ -182,6 +184,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => NewsProvider()),
         ChangeNotifierProvider(create: (_) => CustomerSummaryProvider()),
         ChangeNotifierProvider(create: (_) => SummaryColorsProvider()),
+        ChangeNotifierProvider(create: (_) => AppUpdateProvider()),
       ],
       child: AppLifecycleManager(
         child: MaterialApp(
@@ -231,7 +234,10 @@ class MyApp extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          home: const AuthWrapper(),
+          // The update check sits above the auth flow rather than in front of
+          // it: AuthWrapper is built immediately and restores the saved
+          // session while the check runs, so neither one waits on the other.
+          home: const AppUpdateGate(child: AuthWrapper()),
         ),
       ),
     );
