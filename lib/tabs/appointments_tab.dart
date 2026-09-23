@@ -398,16 +398,12 @@ class _AppointmentsTabState
     final now = DateTime.now();
 
     // Sort appointments once (by option)
-    // For postponed appointments, use postponedDate; otherwise use appointmentDateTime
+    // Sorted by effectiveDateTime (the postponed date when there is one)
     switch (_sortOption) {
       case AppointmentSortOption.closestToToday:
         appointments.sort((a, b) {
-          final aDate = (a.status == AppointmentStatus.postponed && a.postponedDate != null)
-              ? a.postponedDate!
-              : a.appointmentDateTime;
-          final bDate = (b.status == AppointmentStatus.postponed && b.postponedDate != null)
-              ? b.postponedDate!
-              : b.appointmentDateTime;
+          final aDate = a.effectiveDateTime;
+          final bDate = b.effectiveDateTime;
           final aDiff = aDate.difference(now).abs();
           final bDiff = bDate.difference(now).abs();
           return aDiff.compareTo(bDiff);
@@ -416,34 +412,27 @@ class _AppointmentsTabState
       case AppointmentSortOption.dateAscending:
         // Tarih Artan: earliest dates first (2020 before 2025 before 2028)
         appointments.sort((a, b) {
-          final aDate = (a.status == AppointmentStatus.postponed && a.postponedDate != null)
-              ? a.postponedDate!
-              : a.appointmentDateTime;
-          final bDate = (b.status == AppointmentStatus.postponed && b.postponedDate != null)
-              ? b.postponedDate!
-              : b.appointmentDateTime;
+          final aDate = a.effectiveDateTime;
+          final bDate = b.effectiveDateTime;
           return aDate.compareTo(bDate);
         });
         break;
       case AppointmentSortOption.dateDescending:
         // Tarih Azalan: latest dates first (2028 before 2025 before 2020)
         appointments.sort((a, b) {
-          final aDate = (a.status == AppointmentStatus.postponed && a.postponedDate != null)
-              ? a.postponedDate!
-              : a.appointmentDateTime;
-          final bDate = (b.status == AppointmentStatus.postponed && b.postponedDate != null)
-              ? b.postponedDate!
-              : b.appointmentDateTime;
+          final aDate = a.effectiveDateTime;
+          final bDate = b.effectiveDateTime;
           return bDate.compareTo(aDate);
         });
         break;
     }
 
     // Group by date (dd.MM.yyyy)
-    // Always use appointmentDateTime for grouping (don't separate postponed appointments)
+    // Grouped by displayDateTime: a postponed appointment stays under its first
+    // date, one completed after a postponement moves to the date it was held.
     final Map<String, List<AppointmentModel>> grouped = {};
     for (final a in appointments) {
-      final key = _longDf.format(a.appointmentDateTime);
+      final key = _longDf.format(a.displayDateTime);
       (grouped[key] ??= []).add(a);
     }
 
@@ -615,7 +604,7 @@ class _AppointmentsTabState
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              _shortDf.format(appointment.appointmentDateTime),
+                              _shortDf.format(appointment.displayDateTime),
                               style: TextStyle(fontWeight: FontWeight.bold,fontSize: 16, color: Colors.grey[700]),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -837,7 +826,7 @@ class _AppointmentsTabState
       builder: (context) {
         return AlertDialog(
           title: Text(
-            '${_shortDf.format(appointment.appointmentDateTime)} Randevusu',
+            '${_shortDf.format(appointment.displayDateTime)} Randevusu',
             style: const TextStyle(fontSize: 18,fontWeight: FontWeight.bold),
           ),
           content: SingleChildScrollView(
@@ -920,7 +909,7 @@ class _AppointmentsTabState
     DialogUtils.openConfirm(
       context,
       title: 'Randevu Silme',
-      message: '${_shortDf.format(appointment.appointmentDateTime)} '
+      message: '${_shortDf.format(appointment.displayDateTime)} '
           'tarihli randevuyu silmek istediğinizden emin misiniz?',
       confirmText: 'Evet, Sil',
       cancelText: 'İptal',
@@ -976,7 +965,7 @@ class _AppointmentsTabState
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  _shortDf.format(appointment.appointmentDateTime),
+                  _shortDf.format(appointment.displayDateTime),
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,

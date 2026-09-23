@@ -105,15 +105,24 @@ class AppointmentModel {
   /// recorded, and appointments predating [postponedBy] carry only the date.
   bool get wasPostponed => postponedDate != null || postponedBy != null;
 
-  /// Randevunun listelerde gösterilecek tarihi: ertelenmiş bir randevuda
-  /// ertelendiği **yeni** tarih, diğer her durumda planlanan tarih.
+  /// Randevunun listelerde gösterilecek tarihi: ertelenmiş ya da ertelendikten
+  /// sonra "Yapıldı"ya çekilmiş bir randevuda ertelendiği **yeni** tarih, diğer
+  /// her durumda planlanan tarih.
   ///
   /// Yeni tarih seçilmeden de erteleme kaydedilebildiği için ("Ertelendi" ama
   /// [postponedDate] boş) o durumda planlanan tarih kullanılır.
   DateTime get effectiveDateTime =>
       (status == AppointmentStatus.postponed && postponedDate != null)
           ? postponedDate!
-          : appointmentDateTime;
+          : displayDateTime;
+
+  DateTime get displayDateTime => isHeldOnPostponedDate(status, postponedDate)
+      ? postponedDate!
+      : appointmentDateTime;
+
+  static bool isHeldOnPostponedDate(
+          AppointmentStatus status, DateTime? postponedDate) =>
+      status == AppointmentStatus.completed && postponedDate != null;
 
   @override
   String toString() {
