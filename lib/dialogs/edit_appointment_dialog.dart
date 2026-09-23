@@ -72,11 +72,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     _appointmentType = widget.appointment.appointmentType;
     _appointmentStatus = widget.appointment.status;
     _appointmentDateTime = widget.appointment.appointmentDateTime;
-    _hourController.text =
-        _appointmentDateTime.hour.toString().padLeft(2, '0');
-    _minuteController.text =
-        _appointmentDateTime.minute.toString().padLeft(2, '0');
     _postponedDate = widget.appointment.postponedDate;
+    _fillTimeBoxes(_mainDate);
     _postponedBy = widget.appointment.postponedBy;
     _notesController.text = widget.appointment.notes ?? '';
     _durationController.text = widget.appointment.durationMinutes.toString();
@@ -175,14 +172,52 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     }
   }
   
+  List<AppointmentStatus> get _selectableStatuses =>
+      widget.appointment.status == AppointmentStatus.postponed
+          ? AppointmentStatus.values
+              .where((s) => s != AppointmentStatus.scheduled)
+              .toList()
+          : AppointmentStatus.values;
+
+  bool get _mainDateIsPostponedDate =>
+      AppointmentModel.isHeldOnPostponedDate(_appointmentStatus, _postponedDate);
+
+  DateTime get _mainDate =>
+      _mainDateIsPostponedDate ? _postponedDate! : _appointmentDateTime;
+
+  void _setMainDate(DateTime value) {
+    if (_mainDateIsPostponedDate) {
+      _postponedDate = value;
+    } else {
+      _appointmentDateTime = value;
+    }
+  }
+
+  DateTime _withTime(DateTime date, TimeOfDay time) =>
+      DateTime(date.year, date.month, date.day, time.hour, time.minute);
+
+  void _fillTimeBoxes(DateTime date) {
+    _hourController.text = date.hour.toString().padLeft(2, '0');
+    _minuteController.text = date.minute.toString().padLeft(2, '0');
+  }
+
   void _handleStatusChange(AppointmentStatus newStatus) {
     // The postponement source (user vs admin) is chosen inline via the
     // "Erteleme Kaynağı" selector shown while the status is "Ertelendi"; it
     // opens on "Danışan Kaynaklı" the first time that status is picked.
+    final bool mainDateWasPostponedDate = _mainDateIsPostponedDate;
+    final TimeOfDay? enteredTime =
+        parseHourMinute(_hourController, _minuteController);
     setState(() {
+      if (enteredTime != null) {
+        _setMainDate(_withTime(_mainDate, enteredTime));
+      }
       _appointmentStatus = newStatus;
       if (newStatus == AppointmentStatus.postponed) {
         _postponedBy ??= PostponeSource.user;
+      }
+      if (mainDateWasPostponedDate != _mainDateIsPostponedDate) {
+        _fillTimeBoxes(_mainDate);
       }
     });
   }
@@ -203,7 +238,8 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     // The postponed date is optional: the new date is often not known when the
     // postponement is recorded, and it can be filled in later.
 
-    // Read the inline time boxes (SS:DD) and apply them to the appointment date.
+    // Read the inline time boxes (SS:DD) and apply them to the date shown
+    // above them.
     final TimeOfDay? enteredTime =
         parseHourMinute(_hourController, _minuteController);
     if (enteredTime == null) {
@@ -214,13 +250,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       );
       return;
     }
-    _appointmentDateTime = DateTime(
-      _appointmentDateTime.year,
-      _appointmentDateTime.month,
-      _appointmentDateTime.day,
-      enteredTime.hour,
-      enteredTime.minute,
-    );
+    _setMainDate(_withTime(_mainDate, enteredTime));
 
     // The postponement record survives the appointment being completed or
     // burned: an appointment that was postponed and then took place still spent
@@ -352,7 +382,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       context,
       title: 'Randevu Silme',
       message:
-          '${DateFormatter.formatNumericDateTime(widget.appointment.appointmentDateTime)} '
+          '${DateFormatter.formatNumericDateTime(widget.appointment.displayDateTime)} '
           'tarihli randevuyu silmek istediğinizden emin misiniz?',
       confirmText: 'Evet, Sil',
       cancelText: 'İptal',
@@ -515,7 +545,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
                     _handleStatusChange(newValue);
                   }
                 },
-                items: AppointmentStatus.values
+                items: _selectableStatuses
                     .map<DropdownMenuItem<AppointmentStatus>>(
                         (AppointmentStatus status) {
                   return DropdownMenuItem<AppointmentStatus>(
@@ -674,16 +704,11 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
             // 4) Date & Time — date via widget, time via two inline boxes,
             // stacked below the date. No past/future restriction.
             DatePickerFormField(
-              selectedDate: _appointmentDateTime,
+              selectedDate: _mainDate,
               onDateSelected: (picked) {
                 setState(() {
-                  _appointmentDateTime = DateTime(
-                    picked.year,
-                    picked.month,
-                    picked.day,
-                    _appointmentDateTime.hour,
-                    _appointmentDateTime.minute,
-                  );
+                  _setMainDate(
+                      _withTime(picked, TimeOfDay.fromDateTime(_mainDate)));
                 });
               },
               label: 'Tarih Seçin',
