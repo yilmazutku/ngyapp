@@ -3,11 +3,10 @@ import 'package:flutter/material.dart';
 import '../models/appointment_model.dart';
 import 'dialog_utils.dart';
 
-/// The postponement-right side of cancelling, deleting or un-postponing an
-/// appointment.
+/// The postponement-right side of deleting or un-postponing an appointment.
 ///
 /// `postponementsUsed` only counts user-originated postponements, so only
-/// appointments carrying that marker have a right behind them to talk about. Cancelling or deleting
+/// appointments carrying that marker have a right behind them to talk about. Deleting
 /// such an appointment deliberately does **not** give the right back — the
 /// customer did ask for the postponement — but the admin is told, because an
 /// admin-side mistake can then only be corrected from the package editor.
@@ -19,13 +18,13 @@ class PostponementNotices {
 
   static const String _title = 'Erteleme Hakkı';
 
-  /// Shown after cancelling or deleting an appointment that had consumed a
-  /// postponement right. Wording is deliberately identical for both actions.
+  /// Shown after deleting an appointment that had consumed a postponement
+  /// right.
   static const String _rightKeptMessage =
-      'Danışan erteleme hakkı kullanılan bir randevuyu iptal ettiniz / '
-      'sildiniz. Eğer sizden kaynaklı bir iptal/silme işlemi ise danışan '
-      'erteleme hakkını düzeltmek isterseniz paket düzenleme kısmından '
-      'ayarlayınız.';
+      'Danışan erteleme hakkı kullanılan bir randevuyu sildiniz. Bu randevuda '
+      'danışan erteleme hakkından düşülmüştü. Silme işlemi sizden kaynaklıysa '
+      'paket düzenleme ekranında "Kullanılan Erteleme Sayısı"nı 1 azaltarak '
+      'kalan erteleme hakkına 1 ekleyebilirsiniz.';
 
   static const String _rightReturnedByRescheduleMessage =
       'Randevu tekrar planlandı durumuna alındı. Bu randevu için kullanılan '
@@ -53,7 +52,7 @@ class PostponementNotices {
       appointment.postponedBy == PostponeSource.user &&
       (appointment.subscriptionId?.isNotEmpty ?? false);
 
-  /// Tells the admin the right stayed spent after a cancel or a delete.
+  /// Tells the admin the right stayed spent after a delete.
   /// Does nothing when the appointment never consumed one.
   static Future<void> warnRightKept(
     BuildContext context,
