@@ -179,6 +179,10 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               .toList()
           : AppointmentStatus.values;
 
+  bool get _isHeldAfterPostponement =>
+      _appointmentStatus == AppointmentStatus.completed &&
+      (_postponedDate != null || _postponedBy != null);
+
   bool get _mainDateIsPostponedDate =>
       AppointmentModel.isHeldOnPostponedDate(_appointmentStatus, _postponedDate);
 
@@ -714,6 +718,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
               label: 'Tarih Seçin',
               selectedLabel: AppointmentDateLabels.dateLabel(
                 _appointmentStatus == AppointmentStatus.postponed,
+                isHeldAfterPostponement: _isHeldAfterPostponement,
               ),
               firstDate: DateTime(2000),
               lastDate: DateTime(2100),
