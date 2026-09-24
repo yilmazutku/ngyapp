@@ -15,6 +15,7 @@ class AppointmentDateLabels {
 
   static const String date = 'Tarih';
   static const String firstDate = 'İlk Tarih';
+  static const String heldDate = 'Gerçekleştiği Tarih';
 
   /// Randevu kartlarında satır etiketi olarak kullanılan biçim.
   static const String postponedDate = 'Ertelendiği Tarih';
@@ -23,8 +24,13 @@ class AppointmentDateLabels {
   /// [String.toUpperCase] eşlemesi "i" harfini "I" yaptığı için elle yazılır.
   static const String postponedDateHeading = 'ERTELENDİĞİ TARİH';
 
-  /// Randevunun kendi tarihinin etiketi; [isPostponed] ise "İlk Tarih".
-  static String dateLabel(bool isPostponed) => isPostponed ? firstDate : date;
+  /// Randevunun kendi tarihinin etiketi; [isPostponed] ise "İlk Tarih",
+  /// [isHeldAfterPostponement] ise "Gerçekleştiği Tarih".
+  static String dateLabel(bool isPostponed,
+      {bool isHeldAfterPostponement = false}) {
+    if (isPostponed) return firstDate;
+    return isHeldAfterPostponement ? heldDate : date;
+  }
 }
 
 /// Parses two "HH" / "MM" text controllers into a [TimeOfDay], or returns null
