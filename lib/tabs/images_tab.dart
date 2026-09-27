@@ -487,7 +487,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       List<dynamic> filteredItems,
       ) {
     final mealTypeOptions = {
-      for (final Meals type in _mealGroups) type: type.photoLabel,
+      for (final Meals type in _mealGroups) type: type.displayLabel,
     };
 
     // Use filterResetKey to force rebuild when "Filtreleri Sıfırla" is clicked
@@ -881,7 +881,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
   ];
 
   Widget _buildStatisticsBar() {
-    // Ara öğünler numarasız tek rozette toplanır ("Ara Öğün").
+    // Ara öğünler numarasız tek rozette toplanır ("Ara").
     final Map<Meals, int> counts = {};
     for (final entry in _mealTypeCounts.entries) {
       final Meals key = entry.key.isSnack ? Meals.firstmid : entry.key;
@@ -947,7 +947,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
               ),
             ),
             Text(
-              meal.photoLabel,
+              meal.displayLabel,
               style: TextStyle(
                 fontSize: 12,
                 color: chipColor,
@@ -1028,7 +1028,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                 SizedBox(width: kMealCardSpacing),
                 Flexible(
                   child: Text(
-                    mealType.photoLabel,
+                    mealType.displayLabel,
                     style: TextStyle(
                       fontSize: 11 * kSizeReductionMultiplier,
                       fontWeight: FontWeight.w600,

@@ -8,6 +8,10 @@ import '../models/meal_model.dart';
 /// time of each meal, resolved to the [Meals] enum.
 class DietMenu {
   final Map<Meals, List<String>> contents;
+
+  /// Diyette yazılı öğün saatleri. Saati yazılmamış (ya da okunamayan) öğün
+  /// bu map'te yoktur: varsayılan saat uydurulmaz, ekranda "-" görünür
+  /// ([formatMealTime]).
   final Map<Meals, TimeOfDay> times;
 
   const DietMenu({required this.contents, required this.times});
@@ -24,7 +28,8 @@ class DietMenu {
 
   List<String> linesOf(Meals meal) => contents[meal] ?? const <String>[];
 
-  TimeOfDay timeOf(Meals meal, TimeOfDay fallback) => times[meal] ?? fallback;
+  /// Öğünün diyetteki saati; diyette yazılı değilse null.
+  TimeOfDay? timeOf(Meals meal) => times[meal];
 
   /// [date] günü geçerli menü: diyette hafta sonu menüsü varsa hafta sonu
   /// günlerinde o, diğer günlerde hafta içi menüsü ("Planım"daki kural).
@@ -61,36 +66,52 @@ class DietMenu {
               .where((line) => line.isNotEmpty)
               .toList()
           : <String>[];
-      times[meal] = parseMealTime(mealData['time']?.toString());
+      final TimeOfDay? time = parseMealTime(mealData['time']?.toString());
+      if (time != null) times[meal] = time;
     }
 
     return DietMenu(contents: contents, times: times);
   }
 }
 
-/// Converts a stored time string ("HH:mm" or "HH.mm") to a [TimeOfDay],
-/// defaulting to midnight when missing or unparseable.
-TimeOfDay parseMealTime(String? timeString) {
-  if (timeString == null || timeString.isEmpty) {
-    return const TimeOfDay(hour: 0, minute: 0);
-  }
+/// Converts a stored time string ("HH:mm" or "HH.mm") to a [TimeOfDay].
+///
+/// Returns null when the time is missing or unparseable: no default time is
+/// ever made up, the meal is shown without a time ("-", see
+/// [formatMealTime]) and gets no reminder.
+TimeOfDay? parseMealTime(String? timeString) {
+  final String value = timeString?.trim() ?? '';
+  if (value.isEmpty) return null;
+
   try {
-    if (timeString.contains(':')) {
-      final parts = timeString.split(':');
+    if (value.contains(':')) {
+      final parts = value.split(':');
       if (parts.length == 2) {
         final hour = int.tryParse(parts[0].trim());
         final minute = int.tryParse(parts[1].trim());
-        if (hour != null && minute != null) {
+        if (hour != null &&
+            minute != null &&
+            hour >= 0 &&
+            hour <= 23 &&
+            minute >= 0 &&
+            minute <= 59) {
           return TimeOfDay(hour: hour, minute: minute);
         }
       }
     } else {
-      return TimeOfDay.fromDateTime(DateFormat('HH:mm').parse(timeString));
+      return TimeOfDay.fromDateTime(DateFormat('HH:mm').parse(value));
     }
   } catch (e) {
   }
-  return const TimeOfDay(hour: 0, minute: 0);
+  return null;
 }
+
+/// Öğün saati yazılı olmadığında gösterilen işaret.
+const String kMissingMealTimeText = '-';
+
+/// Öğün saatinin ekrandaki hâli: "12:30"; diyette saat yoksa "-".
+String formatMealTime(TimeOfDay? time) =>
+    time == null ? kMissingMealTimeText : formatTimeOfDay24(time);
 
 String formatTimeOfDay24(TimeOfDay time) {
   final now = DateTime.now();

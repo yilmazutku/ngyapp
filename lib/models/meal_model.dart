@@ -153,18 +153,19 @@ class MealModel {
 const String ARA_WORD_LABEL='Ara';
 enum Meals {
 
-  br('Sabah', '09:00'),
-  firstmid('Ara Öğün 1', '10:30'),
-  lunch('Öğle', '12:30'),
-  secondmid('Ara Öğün 2', '16:00'),
-  dinner('Akşam', '19:00'),
-  thirdmid('Ara Öğün 3', '21:00'),
-  none('Diğer', '');
+  br('Sabah'),
+  firstmid('Ara Öğün 1'),
+  lunch('Öğle'),
+  secondmid('Ara Öğün 2'),
+  dinner('Akşam'),
+  thirdmid('Ara Öğün 3'),
+  none('Diğer');
 
-  const Meals(this.label, this.defaultTime);
+  /// Öğünlerin sabit bir saati yoktur: saat her zaman danışanın diyetinden
+  /// okunur, diyette yoksa "-" gösterilir (bkz. `DietMenu`).
+  const Meals(this.label);
 
   final String label;
-  final String defaultTime;
 
   /// Actual meal types used for diets, tracking, and reminders (excludes [none]).
   static List<Meals> get dietValues =>
@@ -176,22 +177,23 @@ enum Meals {
       this == Meals.secondmid ||
       this == Meals.thirdmid;
 
-  /// Fotoğraf ekranlarında, sohbette ve bildirimlerde gösterilen öğün adı.
+  /// Kullanıcıya gösterilen öğün adı: ara öğünler numarasız "Ara", diğerleri
+  /// kendi adıyla ("Sabah", "Öğle", "Akşam", "Diğer").
   ///
-  /// Ara öğünler numaralandırılmadan tek ad altında toplanır: kullanıcıya
-  /// hiçbir yerde "Ara Öğün 1/2/3" gösterilmez. Numaralı [label] yalnızca
-  /// diyet yapısında (diyet dosyası ayrıştırma, diyet düzenleme) kullanılır;
-  /// hatırlatmalar [displayLabel] ile "Ara" der.
-  String get photoLabel => isSnack ? snackPhotoLabel : label;
+  /// Fotoğraf ekranları, sohbet, bildirimler, "Planım" ve hatırlatmalar bunu
+  /// kullanır; kullanıcıya hiçbir yerde "Ara Öğün 1/2/3" gösterilmez.
+  /// Numaralı [label] yalnızca diyet yapısında (diyet dosyası ayrıştırma,
+  /// diyet düzenleme) kalır.
+  String get displayLabel => isSnack ? snackLabel : label;
 
-  /// Ara öğünlerin fotoğraf ekranlarındaki ortak adı.
-  static const String snackPhotoLabel = 'Ara Öğün';
+  /// Ara öğünlerin kullanıcıya gösterilen ortak adı.
+  static const String snackLabel = 'Ara';
 
-  /// Sohbete düşen öğün fotoğrafının mesaj açıklaması: "Öğün: Ara Öğün".
-  String get chatCaption => '$chatCaptionPrefix$photoLabel';
+  /// Sohbete düşen öğün fotoğrafının mesaj açıklaması: "Öğün: Ara".
+  String get chatCaption => '$chatCaptionPrefix$displayLabel';
 
-  /// Sohbet listesindeki son mesaj özeti: "Öğün Fotoğrafı (Ara Öğün)".
-  String get chatSummary => '$_chatSummaryPrefix$photoLabel)';
+  /// Sohbet listesindeki son mesaj özeti: "Öğün Fotoğrafı (Ara)".
+  String get chatSummary => '$_chatSummaryPrefix$displayLabel)';
 
   /// Öğün fotoğrafı mesajının açıklamasının öneki (bkz. [chatCaption]).
   static const String chatCaptionPrefix = 'Öğün: ';
@@ -212,9 +214,13 @@ enum Meals {
   /// [none] önceki sürümlerde bu adla yazılıyordu.
   static const String _legacyNoneLabel = 'Hiçbiri';
 
+  /// Ara öğünler önceki sürümlerde numaralı ("Ara Öğün 2", bkz. [label]) ya da
+  /// bu adla yazılıyordu.
+  static const String _legacySnackLabel = 'Ara Öğün';
+
   /// Uygulamanın sohbete yazdığı öğün metinlerini ([chatCaption],
-  /// [chatSummary]) bugünkü adlarla verir: eski mesajlardaki "Ara Öğün 2"
-  /// "Ara Öğün", "Hiçbiri" "Diğer" olur. Kullanıcının yazdığı metinlere
+  /// [chatSummary]) bugünkü adlarla verir: eski mesajlardaki "Ara Öğün 2" ve
+  /// "Ara Öğün" "Ara", "Hiçbiri" "Diğer" olur. Kullanıcının yazdığı metinlere
   /// dokunulmaz.
   static String chatTextForDisplay(String text) {
     if (!text.startsWith(chatCaptionPrefix) &&
@@ -222,13 +228,13 @@ enum Meals {
       return text;
     }
 
-    String result = text.replaceFirst(_legacyNoneLabel, none.photoLabel);
+    String result = text.replaceFirst(_legacyNoneLabel, none.displayLabel);
     for (final Meals meal in values) {
       if (meal.isSnack) {
-        result = result.replaceFirst(meal.label, meal.photoLabel);
+        result = result.replaceFirst(meal.label, meal.displayLabel);
       }
     }
-    return result;
+    return result.replaceFirst(_legacySnackLabel, snackLabel);
   }
 
   /// Fotoğrafı silinen mesajın yeni metni: "Öğün: Öğle (fotoğraf silindi)";
@@ -240,13 +246,6 @@ enum Meals {
         : '$caption $deletedPhotoSuffix';
   }
 
-  /// Returns a simplified display label where all "Ara Öğün" types are shown as just "Ara"
-  String get displayLabel {
-    if (this == Meals.firstmid || this == Meals.secondmid || this == Meals.thirdmid) {
-      return 'Ara';
-    }
-    return label;
-  }
 
   static Meals? fromName(String name) {
     try {

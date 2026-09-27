@@ -117,7 +117,7 @@ They notify users/admins about new chat messages.
 | `CHAT_DEFAULT_BODY` | `'Yeni mesaj'` | Body when message text is empty |
 | `CHAT_IMAGE_BODY` | `'Fotoğraf'` | Body when message is an image |
 | `CHAT_REACTION_BODY_TEMPLATE` | `'bir mesajınıza {emoji} ifadesi bıraktı'` | Body when one side reacts to the other's message. `{emoji}` is replaced with the reaction (e.g. `👍`). Title is `CHAT_ADMIN_TO_USER_TITLE` for admin→user, the reacting client's name for user→admin. |
-| `CHAT_MEAL_PHOTO_REACTION_BODY_TEMPLATE` | `'{meal} fotoğrafınıza {emoji} bıraktı'` | Admin→user body when the reacted message is a meal photo. `{meal}` comes from the message text `Öğün: {name}`: `Öğle` → `Öğle öğün`, every snack → `Ara Öğün` (snacks are never numbered, older `Ara Öğün 2` texts included), `Diğer` (formerly `Hiçbiri`) → `Öğün` (e.g. `Öğle öğün fotoğrafınıza 👍 bıraktı`, `Ara Öğün fotoğrafınıza 👍 bıraktı`). |
+| `CHAT_MEAL_PHOTO_REACTION_BODY_TEMPLATE` | `'{meal} fotoğrafınıza {emoji} bıraktı'` | Admin→user body when the reacted message is a meal photo. `{meal}` comes from the message text `Öğün: {name}`: `Öğle` → `Öğle öğün`, every snack → `Ara öğün` (snacks are shown as just `Ara`, older `Ara Öğün 2` / `Ara Öğün` texts included), `Diğer` (formerly `Hiçbiri`) → `Öğün` (e.g. `Öğle öğün fotoğrafınıza 👍 bıraktı`, `Ara öğün fotoğrafınıza 👍 bıraktı`). |
 | `CHAT_PHOTO_REACTION_BODY_TEMPLATE` | `'bir fotoğrafınıza {emoji} bıraktı'` | Admin→user body when the reacted message is a photo that is not a meal photo. |
 | `CHAT_USER_TO_ADMIN_DEFAULT_TITLE` | `'Kullanıcı mesajı'` | Title when user sends to admin (fallback if name not found) |
 | `CHAT_ANDROID_ICON` | `'ic_notification'` | Android notification icon |

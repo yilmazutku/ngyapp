@@ -611,9 +611,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Show a modal bottom sheet for meal type selection.
   ///
   /// Öğünler danışanın bugünkü diyetindeki saatleriyle listelenir ("Öğle
-  /// (12:30)", "Ara (15:30)"): birden çok ara öğünü olan danışan doğru olanı
-  /// saatinden seçer, fotoğraf o öğüne kaydedilir ve o öğünün hatırlatması
-  /// iptal olur. Seçenekler okunurken sayfa içinde yükleniyor gösterilir.
+  /// (12:30)", "Ara (15:30)"; saat diyette yoksa "-"): birden çok ara öğünü
+  /// olan danışan doğru olanı saatinden seçer, fotoğraf o öğüne kaydedilir ve
+  /// o öğünün hatırlatması iptal olur. Seçenekler okunurken sayfa içinde
+  /// yükleniyor gösterilir.
   ///
   /// Returns the selected Meals enum value, or null if cancelled.
   Future<Meals?> _chooseMeal() async {
@@ -656,54 +657,49 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Öğün seçicinin seçenekleri: danışanın bugünkü diyet menüsündeki öğünler
-  /// ("Planım"da gördüğü öğünler ve saatler), saate göre sıralı, en sonda
-  /// "Diğer". Ara öğünler numarasız "Ara" yazılır, saatleriyle ayırt edilir.
+  /// Diyeti olmayan danışanın seçicideki öğünleri. Saat gösterilemediği için
+  /// ara öğünler tek "Ara" seçeneğinde toplanır: saatsiz üç "Ara" birbirinden
+  /// ayırt edilemezdi.
+  static const List<Meals> _mealsWithoutDiet = [
+    Meals.br,
+    Meals.firstmid,
+    Meals.lunch,
+    Meals.dinner,
+  ];
+
+  /// Öğün seçicinin seçenekleri: danışanın bugünkü diyet menüsündeki öğünler,
+  /// "Planım"daki sıra ve saatlerle ("Öğle (12:30)", "Ara (15:30)"); en sonda
+  /// "Diğer". Saat her zaman diyetten gelir; diyette yazılı değilse "-"
+  /// görünür, varsayılan saat uydurulmaz.
   ///
-  /// Diyet yoksa ya da okunamazsa bütün öğünler varsayılan saatleriyle
-  /// listelenir; seçici hiçbir durumda boş kalmaz.
+  /// Diyet yoksa ya da okunamazsa öğünler saatsiz listelenir ("Öğle (-)"):
+  /// danışanın bir diyeti olmadığı anlaşılır ve seçici yine boş kalmaz.
   Future<List<({Meals meal, String label})>> _loadMealChoices() async {
     final DietProvider dietProvider =
         Provider.of<DietProvider>(context, listen: false);
 
-    List<({Meals meal, TimeOfDay time})> timedMeals = [];
+    DietMenu menu = const DietMenu.empty();
     try {
       final DietDocument? diet =
           await dietProvider.fetchLatestDietDocument(_currentUid);
-      final DietMenu menu = DietMenu.forDate(
+      menu = DietMenu.forDate(
         weekday: DietMenu.fromSubtitles(diet?.subtitles),
         weekend: DietMenu.fromSubtitles(diet?.weekendSubtitles),
         date: DateTime.now(),
       );
-      timedMeals = [
-        for (final Meals meal in menu.mealsWithContent)
-          (
-            meal: meal,
-            time: menu.timeOf(meal, parseMealTime(meal.defaultTime)),
-          ),
-      ];
     } catch (e) {
-      // Varsayılan öğünlerle devam edilir.
+      // Diyet okunamazsa diyetsiz seçenekler gösterilir.
     }
 
-    if (timedMeals.isEmpty) {
-      timedMeals = [
-        for (final Meals meal in Meals.dietValues)
-          (meal: meal, time: parseMealTime(meal.defaultTime)),
-      ];
-    }
-
-    int minutesOf(TimeOfDay time) => time.hour * 60 + time.minute;
-    timedMeals.sort((a, b) {
-      final int byTime = minutesOf(a.time).compareTo(minutesOf(b.time));
-      return byTime != 0 ? byTime : a.meal.index.compareTo(b.meal.index);
-    });
+    final List<Meals> meals = menu.mealsWithContent.isNotEmpty
+        ? menu.mealsWithContent
+        : _mealsWithoutDiet;
 
     return [
-      for (final ({Meals meal, TimeOfDay time}) item in timedMeals)
+      for (final Meals meal in meals)
         (
-          meal: item.meal,
-          label: '${item.meal.displayLabel} (${formatTimeOfDay24(item.time)})',
+          meal: meal,
+          label: '${meal.displayLabel} (${formatMealTime(menu.timeOf(meal))})',
         ),
       (meal: Meals.none, label: Meals.none.displayLabel),
     ];
@@ -1317,7 +1313,7 @@ class _MessageBubble extends StatelessWidget {
     final bubbleColor = isMe ? Colors.blue.shade100 : Colors.grey.shade300;
     final align = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     // Uygulamanın yazdığı öğün açıklamaları eski mesajlarda da güncel adla
-    // görünür ("Ara Öğün 2" -> "Ara Öğün").
+    // görünür ("Ara Öğün 2" -> "Ara").
     final String text = Meals.chatTextForDisplay(message.text ?? '');
 
     // The message body itself (text bubble and/or image + timestamp).

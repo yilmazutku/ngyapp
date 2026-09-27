@@ -595,8 +595,6 @@ class _MealUploadPageState extends State<MealUploadPage>
 
   @override
   Widget build(BuildContext context) {
-    const defaultMealTime = TimeOfDay(hour: 0, minute: 0);
-
     return Scaffold(
       appBar: const AppBarWithBack(
         title: 'Planım',
@@ -640,7 +638,7 @@ class _MealUploadPageState extends State<MealUploadPage>
 
                         // Meals Section with collapsible tiles (split into
                         // weekday/weekend sections when the diet has both).
-                        _buildMealsArea(defaultMealTime),
+                        _buildMealsArea(),
                       ],
                     ),
                   ),
@@ -987,12 +985,11 @@ class _MealUploadPageState extends State<MealUploadPage>
   /// or two labelled sections (Hafta İçi + Hafta Sonu) when the diet defines a
   /// weekend menu. Only the section matching today is interactive (check-off +
   /// photo upload); the other is shown read-only for reference.
-  Widget _buildMealsArea(TimeOfDay defaultMealTime) {
+  Widget _buildMealsArea() {
     if (!_weekendMenu.hasContent) {
       return _buildMealsSection(
         menu: _weekdayMenu,
         interactive: true,
-        defaultMealTime: defaultMealTime,
       );
     }
 
@@ -1007,7 +1004,6 @@ class _MealUploadPageState extends State<MealUploadPage>
           menu: _weekdayMenu,
           interactive: !weekendToday,
           isToday: !weekendToday,
-          defaultMealTime: defaultMealTime,
         ),
         const SizedBox(height: 12),
         _buildMealsSection(
@@ -1016,7 +1012,6 @@ class _MealUploadPageState extends State<MealUploadPage>
           menu: _weekendMenu,
           interactive: weekendToday,
           isToday: weekendToday,
-          defaultMealTime: defaultMealTime,
         ),
       ],
     );
@@ -1026,7 +1021,6 @@ class _MealUploadPageState extends State<MealUploadPage>
   Widget _buildMealsSection({
     required DietMenu menu,
     required bool interactive,
-    required TimeOfDay defaultMealTime,
     DietSection? section,
     IconData? sectionIcon,
     bool isToday = false,
@@ -1076,7 +1070,7 @@ class _MealUploadPageState extends State<MealUploadPage>
           ...mealsWithContent.map((meal) => _buildMealTile(
                 mealCategory: meal,
                 contents: menu.linesOf(meal),
-                mealTime: menu.timeOf(meal, defaultMealTime),
+                mealTime: menu.timeOf(meal),
                 interactive: interactive,
                 expansionKey: _expansionKey(meal, section: section),
               )),
@@ -1090,7 +1084,7 @@ class _MealUploadPageState extends State<MealUploadPage>
   Widget _buildMealTile({
     required Meals mealCategory,
     required List<String> contents,
-    required TimeOfDay mealTime,
+    required TimeOfDay? mealTime,
     required bool interactive,
     required String expansionKey,
   }) {
@@ -1310,7 +1304,7 @@ class _MealUploadPageState extends State<MealUploadPage>
                                       CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '${meal.photoLabel}  (${images.length}/${MealModel.maxImages})',
+                                      '${meal.displayLabel}  (${images.length}/${MealModel.maxImages})',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,

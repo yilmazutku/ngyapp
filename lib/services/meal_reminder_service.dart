@@ -8,8 +8,8 @@ import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../constants/app_constants.dart';
-import '../models/diet_section.dart';
 import '../models/meal_model.dart';
+import '../utils/diet_menu_parser.dart';
 
 /// Service for scheduling meal upload reminder notifications.
 /// 
@@ -178,6 +178,11 @@ class MealReminderService {
   }
 
   /// Fetch user's meal times from their latest diet document.
+  ///
+  /// Bugünün menüsü ve saatleri "Planım" ile sohbetteki öğün seçicinin
+  /// kullandığı kuralla okunur ([DietMenu.forDate]); hatırlatma saati ekranda
+  /// görünen saatle hep aynıdır. Diyette saati yazılmamış öğüne hatırlatma
+  /// kurulmaz: varsayılan saat uydurulmaz.
   Future<Map<Meals, TimeOfDay>> _fetchUserMealTimes(String userId) async {
     Map<Meals, TimeOfDay> mealTimes = {};
 
@@ -195,43 +200,17 @@ class MealReminderService {
       }
 
       final data = querySnapshot.docs.first.data();
-      final weekdaySubtitles = data['subtitles'] as Map<String, dynamic>?;
-      final weekendSubtitles = data['weekendSubtitles'] as Map<String, dynamic>?;
+      final DietMenu menu = DietMenu.forDate(
+        weekday: DietMenu.fromSubtitles(
+            data['subtitles'] as Map<String, dynamic>?),
+        weekend: DietMenu.fromSubtitles(
+            data['weekendSubtitles'] as Map<String, dynamic>?),
+        date: DateTime.now(),
+      );
 
-      // On Saturday/Sunday use the weekend menu's times when the diet defines
-      // one, so reminders match what the user should actually be eating today.
-      final useWeekend = isWeekendDate(DateTime.now()) &&
-          weekendSubtitles != null &&
-          weekendSubtitles.isNotEmpty;
-      final subtitles = useWeekend ? weekendSubtitles : weekdaySubtitles;
-
-      if (subtitles == null) {
-        return mealTimes;
-      }
-
-      for (final entry in subtitles.entries) {
-        final mealName = entry.key;
-        final mealData = entry.value as Map<String, dynamic>;
-        final meal = Meals.fromName(mealName);
-
-        if (meal == null) continue;
-
-        // Check if content exists (meal is assigned to this user)
-        final content = mealData['content'] as List<dynamic>?;
-        if (content == null || content.isEmpty) continue;
-
-        // Parse meal time
-        final timeString = mealData['time'] as String?;
-        TimeOfDay time = _parseDefaultTime(meal);
-
-        if (timeString != null && timeString.isNotEmpty) {
-          final parsedTime = _parseTimeString(timeString);
-          if (parsedTime != null) {
-            time = parsedTime;
-          }
-        }
-
-        mealTimes[meal] = time;
+      for (final Meals meal in menu.mealsWithContent) {
+        final TimeOfDay? time = menu.timeOf(meal);
+        if (time != null) mealTimes[meal] = time;
       }
     } catch (e) {
     }
@@ -271,33 +250,6 @@ class MealReminderService {
     }
 
     return states;
-  }
-
-  /// Parse a time string (HH:mm format) into TimeOfDay.
-  TimeOfDay? _parseTimeString(String timeString) {
-    try {
-      if (timeString.contains(':')) {
-        final parts = timeString.split(':');
-        if (parts.length >= 2) {
-          final hour = int.tryParse(parts[0]);
-          final minute = int.tryParse(parts[1]);
-          if (hour != null && minute != null) {
-            return TimeOfDay(hour: hour, minute: minute);
-          }
-        }
-      }
-    } catch (e) {
-    }
-    return null;
-  }
-
-  /// Get default time for a meal type.
-  TimeOfDay _parseDefaultTime(Meals meal) {
-    final parts = meal.defaultTime.split(':');
-    return TimeOfDay(
-      hour: int.tryParse(parts[0]) ?? 12,
-      minute: int.tryParse(parts[1]) ?? 0,
-    );
   }
 
   /// Schedule a local notification.

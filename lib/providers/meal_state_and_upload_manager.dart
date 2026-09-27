@@ -77,7 +77,7 @@ static const MEAL_RANGE_DAYS=7;
       }
 
       // Apply meal type filter if provided. Ara öğün seçildiyse üç ara öğünün
-      // hepsi eşleşir: filtrede numarasız tek "Ara Öğün" seçeneği var.
+      // hepsi eşleşir: filtrede numarasız tek "Ara" seçeneği var.
       if (filterParams?.mealType != null) {
         final Meals? filterMeal = Meals.fromName(filterParams!.mealType!);
         all = all

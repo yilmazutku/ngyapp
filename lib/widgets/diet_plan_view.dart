@@ -152,7 +152,9 @@ class DietSectionHeader extends StatelessWidget {
 class DietMealTile extends StatelessWidget {
   final Meals mealCategory;
   final List<String> contents;
-  final TimeOfDay mealTime;
+
+  /// Öğünün diyetteki saati; diyette yazılı değilse null ("-" görünür).
+  final TimeOfDay? mealTime;
   final String expansionKey;
   final bool expanded;
   final ValueChanged<bool> onExpansionChanged;
@@ -269,7 +271,7 @@ class DietMealTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  formatTimeOfDay24(mealTime),
+                  formatMealTime(mealTime),
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
@@ -435,7 +437,7 @@ class _DietPlanViewState extends State<DietPlanView> {
         return DietMealTile(
           mealCategory: meal,
           contents: menu.linesOf(meal),
-          mealTime: menu.timeOf(meal, const TimeOfDay(hour: 0, minute: 0)),
+          mealTime: menu.timeOf(meal),
           expansionKey: key,
           expanded: _expandedMeals[key] ?? false,
           onExpansionChanged: (isExpanded) =>

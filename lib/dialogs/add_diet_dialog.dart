@@ -125,7 +125,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
         for (var meal in Meals.dietValues)
           {
             'name': meal.label,
-            'time': meal.defaultTime,
+            // Saat yalnızca belgeden okunur; okunamazsa içe aktarma durur
+            // (bkz. [_mealsWithBadTimeHeader]).
+            'time': '',
             'content': <Map<String, dynamic>>[],
           },
       ];
@@ -504,9 +506,6 @@ class _AddDietDialogState extends State<AddDietDialog> {
     // Clear any old parse data (rebuild both menus from scratch).
     weekdaySubtitles = _freshMealList();
     weekendSubtitles = _freshMealList();
-    for (final subtitle in [...weekdaySubtitles, ...weekendSubtitles]) {
-      subtitle['time'] = '';
-    }
     _localFilePath = null;
     _hasParsedPreview = false;
     // Reset any previously detected/attached recipe.

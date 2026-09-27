@@ -47,7 +47,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
       subtitles.add({
         'name': meal.label,
         'enumName': meal.name,
-        'time': meal.defaultTime,
+        'time': '',
         'content': [],
       });
     }
@@ -517,9 +517,7 @@ class _FileHandlerPageState extends State<FileHandlerPage> {
           setState(() {
             for (var subtitle in subtitles) {
               subtitle['content'].clear();
-              subtitle['time'] = subtitle['name'] == 'Sabah' ? '08:00' : 
-                               subtitle['name'] == 'Öğle' ? '13:00' : 
-                               subtitle['name'] == 'Akşam' ? '19:00' : '';
+              subtitle['time'] = '';
             }
             _localFilePath = null;
           });
