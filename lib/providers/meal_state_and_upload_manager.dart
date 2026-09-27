@@ -76,9 +76,15 @@ static const MEAL_RANGE_DAYS=7;
         all = all.where((m) => m.subscriptionId == selectedSubscriptionId).toList();
       }
 
-      // Apply meal type filter if provided
+      // Apply meal type filter if provided. Ara öğün seçildiyse üç ara öğünün
+      // hepsi eşleşir: filtrede numarasız tek "Ara Öğün" seçeneği var.
       if (filterParams?.mealType != null) {
-        all = all.where((m) => m.mealType.name == filterParams!.mealType).toList();
+        final Meals? filterMeal = Meals.fromName(filterParams!.mealType!);
+        all = all
+            .where((m) => filterMeal != null && filterMeal.isSnack
+                ? m.mealType.isSnack
+                : m.mealType.name == filterParams.mealType)
+            .toList();
       }
 
       // Apply search filter if provided
@@ -362,9 +368,16 @@ Future<String?> uploadMealImg({
 /// Deletes a single image from a meal entry.
 /// If no images remain, the meal is marked as unchecked.
 ///
+/// Fotoğraf sohbete de düşmüşse o mesaj "fotoğraf silindi" notuna çevrilir
+/// ([_markChatPhotoDeleted]). Silme nereden yapılırsa yapılsın (sohbet,
+/// "Planım", test verisi temizliği) Öğün Fotoğrafları, Görseller sekmesi,
+/// "Planım" ve sohbet aynı sonucu gösterir. Öğün kaydı bulunamasa da dosya ve
+/// sohbet mesajı temizlenir.
+///
 /// [ignoreStorageFailure] true iken Storage'daki dosya silinemese de (ör.
 /// dosya zaten yok) Firestore kaydı temizlenmeye devam eder. Test verisini
-/// temizleyen akış bunu kullanır: kayıt sistemde asılı kalmamalı.
+/// temizleyen akış ve sohbetten silme bunu kullanır: kayıt sistemde asılı
+/// kalmamalı.
 Future<void> deleteMealImage({
   required String userId,
   required Meals meal,
@@ -384,20 +397,11 @@ Future<void> deleteMealImage({
         .doc(meal.name);
 
     final mealDoc = await mealDocRef.get();
-    if (!mealDoc.exists) return;
-
-    final mealModel = MealModel.fromDocument(mealDoc);
-    final int index = mealModel.imageUrls.indexOf(imageUrlToDelete);
-    final updatedUrls = List<String>.from(mealModel.imageUrls)
-      ..remove(imageUrlToDelete);
-    final updatedThumbs = mealModel.alignedThumbUrls();
-    final updatedTimes = mealModel.alignedImageTimes();
+    final MealModel? mealModel =
+        mealDoc.exists ? MealModel.fromDocument(mealDoc) : null;
+    final int index = mealModel?.imageUrls.indexOf(imageUrlToDelete) ?? -1;
     final String? thumbUrlToDelete =
-        index >= 0 ? mealModel.thumbUrlAt(index) : null;
-    if (index >= 0) {
-      updatedThumbs.removeAt(index);
-      updatedTimes.removeAt(index);
-    }
+        index >= 0 ? mealModel!.thumbUrlAt(index) : null;
 
     // Delete the file from Storage
     try {
@@ -414,31 +418,95 @@ Future<void> deleteMealImage({
       }
     }
 
-    if (updatedUrls.isEmpty) {
-      // No images left — remove the document and uncheck
-      await mealDocRef.delete();
-      await updateMealState(userId, referenceDate, meal, false);
-    } else {
-      await mealDocRef.set(
-        MealModel(
-          mealId: mealModel.mealId,
-          mealType: meal,
-          imageUrls: updatedUrls,
-          thumbUrls: updatedThumbs,
-          imageTimes: updatedTimes,
-          subscriptionId: mealModel.subscriptionId,
-          timestamp: mealModel.timestamp,
-          description: mealModel.description,
-          calories: mealModel.calories,
-          notes: mealModel.notes,
-          isChecked: true,
-        ).toMap(),
-      );
+    if (mealModel != null && index >= 0) {
+      final updatedUrls = List<String>.from(mealModel.imageUrls)
+        ..removeAt(index);
+      final updatedThumbs = mealModel.alignedThumbUrls()..removeAt(index);
+      final updatedTimes = mealModel.alignedImageTimes()..removeAt(index);
+
+      if (updatedUrls.isEmpty) {
+        // No images left — remove the document and uncheck
+        await mealDocRef.delete();
+        await updateMealState(userId, referenceDate, meal, false);
+      } else {
+        await mealDocRef.set(
+          MealModel(
+            mealId: mealModel.mealId,
+            mealType: meal,
+            imageUrls: updatedUrls,
+            thumbUrls: updatedThumbs,
+            imageTimes: updatedTimes,
+            subscriptionId: mealModel.subscriptionId,
+            // Öğünün saati, kalan fotoğrafların en son yükleneni olur.
+            timestamp: updatedTimes.reduce((a, b) => a.isAfter(b) ? a : b),
+            description: mealModel.description,
+            calories: mealModel.calories,
+            notes: mealModel.notes,
+            isChecked: true,
+          ).toMap(),
+        );
+      }
     }
+
+    await _markChatPhotoDeleted(userId, imageUrlToDelete);
 
     notifyListeners();
   } catch (e) {
     rethrow;
+  }
+}
+
+/// Danışanın sohbette gönderdiği bir öğün fotoğrafını siler (bkz.
+/// [deleteMealImage]): fotoğraf öğün kaydından, Storage'dan (küçük görseliyle)
+/// ve sohbetten ("fotoğraf silindi" notu) kalkar.
+///
+/// Öğün ve gün, fotoğrafın yüklenirken kurulan Storage yolundan çözülür
+/// ([_mealPhotoLocation]); gece yarısına yakın yüklemelerde bile doğru öğün
+/// kaydı bulunur. Yol çözülemezse [fallbackMeal] ve [fallbackDate] kullanılır.
+Future<void> deleteChatMealPhoto({
+  required String userId,
+  required String imageUrl,
+  Meals? fallbackMeal,
+  DateTime? fallbackDate,
+}) async {
+  final ({Meals meal, DateTime date})? location =
+      _mealPhotoLocation(userId, imageUrl) ??
+          (fallbackMeal != null && fallbackDate != null
+              ? (meal: fallbackMeal, date: fallbackDate)
+              : null);
+  if (location == null) {
+    throw StateError('Fotoğrafın ait olduğu öğün kaydı bulunamadı.');
+  }
+
+  await deleteMealImage(
+    userId: userId,
+    meal: location.meal,
+    imageUrlToDelete: imageUrl,
+    overrideDate: location.date,
+    ignoreStorageFailure: true,
+  );
+}
+
+/// Öğün fotoğrafının öğünü ve günü, Storage yolundan
+/// (`users/{uid}/mealPhotos/{yyyy-MM-dd}/{öğün}/{dosya}`, bkz. [_uploadImg]).
+/// Adres başka bir yola aitse null.
+({Meals meal, DateTime date})? _mealPhotoLocation(
+    String userId, String imageUrl) {
+  try {
+    final List<String> parts =
+        FirebaseStorage.instance.refFromURL(imageUrl).fullPath.split('/');
+    if (parts.length < 6 ||
+        parts[0] != 'users' ||
+        parts[1] != userId ||
+        parts[2] != _mealPhotosFolder) {
+      return null;
+    }
+
+    final Meals? meal = Meals.fromName(parts[4]);
+    if (meal == null) return null;
+    return (meal: meal, date: DateFormat('yyyy-MM-dd').parseStrict(parts[3]));
+  } catch (e) {
+    return null;
   }
 }
 
@@ -461,6 +529,10 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
 }
 
 
+  /// Öğün fotoğraflarının Storage'daki klasörü (bkz. [_uploadImg],
+  /// [_mealPhotoLocation]).
+  static const String _mealPhotosFolder = 'mealPhotos';
+
   /// Posts the meal image to the user's chat. Hata yutulmaz; çağıran
   /// ([uploadMealImg]) sohbete düşmeyen fotoğrafı kullanıcıya bildirir.
   Future<void> _postToChat(String userId, Meals meal, String imageUrl, ChatManager? chatManager) async {
@@ -472,7 +544,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     // not need the dot-notation that would force a separate update().
     await chatDoc.set({
       'participants': [chatId, ...ChatManager.adminIds],
-      'lastMessage': 'Öğün Fotoğrafı (${meal.label})',
+      'lastMessage': meal.chatSummary,
       'lastImageUrl': imageUrl,
       'lastMessageAt': Timestamp.now(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -487,15 +559,60 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     final msgData = <String, dynamic>{
       'chatId': chatId,
       'senderId': userId,
-      'text': 'Öğün: ${meal.label}',
+      'text': meal.chatCaption,
       'imageUrl': imageUrl,
       'createdAt': FieldValue.serverTimestamp(),
       'clientCreatedAt': Timestamp.now(),
     };
     if (chatManager != null) {
-      msgData['storagePath'] = 'meals/$userId/${meal.name}';
+      msgData['storagePath'] = '${Meals.chatMarkerPrefix}$userId/${meal.name}';
     }
     await chatDoc.collection('messages').add(msgData);
+  }
+
+  /// Sohbette [imageUrl] fotoğrafını taşıyan mesajı "fotoğraf silindi" notuna
+  /// çevirir ("Öğün: Öğle (fotoğraf silindi)"); sohbet listesinin son mesaj
+  /// önizlemesi bu fotoğrafsa o da güncellenir. Mesaj silinmez: üzerindeki
+  /// ifadeler ve konuşmanın akışı korunur.
+  ///
+  /// Hatası yutulur: öğün kaydı zaten temizlenmiştir; mesaj buradan
+  /// yazılamazsa (ör. yetki) aynı işi `markChatMessagesOfDeletedMealPhotos`
+  /// Cloud Function'ı sunucuda yapar.
+  Future<void> _markChatPhotoDeleted(String userId, String imageUrl) async {
+    try {
+      final chatDoc =
+          FirebaseFirestore.instance.collection('chats').doc(userId);
+      final matches = await chatDoc
+          .collection('messages')
+          .where('imageUrl', isEqualTo: imageUrl)
+          .get();
+      if (matches.docs.isEmpty) return;
+
+      String deletedText = Meals.deletedPhotoText;
+      final WriteBatch batch = FirebaseFirestore.instance.batch();
+      for (final doc in matches.docs) {
+        final Object? text = doc.data()['text'];
+        deletedText =
+            Meals.deletedPhotoChatText(text is String ? text : null);
+        batch.update(doc.reference, {
+          'imageUrl': FieldValue.delete(),
+          'storagePath': FieldValue.delete(),
+          'text': deletedText,
+          'photoDeleted': true,
+        });
+      }
+      await batch.commit();
+
+      final chatSnapshot = await chatDoc.get();
+      if (chatSnapshot.data()?['lastImageUrl'] == imageUrl) {
+        await chatDoc.update({
+          'lastImageUrl': '',
+          'lastMessage': deletedText,
+        });
+      }
+    } catch (e) {
+      // Sunucudaki Cloud Function aynı işi yapar.
+    }
   }
   
 
@@ -570,8 +687,8 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
 
       String path;
       if (meal != null) {
-        path =
-            'users/$userId/mealPhotos/$date/${meal.name}/${prepared.fileName}';
+        path = 'users/$userId/$_mealPhotosFolder/$date/${meal.name}/'
+            '${prepared.fileName}';
       } else {
         path = 'users/$userId/chatPhotos/$date/${prepared.fileName}';
       }

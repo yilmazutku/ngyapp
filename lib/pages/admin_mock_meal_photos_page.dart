@@ -488,7 +488,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
                 photoIndex < _photosPerMeal;
                 photoIndex++) {
               _progressMessage.value =
-                  '$progressPrefix - ${meal.label} (${photoIndex + 1}/'
+                  '$progressPrefix - ${meal.photoLabel} (${photoIndex + 1}/'
                   '$_photosPerMeal)';
 
               final String fileName = '$kMockPhotoFilePrefix${meal.name}_'
@@ -530,7 +530,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
           results.add(_MockResult.done(
             client.displayName,
             '${meals.length} öğün · $uploaded fotoğraf yüklendi '
-            '(${meals.map((meal) => meal.label).join(', ')})',
+            '(${_mealNamesOf(meals)})',
           ));
         } catch (e) {
           results.add(_MockResult.failed(client.displayName, 'Hata: $e'));
@@ -1003,7 +1003,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
                         ? 'Bu diyette tanımlı öğün bulunamadı.'
                         : '${meals.length} öğün · ${meals.length * _photosPerMeal} '
                             'fotoğraf/danışan\n'
-                            '${meals.map((meal) => meal.label).join(', ')}',
+                            '${_mealNamesOf(meals)}',
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -1548,4 +1548,17 @@ class _PanelCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Öğün adları; ara öğünler numarasız tek adda toplanır
+/// ("Sabah, Ara Öğün (2), Öğle").
+String _mealNamesOf(List<Meals> meals) {
+  final Map<String, int> counts = {};
+  for (final Meals meal in meals) {
+    counts[meal.photoLabel] = (counts[meal.photoLabel] ?? 0) + 1;
+  }
+  return counts.entries
+      .map((entry) =>
+          entry.value > 1 ? '${entry.key} (${entry.value})' : entry.key)
+      .join(', ');
 }

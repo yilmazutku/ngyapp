@@ -19,6 +19,7 @@ import 'package:ngy_app/widgets/reaction_picker.dart';
 import 'package:ngy_app/pages/user_media_gallery_page.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
+import 'package:ngy_app/services/meal_reminder_service.dart';
 
 import '../constants/app_constants.dart';
 import '../widgets/labeled_action_button.dart';
@@ -79,6 +80,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       'Fotoğrafınız öğün kaydınıza eklendi ancak sohbete gönderilemedi. '
       'Diyetisyeniniz fotoğrafı öğün kayıtlarınızda görebilir; tekrar '
       'yüklemenize gerek yok.';
+  static const String _deletePhotoTitle = 'Fotoğrafı Sil';
+  static const String _deletePhotoConfirmText =
+      'Bu öğün fotoğrafı silinecek. Fotoğraf öğün kayıtlarınızdan da '
+      'kaldırılır ve diyetisyeniniz artık göremez; sohbette yerine '
+      '"fotoğraf silindi" notu kalır.\n\nDevam etmek istiyor musunuz?';
+  static const String _deletePhotoConfirmLabel = 'Sil';
+  static const String _deletePhotoCancelLabel = 'Vazgeç';
+  static const String _deletingPhotoText = 'Fotoğraf siliniyor...';
+  static const String _photoDeletedText = 'Fotoğraf silindi.';
+  static const String _deletePhotoErrorText =
+      'Fotoğraf silinemedi. Lütfen tekrar deneyin.';
 
   final ImagePicker _picker = ImagePicker();
 
@@ -600,7 +612,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               ),
               for (final m in Meals.values)
                 ListTile(
-                  title: Text(m.label),
+                  title: Text(m.photoLabel),
                   subtitle: m.defaultTime.isNotEmpty ? Text(m.defaultTime) : null,
                   onTap: () {
                     Navigator.of(ctx).pop(m);
@@ -743,6 +755,75 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void _jumpToLatest() {
     _showJumpToLatest.value = false;
     setState(() => _focusActive = false);
+  }
+
+  /// Danışanın kendi gönderdiği öğün fotoğrafını onay alarak siler.
+  ///
+  /// Fotoğraf öğün kaydından (Öğün Fotoğrafları, Görseller sekmesi, "Planım")
+  /// ve Storage'dan kalkar; sohbetteki mesaj "fotoğraf silindi" notuna döner
+  /// (bkz. [MealManager.deleteChatMealPhoto]). Öğünün son fotoğrafı silindiyse
+  /// öğün yüklenmemiş sayılır; hatırlatmalar buna göre yeniden kurulur.
+  Future<void> _confirmAndDeleteMealPhoto(MessageData message) async {
+    final String? imageUrl = message.imageUrl;
+    if (imageUrl == null) return;
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final MealManager mealManager =
+        Provider.of<MealManager>(context, listen: false);
+
+    final bool confirmed = await DialogUtils.openConfirm(
+      context,
+      title: _deletePhotoTitle,
+      message: _deletePhotoConfirmText,
+      confirmText: _deletePhotoConfirmLabel,
+      cancelText: _deletePhotoCancelLabel,
+    );
+    if (!confirmed) return;
+
+    bool loadingOpen = false;
+    if (mounted) {
+      DialogUtils.openLoading(context, message: _deletingPhotoText);
+      loadingOpen = true;
+    }
+
+    try {
+      await mealManager.deleteChatMealPhoto(
+        userId: _currentUid,
+        imageUrl: imageUrl,
+        fallbackMeal: message.photoMeal,
+        fallbackDate: (message.clientCreatedAt ?? message.createdAt)?.toDate(),
+      );
+
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      messenger.showSnackBar(
+        const SnackBar(content: Text(_photoDeletedText)),
+      );
+      _rescheduleMealReminders();
+    } catch (e) {
+      if (mounted && loadingOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingOpen = false;
+      }
+
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: _uploadErrorTitle,
+        message: _deletePhotoErrorText,
+      );
+    }
+  }
+
+  /// Öğün hatırlatmalarını günün güncel durumuna göre yeniden kurar: silinen
+  /// fotoğraf öğünün son fotoğrafıysa o öğünün hatırlatması geri gelir.
+  void _rescheduleMealReminders() {
+    final MealReminderService reminders = MealReminderService();
+    if (!reminders.isSupported) return;
+    reminders.scheduleMealReminders(_currentUid);
   }
 
   /// Toggle the current viewer's reaction on [message].
@@ -925,9 +1006,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // `senderId == _chatId` means the message came from the user; an admin UID
     // means it came from the office. Reacting to your own message stays
     // disabled on both sides.
-    final bool canReact = _isAdminUser
-        ? msg.senderId == _chatId
-        : ChatManager.isAdminUid(msg.senderId);
+    final bool canReact = !msg.photoDeleted &&
+        (_isAdminUser
+            ? msg.senderId == _chatId
+            : ChatManager.isAdminUid(msg.senderId));
+
+    // Danışan sohbetten yüklediği öğün fotoğrafını uzun basarak silebilir.
+    final bool canDeletePhoto =
+        !_isAdminUser && msg.senderId == _currentUid && msg.isMealPhoto;
 
     Widget bubble({required bool highlighted}) => _MessageBubble(
           message: msg,
@@ -937,6 +1023,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           canReact: canReact,
           onImageTap: (url) => _showImageDialog(context, url),
           onToggleReaction: _handleToggleReaction,
+          onDeletePhoto: canDeletePhoto ? _confirmAndDeleteMealPhoto : null,
         );
 
     if (!_focusActive || msg.id != widget.focusMessageId) {
@@ -1087,6 +1174,10 @@ class _MessageBubble extends StatelessWidget {
   /// Called with the tapped emoji when the viewer picks a reaction.
   final void Function(MessageData message, String emoji) onToggleReaction;
 
+  /// Verilirse uzun basma bu mesajın öğün fotoğrafını silme akışını açar
+  /// (danışanın kendi öğün fotoğrafları).
+  final void Function(MessageData message)? onDeletePhoto;
+
   static const _months = [
     '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
     'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
@@ -1100,6 +1191,7 @@ class _MessageBubble extends StatelessWidget {
     required this.highlighted,
     required this.onImageTap,
     required this.onToggleReaction,
+    this.onDeletePhoto,
   });
 
   /// Vurgunun açılıp kapanma süresi.
@@ -1134,6 +1226,9 @@ class _MessageBubble extends StatelessWidget {
     final timeStr = ts != null ? _formatTime(ts.toDate()) : 'Gönderiliyor…';
     final bubbleColor = isMe ? Colors.blue.shade100 : Colors.grey.shade300;
     final align = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+    // Uygulamanın yazdığı öğün açıklamaları eski mesajlarda da güncel adla
+    // görünür ("Ara Öğün 2" -> "Ara Öğün").
+    final String text = Meals.chatTextForDisplay(message.text ?? '');
 
     // The message body itself (text bubble and/or image + timestamp).
     final content = Column(
@@ -1141,7 +1236,7 @@ class _MessageBubble extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         // Text message bubble
-        if ((message.text ?? '').isNotEmpty)
+        if (text.isNotEmpty)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             constraints: BoxConstraints(
@@ -1154,7 +1249,10 @@ class _MessageBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: align,
               children: [
-                Text(message.text!, style: const TextStyle(fontSize: 15)),
+                if (message.photoDeleted)
+                  _DeletedPhotoNote(text: text)
+                else
+                  Text(text, style: const TextStyle(fontSize: 15)),
                 const SizedBox(height: 4),
                 Text(
                   timeStr,
@@ -1184,17 +1282,28 @@ class _MessageBubble extends StatelessWidget {
       ],
     );
 
-    // Long-press to react (on the other party's messages). HitTestBehavior
-    // .deferToChild keeps taps on the image working (opens the full-screen
-    // viewer) while still recognizing a long-press on the bubble.
-    final body = canReact
-        ? GestureDetector(
-            behavior: HitTestBehavior.deferToChild,
-            onLongPressStart: (details) =>
-                _handleLongPress(context, details.globalPosition),
-            child: content,
-          )
-        : content;
+    // Long-press to react (on the other party's messages) or, on the
+    // client's own meal photo, to delete it. HitTestBehavior.deferToChild
+    // keeps taps on the image working (opens the full-screen viewer) while
+    // still recognizing a long-press on the bubble.
+    final void Function(MessageData message)? deletePhoto = onDeletePhoto;
+    final Widget body;
+    if (canReact) {
+      body = GestureDetector(
+        behavior: HitTestBehavior.deferToChild,
+        onLongPressStart: (details) =>
+            _handleLongPress(context, details.globalPosition),
+        child: content,
+      );
+    } else if (deletePhoto != null) {
+      body = GestureDetector(
+        behavior: HitTestBehavior.deferToChild,
+        onLongPress: () => deletePhoto(message),
+        child: content,
+      );
+    } else {
+      body = content;
+    }
 
     return AnimatedContainer(
       duration: _highlightFadeDuration,
@@ -1229,6 +1338,41 @@ class _MessageBubble extends StatelessWidget {
     if (selected != null) {
       onToggleReaction(message, selected);
     }
+  }
+}
+
+/// Fotoğrafı silinmiş öğün mesajının metni: silindiği ikon ve soluk, eğik
+/// yazıyla belli olur.
+class _DeletedPhotoNote extends StatelessWidget {
+  final String text;
+
+  const _DeletedPhotoNote({required this.text});
+
+  static const double _iconSize = 16;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.hide_image_outlined,
+          size: _iconSize,
+          color: Colors.black45,
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontSize: 15,
+              fontStyle: FontStyle.italic,
+              color: Colors.black54,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 

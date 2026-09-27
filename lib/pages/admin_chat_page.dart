@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:ngy_app/pages/chat_page_new.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
+import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
@@ -417,7 +418,10 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
               final data = d.data();
               
               // Extract chat metadata
-              final lastMsg = (data['lastMessage'] ?? '') as String;
+              // Eski özetler de güncel öğün adıyla görünür
+              // ("Öğün Fotoğrafı (Ara Öğün 2)" -> "(Ara Öğün)").
+              final lastMsg = Meals.chatTextForDisplay(
+                  (data['lastMessage'] ?? '') as String);
               final lastImageUrl = data['lastImageUrl'] as String?;
               final lastAt = data['lastMessageAt'] as Timestamp?;
               
@@ -510,7 +514,7 @@ class _ChatListItem extends StatelessWidget {
         if (snapshot.hasData && snapshot.data != null) {
           final user = snapshot.data!;
           final firstName = user.name.trim();
-          final lastName = user.surname.trim() ?? '';
+          final lastName = user.surname.trim();
           displayName = lastName.isNotEmpty ? '$firstName $lastName' : firstName;
         }
 

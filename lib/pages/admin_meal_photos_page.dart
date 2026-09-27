@@ -86,11 +86,13 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _chatLookupText = 'Sohbetteki mesaj aranıyor...';
   static const String _chatNotFoundTitle = 'Mesaj Bulunamadı';
   static const String _chatNotFoundText =
-      'Bu fotoğrafın sohbette bir mesajı yok; sohbete düşmeden yüklenmiş '
-      'olabilir.';
+      'Bu fotoğrafın sohbette bir mesajı yok; sohbete düşmeden yüklenmiş ya '
+      'da danışan tarafından silinmiş olabilir. Silindiyse sayfayı '
+      'yenilediğinizde listeden kalkar.';
   static const String _reactNotFoundText =
       'Bu fotoğrafın sohbette bir mesajı yok; ifade yalnızca sohbetteki '
-      'mesaja bırakılabilir.';
+      'mesaja bırakılabilir. Fotoğraf danışan tarafından silinmiş olabilir; '
+      'silindiyse sayfayı yenilediğinizde listeden kalkar.';
   static const String _chatErrorTitle = 'Hata';
   static const String _chatErrorText =
       'Sohbete gidilemedi. Lütfen tekrar deneyin.';

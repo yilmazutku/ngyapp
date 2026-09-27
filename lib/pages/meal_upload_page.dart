@@ -1310,7 +1310,7 @@ class _MealUploadPageState extends State<MealUploadPage>
                                       CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '${meal.label}  (${images.length}/${MealModel.maxImages})',
+                                      '${meal.photoLabel}  (${images.length}/${MealModel.maxImages})',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,

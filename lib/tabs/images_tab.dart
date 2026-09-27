@@ -64,7 +64,6 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
   // Meal card text and icon sizes (30% smaller)
   static const double kMealCardIconSize = 14.0 * kSizeReductionMultiplier;
   static const double kMealCardPadding = 6.0 * kSizeReductionMultiplier;
-  static const double kMealCardTopPadding = 8.0 * kSizeReductionMultiplier;
   static const double kMealCardSpacing = 4.0 * kSizeReductionMultiplier;
   static const double kMealCardMargin = 4.0 * kSizeReductionMultiplier;
 
@@ -487,7 +486,9 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       List<dynamic> allItems,
       List<dynamic> filteredItems,
       ) {
-    final mealTypeOptions = {for (var type in Meals.values) type: type.label};
+    final mealTypeOptions = {
+      for (final Meals type in _mealGroups) type: type.photoLabel,
+    };
 
     // Use filterResetKey to force rebuild when "Filtreleri Sıfırla" is clicked
     final resetKey = ValueKey('images_filter_$filterResetKey');
@@ -540,7 +541,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                         setDateFilterState(() {}); // Update local UI including date range filter
                         setState(() {}); // Update parent state
                       },
-                      activeColor: Theme.of(context).primaryColor,
+                      activeThumbColor: Theme.of(context).primaryColor,
                       contentPadding:
                       const EdgeInsets.symmetric(horizontal: 0),
                     ),
@@ -611,9 +612,9 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
     return Container(
       padding: EdgeInsets.all(paddingSize),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -628,7 +629,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                 style: TextStyle(
                   fontSize: labelFontSize,
                   fontWeight: FontWeight.bold,
-                  color: color.withOpacity(0.8),
+                  color: color.withValues(alpha: 0.8),
                 ),
               ),
               Text(
@@ -868,34 +869,27 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
     );
   }
 
+  /// Öğün filtresinin seçenekleri ve istatistik rozetlerinin sırası. Ara
+  /// öğünler numarasız tek seçenekte toplanır: [Meals.firstmid] üç ara öğünü
+  /// birden temsil eder (bkz. [MealManager.fetchMeals]).
+  static const List<Meals> _mealGroups = [
+    Meals.br,
+    Meals.firstmid,
+    Meals.lunch,
+    Meals.dinner,
+    Meals.none,
+  ];
+
   Widget _buildStatisticsBar() {
-    // Combine ara öğün counts (firstmid, secondmid, thirdmid) into single "Ara" category
-    final Map<String, int> displayCounts = {};
-    int araCount = 0;
-
+    // Ara öğünler numarasız tek rozette toplanır ("Ara Öğün").
+    final Map<Meals, int> counts = {};
     for (final entry in _mealTypeCounts.entries) {
-      if (entry.key == Meals.firstmid ||
-          entry.key == Meals.secondmid ||
-          entry.key == Meals.thirdmid) {
-        araCount += entry.value;
-      } else {
-        displayCounts[entry.key.label] = entry.value;
-      }
+      final Meals key = entry.key.isSnack ? Meals.firstmid : entry.key;
+      counts[key] = (counts[key] ?? 0) + entry.value;
     }
 
-    // Add combined ara count if any
-    if (araCount > 0) {
-      displayCounts['Ara'] = araCount;
-    }
-
-    // Define display order
-    const displayOrder = ['Sabah', 'Öğle', 'Akşam', 'Ara', 'Hiçbiri'];
-    final sortedEntries = displayCounts.entries.toList()
-      ..sort((a, b) {
-        final aIndex = displayOrder.indexOf(a.key);
-        final bIndex = displayOrder.indexOf(b.key);
-        return aIndex.compareTo(bIndex);
-      });
+    final List<Meals> shownMeals =
+        _mealGroups.where(counts.containsKey).toList();
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -916,12 +910,10 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
           ),
           const SizedBox(height: 8),
           Row(
-            children: sortedEntries.map((entry) {
-              return _buildMealTypeStatChip(
-                label: entry.key,
-                count: entry.value,
-              );
-            }).toList(),
+            children: [
+              for (final Meals meal in shownMeals)
+                _buildMealTypeStatChip(meal: meal, count: counts[meal]!),
+            ],
           ),
         ],
       ),
@@ -929,10 +921,10 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
   }
 
   Widget _buildMealTypeStatChip({
-    required String label,
+    required Meals meal,
     required int count,
   }) {
-    final Color chipColor = _getMealTypeColorByLabel(label);
+    final Color chipColor = mealTypeColor(meal);
 
     return Flexible(
       fit: FlexFit.tight,
@@ -940,9 +932,9 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
         margin: const EdgeInsets.symmetric(horizontal: 4),
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         decoration: BoxDecoration(
-          color: chipColor.withOpacity(0.1),
+          color: chipColor.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: chipColor.withOpacity(0.3)),
+          border: Border.all(color: chipColor.withValues(alpha: 0.3)),
         ),
         child: Column(
           children: [
@@ -955,7 +947,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
               ),
             ),
             Text(
-              label,
+              meal.photoLabel,
               style: TextStyle(
                 fontSize: 12,
                 color: chipColor,
@@ -967,23 +959,6 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
         ),
       ),
     );
-  }
-
-  Color _getMealTypeColorByLabel(String label) {
-    switch (label) {
-      case 'Sabah':
-        return Colors.orange;
-      case 'Öğle':
-        return Colors.green;
-      case 'Akşam':
-        return Colors.indigo;
-      case 'Ara':
-        return Colors.purple;
-      case 'Hiçbiri':
-        return Colors.grey;
-      default:
-        return Colors.grey;
-    }
   }
 
   // Small square thumbnail, downsampled, Hero to dialog
@@ -1001,7 +976,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
         side: BorderSide(
-          color: typeColor.withOpacity(0.5),
+          color: typeColor.withValues(alpha: 0.5),
           width: 1,
         ),
       ),
@@ -1053,7 +1028,7 @@ class _ImagesTabState extends FilterableTabState<MealManager, ImagesTab> {
                 SizedBox(width: kMealCardSpacing),
                 Flexible(
                   child: Text(
-                    mealType.label,
+                    mealType.photoLabel,
                     style: TextStyle(
                       fontSize: 11 * kSizeReductionMultiplier,
                       fontWeight: FontWeight.w600,
