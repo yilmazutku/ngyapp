@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../models/diet_section.dart';
 import '../models/meal_model.dart';
 
 /// One menu of a diet plan (weekday or weekend): the content lines and the
@@ -24,6 +25,15 @@ class DietMenu {
   List<String> linesOf(Meals meal) => contents[meal] ?? const <String>[];
 
   TimeOfDay timeOf(Meals meal, TimeOfDay fallback) => times[meal] ?? fallback;
+
+  /// [date] günü geçerli menü: diyette hafta sonu menüsü varsa hafta sonu
+  /// günlerinde o, diğer günlerde hafta içi menüsü ("Planım"daki kural).
+  static DietMenu forDate({
+    required DietMenu weekday,
+    required DietMenu weekend,
+    required DateTime date,
+  }) =>
+      weekend.hasContent && isWeekendDate(date) ? weekend : weekday;
 
   /// Parses a stored menu map (keyed by [Meals] enum name, each value holding
   /// `time` and `content`) as persisted on a diet document.
