@@ -159,7 +159,7 @@ enum Meals {
   secondmid('Ara Öğün 2', '16:00'),
   dinner('Akşam', '19:00'),
   thirdmid('Ara Öğün 3', '21:00'),
-  none('Hiçbiri', '');
+  none('Diğer', '');
 
   const Meals(this.label, this.defaultTime);
 
@@ -176,16 +176,69 @@ enum Meals {
       this == Meals.secondmid ||
       this == Meals.thirdmid;
 
-  /// Fotoğraf ekranlarında gösterilen öğün adı.
+  /// Fotoğraf ekranlarında, sohbette ve bildirimlerde gösterilen öğün adı.
   ///
-  /// Ara öğünler numaralandırılmadan tek ad altında toplanır: fotoğrafa
-  /// bakarken "Ara Öğün 1/2/3" ayrımının bilgi değeri yok, kart etiketini
-  /// gereksiz uzatıyor. Diyet ekranları ve hatırlatmalar kendi adlarını
-  /// ([label], [displayLabel]) kullanmayı sürdürür.
+  /// Ara öğünler numaralandırılmadan tek ad altında toplanır: kullanıcıya
+  /// hiçbir yerde "Ara Öğün 1/2/3" gösterilmez. Numaralı [label] yalnızca
+  /// diyet yapısında (diyet dosyası ayrıştırma, diyet düzenleme) kullanılır;
+  /// hatırlatmalar [displayLabel] ile "Ara" der.
   String get photoLabel => isSnack ? snackPhotoLabel : label;
 
   /// Ara öğünlerin fotoğraf ekranlarındaki ortak adı.
   static const String snackPhotoLabel = 'Ara Öğün';
+
+  /// Sohbete düşen öğün fotoğrafının mesaj açıklaması: "Öğün: Ara Öğün".
+  String get chatCaption => '$chatCaptionPrefix$photoLabel';
+
+  /// Sohbet listesindeki son mesaj özeti: "Öğün Fotoğrafı (Ara Öğün)".
+  String get chatSummary => '$_chatSummaryPrefix$photoLabel)';
+
+  /// Öğün fotoğrafı mesajının açıklamasının öneki (bkz. [chatCaption]).
+  static const String chatCaptionPrefix = 'Öğün: ';
+  static const String _chatSummaryPrefix = 'Öğün Fotoğrafı (';
+
+  /// Öğün fotoğrafı mesajının `storagePath` alanındaki işaretin öneki:
+  /// "meals/{uid}/{öğün}". Storage yolu değildir; mesajın hangi öğüne ait
+  /// olduğunu söyler.
+  static const String chatMarkerPrefix = 'meals/';
+
+  /// Fotoğrafı silinen öğün mesajının açıklamasına eklenen not.
+  static const String deletedPhotoSuffix = '(fotoğraf silindi)';
+
+  /// Açıklaması olmayan bir fotoğraf mesajının fotoğrafı silindiğinde yazılan
+  /// metin.
+  static const String deletedPhotoText = 'Fotoğraf silindi';
+
+  /// [none] önceki sürümlerde bu adla yazılıyordu.
+  static const String _legacyNoneLabel = 'Hiçbiri';
+
+  /// Uygulamanın sohbete yazdığı öğün metinlerini ([chatCaption],
+  /// [chatSummary]) bugünkü adlarla verir: eski mesajlardaki "Ara Öğün 2"
+  /// "Ara Öğün", "Hiçbiri" "Diğer" olur. Kullanıcının yazdığı metinlere
+  /// dokunulmaz.
+  static String chatTextForDisplay(String text) {
+    if (!text.startsWith(chatCaptionPrefix) &&
+        !text.startsWith(_chatSummaryPrefix)) {
+      return text;
+    }
+
+    String result = text.replaceFirst(_legacyNoneLabel, none.photoLabel);
+    for (final Meals meal in values) {
+      if (meal.isSnack) {
+        result = result.replaceFirst(meal.label, meal.photoLabel);
+      }
+    }
+    return result;
+  }
+
+  /// Fotoğrafı silinen mesajın yeni metni: "Öğün: Öğle (fotoğraf silindi)";
+  /// açıklaması yoksa [deletedPhotoText].
+  static String deletedPhotoChatText(String? text) {
+    final String caption = chatTextForDisplay(text ?? '').trim();
+    return caption.isEmpty
+        ? deletedPhotoText
+        : '$caption $deletedPhotoSuffix';
+  }
 
   /// Returns a simplified display label where all "Ara Öğün" types are shown as just "Ara"
   String get displayLabel {

@@ -36,8 +36,6 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   static const int _columns = 5; // 5 photos per row (as requested)
   static const double _gridGap = 6.0;
   static const double _cardAspectRatio = 1.2; // matches MealImageCard's layout
-  static const String _mealPathPrefix = 'meals/';
-  static const String _mealTextPrefix = 'Öğün: ';
 
   /// Owns the grid scroll position so the [Scrollbar] can attach to it
   /// (shared-controller rule) and so we can jump to the bottom on open.
@@ -67,26 +65,9 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
     super.dispose();
   }
 
-  /// Derive the meal type of a chat-uploaded photo. Meal photos posted to the
-  /// chat carry the meal's enum name in [MessageData.storagePath]
-  /// ('meals/{uid}/{name}') and its label in [MessageData.text]
-  /// ('Öğün: {label}'); anything else falls back to [Meals.none].
-  Meals _mealTypeOf(MessageData m) {
-    final path = m.storagePath ?? '';
-    if (path.startsWith(_mealPathPrefix)) {
-      final byName = Meals.fromName(path.split('/').last);
-      if (byName != null) return byName;
-    }
-    final text = m.text ?? '';
-    if (text.startsWith(_mealTextPrefix)) {
-      final label = text.substring(_mealTextPrefix.length).trim();
-      return Meals.values.firstWhere(
-        (x) => x.label == label,
-        orElse: () => Meals.none,
-      );
-    }
-    return Meals.none;
-  }
+  /// Derive the meal type of a chat-uploaded photo (see
+  /// [MessageData.photoMeal]); anything else falls back to [Meals.none].
+  Meals _mealTypeOf(MessageData m) => m.photoMeal ?? Meals.none;
 
   /// Adapt a chat image message to a [MealModel] so the shared [MealImageCard]
   /// can render it exactly like the images tab.

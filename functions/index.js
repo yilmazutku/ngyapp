@@ -54,13 +54,31 @@ const CHAT_MEAL_PHOTO_REACTION_BODY_TEMPLATE =
 const CHAT_PHOTO_REACTION_BODY_TEMPLATE = 'bir fotoğrafınıza {emoji} bıraktı';
 
 /**
- * Meal photos posted to the chat carry the meal's label in their text as
- * "Öğün: {label}" (see MealManager._postToChat in the app).
+ * Meal photos posted to the chat carry the meal's name in their text as
+ * "Öğün: {name}" (Meals.chatCaption in the app).
  */
 const MEAL_MESSAGE_TEXT_PREFIX = 'Öğün: ';
 
-/** Label of the "no meal" choice (Meals.none in the app). */
-const MEAL_LABEL_NONE = 'Hiçbiri';
+/**
+ * The chat summary of a meal photo: "Öğün Fotoğrafı ({name})"
+ * (Meals.chatSummary in the app).
+ */
+const MEAL_SUMMARY_TEXT_PREFIX = 'Öğün Fotoğrafı (';
+
+/**
+ * Snacks are never numbered in what users see: "Ara Öğün", not "Ara Öğün 2"
+ * (Meals.snackPhotoLabel in the app). Older messages still carry the number.
+ */
+const SNACK_PHOTO_LABEL = 'Ara Öğün';
+
+/** Numbered snack names written by older app versions. */
+const LEGACY_SNACK_LABEL_PATTERN = /Ara Öğün [1-3]/;
+
+/** Name of the "other" choice (Meals.none in the app). */
+const MEAL_LABEL_OTHER = 'Diğer';
+
+/** Name older app versions used for the "other" choice. */
+const LEGACY_MEAL_LABEL_OTHER = 'Hiçbiri';
 
 /** Appended to a meal photo message whose photo was deleted. */
 const CHAT_DELETED_PHOTO_SUFFIX = '(fotoğraf silindi)';
@@ -297,7 +315,9 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
       // Notification body
       let body = CHAT_DEFAULT_BODY;
       if (typeof msg.text === 'string' && msg.text.trim().length) {
-        body = msg.text.trim();
+        // Meal photo captions from older app versions still number snacks
+        // ("Öğün: Ara Öğün 2"); admins see today's names.
+        body = withCurrentMealNames(msg.text.trim());
       } else if (typeof msg.imageUrl === 'string' && msg.imageUrl.length) {
         body = CHAT_IMAGE_BODY;
       }
@@ -365,14 +385,52 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
 );
 
 /**
+ * App-written meal texts ("Öğün: …", "Öğün Fotoğrafı (…)") with today's meal
+ * names: older messages said "Ara Öğün 2" and "Hiçbiri". Other texts (what
+ * people typed) are returned as they are. Mirrors Meals.chatTextForDisplay.
+ * @param {string} text Message text.
+ * @return {string} Text with current meal names.
+ */
+function withCurrentMealNames(text) {
+  if (!text.startsWith(MEAL_MESSAGE_TEXT_PREFIX) &&
+      !text.startsWith(MEAL_SUMMARY_TEXT_PREFIX)) {
+    return text;
+  }
+  return text
+      .replace(LEGACY_MEAL_LABEL_OTHER, MEAL_LABEL_OTHER)
+      .replace(LEGACY_SNACK_LABEL_PATTERN, SNACK_PHOTO_LABEL);
+}
+
+/**
  * Name of a meal photo in reaction notifications: "Öğle" -> "Öğle öğün",
- * "Ara Öğün 1" stays as is, and a photo without a meal is just "Öğün".
- * @param {string} label Meal label taken from the message text.
+ * any snack -> "Ara Öğün" (never numbered), and the "other" choice is just
+ * "Öğün".
+ * @param {string} label Meal name taken from the message text.
  * @return {string} Name used before "fotoğrafınıza".
  */
 function mealPhotoName(label) {
-  if (!label || label === MEAL_LABEL_NONE) return 'Öğün';
-  return label.includes('Öğün') ? label : `${label} öğün`;
+  if (!label ||
+      label === MEAL_LABEL_OTHER ||
+      label === LEGACY_MEAL_LABEL_OTHER) {
+    return 'Öğün';
+  }
+  if (label.startsWith(SNACK_PHOTO_LABEL)) return SNACK_PHOTO_LABEL;
+  return `${label} öğün`;
+}
+
+/**
+ * Text of a message whose photo was deleted: "Öğün: Öğle (fotoğraf silindi)",
+ * or CHAT_DELETED_PHOTO_TEXT for a photo without text. Mirrors
+ * Meals.deletedPhotoChatText.
+ * @param {*} text Current message text.
+ * @return {string} New message text.
+ */
+function deletedPhotoText(text) {
+  const caption =
+      typeof text === 'string' ? withCurrentMealNames(text).trim() : '';
+  return caption ?
+      `${caption} ${CHAT_DELETED_PHOTO_SUFFIX}` :
+      CHAT_DELETED_PHOTO_TEXT;
 }
 
 /**
@@ -392,7 +450,9 @@ function buildAdminReactionBody(message, emoji) {
     return CHAT_REACTION_BODY_TEMPLATE.replace('{emoji}', emoji);
   }
   if (text.startsWith(MEAL_MESSAGE_TEXT_PREFIX)) {
-    const label = text.slice(MEAL_MESSAGE_TEXT_PREFIX.length).trim();
+    const label = withCurrentMealNames(text)
+        .slice(MEAL_MESSAGE_TEXT_PREFIX.length)
+        .trim();
     return CHAT_MEAL_PHOTO_REACTION_BODY_TEMPLATE
         .replace('{meal}', mealPhotoName(label))
         .replace('{emoji}', emoji);
@@ -661,6 +721,9 @@ exports.markChatMessagesOfDeletedMealPhotos = onDocumentWritten(
       const chatRef =
           admin.firestore().collection('chats').doc(event.params.userId);
 
+      // The app marks the message itself when it deletes the photo (the
+      // query then finds nothing); this covers deletes it could not mark.
+      const deletedTexts = new Map();
       for (const url of removed) {
         const snapshot = await chatRef
             .collection('messages')
@@ -668,21 +731,24 @@ exports.markChatMessagesOfDeletedMealPhotos = onDocumentWritten(
             .get();
 
         await Promise.all(snapshot.docs.map((doc) => {
-          const text = doc.get('text');
+          const text = deletedPhotoText(doc.get('text'));
+          deletedTexts.set(url, text);
           return doc.ref.update({
             imageUrl: admin.firestore.FieldValue.delete(),
             storagePath: admin.firestore.FieldValue.delete(),
-            text: typeof text === 'string' && text !== '' ?
-                `${text} ${CHAT_DELETED_PHOTO_SUFFIX}` :
-                CHAT_DELETED_PHOTO_TEXT,
+            text: text,
+            photoDeleted: true,
           });
         }));
       }
 
-      // The admin chat list previews lastImageUrl; do not leave it broken.
+      // The admin chat list previews the last photo; do not leave it broken.
       const chatDoc = await chatRef.get();
-      if (chatDoc.exists && removed.includes(chatDoc.get('lastImageUrl'))) {
-        await chatRef.update({lastImageUrl: ''});
+      const lastImageUrl = chatDoc.exists ? chatDoc.get('lastImageUrl') : '';
+      if (removed.includes(lastImageUrl)) {
+        const lastMessage =
+            deletedTexts.get(lastImageUrl) || CHAT_DELETED_PHOTO_TEXT;
+        await chatRef.update({lastImageUrl: '', lastMessage: lastMessage});
       }
 
       logger.info('Marked chat messages of deleted meal photos', {

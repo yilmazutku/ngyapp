@@ -10,6 +10,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 
+import '../models/meal_model.dart';
+
 /// Data Transfer Object representing a chat message from Firestore.
 /// 
 /// Structure:
@@ -37,6 +39,11 @@ class MessageData {
   /// The value is the reaction emoji (e.g. '👍' or '❤️').
   final Map<String, String> reactions;
 
+  /// Mesajdaki öğün fotoğrafı silindi mi. Silinen fotoğrafın mesajı kaybolmaz,
+  /// "Öğün: Öğle (fotoğraf silindi)" notuna döner (bkz.
+  /// `MealManager.deleteMealImage`).
+  final bool photoDeleted;
+
   MessageData({
     required this.id,
     required this.chatId,
@@ -47,7 +54,36 @@ class MessageData {
     this.createdAt,
     this.clientCreatedAt,
     this.reactions = const {},
+    this.photoDeleted = false,
   });
+
+  /// Danışanın sohbetten yüklediği öğün fotoğrafı mı (bkz.
+  /// `MealManager.uploadMealImg`, `alsoPostToChat`).
+  bool get isMealPhoto =>
+      (imageUrl ?? '').isNotEmpty &&
+      ((storagePath ?? '').startsWith(Meals.chatMarkerPrefix) ||
+          (text ?? '').startsWith(Meals.chatCaptionPrefix));
+
+  /// Öğün fotoğrafı mesajının öğünü: önce `storagePath` işaretinden
+  /// ("meals/{uid}/{öğün}"), yoksa açıklamadan ("Öğün: Öğle"). Açıklamadan
+  /// okunan ara öğün, numarası yazılmadığı için ilk ara öğüne düşer.
+  /// Bulunamazsa null.
+  Meals? get photoMeal {
+    final String path = storagePath ?? '';
+    if (path.startsWith(Meals.chatMarkerPrefix)) {
+      final Meals? byName = Meals.fromName(path.split('/').last);
+      if (byName != null) return byName;
+    }
+
+    final String caption = Meals.chatTextForDisplay(text ?? '');
+    if (!caption.startsWith(Meals.chatCaptionPrefix)) return null;
+    final String label =
+        caption.substring(Meals.chatCaptionPrefix.length).trim();
+    for (final Meals meal in Meals.values) {
+      if (meal.photoLabel == label) return meal;
+    }
+    return null;
+  }
 
   /// Factory constructor to create a MessageData instance from a Firestore snapshot.
   factory MessageData.fromSnapshot(DocumentSnapshot<Map<String, dynamic>> snap) {
@@ -62,6 +98,7 @@ class MessageData {
       createdAt: data['createdAt'] as Timestamp?,
       clientCreatedAt: data['clientCreatedAt'] as Timestamp?,
       reactions: parseReactions(data['reactions']),
+      photoDeleted: data['photoDeleted'] == true,
     );
   }
 
