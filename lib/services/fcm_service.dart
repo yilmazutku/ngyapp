@@ -379,6 +379,12 @@ class FcmService {
     final type = (data['type'] ?? '').toString();
     final isAdmin = _adminUids.contains(user.uid);
 
+    // İfade bildirimleri tepkinin bırakıldığı mesajı taşır: sohbet o mesajda
+    // açılır (bkz. ChatPage.focusMessageId).
+    final messageIdValue = (data['messageId'] ?? '').toString();
+    final String? focusMessageId =
+        messageIdValue.isEmpty ? null : messageIdValue;
+
     switch (type) {
       case 'chat':
         // Admin -> User notification
@@ -386,7 +392,10 @@ class FcmService {
           final chatId = (data['chatId'] ?? '').toString();
           if (chatId.isNotEmpty) {
             navigator.push(MaterialPageRoute(
-              builder: (_) => ChatPage(overrideChatId: chatId),
+              builder: (_) => ChatPage(
+                overrideChatId: chatId,
+                focusMessageId: focusMessageId,
+              ),
             ));
           } else {
             navigator.push(MaterialPageRoute(
@@ -395,7 +404,7 @@ class FcmService {
           }
         } else {
           navigator.push(MaterialPageRoute(
-            builder: (_) => const ChatPage(),
+            builder: (_) => ChatPage(focusMessageId: focusMessageId),
           ));
         }
         break;
@@ -407,7 +416,10 @@ class FcmService {
         final chatId = (data['chatId'] ?? '').toString();
         if (chatId.isNotEmpty) {
           navigator.push(MaterialPageRoute(
-            builder: (_) => ChatPage(overrideChatId: chatId),
+            builder: (_) => ChatPage(
+              overrideChatId: chatId,
+              focusMessageId: focusMessageId,
+            ),
           ));
         } else {
           navigator.push(MaterialPageRoute(
@@ -602,7 +614,7 @@ class _InAppNotificationBannerState extends State<_InAppNotificationBanner>
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.25),
+                      color: Colors.black.withValues(alpha: 0.25),
                       blurRadius: 16,
                       offset: const Offset(0, 6),
                     ),
@@ -678,7 +690,7 @@ class _InAppNotificationBannerState extends State<_InAppNotificationBanner>
                     // Divider
                     Container(
                       height: 1,
-                      color: Colors.white.withOpacity(0.15),
+                      color: Colors.white.withValues(alpha: 0.15),
                     ),
                     // Action buttons row
                     Row(
@@ -708,7 +720,7 @@ class _InAppNotificationBannerState extends State<_InAppNotificationBanner>
                         Container(
                           width: 1,
                           height: 40,
-                          color: Colors.white.withOpacity(0.15),
+                          color: Colors.white.withValues(alpha: 0.15),
                         ),
                         // "Aç" (Open) button
                         Expanded(

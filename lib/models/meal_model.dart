@@ -1,11 +1,23 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MealModel {
-  static const int maxImages = 3;
+  static const int maxImages = 10;
+
+  /// Öğündeki fotoğraf sınırı dolmuşken yeni fotoğraf denendiğinde gösterilen
+  /// uyarı; sohbet ve "Planım" aynı metni kullanır.
+  static const String maxImagesReachedTitle = 'Fotoğraf Sınırı';
+  static const String maxImagesReachedMessage =
+      'Bir öğün için en fazla $maxImages fotoğraf yüklenmesine izin '
+      'verilmektedir.';
 
   final String mealId;
   final Meals mealType;
   final List<String> imageUrls;
+
+  /// [imageUrls] ile paralel yükleme saatleri. [timestamp] öğüne en son
+  /// fotoğrafın eklendiği saattir; aynı öğündeki her fotoğrafın kendi saati
+  /// buradan okunur ([imageTimeAt]). Bu alandan önceki kayıtlarda liste boştur.
+  final List<DateTime> imageTimes;
 
   /// [imageUrls] ile paralel küçük görsel adresleri; küçük görseli olmayan
   /// fotoğrafın yerinde boş dize durur. Liste ekranları tam boy fotoğraf
@@ -28,6 +40,7 @@ class MealModel {
     required this.mealType,
     required this.imageUrls,
     List<String>? thumbUrls,
+    List<DateTime>? imageTimes,
     this.subscriptionId,
     this.description,
     required this.timestamp,
@@ -39,6 +52,7 @@ class MealModel {
     this.updateDate,
     this.updateUser,
   })  : thumbUrls = thumbUrls ?? const [],
+        imageTimes = imageTimes ?? const [],
         createDate = createDate ?? DateTime.now();
 
   /// First image URL for convenience, or empty string if none.
@@ -59,6 +73,16 @@ class MealModel {
         (i) => i < thumbUrls.length ? thumbUrls[i] : '',
       );
 
+  /// [index]. fotoğrafın yükleme saati. Saati kaydedilmemiş eski
+  /// fotoğraflarda öğünün saatine ([timestamp]) düşer.
+  DateTime imageTimeAt(int index) =>
+      index >= 0 && index < imageTimes.length ? imageTimes[index] : timestamp;
+
+  /// [imageTimes]'ı [imageUrls] ile aynı uzunluğa getirir; eksik saatler
+  /// [timestamp] ile doldurulur (bkz. [alignedThumbUrls]).
+  List<DateTime> alignedImageTimes() =>
+      List<DateTime>.generate(imageUrls.length, imageTimeAt);
+
   bool get canAddMoreImages => imageUrls.length < maxImages;
 
   factory MealModel.fromDocument(DocumentSnapshot doc) {
@@ -75,6 +99,8 @@ class MealModel {
       urls = [];
     }
 
+    final DateTime timestamp = (data['timestamp'] as Timestamp).toDate();
+
     return MealModel(
       mealId: doc.id,
       mealType: Meals.values.firstWhere((e) => e.name == data['mealType']),
@@ -83,9 +109,14 @@ class MealModel {
           ? List<String>.from(
               (data['thumbUrls'] as List).map((e) => e is String ? e : ''))
           : const [],
+      imageTimes: data['imageTimes'] is List
+          ? (data['imageTimes'] as List)
+              .map((e) => e is Timestamp ? e.toDate() : timestamp)
+              .toList()
+          : const [],
       subscriptionId: data['subscriptionId'],
       description: data['description'],
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
+      timestamp: timestamp,
       calories: data['calories'],
       notes: data['notes'],
       isChecked: data['isChecked'] ?? false,
@@ -101,6 +132,7 @@ class MealModel {
       'mealType': mealType.name,
       'imageUrls': imageUrls,
       'thumbUrls': alignedThumbUrls(),
+      'imageTimes': alignedImageTimes().map(Timestamp.fromDate).toList(),
       // Keep legacy field for any readers that still use it
       'imageUrl': imageUrl,
       'subscriptionId': subscriptionId,

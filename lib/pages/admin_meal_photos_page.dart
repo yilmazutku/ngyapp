@@ -355,7 +355,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   /// Bir öğün dokümanı en fazla [MealModel.maxImages] görsel taşır. Her görsel
   /// kendi kartında görünsün diye doküman, tek görselli kopyalara ayrılır;
-  /// öğün türü ve yükleme saati kopyalarda korunur.
+  /// öğün türü kopyalarda korunur, saat ise her görselin kendi yükleme saatidir
+  /// (sohbetteki mesajın saatiyle aynı).
   List<MealModel> _splitIntoPhotos(List<MealModel>? meals) {
     if (meals == null || meals.isEmpty) return const [];
 
@@ -368,9 +369,10 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
             mealType: meal.mealType,
             imageUrls: [meal.imageUrls[i]],
             thumbUrls: [meal.thumbUrlAt(i) ?? ''],
+            imageTimes: [meal.imageTimeAt(i)],
             subscriptionId: meal.subscriptionId,
             description: meal.description,
-            timestamp: meal.timestamp,
+            timestamp: meal.imageTimeAt(i),
             calories: meal.calories,
             notes: meal.notes,
             isChecked: meal.isChecked,
@@ -378,7 +380,15 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         );
       }
     }
-    return photos;
+    // Öğünler son yükleme saatine göre gelir; bir öğüne sonradan eklenen
+    // fotoğraf şeritte kendi saatindeki yere otursun. Saati aynı olanlar
+    // (saat kaydı olmayan eski fotoğraflar) geliş sırasını korur.
+    final List<int> order = List<int>.generate(photos.length, (i) => i)
+      ..sort((a, b) {
+        final int byTime = photos[a].timestamp.compareTo(photos[b].timestamp);
+        return byTime != 0 ? byTime : a.compareTo(b);
+      });
+    return [for (final int i in order) photos[i]];
   }
 
   /// Arama ve öğün filtresini uygulayıp [_visibleGroups] sonucunu tazeler.
@@ -581,7 +591,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Sohbeti fotoğrafın mesajında açar.
   ///
   /// Mesaj sohbetin gösterdiği son 50 mesajdan eskiyse sohbet her zamanki gibi
-  /// en alttan açılır.
+  /// en alttan açılır. Sohbetten dönülünce o danışanın rozetleri tazelenir:
+  /// sohbette bırakılan/kaldırılan ifade ya da silinen sohbet kartlara yansır.
   Future<void> _goToChatMessage(
     _ClientPhotoGroup group,
     MealModel photo,
@@ -602,9 +613,46 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         builder: (_) => ChatPage(
           overrideChatId: group.user.userId,
           focusMessageId: message.id,
+          userDisplayName: group.displayName,
         ),
       ),
     );
+    if (!mounted) return;
+    await _refreshReactionsOf(group.user.userId);
+  }
+
+  /// Tek danışanın seçili gündeki rozetlerini sunucudan yeniden okur; tüm
+  /// sayfayı yeniden yüklemeye gerek kalmaz.
+  ///
+  /// Önce o danışanın fotoğraflarına ait eski rozetler kaldırılır, sonra yeni
+  /// sonuç yazılır: sohbette kaldırılan ifade kartta da kalkar. Okuma
+  /// başarısız olursa eldeki rozetlere dokunulmaz.
+  Future<void> _refreshReactionsOf(String userId) async {
+    final ChatManager chatManager =
+        Provider.of<ChatManager>(context, listen: false);
+    final int loadId = _loadId;
+
+    final Map<String, Map<String, String>> fresh;
+    try {
+      fresh = await chatManager.fetchImageReactionsOfUserForDate(
+        userId: userId,
+        date: _day,
+      );
+    } catch (e) {
+      return;
+    }
+    // Bu arada gün değiştiyse ya da sayfa yenilendiyse sonuç eskidir.
+    if (!mounted || loadId != _loadId) return;
+
+    setState(() {
+      for (final _ClientPhotoGroup group in _groups) {
+        if (group.user.userId != userId) continue;
+        for (final MealModel photo in group.photos) {
+          _reactionsByImageUrl.remove(photo.imageUrl);
+        }
+      }
+      _reactionsByImageUrl.addAll(fresh);
+    });
   }
 
   /// Fotoğrafın sohbetteki mesajına ifade bırakır.

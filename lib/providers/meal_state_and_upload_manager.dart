@@ -232,8 +232,36 @@ static const MEAL_RANGE_DAYS=7;
     return meals;
   }
 
+/// Öğüne yeni bir fotoğraf eklenebilir mi: o günün öğün kaydında
+/// [MealModel.maxImages] sınırı dolmamışsa (ya da kayıt yoksa) true.
+///
+/// Yüklemeden önce sorulur ki kullanıcı fotoğraf seçip yüklemeyi bekledikten
+/// sonra reddedilmesin. [date] verilmezse bugün.
+Future<bool> canAddMealImage({
+  required String userId,
+  required Meals meal,
+  DateTime? date,
+}) async {
+  final String dateKey = DateFormat('yyyy-MM-dd').format(date ?? DateTime.now());
+  final DocumentSnapshot<Map<String, dynamic>> mealDoc = await FirebaseFirestore
+      .instance
+      .collection('users')
+      .doc(userId)
+      .collection('meals')
+      .doc(dateKey)
+      .collection('mealEntries')
+      .doc(meal.name)
+      .get();
+  if (!mealDoc.exists) return true;
+  return MealModel.fromDocument(mealDoc).canAddMoreImages;
+}
+
 /// Uploads a meal photo to Firebase Storage and appends it to the meal document.
 /// A meal type can have up to [MealModel.maxImages] images.
+///
+/// [alsoPostToChat] true iken fotoğraf öğüne kaydedilip sohbete
+/// gönderilemezse [MealChatPostException] fırlatılır: fotoğraf öğünde durur,
+/// çağıran kullanıcıya sohbette görünmeyeceğini söyleyebilir.
 Future<String?> uploadMealImg({
   required String userId,
   required Meals meal,
@@ -285,12 +313,16 @@ Future<String?> uploadMealImg({
     final updatedUrls = [...existingUrls, result.downloadUrl!];
     final existingThumbs = previousMealModel?.alignedThumbUrls() ?? <String>[];
     final updatedThumbs = [...existingThumbs, result.thumbUrl ?? ''];
+    final existingTimes =
+        previousMealModel?.alignedImageTimes() ?? <DateTime>[];
+    final updatedTimes = [...existingTimes, referenceDate];
 
     final mergedMealModel = MealModel(
       mealId: previousMealModel?.mealId ?? mealDocRef.id,
       mealType: meal,
       imageUrls: updatedUrls,
       thumbUrls: updatedThumbs,
+      imageTimes: updatedTimes,
       subscriptionId: subscriptionId,
       timestamp: referenceDate,
       description: previousMealModel?.description,
@@ -301,15 +333,25 @@ Future<String?> uploadMealImg({
 
     // Three different documents (meal entry, the day's checklist, the chat):
     // independent writes, so they are issued together instead of one after the
-    // other.
+    // other. Sohbet yazımının hatası ayrıca tutulur: öğün kaydı yine de
+    // tamamlanmış olur, yükleme "başarısız" sayılıp fotoğraf tekrar
+    // yüklenmesin.
+    Object? chatPostError;
     await Future.wait([
       mealDocRef.set(mergedMealModel.toMap()),
       updateMealState(userId, referenceDate, meal, true),
       if (alsoPostToChat)
-        _postToChat(userId, meal, result.downloadUrl!, chatManager),
+        _postToChat(userId, meal, result.downloadUrl!, chatManager)
+            .catchError((Object e) {
+          chatPostError = e;
+        }),
     ]);
 
     notifyListeners();
+
+    if (chatPostError != null) {
+      throw MealChatPostException(result.downloadUrl!, chatPostError!);
+    }
 
     return result.downloadUrl;
   } catch (e) {
@@ -349,9 +391,13 @@ Future<void> deleteMealImage({
     final updatedUrls = List<String>.from(mealModel.imageUrls)
       ..remove(imageUrlToDelete);
     final updatedThumbs = mealModel.alignedThumbUrls();
+    final updatedTimes = mealModel.alignedImageTimes();
     final String? thumbUrlToDelete =
         index >= 0 ? mealModel.thumbUrlAt(index) : null;
-    if (index >= 0) updatedThumbs.removeAt(index);
+    if (index >= 0) {
+      updatedThumbs.removeAt(index);
+      updatedTimes.removeAt(index);
+    }
 
     // Delete the file from Storage
     try {
@@ -379,6 +425,7 @@ Future<void> deleteMealImage({
           mealType: meal,
           imageUrls: updatedUrls,
           thumbUrls: updatedThumbs,
+          imageTimes: updatedTimes,
           subscriptionId: mealModel.subscriptionId,
           timestamp: mealModel.timestamp,
           description: mealModel.description,
@@ -414,44 +461,41 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
 }
 
 
-  /// Posts the meal image to the user's chat
+  /// Posts the meal image to the user's chat. Hata yutulmaz; çağıran
+  /// ([uploadMealImg]) sohbete düşmeyen fotoğrafı kullanıcıya bildirir.
   Future<void> _postToChat(String userId, Meals meal, String imageUrl, ChatManager? chatManager) async {
-    try {
-      // If we have a ChatManager instance, use it to post the image directly
-      final chatId = userId; // In this app, chatId == userId
-      final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
-      
-      // Chat summary and the admin unread counters in a single write:
-      // set(merge: true) merges nested maps field by field, so the counters do
-      // not need the dot-notation that would force a separate update().
-      await chatDoc.set({
-        'participants': [chatId, ...ChatManager.adminIds],
-        'lastMessage': 'Öğün Fotoğrafı (${meal.label})',
-        'lastImageUrl': imageUrl,
-        'lastMessageAt': Timestamp.now(),
-        'updatedAt': FieldValue.serverTimestamp(),
-        'adminUnreadCount': {
-          for (final adminUid in ChatManager.adminIds)
-            adminUid: FieldValue.increment(1),
-        },
-        'hasUnreadFor': FieldValue.arrayUnion(ChatManager.adminIds.toList()),
-      }, SetOptions(merge: true));
+    final chatId = userId; // In this app, chatId == userId
+    final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
 
-      // Add message to chat
-      final msgData = <String, dynamic>{
-        'chatId': chatId,
-        'senderId': userId,
-        'text': 'Öğün: ${meal.label}',
-        'imageUrl': imageUrl,
-        'createdAt': FieldValue.serverTimestamp(),
-        'clientCreatedAt': Timestamp.now(),
-      };
-      if (chatManager != null) {
-        msgData['storagePath'] = 'meals/$userId/${meal.name}';
-      }
-      await chatDoc.collection('messages').add(msgData);
-    } catch (e) {
+    // Chat summary and the admin unread counters in a single write:
+    // set(merge: true) merges nested maps field by field, so the counters do
+    // not need the dot-notation that would force a separate update().
+    await chatDoc.set({
+      'participants': [chatId, ...ChatManager.adminIds],
+      'lastMessage': 'Öğün Fotoğrafı (${meal.label})',
+      'lastImageUrl': imageUrl,
+      'lastMessageAt': Timestamp.now(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'adminUnreadCount': {
+        for (final adminUid in ChatManager.adminIds)
+          adminUid: FieldValue.increment(1),
+      },
+      'hasUnreadFor': FieldValue.arrayUnion(ChatManager.adminIds.toList()),
+    }, SetOptions(merge: true));
+
+    // Add message to chat
+    final msgData = <String, dynamic>{
+      'chatId': chatId,
+      'senderId': userId,
+      'text': 'Öğün: ${meal.label}',
+      'imageUrl': imageUrl,
+      'createdAt': FieldValue.serverTimestamp(),
+      'clientCreatedAt': Timestamp.now(),
+    };
+    if (chatManager != null) {
+      msgData['storagePath'] = 'meals/$userId/${meal.name}';
     }
+    await chatDoc.collection('messages').add(msgData);
   }
   
 
@@ -657,6 +701,19 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     }
   }
 }
+/// Öğün fotoğrafı öğün kaydına eklendi ama sohbete gönderilemedi
+/// (bkz. [MealManager.uploadMealImg]).
+class MealChatPostException implements Exception {
+  /// Öğüne kaydedilen fotoğrafın adresi.
+  final String downloadUrl;
+  final Object cause;
+
+  const MealChatPostException(this.downloadUrl, this.cause);
+
+  @override
+  String toString() => 'MealChatPostException($downloadUrl): $cause';
+}
+
 /// Represents the result of an image upload operation
 class UploadResult {
   final String? downloadUrl;

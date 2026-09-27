@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const logger = require('firebase-functions/logger');
-const {onDocumentCreated, onDocumentUpdated} =
+const {onDocumentCreated, onDocumentUpdated, onDocumentWritten} =
 require('firebase-functions/v2/firestore');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
 
@@ -41,6 +41,32 @@ const CHAT_IMAGE_BODY = 'Fotoğraf';
  * Rendered as e.g. "bir mesajınıza 👍 ifadesi bıraktı".
  */
 const CHAT_REACTION_BODY_TEMPLATE = 'bir mesajınıza {emoji} ifadesi bıraktı';
+
+/**
+ * Body when the admin reacts to one of the user's meal photos.
+ * {meal} is the meal's photo name (see mealPhotoName), e.g.
+ * "Öğle öğün fotoğrafınıza 👍 bıraktı".
+ */
+const CHAT_MEAL_PHOTO_REACTION_BODY_TEMPLATE =
+    '{meal} fotoğrafınıza {emoji} bıraktı';
+
+/** Body when the admin reacts to one of the user's (non-meal) photos. */
+const CHAT_PHOTO_REACTION_BODY_TEMPLATE = 'bir fotoğrafınıza {emoji} bıraktı';
+
+/**
+ * Meal photos posted to the chat carry the meal's label in their text as
+ * "Öğün: {label}" (see MealManager._postToChat in the app).
+ */
+const MEAL_MESSAGE_TEXT_PREFIX = 'Öğün: ';
+
+/** Label of the "no meal" choice (Meals.none in the app). */
+const MEAL_LABEL_NONE = 'Hiçbiri';
+
+/** Appended to a meal photo message whose photo was deleted. */
+const CHAT_DELETED_PHOTO_SUFFIX = '(fotoğraf silindi)';
+
+/** Text of a photo message without text whose photo was deleted. */
+const CHAT_DELETED_PHOTO_TEXT = 'Fotoğraf silindi';
 
 /** Default title for user-to-admin notifications (when user name not found) */
 const CHAT_USER_TO_ADMIN_DEFAULT_TITLE = 'Kullanıcı mesajı';
@@ -339,6 +365,42 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
 );
 
 /**
+ * Name of a meal photo in reaction notifications: "Öğle" -> "Öğle öğün",
+ * "Ara Öğün 1" stays as is, and a photo without a meal is just "Öğün".
+ * @param {string} label Meal label taken from the message text.
+ * @return {string} Name used before "fotoğrafınıza".
+ */
+function mealPhotoName(label) {
+  if (!label || label === MEAL_LABEL_NONE) return 'Öğün';
+  return label.includes('Öğün') ? label : `${label} öğün`;
+}
+
+/**
+ * Reaction notification body for the admin -> user direction, worded after
+ * the reacted message: a meal photo names its meal, other photos and text
+ * messages keep the generic wording.
+ * @param {Object} message Reacted message data.
+ * @param {string} emoji Reaction left by the admin.
+ * @return {string} Notification body.
+ */
+function buildAdminReactionBody(message, emoji) {
+  const text = typeof message.text === 'string' ? message.text : '';
+  const hasImage =
+      typeof message.imageUrl === 'string' && message.imageUrl !== '';
+
+  if (!hasImage) {
+    return CHAT_REACTION_BODY_TEMPLATE.replace('{emoji}', emoji);
+  }
+  if (text.startsWith(MEAL_MESSAGE_TEXT_PREFIX)) {
+    const label = text.slice(MEAL_MESSAGE_TEXT_PREFIX.length).trim();
+    return CHAT_MEAL_PHOTO_REACTION_BODY_TEMPLATE
+        .replace('{meal}', mealPhotoName(label))
+        .replace('{emoji}', emoji);
+  }
+  return CHAT_PHOTO_REACTION_BODY_TEMPLATE.replace('{emoji}', emoji);
+}
+
+/**
  * Sends a push notification to the user when an admin leaves (or changes) a
  * reaction on one of the user's messages.
  *
@@ -395,7 +457,7 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
       if (!token) return;
 
       const title = CHAT_ADMIN_TO_USER_TITLE;
-      const body = CHAT_REACTION_BODY_TEMPLATE.replace('{emoji}', emoji);
+      const body = buildAdminReactionBody(after, emoji);
 
       const res = await admin.messaging().sendEachForMulticast({
         tokens: [token],
@@ -406,6 +468,8 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
         data: {
           type: 'chat',
           chatId: chatId,
+          // The app opens the chat at this message (ChatPage.focusMessageId).
+          messageId: event.params.messageId,
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         android: buildAndroidConfig(title, body),
@@ -552,6 +616,79 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
               `Removed invalid token for admin ${notifiedAdminUids[i]}`);
         }
       }
+    },
+);
+
+/**
+ * Image URLs of a meal entry document (legacy records keep a single imageUrl).
+ * @param {Object} data Meal entry data.
+ * @return {Set<string>} Image URLs.
+ */
+function mealImageUrls(data) {
+  if (Array.isArray(data.imageUrls)) {
+    return new Set(data.imageUrls.filter((url) => typeof url === 'string'));
+  }
+  if (typeof data.imageUrl === 'string' && data.imageUrl !== '') {
+    return new Set([data.imageUrl]);
+  }
+  return new Set();
+}
+
+/**
+ * Keeps the chat in step when photos are removed from a meal record.
+ *
+ * Meal photos uploaded from the chat are also posted there as a message with
+ * the same download URL. When the photo is deleted from the meal record (e.g.
+ * from "Planım"), its file is gone, so the message is turned into a short
+ * "fotoğraf silindi" note instead of showing a broken image; reactions left on
+ * it stay. Done here rather than in the app so it works whoever deletes the
+ * photo and whatever the Firestore rules allow on chat messages.
+ *
+ * Path: users/{userId}/meals/{dateKey}/mealEntries/{mealName}. In our model
+ * the user's chat id equals their UID.
+ */
+exports.markChatMessagesOfDeletedMealPhotos = onDocumentWritten(
+    'users/{userId}/meals/{dateKey}/mealEntries/{mealName}',
+    async (event) => {
+      const before = (event.data && event.data.before.data()) || {};
+      const after = (event.data && event.data.after.data()) || {};
+
+      const remaining = mealImageUrls(after);
+      const removed =
+          [...mealImageUrls(before)].filter((url) => !remaining.has(url));
+      if (removed.length === 0) return;
+
+      const chatRef =
+          admin.firestore().collection('chats').doc(event.params.userId);
+
+      for (const url of removed) {
+        const snapshot = await chatRef
+            .collection('messages')
+            .where('imageUrl', '==', url)
+            .get();
+
+        await Promise.all(snapshot.docs.map((doc) => {
+          const text = doc.get('text');
+          return doc.ref.update({
+            imageUrl: admin.firestore.FieldValue.delete(),
+            storagePath: admin.firestore.FieldValue.delete(),
+            text: typeof text === 'string' && text !== '' ?
+                `${text} ${CHAT_DELETED_PHOTO_SUFFIX}` :
+                CHAT_DELETED_PHOTO_TEXT,
+          });
+        }));
+      }
+
+      // The admin chat list previews lastImageUrl; do not leave it broken.
+      const chatDoc = await chatRef.get();
+      if (chatDoc.exists && removed.includes(chatDoc.get('lastImageUrl'))) {
+        await chatRef.update({lastImageUrl: ''});
+      }
+
+      logger.info('Marked chat messages of deleted meal photos', {
+        userId: event.params.userId,
+        count: removed.length,
+      });
     },
 );
 
