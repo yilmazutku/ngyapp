@@ -497,6 +497,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         );
         // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
         limitReached = downloadUrl == null;
+        if (!limitReached) _cancelMealReminder(meal);
       } else {
         await chat.sendImageTo(_chatId, image);
       }
@@ -510,6 +511,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         await _showMealImageLimitDialog();
       }
     } on MealChatPostException {
+      // Fotoğraf öğüne kaydedildi, yalnızca sohbete düşmedi: öğün yüklenmiş
+      // sayılır.
+      if (meal != null) _cancelMealReminder(meal);
+
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
         loadingOpen = false;
@@ -816,6 +821,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: _deletePhotoErrorText,
       );
     }
+  }
+
+  /// Öğünün fotoğrafı yüklendi: o öğünün bugünkü "yüklediniz mi?"
+  /// hatırlatması iptal edilir ("Planım"daki yüklemeyle aynı davranış).
+  void _cancelMealReminder(Meals meal) {
+    MealReminderService().cancelMealReminder(meal);
   }
 
   /// Öğün hatırlatmalarını günün güncel durumuna göre yeniden kurar: silinen
