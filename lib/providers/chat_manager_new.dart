@@ -132,9 +132,6 @@ class ChatManager extends ChangeNotifier {
   
   /// Text input controller for the message input field
   final TextEditingController messageController = TextEditingController();
-  
-  /// Scroll controller for the message list - shared between Scrollbar and ListView
-  final ScrollController scrollController = ScrollController();
 
   // ===== State Management =====
   
@@ -171,6 +168,10 @@ class ChatManager extends ChangeNotifier {
 
   // ===== Firestore References =====
   
+  /// Sohbete doğrudan gönderilen görsellerin Storage klasörü. [deleteChat]
+  /// yalnızca bu klasördeki dosyaları siler.
+  String _chatStorageFolder(String chatId) => 'chats/$chatId';
+
   /// Returns a reference to the chat document for a given chatId
   DocumentReference<Map<String, dynamic>> _chatDoc(String chatId) =>
       db.collection('chats').doc(chatId);
@@ -251,11 +252,7 @@ class ChatManager extends ChangeNotifier {
     required DateTime date,
     void Function(Map<String, Map<String, String>> batchResult)? onBatch,
   }) async {
-    final DateTime dayStart = DateTime(date.year, date.month, date.day);
-    final Timestamp start =
-        Timestamp.fromDate(dayStart.subtract(reactionsDayMargin));
-    final Timestamp end = Timestamp.fromDate(
-        dayStart.add(const Duration(days: 1) + reactionsDayMargin));
+    final (Timestamp start, Timestamp end) = _reactionsDayWindow(date);
 
     final Map<String, Map<String, String>> reactionsByImageUrl = {};
 
@@ -266,9 +263,11 @@ class ChatManager extends ChangeNotifier {
 
       final List<Map<String, Map<String, String>>> batchResults =
           await Future.wait(
-        userIds
-            .sublist(from, to)
-            .map((userId) => _fetchImageReactionsForDay(userId, start, end)),
+        // Tepkiler sayfanın asıl işi değil: bir sohbet okunamazsa o danışanın
+        // rozeti çıkmaz, diğerleri yine gösterilir.
+        userIds.sublist(from, to).map((userId) =>
+            _fetchImageReactionsForDay(userId, start, end).catchError(
+                (Object e) => <String, Map<String, String>>{})),
       );
 
       final Map<String, Map<String, String>> batchReactions = {};
@@ -284,9 +283,32 @@ class ChatManager extends ChangeNotifier {
     return reactionsByImageUrl;
   }
 
+  /// ADMIN ÇAĞIRIR: Tek danışanın [date] gününde sohbetine düşmüş
+  /// fotoğraflarının tepkileri ([fetchImageReactionsOfUsersForDate] ile aynı
+  /// biçim). Sohbetten dönüldüğünde yalnızca o danışanın rozetlerini tazelemek
+  /// için kullanılır; okuma hatası yutulmaz ki çağıran eldeki rozetleri
+  /// boşuna silmesin.
+  Future<Map<String, Map<String, String>>> fetchImageReactionsOfUserForDate({
+    required String userId,
+    required DateTime date,
+  }) {
+    final (Timestamp start, Timestamp end) = _reactionsDayWindow(date);
+    return _fetchImageReactionsForDay(userId, start, end);
+  }
+
+  /// [date] gününün tepki sorgusu aralığı; iki uca [reactionsDayMargin] payı
+  /// eklenir.
+  (Timestamp, Timestamp) _reactionsDayWindow(DateTime date) {
+    final DateTime dayStart = DateTime(date.year, date.month, date.day);
+    return (
+      Timestamp.fromDate(dayStart.subtract(reactionsDayMargin)),
+      Timestamp.fromDate(
+          dayStart.add(const Duration(days: 1) + reactionsDayMargin)),
+    );
+  }
+
   /// Tek bir sohbetin [start] ile [end] arasındaki fotoğraflı mesajlarının
-  /// tepkileri. Tepkiler sayfanın asıl işi değil: okunamazsa boş dönülür,
-  /// fotoğraflar yine gösterilir.
+  /// tepkileri (adres -> (uid -> emoji)); yalnızca tepkisi olanlar döner.
   Future<Map<String, Map<String, String>>> _fetchImageReactionsForDay(
     String chatId,
     Timestamp start,
@@ -294,26 +316,23 @@ class ChatManager extends ChangeNotifier {
   ) async {
     final Map<String, Map<String, String>> reactions = {};
 
-    try {
-      final QuerySnapshot<Map<String, dynamic>> snapshot = await _chatDoc(chatId)
-          .collection('messages')
-          .where('createdAt', isGreaterThanOrEqualTo: start)
-          .where('createdAt', isLessThan: end)
-          .get();
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _chatDoc(chatId)
+        .collection('messages')
+        .where('createdAt', isGreaterThanOrEqualTo: start)
+        .where('createdAt', isLessThan: end)
+        .get();
 
-      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
-          in snapshot.docs) {
-        final Map<String, dynamic> data = doc.data();
-        final String imageUrl = (data['imageUrl'] as String?) ?? '';
-        if (imageUrl.isEmpty) continue;
+    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+        in snapshot.docs) {
+      final Map<String, dynamic> data = doc.data();
+      final String imageUrl = (data['imageUrl'] as String?) ?? '';
+      if (imageUrl.isEmpty) continue;
 
-        final Map<String, String> parsed =
-            MessageData.parseReactions(data['reactions']);
-        if (parsed.isEmpty) continue;
+      final Map<String, String> parsed =
+          MessageData.parseReactions(data['reactions']);
+      if (parsed.isEmpty) continue;
 
-        reactions[imageUrl] = parsed;
-      }
-    } catch (e) {
+      reactions[imageUrl] = parsed;
     }
 
     return reactions;
@@ -516,6 +535,24 @@ class ChatManager extends ChangeNotifier {
         });
   }
 
+  /// Oturumdaki kişinin [chatId] sohbetindeki okunmamış mesaj sayısı:
+  /// yönetici için kendi `adminUnreadCount` değeri, danışan için
+  /// `userUnreadCount`. Sohbet bir mesajda (odaklı) açıldığında "En yeniye
+  /// git" düğmesindeki sayı buradan okunur.
+  Future<int> currentUserUnreadCount(String chatId) async {
+    final String? uid = auth.currentUser?.uid;
+    if (uid == null) return 0;
+
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await _chatDoc(chatId).get();
+    final Map<String, dynamic>? data = snapshot.data();
+    if (data == null) return 0;
+
+    if (isAdminUid(uid)) return getUnreadCountFromChatData(data, uid);
+    final Object? count = data['userUnreadCount'];
+    return count is num ? count.toInt() : 0;
+  }
+
   /// Get unread count for a specific chat and admin from chat data.
   /// Helper method used by UI widgets.
   /// 
@@ -631,7 +668,7 @@ class ChatManager extends ChangeNotifier {
 
       // Step 3: Prepare storage reference
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_${_rand(5)}.jpg';
-      final path = 'chats/$chatId/$fileName';
+      final path = '${_chatStorageFolder(chatId)}/$fileName';
       final ref = storage.ref(path);
       final meta = SettableMetadata(contentType: 'image/jpeg');
 
@@ -781,17 +818,18 @@ class ChatManager extends ChangeNotifier {
   /// Permanently delete an entire chat and all of its data.
   ///
   /// This is an ADMIN-ONLY destructive operation that:
-  /// 1. Deletes every image referenced by the chat's messages from Firebase
-  ///    Storage. This covers both direct chat uploads (chats/{chatId}/...) and
-  ///    meal photos that were posted to the chat. Storage deletion is
-  ///    best-effort per file: a single failure (e.g. the file was already
-  ///    removed) is ignored and does not abort the rest of the operation.
+  /// 1. Deletes the images the chat itself uploaded (chats/{chatId}/...) from
+  ///    Firebase Storage. Storage deletion is best-effort per file: a single
+  ///    failure (e.g. the file was already removed) is ignored and does not
+  ///    abort the rest of the operation.
   /// 2. Deletes all message documents in the messages subcollection
   ///    (in batches, since a document delete does not cascade to subcollections).
   /// 3. Deletes the chat document itself.
   ///
-  /// NOTE: Meal photos are shared with the user's meal-tracking history, so
-  /// deleting them here also removes those images from the meal records.
+  /// Öğün fotoğrafları silinmez: dosyaları danışanın öğün kayıtlarına aittir
+  /// (`users/{uid}/mealPhotos/...`) ve "Planım", Öğün Fotoğrafları gibi
+  /// ekranlar onları göstermeye devam eder. Silinseydi bu kayıtlar kırık
+  /// adreslerle kalırdı.
   ///
   /// Throws [StateError] if the caller is not an admin.
   ///
@@ -807,13 +845,21 @@ class ChatManager extends ChangeNotifier {
     // Step 1: Fetch all message documents
     final snapshot = await messagesRef.get();
 
-    // Step 2: Delete referenced images from Storage (best-effort, de-duplicated).
-    // refFromURL works for both direct chat uploads and meal photos since both
-    // store full download URLs in the message's imageUrl field.
+    // Step 2: Delete the chat's own images from Storage (best-effort,
+    // de-duplicated). refFromURL only parses the download URL (no network
+    // call), so the storage path decides what belongs to the chat.
+    final chatFolder = '${_chatStorageFolder(chatId)}/';
     final imageUrls = <String>{};
     for (final doc in snapshot.docs) {
       final url = (doc.data()['imageUrl'] as String?)?.trim() ?? '';
-      if (url.isNotEmpty) imageUrls.add(url);
+      if (url.isEmpty) continue;
+      try {
+        if (storage.refFromURL(url).fullPath.startsWith(chatFolder)) {
+          imageUrls.add(url);
+        }
+      } catch (e) {
+        // Not a Firebase Storage URL: nothing of ours to delete.
+      }
     }
 
     // Deleted in parallel batches: one round trip per image, serialised, made
@@ -935,7 +981,6 @@ class ChatManager extends ChangeNotifier {
   @override
   void dispose() {
     messageController.dispose();
-    scrollController.dispose();
     super.dispose();
   }
 }

@@ -468,25 +468,19 @@ class _MealUploadPageState extends State<MealUploadPage>
       final mealManager = Provider.of<MealManager>(context, listen: false);
 
       // Pre-check: see if the meal already has max images
-      final existingMeals = await mealManager.fetchMeals(
-        null,
+      final bool canAdd = await mealManager.canAddMealImage(
         userId: widget.userId,
-        showAllImages: true,
-        date: DateFormat('yyyy-MM-dd')
-            .format(kDebugMode ? _debugSelectedDate ?? now : now),
+        meal: mealCategory,
+        date: kDebugMode ? _debugSelectedDate ?? now : now,
       );
-      final existingMeal = existingMeals
-          .where((m) => m.mealType == mealCategory)
-          .toList();
-      if (existingMeal.isNotEmpty && !existingMeal.first.canAddMoreImages) {
+      if (!canAdd) {
         if (!mounted) return;
         _uploadTimeoutTimer?.cancel();
         setState(() => _isUploading = false);
-        await DialogUtils.openError(
+        await DialogUtils.openInfo(
           context,
-          title: 'Limit',
-          message:
-              'Bu öğün için en fazla ${MealModel.maxImages} görsel yükleyebilirsiniz.',
+          title: MealModel.maxImagesReachedTitle,
+          message: MealModel.maxImagesReachedMessage,
         );
         return;
       }

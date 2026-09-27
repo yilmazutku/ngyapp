@@ -117,6 +117,8 @@ They notify users/admins about new chat messages.
 | `CHAT_DEFAULT_BODY` | `'Yeni mesaj'` | Body when message text is empty |
 | `CHAT_IMAGE_BODY` | `'Fotoğraf'` | Body when message is an image |
 | `CHAT_REACTION_BODY_TEMPLATE` | `'bir mesajınıza {emoji} ifadesi bıraktı'` | Body when one side reacts to the other's message. `{emoji}` is replaced with the reaction (e.g. `👍`). Title is `CHAT_ADMIN_TO_USER_TITLE` for admin→user, the reacting client's name for user→admin. |
+| `CHAT_MEAL_PHOTO_REACTION_BODY_TEMPLATE` | `'{meal} fotoğrafınıza {emoji} bıraktı'` | Admin→user body when the reacted message is a meal photo. `{meal}` comes from the message text `Öğün: {label}`: `Öğle` → `Öğle öğün`, `Ara Öğün 1` stays as is, `Hiçbiri` → `Öğün` (e.g. `Öğle öğün fotoğrafınıza 👍 bıraktı`). |
+| `CHAT_PHOTO_REACTION_BODY_TEMPLATE` | `'bir fotoğrafınıza {emoji} bıraktı'` | Admin→user body when the reacted message is a photo that is not a meal photo. |
 | `CHAT_USER_TO_ADMIN_DEFAULT_TITLE` | `'Kullanıcı mesajı'` | Title when user sends to admin (fallback if name not found) |
 | `CHAT_ANDROID_ICON` | `'ic_notification'` | Android notification icon |
 | `CHAT_ANDROID_COLOR` | `'#075E54'` | Notification color (WhatsApp green) |
@@ -129,7 +131,11 @@ reaction only notifies the *other* side.
 - `notifyUserOnAdminReaction`: an admin leaves or changes a reaction
   (`reactions.<adminUid> = emoji`) on a message the user sent → the user is
   notified. Title `Nilay Göktepe Yılmaz` (`CHAT_ADMIN_TO_USER_TITLE`), body
-  e.g. `bir mesajınıza 👍 ifadesi bıraktı`, data `type: 'chat'`.
+  worded after the message: `Öğle öğün fotoğrafınıza 👍 bıraktı` for a meal
+  photo, `bir fotoğrafınıza 👍 bıraktı` for another photo,
+  `bir mesajınıza 👍 ifadesi bıraktı` for a text message. Data
+  `type: 'chat'` plus `messageId`, so the tap opens the chat at that message
+  (`ChatPage(focusMessageId: messageId)`).
 - `notifyAdminsOnUserReaction`: the user leaves or changes a reaction
   (`reactions.<userUid> = emoji`) on a message an admin sent → every admin with
   an FCM token is notified. Title is the client's `name surname` (falling back
