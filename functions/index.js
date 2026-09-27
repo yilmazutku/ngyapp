@@ -66,13 +66,16 @@ const MEAL_MESSAGE_TEXT_PREFIX = 'Öğün: ';
 const MEAL_SUMMARY_TEXT_PREFIX = 'Öğün Fotoğrafı (';
 
 /**
- * Snacks are never numbered in what users see: "Ara Öğün", not "Ara Öğün 2"
- * (Meals.snackPhotoLabel in the app). Older messages still carry the number.
+ * Snacks are shown to users as just "Ara", never "Ara Öğün 2"
+ * (Meals.snackLabel in the app).
  */
-const SNACK_PHOTO_LABEL = 'Ara Öğün';
+const SNACK_LABEL = 'Ara';
 
-/** Numbered snack names written by older app versions. */
-const LEGACY_SNACK_LABEL_PATTERN = /Ara Öğün [1-3]/;
+/**
+ * Snack names written by older app versions: numbered ("Ara Öğün 2") or
+ * "Ara Öğün".
+ */
+const LEGACY_SNACK_LABEL_PATTERN = /Ara Öğün( [1-3])?/;
 
 /** Name of the "other" choice (Meals.none in the app). */
 const MEAL_LABEL_OTHER = 'Diğer';
@@ -398,13 +401,13 @@ function withCurrentMealNames(text) {
   }
   return text
       .replace(LEGACY_MEAL_LABEL_OTHER, MEAL_LABEL_OTHER)
-      .replace(LEGACY_SNACK_LABEL_PATTERN, SNACK_PHOTO_LABEL);
+      .replace(LEGACY_SNACK_LABEL_PATTERN, SNACK_LABEL);
 }
 
 /**
  * Name of a meal photo in reaction notifications: "Öğle" -> "Öğle öğün",
- * any snack -> "Ara Öğün" (never numbered), and the "other" choice is just
- * "Öğün".
+ * "Ara" -> "Ara öğün", and the "other" choice is just "Öğün". [label] has
+ * today's names (see withCurrentMealNames), so snacks are never numbered.
  * @param {string} label Meal name taken from the message text.
  * @return {string} Name used before "fotoğrafınıza".
  */
@@ -414,7 +417,6 @@ function mealPhotoName(label) {
       label === LEGACY_MEAL_LABEL_OTHER) {
     return 'Öğün';
   }
-  if (label.startsWith(SNACK_PHOTO_LABEL)) return SNACK_PHOTO_LABEL;
   return `${label} öğün`;
 }
 

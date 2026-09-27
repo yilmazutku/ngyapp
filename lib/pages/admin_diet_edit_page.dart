@@ -7,6 +7,7 @@ import '../models/special_line_model.dart';
 import '../providers/diet_provider.dart';
 import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/diet_menu_parser.dart';
 import '../utils/meal_formatter.dart';
 import '../utils/pdf_launcher.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -460,7 +461,7 @@ class _DietEditPageState extends State<DietEditPage> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
-                      time,
+                      formatMealTime(parseMealTime(time)),
                       style: TextStyle(
                         color: Colors.blue.shade800,
                         fontWeight: FontWeight.w500,
@@ -477,7 +478,7 @@ class _DietEditPageState extends State<DietEditPage> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
-                      time,
+                      formatMealTime(parseMealTime(time)),
                       style: TextStyle(
                         color: Colors.blue.shade800,
                         fontWeight: FontWeight.w500,
@@ -865,7 +866,9 @@ class _DietEditPageState extends State<DietEditPage> {
 
   // Show add meal dialog (adds to the passed-in menu: weekday or weekend)
   void _showAddMealDialog(Map<String, dynamic> data) {
-    final TextEditingController timeController = TextEditingController(text: '12:00');
+    // Saat boş başlar: diyetisyen yazmazsa öğün saatsiz ("-") kalır,
+    // varsayılan saat uydurulmaz.
+    final TextEditingController timeController = TextEditingController();
     
     // Get enum names that aren't already in this menu
     final existingMealNames = data.keys.toList();
@@ -910,7 +913,6 @@ class _DietEditPageState extends State<DietEditPage> {
                   onChanged: (value) {
                     setState(() {
                       selectedMeal = value;
-                      timeController.text = value?.defaultTime ?? '12:00';
                     });
                   },
                 ),

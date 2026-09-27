@@ -9,7 +9,6 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/diet_model.dart';
-import '../models/diet_section.dart';
 import '../models/meal_model.dart';
 import '../models/mock_test_run.dart';
 import '../models/subs_model.dart';
@@ -20,6 +19,7 @@ import '../providers/mock_test_data_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/diet_menu_parser.dart';
 import '../utils/search_text.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -252,8 +252,9 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
 
   /// Yüklenecek öğünler kaynak diyetten geliyorsa, kaç fotoğraf üretileceği
   /// baştan bilinir; bilgi kutusunda gösterilir.
-  List<Meals> get _sourceDietMeals =>
-      _sourceDiet == null ? const [] : _mealsOfDiet(_sourceDiet!, _todayStart());
+  List<Meals> get _sourceDietMeals => _sourceDiet == null
+      ? const []
+      : _mealTimesOfDiet(_sourceDiet!, _todayStart()).keys.toList();
 
   /// Mock fotoğrafı seçtirir. Dosya belleğe alınır (`withData`) ki her yükleme
   /// için aynı baytlar farklı adlarla tekrar tekrar kullanılabilsin.
@@ -336,17 +337,23 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
     });
   }
 
-  /// Danışanın diyetinde tanımlı öğünler. Bugün hafta sonuysa ve diyette ayrı
-  /// bir hafta sonu menüsü varsa o menü kullanılır. Sıra [Meals.dietValues]
-  /// sırasıdır, yani gün içindeki doğal öğün sırası.
-  List<Meals> _mealsOfDiet(DietDocument diet, DateTime day) {
-    final Map<String, dynamic> section = (isWeekendDate(day) && diet.hasWeekend)
-        ? diet.weekendSubtitles!
-        : diet.subtitles;
+  /// Danışanın diyetindeki öğünler ve diyette yazılı saatleri. Menü
+  /// "Planım"daki kuralla seçilir ([DietMenu.forDate]); sıra
+  /// [Meals.dietValues] sırasıdır, yani gün içindeki doğal öğün sırası.
+  ///
+  /// Saati diyette yazılmamış öğün alınmaz: test fotoğrafının saati diyetten
+  /// gelir, varsayılan saat uydurulmaz.
+  Map<Meals, TimeOfDay> _mealTimesOfDiet(DietDocument diet, DateTime day) {
+    final DietMenu menu = DietMenu.forDate(
+      weekday: DietMenu.fromSubtitles(diet.subtitles),
+      weekend: DietMenu.fromSubtitles(diet.weekendSubtitles),
+      date: day,
+    );
 
-    return Meals.dietValues
-        .where((meal) => section.containsKey(meal.name))
-        .toList();
+    return {
+      for (final Meals meal in menu.mealsWithContent)
+        if (menu.timeOf(meal) != null) meal: menu.timeOf(meal)!,
+    };
   }
 
   /// Kaynak diyetin danışana kopyalanacak hâli.
@@ -366,24 +373,25 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
     };
   }
 
-  /// Öğünün varsayılan saatinden (ör. Sabah 09:00) türetilen yükleme zamanı.
+  /// Öğünün diyetteki saatinden ([mealTime]) türetilen yükleme zamanı.
   /// Fotoğraf ve danışan sırasına göre kaydırılır ki sayfada hep farklı
   /// saatler görünsün.
   DateTime _uploadTimeFor(
     DateTime day,
-    Meals meal,
+    TimeOfDay mealTime,
     int photoIndex,
     int clientIndex,
   ) {
-    final List<String> parts = meal.defaultTime.split(':');
-    final int hour = parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 12) : 12;
-    final int minute = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
-
     final int shift = photoIndex * _minutesBetweenPhotos +
         (clientIndex % _clientShiftLimit) * _minutesBetweenClients;
 
-    return DateTime(day.year, day.month, day.day, hour, minute)
-        .add(Duration(minutes: shift));
+    return DateTime(
+      day.year,
+      day.month,
+      day.day,
+      mealTime.hour,
+      mealTime.minute,
+    ).add(Duration(minutes: shift));
   }
 
   /// Seçili danışanlar için geçici diyeti ve sahte fotoğrafları yükler.
@@ -475,10 +483,11 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
             continue;
           }
 
-          final List<Meals> meals = _mealsOfDiet(diet, day);
+          final Map<Meals, TimeOfDay> mealTimes = _mealTimesOfDiet(diet, day);
+          final List<Meals> meals = mealTimes.keys.toList();
           if (meals.isEmpty) {
-            results.add(_MockResult.skipped(
-                client.displayName, 'Diyetinde tanımlı öğün yok, atlandı.'));
+            results.add(_MockResult.skipped(client.displayName,
+                'Diyetinde saati yazılı öğün yok, atlandı.'));
             continue;
           }
 
@@ -488,13 +497,13 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
                 photoIndex < _photosPerMeal;
                 photoIndex++) {
               _progressMessage.value =
-                  '$progressPrefix - ${meal.photoLabel} (${photoIndex + 1}/'
+                  '$progressPrefix - ${meal.displayLabel} (${photoIndex + 1}/'
                   '$_photosPerMeal)';
 
               final String fileName = '$kMockPhotoFilePrefix${meal.name}_'
                   '$photoIndex${_extensionOfSelectedPhoto()}';
-              final DateTime uploadTime =
-                  _uploadTimeFor(day, meal, photoIndex, clientIndex);
+              final DateTime uploadTime = _uploadTimeFor(
+                  day, mealTimes[meal]!, photoIndex, clientIndex);
 
               final String? url = await mealManager.uploadMealImg(
                 userId: client.user.userId,
@@ -1046,10 +1055,9 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Her öğün için $_photosPerMeal fotoğraf yüklenir. Saatler öğünün '
-            'varsayılan saatinden başlar (Sabah ${Meals.br.defaultTime}, Öğle '
-            '${Meals.lunch.defaultTime}, Akşam ${Meals.dinner.defaultTime}); '
-            'fotoğraflar $_minutesBetweenPhotos dk, danışanlar '
+            'Her öğün için $_photosPerMeal fotoğraf yüklenir. Saatler '
+            'diyetteki öğün saatinden başlar; saati diyette yazılmamış öğün '
+            'atlanır. Fotoğraflar $_minutesBetweenPhotos dk, danışanlar '
             '$_minutesBetweenClients dk arayla kaydırılır.',
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -1551,11 +1559,11 @@ class _PanelCard extends StatelessWidget {
 }
 
 /// Öğün adları; ara öğünler numarasız tek adda toplanır
-/// ("Sabah, Ara Öğün (2), Öğle").
+/// ("Sabah, Ara (2), Öğle").
 String _mealNamesOf(List<Meals> meals) {
   final Map<String, int> counts = {};
   for (final Meals meal in meals) {
-    counts[meal.photoLabel] = (counts[meal.photoLabel] ?? 0) + 1;
+    counts[meal.displayLabel] = (counts[meal.displayLabel] ?? 0) + 1;
   }
   return counts.entries
       .map((entry) =>

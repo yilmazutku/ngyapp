@@ -419,7 +419,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
               
               // Extract chat metadata
               // Eski özetler de güncel öğün adıyla görünür
-              // ("Öğün Fotoğrafı (Ara Öğün 2)" -> "(Ara Öğün)").
+              // ("Öğün Fotoğrafı (Ara Öğün 2)" -> "(Ara)").
               final lastMsg = Meals.chatTextForDisplay(
                   (data['lastMessage'] ?? '') as String);
               final lastImageUrl = data['lastImageUrl'] as String?;

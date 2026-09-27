@@ -80,7 +80,7 @@ class MessageData {
     final String label =
         caption.substring(Meals.chatCaptionPrefix.length).trim();
     for (final Meals meal in Meals.values) {
-      if (meal.photoLabel == label) return meal;
+      if (meal.displayLabel == label) return meal;
     }
     return null;
   }

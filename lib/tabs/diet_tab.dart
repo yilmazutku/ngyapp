@@ -323,13 +323,11 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
                         if (selectedSub == null) return;
 
                         final now = DateTime.now();
+                        // Öğünler saatsiz başlar ("-"): saati diyetisyen
+                        // girer, varsayılan saat uydurulmaz.
                         final defaultDietContent = {
-                          Meals.br.name: {'time': '08:00', 'content': []},
-                          Meals.firstmid.name: {'time': '10:30', 'content': []},
-                          Meals.lunch.name: {'time': '13:00', 'content': []},
-                          Meals.secondmid.name: {'time': '16:00', 'content': []},
-                          Meals.dinner.name: {'time': '19:00', 'content': []},
-                          Meals.thirdmid.name: {'time': '21:30', 'content': []},
+                          for (final Meals meal in Meals.dietValues)
+                            meal.name: {'time': '', 'content': []},
                         };
 
                         if (!context.mounted) return;

@@ -106,7 +106,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   /// Öğün filtresindeki seçenekler. Ara öğünler tek seçenekte toplanır:
   /// [Meals.firstmid] üçünü birden temsil eder (bkz. [_matchesMealFilter]),
-  /// böylece filtrede üç ayrı "Ara Öğün" satırı çıkmaz.
+  /// böylece filtrede üç ayrı "Ara" satırı çıkmaz.
   static const List<Meals> _mealFilterOptions = [
     Meals.br,
     Meals.firstmid,
@@ -923,7 +923,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
               selectedValue: _mealFilter,
               options: {
                 for (final Meals meal in _mealFilterOptions)
-                  meal: meal.photoLabel,
+                  meal: meal.displayLabel,
               },
               onSelected: (meal) => setState(() {
                 _mealFilter = meal;
@@ -999,7 +999,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
                 isLoadingPhotos: _photosLoading,
                 emptyText: _mealFilter == null
                     ? (_isToday ? _emptyTodayText : _emptyOtherDayText)
-                    : '"${_mealFilter!.photoLabel}" öğünü için fotoğraf '
+                    : '"${_mealFilter!.displayLabel}" öğünü için fotoğraf '
                         'yüklenmemiş.',
               );
             },
@@ -1022,7 +1022,7 @@ class _ClientPhotoGroup {
   final DateTime? lastUploadAt;
 
   /// Öğün türü -> fotoğraf sayısı (yükleme sırasına göre). Ara öğünler tek
-  /// anahtarda toplanır ([Meals.firstmid]); rozet "Ara Öğün (3)" der.
+  /// anahtarda toplanır ([Meals.firstmid]); rozet "Ara (3)" der.
   final Map<Meals, int> countsByMeal;
 
   /// Aramada karşılaştırılan kelimeler (ad soyad + e-posta), önceden
@@ -1336,7 +1336,7 @@ class _MealCountChip extends StatelessWidget {
           Icon(mealTypeIcon(mealType), size: 14, color: color),
           const SizedBox(width: 4),
           Text(
-            '${mealType.photoLabel} ($count)',
+            '${mealType.displayLabel} ($count)',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
