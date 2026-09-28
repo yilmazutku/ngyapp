@@ -196,10 +196,6 @@ class ChatManager extends ChangeNotifier {
 
   // ===== State Management =====
   
-  /// Indicates if a text message send operation is in progress
-  bool _sending = false;
-  bool get sending => _sending;
-
   /// Active Firebase Storage upload task (null when no upload is in progress)
   UploadTask? _activeTask;
   
@@ -439,6 +435,29 @@ class ChatManager extends ChangeNotifier {
         bool incrementUnreadForAdmins = false,
         bool incrementUnreadForUser = false,
       }) async {
+    await _chatDoc(chatId).set(
+      _chatSummaryData(
+        chatId,
+        lastMessage: lastMessage,
+        lastImageUrl: lastImageUrl,
+        lastAt: lastAt,
+        incrementUnreadForAdmins: incrementUnreadForAdmins,
+        incrementUnreadForUser: incrementUnreadForUser,
+      ),
+      SetOptions(merge: true),
+    );
+  }
+
+  /// Sohbet dokümanına `set(merge: true)` ile yazılan özet ve sayaçlar (bkz.
+  /// [_ensureChatDoc]); toplu yazımda da aynı veri kullanılır.
+  Map<String, dynamic> _chatSummaryData(
+      String chatId, {
+        String? lastMessage,
+        String? lastImageUrl,
+        Timestamp? lastAt,
+        bool incrementUnreadForAdmins = false,
+        bool incrementUnreadForUser = false,
+      }) {
     final participants = <String>{chatId, ...adminIds}.toList();
     
     // Everything lands in one write. set(merge: true) merges nested maps field
@@ -451,7 +470,7 @@ class ChatManager extends ChangeNotifier {
       if (incrementUnreadForUser) chatId,
     ];
 
-    final data = <String, dynamic>{
+    return <String, dynamic>{
       'participants': participants,
       if (lastMessage != null) 'lastMessage': lastMessage,
       if (lastImageUrl != null) 'lastImageUrl': lastImageUrl,
@@ -464,8 +483,6 @@ class ChatManager extends ChangeNotifier {
       if (incrementUnreadForUser) 'userUnreadCount': FieldValue.increment(1),
       if (unreadFor.isNotEmpty) 'hasUnreadFor': FieldValue.arrayUnion(unreadFor),
     };
-
-    await _chatDoc(chatId).set(data, SetOptions(merge: true));
   }
 
   /// Mark a chat as read for the current admin user.
@@ -618,59 +635,46 @@ class ChatManager extends ChangeNotifier {
   }
 
   /// Send a text message to a specific chat.
-  /// 
-  /// Flow:
-  /// 1. Validates input (non-empty, not already sending)
-  /// 2. Ensures chat document exists with updated metadata
-  /// 3. Adds message to messages subcollection
   ///
-  /// Metin kutusu sohbet sayfasına aittir; gönderim başarılı olunca kutuyu
-  /// sayfa temizler. Böylece bir sohbette yazılıp gönderilmeyen metin başka
-  /// bir sohbetin kutusuna taşınmaz.
-  /// 
+  /// Sohbet özeti (son mesaj, okunmamış sayaçları) ve mesaj tek bir toplu
+  /// yazımla gider: mesaj yerel önbelleğe hemen yazılır ve listede anında
+  /// görünür ("Gönderiliyor…"), çevrimdışıyken de; bağlantı gelince sunucuya
+  /// iletilir. Dönen future sunucu yazımı onaylayınca tamamlanır, reddederse
+  /// hata verir. Özet ile mesaj birbirinden kopmaz.
+  ///
+  /// Metin kutusu sohbet sayfasına aittir (bkz. `ChatPage`): bir sohbette
+  /// yazılıp gönderilmeyen metin başka bir sohbetin kutusuna taşınmaz.
+  ///
   /// @param chatId The target chat ID (user UID in our model)
   /// @param rawText The text typed by the user (trimmed here)
   Future<void> sendTextTo(String chatId, String rawText) async {
     final text = rawText.trim();
-    
-    // Guard: Prevent empty messages or concurrent sends
-    if (text.isEmpty || _sending) {
-      return;
-    }
+    if (text.isEmpty) return;
 
-    _sending = true;
-    notifyListeners();
-    
-    try {
-      // Determine who should get unread notification
-      final isUserMessage = !isAdminUid(userId);
-      final isAdminMessage = isAdminUid(userId);
-      
-      // Update chat document with latest message info
-      // Clear lastImageUrl since this is a text-only message
-      await _ensureChatDoc(
-        chatId, 
-        lastMessage: text, 
-        lastImageUrl: '', 
+    // User sends → notify admins; admin sends → notify user.
+    final isAdminMessage = isAdminUid(userId);
+
+    final WriteBatch batch = db.batch();
+    batch.set(
+      _chatDoc(chatId),
+      _chatSummaryData(
+        chatId,
+        lastMessage: text,
+        lastImageUrl: '', // text-only message clears the image preview
         lastAt: Timestamp.now(),
-        incrementUnreadForAdmins: isUserMessage,  // User sends → notify admins
-        incrementUnreadForUser: isAdminMessage,   // Admin sends → notify user
-      );
-      
-      // Add message to subcollection
-      await _chatDoc(chatId).collection('messages').add({
-        'chatId': chatId,
-        'senderId': userId,
-        'text': text,
-        'createdAt': FieldValue.serverTimestamp(),
-        'clientCreatedAt': Timestamp.now(),
-      });
-    } catch (e) {
-      rethrow;
-    } finally {
-      _sending = false;
-      notifyListeners();
-    }
+        incrementUnreadForAdmins: !isAdminMessage,
+        incrementUnreadForUser: isAdminMessage,
+      ),
+      SetOptions(merge: true),
+    );
+    batch.set(_chatDoc(chatId).collection('messages').doc(), {
+      'chatId': chatId,
+      'senderId': userId,
+      'text': text,
+      'createdAt': FieldValue.serverTimestamp(),
+      'clientCreatedAt': Timestamp.now(),
+    });
+    await batch.commit();
   }
 
   /// Send an image message to a specific chat.
@@ -692,7 +696,7 @@ class ChatManager extends ChangeNotifier {
   /// @param image The image file selected by the user
   Future<void> sendImageTo(String chatId, XFile image) async {
     // Guard: Prevent concurrent operations
-    if (_sending || isUploading) {
+    if (isUploading) {
       return;
     }
     
