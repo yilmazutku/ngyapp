@@ -247,6 +247,15 @@ Future<bool> canAddMealImage({
   required String userId,
   required Meals meal,
   DateTime? date,
+}) async =>
+    await mealImageSlotsLeft(userId: userId, meal: meal, date: date) > 0;
+
+/// Öğüne daha kaç fotoğraf eklenebilir ([MealModel.maxImages] sınırına göre).
+/// Birden çok fotoğraf seçtirilirken seçim sınırı olarak kullanılır.
+Future<int> mealImageSlotsLeft({
+  required String userId,
+  required Meals meal,
+  DateTime? date,
 }) async {
   final String dateKey = DateFormat('yyyy-MM-dd').format(date ?? DateTime.now());
   final DocumentSnapshot<Map<String, dynamic>> mealDoc = await FirebaseFirestore
@@ -258,8 +267,9 @@ Future<bool> canAddMealImage({
       .collection('mealEntries')
       .doc(meal.name)
       .get();
-  if (!mealDoc.exists) return true;
-  return MealModel.fromDocument(mealDoc).canAddMoreImages;
+  if (!mealDoc.exists) return MealModel.maxImages;
+  final int used = MealModel.fromDocument(mealDoc).imageUrls.length;
+  return used >= MealModel.maxImages ? 0 : MealModel.maxImages - used;
 }
 
 /// Uploads a meal photo to Firebase Storage and appends it to the meal document.
@@ -268,6 +278,10 @@ Future<bool> canAddMealImage({
 /// [alsoPostToChat] true iken fotoğraf öğüne kaydedilip sohbete
 /// gönderilemezse [MealChatPostException] fırlatılır: fotoğraf öğünde durur,
 /// çağıran kullanıcıya sohbette görünmeyeceğini söyleyebilir.
+///
+/// [observer] yüklemenin ilerlemesini izler ve iptal edebilir (bkz.
+/// [uploadImageWithThumbnail]); iptal edilirse kayıt yazılmaz ve
+/// [UploadCancelledException] fırlatılır.
 Future<String?> uploadMealImg({
   required String userId,
   required Meals meal,
@@ -276,6 +290,7 @@ Future<String?> uploadMealImg({
   DateTime? overrideDate,
   bool alsoPostToChat = false,
   ChatManager? chatManager,
+  UploadObserver? observer,
 }) async {
   try {
     final referenceDate = overrideDate ?? DateTime.now();
@@ -302,23 +317,25 @@ Future<String?> uploadMealImg({
     } catch (e) {
     }
 
-    final result = await _uploadImg(
-      image,
-      meal: meal,
-      userId: userId,
-      overrideDate: referenceDate,
+    final UploadedImage uploaded = await uploadImageWithThumbnail(
+      bytes: await image.readAsBytes(),
+      fileName: image.name,
+      mimeType: image.mimeType,
+      // Ad benzersiz olur: aynı dosya aynı öğüne ikinci kez yüklense de
+      // öncekinin üstüne yazılmaz.
+      refFor: (fileName) => FirebaseStorage.instance.ref(
+        'users/$userId/$_mealPhotosFolder/$currentDate/${meal.name}/'
+        '${DateTime.now().millisecondsSinceEpoch}_$fileName',
+      ),
+      observer: observer,
     );
-
-    if (!result.isUploadOk || result.downloadUrl == null) {
-      return null;
-    }
 
     // Append the new URL to existing list (küçük görsel listesi de aynı
     // sırayla büyür; eski kayıtta eksikse boş dizeyle hizalanır).
     final existingUrls = previousMealModel?.imageUrls ?? [];
-    final updatedUrls = [...existingUrls, result.downloadUrl!];
+    final updatedUrls = [...existingUrls, uploaded.url];
     final existingThumbs = previousMealModel?.alignedThumbUrls() ?? <String>[];
-    final updatedThumbs = [...existingThumbs, result.thumbUrl ?? ''];
+    final updatedThumbs = [...existingThumbs, uploaded.thumbUrl ?? ''];
     final existingTimes =
         previousMealModel?.alignedImageTimes() ?? <DateTime>[];
     final updatedTimes = [...existingTimes, referenceDate];
@@ -337,29 +354,38 @@ Future<String?> uploadMealImg({
       isChecked: true,
     );
 
+    // Yükleme bu arada iptal edildiyse kayıt yazılmaz.
+    if (observer?.isCancelled ?? false) {
+      await uploaded.delete();
+      throw const UploadCancelledException();
+    }
+
     // Three different documents (meal entry, the day's checklist, the chat):
     // independent writes, so they are issued together instead of one after the
     // other. Sohbet yazımının hatası ayrıca tutulur: öğün kaydı yine de
     // tamamlanmış olur, yükleme "başarısız" sayılıp fotoğraf tekrar
     // yüklenmesin.
     Object? chatPostError;
-    await Future.wait([
+    final Future<void> writes = Future.wait([
       mealDocRef.set(mergedMealModel.toMap()),
       updateMealState(userId, referenceDate, meal, true),
       if (alsoPostToChat)
-        _postToChat(userId, meal, result.downloadUrl!, chatManager)
+        _postToChat(userId, meal, uploaded, chatManager)
             .catchError((Object e) {
           chatPostError = e;
         }),
     ]);
+    // Yazımlar yerel önbelleğe düştü: sohbetteki mesaj şimdiden görünür.
+    observer?.onSaving();
+    await writes;
 
     notifyListeners();
 
     if (chatPostError != null) {
-      throw MealChatPostException(result.downloadUrl!, chatPostError!);
+      throw MealChatPostException(uploaded.url, chatPostError!);
     }
 
-    return result.downloadUrl;
+    return uploaded.url;
   } catch (e) {
     rethrow;
   }
@@ -461,7 +487,7 @@ Future<void> deleteMealImage({
 /// ve sohbetten ("fotoğraf silindi" notu) kalkar.
 ///
 /// Öğün ve gün, fotoğrafın yüklenirken kurulan Storage yolundan çözülür
-/// ([_mealPhotoLocation]); gece yarısına yakın yüklemelerde bile doğru öğün
+/// ([mealPhotoLocation]); gece yarısına yakın yüklemelerde bile doğru öğün
 /// kaydı bulunur. Yol çözülemezse [fallbackMeal] ve [fallbackDate] kullanılır.
 Future<void> deleteChatMealPhoto({
   required String userId,
@@ -470,7 +496,7 @@ Future<void> deleteChatMealPhoto({
   DateTime? fallbackDate,
 }) async {
   final ({Meals meal, DateTime date})? location =
-      _mealPhotoLocation(userId, imageUrl) ??
+      mealPhotoLocation(userId, imageUrl) ??
           (fallbackMeal != null && fallbackDate != null
               ? (meal: fallbackMeal, date: fallbackDate)
               : null);
@@ -488,9 +514,10 @@ Future<void> deleteChatMealPhoto({
 }
 
 /// Öğün fotoğrafının öğünü ve günü, Storage yolundan
-/// (`users/{uid}/mealPhotos/{yyyy-MM-dd}/{öğün}/{dosya}`, bkz. [_uploadImg]).
-/// Adres başka bir yola aitse null.
-({Meals meal, DateTime date})? _mealPhotoLocation(
+/// (`users/{uid}/mealPhotos/{yyyy-MM-dd}/{öğün}/{dosya}`, bkz.
+/// [uploadMealImg]). Adres başka bir yola aitse null. Sohbetteki bir öğün
+/// fotoğrafından Öğün Fotoğrafları'nda o güne gitmek için de kullanılır.
+({Meals meal, DateTime date})? mealPhotoLocation(
     String userId, String imageUrl) {
   try {
     final List<String> parts =
@@ -529,23 +556,33 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
 }
 
 
-  /// Öğün fotoğraflarının Storage'daki klasörü (bkz. [_uploadImg],
-  /// [_mealPhotoLocation]).
+  /// Öğün fotoğraflarının Storage'daki klasörü (bkz. [uploadMealImg],
+  /// [mealPhotoLocation]).
   static const String _mealPhotosFolder = 'mealPhotos';
 
   /// Posts the meal image to the user's chat. Hata yutulmaz; çağıran
   /// ([uploadMealImg]) sohbete düşmeyen fotoğrafı kullanıcıya bildirir.
-  Future<void> _postToChat(String userId, Meals meal, String imageUrl, ChatManager? chatManager) async {
+  ///
+  /// Özet ve mesaj tek toplu yazımla gider (bkz. [ChatManager.sendTextTo]):
+  /// mesaj yerelde hemen görünür, çevrimdışıyken de; ikisi birbirinden kopmaz.
+  Future<void> _postToChat(
+    String userId,
+    Meals meal,
+    UploadedImage image,
+    ChatManager? chatManager,
+  ) async {
     final chatId = userId; // In this app, chatId == userId
     final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
 
     // Chat summary and the admin unread counters in a single write:
     // set(merge: true) merges nested maps field by field, so the counters do
     // not need the dot-notation that would force a separate update().
-    await chatDoc.set({
+    final WriteBatch batch = FirebaseFirestore.instance.batch();
+    batch.set(chatDoc, {
       'participants': [chatId, ...ChatManager.adminIds],
       'lastMessage': meal.chatSummary,
-      'lastImageUrl': imageUrl,
+      'lastImageUrl': image.url,
+      'lastImageThumbUrl': image.thumbUrl ?? '',
       'lastMessageAt': Timestamp.now(),
       'updatedAt': FieldValue.serverTimestamp(),
       'adminUnreadCount': {
@@ -555,19 +592,17 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       'hasUnreadFor': FieldValue.arrayUnion(ChatManager.adminIds.toList()),
     }, SetOptions(merge: true));
 
-    // Add message to chat
-    final msgData = <String, dynamic>{
+    batch.set(chatDoc.collection('messages').doc(), {
       'chatId': chatId,
       'senderId': userId,
       'text': meal.chatCaption,
-      'imageUrl': imageUrl,
+      ...ChatManager.imageMessageFields(image),
+      if (chatManager != null)
+        'storagePath': '${Meals.chatMarkerPrefix}$userId/${meal.name}',
       'createdAt': FieldValue.serverTimestamp(),
       'clientCreatedAt': Timestamp.now(),
-    };
-    if (chatManager != null) {
-      msgData['storagePath'] = '${Meals.chatMarkerPrefix}$userId/${meal.name}';
-    }
-    await chatDoc.collection('messages').add(msgData);
+    });
+    await batch.commit();
   }
 
   /// Sohbette [imageUrl] fotoğrafını taşıyan mesajı "fotoğraf silindi" notuna
@@ -595,7 +630,8 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
         deletedText =
             Meals.deletedPhotoChatText(text is String ? text : null);
         batch.update(doc.reference, {
-          'imageUrl': FieldValue.delete(),
+          for (final String field in ChatManager.imageFieldNames)
+            field: FieldValue.delete(),
           'storagePath': FieldValue.delete(),
           'text': deletedText,
           'photoDeleted': true,
@@ -607,6 +643,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
       if (chatSnapshot.data()?['lastImageUrl'] == imageUrl) {
         await chatDoc.update({
           'lastImageUrl': '',
+          'lastImageThumbUrl': '',
           'lastMessage': deletedText,
         });
       }
@@ -652,100 +689,6 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     return checkedStates;
   }
 
-  /// Uploads a file to Firebase Storage
-  ///
-  /// Handles uploading image files to appropriate paths in Firebase Storage based on
-  /// whether they are meal photos or chat photos.
-  ///
-  /// @param imageFile The image file to upload
-  /// @param meal Optional meal type if this is a meal photo
-  /// @param userId The ID of the user to whom the image belongs
-  ///
-  /// @return An UploadResult containing the download URL or error message
-  Future<UploadResult> _uploadImg(
-    XFile? imageFile, {
-    Meals? meal,
-    required String userId,
-    DateTime? overrideDate,
-  }) async {
-    if (imageFile == null) {
-      return UploadResult(errorMessage: 'No image selected for upload.');
-    }
-
-    try {
-      final effectiveDate = overrideDate ?? DateTime.now();
-      String date = DateFormat('yyyy-MM-dd').format(effectiveDate);
-
-      // Yüklemeden önce küçültülür: telefondan gelen tam çözünürlüklü fotoğraf
-      // (4-6 MB) yönetici tarafındaki toplu görünümleri yavaşlatıyordu.
-      // Sıkıştırma yapılamayan platformda orijinal yüklenir, akış değişmez.
-      final PreparedUploadImage prepared = await prepareImageForUpload(
-        bytes: await imageFile.readAsBytes(),
-        fileName: imageFile.name,
-        mimeType: imageFile.mimeType,
-      );
-
-      String path;
-      if (meal != null) {
-        path = 'users/$userId/$_mealPhotosFolder/$date/${meal.name}/'
-            '${prepared.fileName}';
-      } else {
-        path = 'users/$userId/chatPhotos/$date/${prepared.fileName}';
-      }
-
-      Reference ref = FirebaseStorage.instance.ref(path);
-
-      await ref.putData(
-        prepared.bytes,
-        SettableMetadata(contentType: prepared.contentType),
-      );
-
-      // After uploading, get the download URL
-      String downloadUrl = await ref.getDownloadURL();
-
-      // Küçük görsel: liste ekranları orijinal yerine bunu indirir. Üretilemez
-      // ya da yüklenemezse fotoğraf küçük görselsiz kalır, yükleme bozulmaz.
-      final String? thumbUrl = await _uploadThumbnail(ref, prepared.bytes);
-      return UploadResult(downloadUrl: downloadUrl, thumbUrl: thumbUrl);
-    } on FirebaseException {
-      rethrow;
-    } catch (e2) {
-      rethrow;
-    }
-  }
-
-  /// Küçük görseli orijinalin yanına `<ad>_thumb.<uzantı>` adıyla yükler;
-  /// başarısız olursa null döner.
-  Future<String?> _uploadThumbnail(Reference original, Uint8List bytes) async {
-    try {
-      final ThumbnailData? thumb = await generateThumbnail(bytes);
-      if (thumb == null) return null;
-
-      final Reference thumbRef = _thumbnailRefFor(original, thumb.extension);
-      await thumbRef.putData(
-        thumb.bytes,
-        SettableMetadata(contentType: thumb.contentType),
-      );
-      final String url = await thumbRef.getDownloadURL();
-      return url;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /// Orijinal dosyanın klasöründe, aynı ad + `_thumb` son ekiyle küçük görsel
-  /// yolu. Hem yüklemede hem sonradan üretimde aynı kural kullanılır.
-  Reference _thumbnailRefFor(Reference original, String extension) {
-    final String name = original.name;
-    final int dot = name.lastIndexOf('.');
-    final String base = dot > 0 ? name.substring(0, dot) : name;
-    final Reference? parent = original.parent;
-    final String thumbName = '${base}_thumb$extension';
-    return parent == null
-        ? FirebaseStorage.instance.ref(thumbName)
-        : parent.child(thumbName);
-  }
-
   /// Küçük görseli olmayan eski bir fotoğraf için küçük görseli üretip
   /// kaydeder.
   ///
@@ -785,7 +728,7 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
     if (thumb == null) return;
 
     final Reference originalRef = FirebaseStorage.instance.refFromURL(imageUrl);
-    final Reference thumbRef = _thumbnailRefFor(originalRef, thumb.extension);
+    final Reference thumbRef = thumbnailRefFor(originalRef, thumb.extension);
     await thumbRef.putData(
       thumb.bytes,
       SettableMetadata(contentType: thumb.contentType),
@@ -829,18 +772,4 @@ class MealChatPostException implements Exception {
 
   @override
   String toString() => 'MealChatPostException($downloadUrl): $cause';
-}
-
-/// Represents the result of an image upload operation
-class UploadResult {
-  final String? downloadUrl;
-
-  /// Küçük görselin adresi; üretilemediyse null (yükleme yine başarılıdır).
-  final String? thumbUrl;
-  final String? errorMessage;
-
-  /// Indicates whether the upload was successful
-  bool get isUploadOk => downloadUrl != null && errorMessage == null;
-
-  UploadResult({this.downloadUrl, this.thumbUrl, this.errorMessage});
 }

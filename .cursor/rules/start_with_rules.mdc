@@ -1,0 +1,7 @@
+---
+description: Göreve kuralları okuyarak başla
+alwaysApply: true
+---
+- Her görevin en başında `.cursor/rules/` altındaki bütün kural dosyaları okunur.
+- Kurallar okunmadan koda başlanmaz; kodlama bu kurallara göre yapılır.
+- Görev sırasında yeni bir dosya türüne ya da konuya geçilirse (ör. liste, diyalog, yükleme göstergesi) ilgili kural yeniden gözden geçirilir.

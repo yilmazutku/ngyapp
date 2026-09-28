@@ -21,6 +21,9 @@ import 'package:ngy_app/widgets/meal_image_card.dart';
 ///   [MealImageCard] so the layout matches the images tab (5 per row, tap to
 ///   enlarge with meal type + upload date & time).
 /// - Sorted oldest→newest so the most recent photo sits at the very bottom.
+/// - Bir fotoğrafa dokununca büyük görsel diyaloğu açılır; altındaki
+///   "Sohbette göster" sayfayı fotoğrafın mesaj kimliğiyle kapatır, sohbet o
+///   mesaja gider.
 class UserMediaGalleryPage extends StatefulWidget {
   /// The user whose chat-uploaded photos are shown (chatId == userId).
   final String userId;
@@ -36,6 +39,7 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   static const int _columns = 5; // 5 photos per row (as requested)
   static const double _gridGap = 6.0;
   static const double _cardAspectRatio = 1.2; // matches MealImageCard's layout
+  static const String _goToChatLabel = 'Sohbette göster';
 
   /// Owns the grid scroll position so the [Scrollbar] can attach to it
   /// (shared-controller rule) and so we can jump to the bottom on open.
@@ -72,15 +76,38 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   /// Adapt a chat image message to a [MealModel] so the shared [MealImageCard]
   /// can render it exactly like the images tab.
   MealModel _toMeal(MessageData m) {
-    final ts = (m.createdAt ?? m.clientCreatedAt)?.toDate() ?? DateTime.now();
+    final ts = m.sentAt ?? DateTime.now();
     final url = m.imageUrl ?? '';
     return MealModel(
       mealId: m.id,
       mealType: _mealTypeOf(m),
       imageUrls: url.isEmpty ? const <String>[] : <String>[url],
+      // Kart küçük görseli indirir (varsa).
+      thumbUrls: <String>[m.thumbUrl ?? ''],
       timestamp: ts,
       isChecked: true,
     );
+  }
+
+  /// Fotoğrafın büyük görsel diyaloğunu açar; "Sohbette göster" seçilirse
+  /// galeri fotoğrafın mesaj kimliğiyle kapanır (bkz. `ChatPage`).
+  Future<void> _openPhoto(MealModel photo, double dialogImageHeight) async {
+    final String? messageId = await showMealImageDetailsDialog<String>(
+      context,
+      photo,
+      dialogImageHeight: dialogImageHeight,
+      heroTag: MealImageCard.heroTagFor(photo),
+      footerBuilder: (dialogContext) => Align(
+        alignment: Alignment.centerLeft,
+        child: FilledButton.icon(
+          icon: const Icon(Icons.chat_bubble_outline),
+          label: const Text(_goToChatLabel),
+          onPressed: () => Navigator.of(dialogContext).pop(photo.mealId),
+        ),
+      ),
+    );
+    if (messageId == null || !mounted) return;
+    Navigator.of(context).pop(messageId);
   }
 
   /// Jump to the bottom once so the newest photo is visible on open.
@@ -158,6 +185,8 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
                         itemBuilder: (context, i) => MealImageCard(
                           meal: meals[i],
                           dialogImageHeight: dialogImageHeight,
+                          onTap: () =>
+                              _openPhoto(meals[i], dialogImageHeight),
                         ),
                       ),
                     );

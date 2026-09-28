@@ -10,6 +10,7 @@
 ## Kod
 - **Her görevin en başında `.cursor/rules/` altındaki kural dosyaları okunur; kodlama bu kurallara göre yapılır.** Kurallar okunmadan koda başlanmaz.
 - Proje kuralları `.cursor/rules/` altındadır; her değişiklikten önce geçerli olanlar okunur.
+- **Var olan widget'lar yeterliyse yenisi tanımlanmaz, var olan kullanılır.** Yeni widget ya da yardımcı yazmadan önce `lib/widgets`, `lib/utils`, `lib/services` ve ilgili sayfalarda benzeri aranır; neredeyse yeterliyse genişletilir, sayfaya özel bir widget başka yerde gerekiyorsa ortak dosyaya taşınır (bkz. `.cursor/rules/reuse_existing.mdc`).
 - Değişiklikten sonra `flutter analyze lib` çalıştırılır: hata bırakılmaz, dokunulan dosyalarda yeni uyarı bırakılmaz.
 - `flutter analyze` çalışırken `analysis_options.yaml`, `pubspec.lock` ve `lib/l10n/app_localizations.dart` (gen-l10n çıktısı) dosyalarını değiştirebiliyor; bunlar commit'e dahil edilmez.
 

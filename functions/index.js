@@ -740,6 +740,9 @@ exports.markChatMessagesOfDeletedMealPhotos = onDocumentWritten(
           deletedTexts.set(url, text);
           return doc.ref.update({
             imageUrl: admin.firestore.FieldValue.delete(),
+            thumbUrl: admin.firestore.FieldValue.delete(),
+            imageWidth: admin.firestore.FieldValue.delete(),
+            imageHeight: admin.firestore.FieldValue.delete(),
             storagePath: admin.firestore.FieldValue.delete(),
             text: text,
             photoDeleted: true,
@@ -753,7 +756,11 @@ exports.markChatMessagesOfDeletedMealPhotos = onDocumentWritten(
       if (removed.includes(lastImageUrl)) {
         const lastMessage =
             deletedTexts.get(lastImageUrl) || CHAT_DELETED_PHOTO_TEXT;
-        await chatRef.update({lastImageUrl: '', lastMessage: lastMessage});
+        await chatRef.update({
+          lastImageUrl: '',
+          lastImageThumbUrl: '',
+          lastMessage: lastMessage,
+        });
       }
 
       logger.info('Marked chat messages of deleted meal photos', {

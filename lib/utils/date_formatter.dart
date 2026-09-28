@@ -4,9 +4,21 @@ import 'package:intl/intl.dart';
 /// Uses Turkish locale for all date/time formatting
 class DateFormatter {
   static const String _yesterdayLabel = 'Dün';
+  static const String _todayLabel = 'Bugün';
 
   /// Son bir haftada gün adı gösterilir; daha eskisinde tarih.
   static const int _weekdayNameMaxDaysAgo = 6;
+
+  // Sohbette her baloncuk ve listede her satır için biçimlendirilir: kalıp
+  // bir kez çözülür (ilk kullanımda; tr_TR verisi uygulama açılışında
+  // yüklenir).
+  static final DateFormat _timeFormat = DateFormat('HH:mm', 'tr_TR');
+  static final DateFormat _numericDateFormat =
+      DateFormat('dd.MM.yyyy', 'tr_TR');
+  static final DateFormat _weekdayFormat = DateFormat('EEEE', 'tr_TR');
+  static final DateFormat _dayMonthFormat = DateFormat('d MMMM', 'tr_TR');
+  static final DateFormat _dayMonthYearFormat =
+      DateFormat('d MMMM y', 'tr_TR');
 
   /// Sohbet listesindeki son mesaj zamanı (WhatsApp gibi): bugünse "14:05",
   /// dünse "Dün", son bir haftadaysa gün adı ("Salı"), daha eskiyse
@@ -14,21 +26,42 @@ class DateFormatter {
   /// kaldığı için "gelecekte" görünen zaman bugün sayılır.
   static String formatChatListTime(DateTime date, {DateTime? now}) {
     final DateTime current = now ?? DateTime.now();
-    final int daysAgo = DateTime.utc(current.year, current.month, current.day)
-        .difference(DateTime.utc(date.year, date.month, date.day))
-        .inDays;
+    final int daysAgo = _calendarDaysBetween(date, current);
 
     if (daysAgo <= 0) return formatTime(date);
     if (daysAgo == 1) return _yesterdayLabel;
     if (daysAgo <= _weekdayNameMaxDaysAgo) {
-      return DateFormat('EEEE', 'tr_TR').format(date);
+      return _weekdayFormat.format(date);
     }
     return formatNumericDate(date);
   }
 
+  /// Sohbetteki gün ayırıcısı: "Bugün", "Dün", "12 Eylül"; başka yıldaysa
+  /// "12 Eylül 2025".
+  static String formatChatDayLabel(DateTime date, {DateTime? now}) {
+    final DateTime current = now ?? DateTime.now();
+    final int daysAgo = _calendarDaysBetween(date, current);
+
+    if (daysAgo <= 0) return _todayLabel;
+    if (daysAgo == 1) return _yesterdayLabel;
+    return (date.year == current.year ? _dayMonthFormat : _dayMonthYearFormat)
+        .format(date);
+  }
+
+  /// İki anın takvim günü farkı ([to] - [from]); saat ve yaz saati farkı
+  /// sonucu değiştirmez.
+  static int _calendarDaysBetween(DateTime from, DateTime to) =>
+      DateTime.utc(to.year, to.month, to.day)
+          .difference(DateTime.utc(from.year, from.month, from.day))
+          .inDays;
+
+  /// İki an aynı takvim gününde mi.
+  static bool isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
   /// Numeric date shown across the app / dialogs: 01.02.2023 (gg.aa.yyyy)
   static String formatNumericDate(DateTime date) {
-    return DateFormat('dd.MM.yyyy', 'tr_TR').format(date);
+    return _numericDateFormat.format(date);
   }
 
   /// Numeric date with time: 01.02.2023 14:30 (gg.aa.yyyy SS:dd)
@@ -58,7 +91,7 @@ class DateFormatter {
 
   /// Format: 14:30
   static String formatTime(DateTime date) {
-    return DateFormat('HH:mm', 'tr_TR').format(date);
+    return _timeFormat.format(date);
   }
 
   /// Format: Şubat 2023

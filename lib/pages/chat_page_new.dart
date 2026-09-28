@@ -16,19 +16,27 @@ import 'package:ngy_app/providers/diet_provider.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/diet_model.dart';
 import 'package:ngy_app/models/meal_model.dart';
+import 'package:ngy_app/models/pending_upload.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
-import 'package:ngy_app/widgets/chat_image_preview.dart';
+import 'package:ngy_app/widgets/chat/chat_date_separator.dart';
+import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
+import 'package:ngy_app/widgets/chat/message_reply_quote.dart';
+import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
+import 'package:ngy_app/widgets/full_screen_image_page.dart';
+import 'package:ngy_app/widgets/meal_image_card.dart';
+import 'package:ngy_app/widgets/meal_thumbnail_image.dart';
 import 'package:ngy_app/widgets/reaction_badge.dart';
 import 'package:ngy_app/widgets/reaction_picker.dart';
+import 'package:ngy_app/pages/admin_meal_photos_page.dart';
 import 'package:ngy_app/pages/user_media_gallery_page.dart';
+import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 import 'package:ngy_app/services/meal_reminder_service.dart';
 
 import '../constants/app_constants.dart';
-import '../widgets/labeled_action_button.dart';
 
 /// Masaüstü platformu mu (Windows, macOS, Linux). Enter ile gönderme, sağ tık
 /// menüsü ve seçilebilir metin yalnızca burada açılır; dokunmatikte uzun basma
@@ -86,12 +94,12 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
+/// Sohbet başlığındaki menünün işlemleri (yalnızca admin).
+enum _ChatMenuAction { deleteChat }
+
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
-  static const String _mealUploadingText = 'Öğün fotoğrafı yükleniyor...';
-  static const String _imageUploadingText = 'Görsel yükleniyor...';
   static const String _uploadErrorTitle = 'Hata';
-  static const String _mealUploadErrorText =
-      'Öğün fotoğrafı yüklenemedi. Lütfen tekrar deneyin.';
+  static const String _photoLimitTitle = 'Fotoğraf Sınırı';
   static const String _chatPostFailedTitle = 'Sohbete Gönderilemedi';
   static const String _chatPostFailedText =
       'Fotoğrafınız öğün kaydınıza eklendi ancak sohbete gönderilemedi. '
@@ -122,6 +130,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const String _photoDeletedText = 'Fotoğraf silindi.';
   static const String _deletePhotoErrorText =
       'Fotoğraf silinemedi. Lütfen tekrar deneyin.';
+  static const String _copiedText = 'Mesaj kopyalandı.';
+  static const Duration _copiedFeedbackDuration = Duration(seconds: 1);
+  static const String _youLabel = 'Siz';
+  static const String _officeLabel = 'Diyetisyen';
+  static const String _clientFallbackLabel = 'Danışan';
+  static const String _chatMenuTooltip = 'Diğer işlemler';
+  static const String _deleteChatLabel = 'Sohbeti Sil';
+
+  /// Tek seferde sohbete gönderilebilecek en fazla fotoğraf.
+  static const int _maxPhotosPerSend = 10;
+
+  /// Kullanıcı en yeni mesajdan bu kadar yukarı kaydırınca "En yeniye git"
+  /// düğmesi görünür.
+  static const double _jumpButtonThreshold = 300.0;
 
   final ImagePicker _picker = ImagePicker();
 
@@ -179,6 +201,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// metin başka bir sohbetin kutusuna taşınmaz.
   final TextEditingController _messageController = TextEditingController();
 
+  /// Mesaj kutusunun odağı: "Yanıtla" seçilince klavye açılsın.
+  final FocusNode _inputFocusNode = FocusNode();
+
+  /// Yanıtlanan mesaj; mesaj kutusunun üstünde alıntısı görünür ve gönderilen
+  /// metin bu mesaja yanıt olarak yazılır.
+  final ValueNotifier<MessageData?> _replyTarget =
+      ValueNotifier<MessageData?>(null);
+
+  /// Admin başlığındaki danışanın adı; alıntılarda danışanın mesajlarının
+  /// sahibi olarak yazar.
+  String? _clientName;
+
   /// Öğün seçicinin seçenekleri; seçici ilk açıldığında bir kez okunur (bkz.
   /// [_loadMealChoices]).
   Future<List<({Meals meal, String label})>>? _mealChoicesFuture;
@@ -196,6 +230,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Sohbet hedef mesajda (odaklı düzende) mı gösteriliyor. "En yeniye git"
   /// ile kapanır ve liste normal düzene, en yeni mesaja döner.
   late bool _focusActive;
+
+  /// Gidilen mesaj: açılışta [ChatPage.focusMessageId]; sonra bir alıntıya ya
+  /// da galerideki bir fotoğrafa dokununca o mesaj (bkz. [_focusOn]).
+  String? _focusMessageId;
 
   /// [ChatPage.focusMessageId] ile gelen mesajın baloncuğuna takılan anahtar:
   /// mesajın ekranda kurulup kurulmadığı bununla izlenir.
@@ -270,13 +308,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Determine if current user is an admin
     _isAdminUser = ChatManager.isAdminUid(_currentUid);
 
-    _focusActive = widget.focusMessageId != null;
+    _focusMessageId = widget.focusMessageId;
+    _focusActive = _focusMessageId != null;
     // Odaklı açılışta ekran eski bir mesajdadır, en yeni mesaj görünmez.
     _atLatest = !_focusActive;
 
+    _clientName = widget.userDisplayName;
     if (_showsUserTitle && widget.userDisplayName == null) {
-      _userFuture = Provider.of<UserProvider>(context, listen: false)
-          .fetchUserDetails(userId: _chatId);
+      final Future<UserModel?> userFuture =
+          Provider.of<UserProvider>(context, listen: false)
+              .fetchUserDetails(userId: _chatId);
+      _userFuture = userFuture;
+      userFuture.then((user) {
+        if (!mounted || user == null) return;
+        final String name = user.fullName;
+        if (name.isNotEmpty) setState(() => _clientName = name);
+      }, onError: (Object e) {});
     }
 
     // Suppress in-app notifications for this chat while it is on top.
@@ -306,6 +353,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _markChatAsRead();
     }
     _messageController.dispose();
+    _inputFocusNode.dispose();
+    _replyTarget.dispose();
     _scrollController.dispose();
     _focusHighlighted.dispose();
     _showJumpToLatest.dispose();
@@ -513,190 +562,186 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return false;
   }
 
-  /// Pick an image from the gallery, then upload it.
-  ///
-  /// Currently only called from [_startMealUploadFlow], so [meal] is
-  /// always non-null in practice. Kept nullable for future flexibility
-  /// (e.g. re-adding a standalone gallery option to the attachment menu).
-  Future<void> _pickAndSendImage({Meals? meal}) async {
-    final hasPermission = await _checkPhotoPermission();
-    if (!hasPermission) {
-      return;
-    }
-
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-    if (image == null) {
-      return;
-    }
-
-    await _uploadPickedImage(
-      image,
-      meal: meal,
-      chatImageErrorText: 'Görsel gönderilemedi. Lütfen tekrar deneyin.',
-    );
-  }
-
-  /// Capture an image from the camera, then upload it.
-  ///
-  /// Currently only called from [_startMealUploadFlow], so [meal] is
-  /// always non-null in practice. Kept nullable for future flexibility
-  /// (e.g. re-adding a standalone camera option to the attachment menu).
-  Future<void> _captureAndSendImage({Meals? meal}) async {
-    final hasPermission = await _checkCameraPermission();
-    if (!hasPermission) {
-      return;
-    }
-
-    final XFile? image = await _picker.pickImage(
-      source: ImageSource.camera,
-      preferredCameraDevice: CameraDevice.rear,
-    );
-    if (image == null) {
-      return;
-    }
-
-    await _uploadPickedImage(
-      image,
-      meal: meal,
-      chatImageErrorText:
-          'Kamera görüntüsü gönderilemedi. Lütfen tekrar deneyin.',
-    );
-  }
-
-  /// Seçilen görseli yükler: [meal] verilirse öğüne kaydedip sohbete de
-  /// gönderir, verilmezse doğrudan sohbete gönderir.
-  ///
-  /// Öğün fotoğrafı öğüne kaydedilip sohbete gönderilemezse kullanıcıya
-  /// fotoğrafın kaydedildiği söylenir; tekrar yükleyip öğünü kopyayla
-  /// doldurmasın.
-  Future<void> _uploadPickedImage(
-    XFile image, {
-    Meals? meal,
-    required String chatImageErrorText,
-  }) async {
-    // Re-checked after the await: the widget may be gone by now.
-    if (!mounted) return;
-    final chat = context.read<ChatManager>();
-    final mealManager = Provider.of<MealManager>(context, listen: false);
-
-    bool loadingOpen = false;
-    if (mounted) {
-      DialogUtils.openLoading(
-        context,
-        message: meal != null ? _mealUploadingText : _imageUploadingText,
+  /// Fotoğraf seçtirir: kameradan tek, galeriden en fazla [limit] tane.
+  /// İzin yoksa ya da vazgeçilirse boş liste döner. Masaüstünde izin sorulmaz
+  /// (galeri dosya seçicidir).
+  Future<List<XFile>> _pickImages(ImageSource source, {required int limit}) async {
+    if (source == ImageSource.camera) {
+      if (!_isDesktopPlatform && !await _checkCameraPermission()) {
+        return const [];
+      }
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.rear,
       );
-      loadingOpen = true;
+      return image == null ? const [] : [image];
     }
 
-    try {
-      bool limitReached = false;
-      if (meal != null) {
-        final downloadUrl = await mealManager.uploadMealImg(
-          meal: meal,
-          image: image,
-          userId: _currentUid,
-          subscriptionId: _currentUid,
-          alsoPostToChat: true,
-          chatManager: chat,
-        );
-        // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
-        limitReached = downloadUrl == null;
-        if (!limitReached) _cancelMealReminder(meal);
-      } else {
-        await chat.sendImageTo(_chatId, image);
-      }
+    if (!_isDesktopPlatform && !await _checkPhotoPermission()) {
+      return const [];
+    }
+    // Çoklu seçicinin sınırı en az 2 olabilir.
+    if (limit < 2) {
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+      return image == null ? const [] : [image];
+    }
+    return _picker.pickMultiImage(limit: limit);
+  }
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
-
-      if (limitReached && mounted) {
-        await _showMealImageLimitDialog();
-      } else if (mounted) {
-        _showLatest();
-      }
-    } on MealChatPostException {
-      // Fotoğraf öğüne kaydedildi, yalnızca sohbete düşmedi: öğün yüklenmiş
-      // sayılır.
-      if (meal != null) _cancelMealReminder(meal);
-
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
-
-      if (!mounted) return;
+  /// Seçici sınırı uygulamadıysa (bazı platformlar) fazla fotoğraflar
+  /// bırakılır ve kullanıcıya söylenir.
+  Future<List<XFile>> _limitPicked(
+    List<XFile> picked,
+    int limit, {
+    required String limitMessage,
+  }) async {
+    if (picked.length <= limit) return picked;
+    if (mounted) {
       await DialogUtils.openInfo(
         context,
-        title: _chatPostFailedTitle,
-        message: _chatPostFailedText,
-      );
-    } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
-
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: _uploadErrorTitle,
-        message: meal != null ? _mealUploadErrorText : chatImageErrorText,
+        title: _photoLimitTitle,
+        message: '$limitMessage\n\nSeçtiğiniz fotoğraflardan ilk $limit '
+            'tanesi gönderilecek.',
       );
     }
+    return picked.take(limit).toList();
   }
 
-  /// Start the meal upload flow.
-  ///
-  /// 1. User selects meal type
-  /// 2. The meal's photo limit is checked (before any photo is picked)
-  /// 3. User selects image source (gallery or camera)
-  /// 4. Delegates to [_pickAndSendImage] or [_captureAndSendImage]
+  /// Seçilen fotoğrafları sıraya ekler: fotoğraflar listenin altında hemen
+  /// görünür ve tek tek yüklenir (bkz. [PendingUpload]); ekran kilitlenmez.
+  /// [meal] verilirse öğün kaydına da eklenir.
+  void _enqueueUploads(List<XFile> images, {Meals? meal}) {
+    if (images.isEmpty || !mounted) return;
+    final ChatManager chat = context.read<ChatManager>();
+    final MealManager mealManager =
+        Provider.of<MealManager>(context, listen: false);
+
+    chat.enqueueUploads([
+      for (final XFile image in images)
+        PendingUpload(
+          chatId: _chatId,
+          image: image,
+          meal: meal,
+          runner: meal == null
+              ? (upload) =>
+                  chat.sendImageTo(_chatId, upload.image, observer: upload)
+              : (upload) => _uploadMealPhoto(upload, meal, mealManager, chat),
+        ),
+    ]);
+    _showLatest();
+  }
+
+  /// Öğün fotoğrafını öğün kaydına ekler ve sohbete gönderir; öğünün
+  /// hatırlatması iptal olur. Sohbet ekranı kapanmış olsa da çalışır:
+  /// context'e dokunmaz, diyalog yalnızca ekran açıksa gösterilir.
+  Future<void> _uploadMealPhoto(
+    PendingUpload upload,
+    Meals meal,
+    MealManager mealManager,
+    ChatManager chat,
+  ) async {
+    final String? downloadUrl;
+    try {
+      downloadUrl = await mealManager.uploadMealImg(
+        meal: meal,
+        image: upload.image,
+        userId: _currentUid,
+        subscriptionId: _currentUid,
+        alsoPostToChat: true,
+        chatManager: chat,
+        observer: upload,
+      );
+    } on MealChatPostException {
+      // Fotoğraf öğüne kaydedildi, yalnızca sohbete düşmedi: öğün yüklenmiş
+      // sayılır; kullanıcı fotoğrafı tekrar yüklemesin.
+      _cancelMealReminder(meal);
+      // Beklenmez: sıradaki fotoğraflar diyalog kapanmadan da yüklensin.
+      if (mounted) {
+        DialogUtils.openInfo(
+          context,
+          title: _chatPostFailedTitle,
+          message: _chatPostFailedText,
+        );
+      }
+      return;
+    }
+
+    // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
+    if (downloadUrl == null) {
+      throw const UploadFailure(
+        MealModel.maxImagesReachedMessage,
+        canRetry: false,
+      );
+    }
+    _cancelMealReminder(meal);
+  }
+
+  /// Öğün fotoğrafı yükleme akışı: öğün seçimi → öğünün kalan fotoğraf
+  /// hakkı (seçtirmeden önce) → kaynak → fotoğraf(lar) → sıraya ekleme.
+  /// Galeriden öğünün kalan hakkı kadar fotoğraf birden seçilebilir.
   Future<void> _startMealUploadFlow() async {
     final Meals? meal = await _chooseMeal();
     if (meal == null) {
       return;
     }
 
-    if (!await _mealHasRoomForImage(meal)) {
+    final int slotsLeft = await _mealImageSlotsLeft(meal);
+    if (slotsLeft <= 0) {
       return;
     }
 
-    final ImageSource? src = await _chooseSource();
-    if (src == null) {
+    final ImageSource? source = await _chooseSource();
+    if (source == null) {
       return;
     }
 
-    if (src == ImageSource.gallery) {
-      await _pickAndSendImage(meal: meal);
-    } else {
-      await _captureAndSendImage(meal: meal);
-    }
+    final List<XFile> picked = await _limitPicked(
+      await _pickImages(source, limit: slotsLeft),
+      slotsLeft,
+      limitMessage: MealModel.maxImagesReachedMessage,
+    );
+    _enqueueUploads(picked, meal: meal);
   }
 
-  /// Öğünün bugünkü fotoğraf sınırı ([MealModel.maxImages]) dolmuşsa uyarı
-  /// gösterip false döner; kullanıcı fotoğraf seçip yüklemeyi beklemeden
-  /// öğrenir. Kontrol okunamazsa yüklemeye izin verilir: sınırı
-  /// [MealManager.uploadMealImg] yükleme sırasında yine uygular.
-  Future<bool> _mealHasRoomForImage(Meals meal) async {
-    if (!mounted) return false;
+  /// Sohbete öğün kaydına girmeyen fotoğraf gönderme akışı (ör. ürün etiketi,
+  /// tartı): kaynak → fotoğraf(lar) → sıraya ekleme.
+  Future<void> _startPhotoSendFlow() async {
+    final ImageSource? source = await _chooseSource();
+    if (source == null) {
+      return;
+    }
+
+    final List<XFile> picked = await _limitPicked(
+      await _pickImages(source, limit: _maxPhotosPerSend),
+      _maxPhotosPerSend,
+      limitMessage:
+          'Tek seferde en fazla $_maxPhotosPerSend fotoğraf gönderilebilir.',
+    );
+    _enqueueUploads(picked);
+  }
+
+  /// Öğüne bugün daha kaç fotoğraf eklenebilir ([MealModel.maxImages]).
+  /// Hak kalmadıysa uyarı gösterip 0 döner; kullanıcı fotoğraf seçip
+  /// yüklemeyi beklemeden öğrenir. Okunamazsa sınır sayılır: yükleme
+  /// sırasında [MealManager.uploadMealImg] sınırı yine uygular.
+  Future<int> _mealImageSlotsLeft(Meals meal) async {
+    if (!mounted) return 0;
     final mealManager = Provider.of<MealManager>(context, listen: false);
 
-    final bool canAdd;
+    final int slotsLeft;
     try {
-      canAdd = await mealManager.canAddMealImage(
+      slotsLeft = await mealManager.mealImageSlotsLeft(
         userId: _currentUid,
         meal: meal,
       );
     } catch (e) {
-      return true;
+      return MealModel.maxImages;
     }
-    if (canAdd) return true;
+    if (slotsLeft > 0) return slotsLeft;
 
-    if (!mounted) return false;
+    if (!mounted) return 0;
     await _showMealImageLimitDialog();
-    return false;
+    return 0;
   }
 
   Future<void> _showMealImageLimitDialog() {
@@ -805,9 +850,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Show a dialog for image source selection (gallery or camera).
-  /// 
+  /// Masaüstünde kamera olmadığı için doğrudan galeri (dosya seçici) açılır.
+  ///
   /// Returns the selected ImageSource, or null if cancelled.
   Future<ImageSource?> _chooseSource() async {
+    if (_isDesktopPlatform) return ImageSource.gallery;
     return showDialog<ImageSource>(
       context: context,
       builder: (_) => AlertDialog(
@@ -835,17 +882,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// [ChatManager.openFocusWindow]). Açılamazsa sohbet en yeni mesajdan açılır
   /// ve nedeni kullanıcıya söylenir.
   Future<void> _openFocusWindow() async {
+    final String? targetId = _focusMessageId;
+    if (targetId == null) return;
+
     final FocusWindow window;
     try {
-      window =
-          await _chatManager.openFocusWindow(_chatId, widget.focusMessageId!);
+      window = await _chatManager.openFocusWindow(_chatId, targetId);
     } catch (e) {
-      if (!mounted || !_focusActive) return;
+      if (!mounted || !_focusActive || _focusMessageId != targetId) return;
       _showFocusUnavailable(_focusErrorText);
       return;
     }
-    // Bu arada odaktan çıkıldıysa (ör. mesaj gönderildi) pencereye gerek yok.
-    if (!mounted || !_focusActive) return;
+    // Bu arada odaktan çıkıldıysa (ör. mesaj gönderildi) ya da başka bir
+    // mesaja gidildiyse bu pencereye gerek yok.
+    if (!mounted || !_focusActive || _focusMessageId != targetId) return;
 
     final Stream<List<MessageData>>? messages = window.messages;
     if (messages == null) {
@@ -871,6 +921,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
+  }
+
+  /// Sohbeti [messageId] mesajında yeniden açar (bkz. [_openFocusWindow]):
+  /// yanıttaki alıntıya ya da galerideki bir fotoğrafa dokununca. Mesaj
+  /// yüklü olmasa da (eski sayfalarda) bulunur ve vurgulanır.
+  void _focusOn(String messageId) {
+    _showJumpToLatest.value = false;
+    setState(() {
+      _focusMessageId = messageId;
+      _focusActive = true;
+      _focusRevealStarted = false;
+      _resetPaging();
+    });
+    _openFocusWindow();
   }
 
   /// Odaklı düzenden çıkar: liste son mesajlarla, en yeni mesajdan başlar.
@@ -1107,7 +1171,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _unreadCount.value = 0;
       _markChatAsRead();
     }
-    _showJumpToLatest.value = focusLayout && !atLatest;
+    // Odaklı düzende en yeni mesaj ekranda değilse; normal düzende kullanıcı
+    // biraz yukarı kaydırınca.
+    _showJumpToLatest.value = focusLayout
+        ? !atLatest
+        : metrics.pixels > metrics.minScrollExtent + _jumpButtonThreshold;
     return false;
   }
 
@@ -1132,9 +1200,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// "En yeniye git": odaklı düzenden çıkıp en yeni mesaja iner; liste
-  /// normal düzende en yeniden başlar, okundu işareti de orada konur.
-  void _jumpToLatest() => _leaveFocus();
+  /// "En yeniye git": odaklı düzendeyse normal düzene döner (liste en
+  /// yeniden başlar), normal düzende en yeni mesaja kaydırır; okundu işareti
+  /// orada konur.
+  void _jumpToLatest() => _showLatest();
 
   /// Kullanıcının az önce gönderdiği mesaj ekranda görünsün: odaklı düzendeyse
   /// normal düzene geçilir, normal düzende en yeni mesaja kaydırılır.
@@ -1165,8 +1234,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// sayılır (sohbet açıkken gelen mesaj okunmamış rozeti bırakmaz); odaklı
   /// düzende yeni mesajlar görünür alanın altına eklendiği için liste onları
   /// gösterecek kadar kayar. Kullanıcı eski mesajlardaysa okundu işareti en
-  /// yeniye inince konur; odaklı düzende karşı taraftan gelenler "En yeniye
-  /// git" rozetindeki sayıya eklenir.
+  /// yeniye inince konur; karşı taraftan gelenler "En yeniye git"
+  /// rozetindeki sayıya eklenir.
   void _noteNewMessages(List<MessageData> items, {required bool focusLayout}) {
     final bool firstList = !_messagesShown;
     _messagesShown = true;
@@ -1195,7 +1264,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (incoming > 0) _markIncomingSeen();
       } else if (incoming > 0) {
         _markReadPending = true;
-        if (focusLayout) _unreadCount.value += incoming;
+        _unreadCount.value += incoming;
       }
     });
   }
@@ -1218,17 +1287,30 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (text.isEmpty) return;
 
     final ChatManager chat = context.read<ChatManager>();
+    final MessageData? replyTarget = _replyTarget.value;
     _messageController.clear();
+    _replyTarget.value = null;
 
-    final Future<void> sending = chat.sendTextTo(_chatId, text);
+    final Future<void> sending = chat.sendTextTo(
+      _chatId,
+      text,
+      replyTo: replyTarget == null ? null : MessageReply.of(replyTarget),
+    );
     _showLatest();
+    // Masaüstünde gönder düğmesine tıklamak kutunun odağını alır; yazmaya
+    // devam edebilmek için odak kutuya döner.
+    if (_isDesktopPlatform) _inputFocusNode.requestFocus();
 
     try {
       await sending;
     } catch (e) {
       if (!mounted) return;
-      // Bu arada yeni bir şey yazılmadıysa gönderilemeyen metin geri gelir.
-      if (_messageController.text.isEmpty) _messageController.text = text;
+      // Bu arada yeni bir şey yazılmadıysa gönderilemeyen metin (ve yanıtı)
+      // geri gelir.
+      if (_messageController.text.isEmpty) {
+        _messageController.text = text;
+        _replyTarget.value ??= replyTarget;
+      }
       DialogUtils.openError(
         context,
         title: _sendErrorTitle,
@@ -1336,6 +1418,106 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  /// Mesaj menüsünde (uzun basma / sağ tık) seçilen işlem.
+  void _handleMessageAction(MessageData message, MessageAction action) {
+    switch (action) {
+      case MessageAction.reply:
+        _replyTarget.value = message;
+        _inputFocusNode.requestFocus();
+      case MessageAction.copy:
+        _copyMessage(message);
+      case MessageAction.showInMealPhotos:
+        _openInMealPhotos(message);
+      case MessageAction.deletePhoto:
+        _confirmAndDeleteMealPhoto(message);
+    }
+  }
+
+  /// Mesajın menüsündeki işlemler (ifadeler ayrıca, bkz. [_buildMessageBubble]).
+  List<MessageAction> _actionsFor(MessageData message) {
+    final bool hasText = (message.text ?? '').isNotEmpty;
+    return [
+      MessageAction.reply,
+      if (hasText && !message.isMealPhoto && !message.photoDeleted)
+        MessageAction.copy,
+      // Admin, danışanın öğün fotoğrafını Öğün Fotoğrafları'nda görebilir.
+      if (_isAdminUser && message.isMealPhoto && message.senderId == _chatId)
+        MessageAction.showInMealPhotos,
+      // Danışan sohbetten yüklediği öğün fotoğrafını silebilir.
+      if (!_isAdminUser &&
+          message.senderId == _currentUid &&
+          message.isMealPhoto)
+        MessageAction.deletePhoto,
+    ];
+  }
+
+  /// Mesajın metnini panoya kopyalar.
+  void _copyMessage(MessageData message) {
+    Clipboard.setData(
+      ClipboardData(text: Meals.chatTextForDisplay(message.text ?? '')),
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(_copiedText),
+        duration: _copiedFeedbackDuration,
+      ),
+    );
+  }
+
+  /// Alıntılarda mesajın sahibinin adı: kendi mesajı "Siz", ofisin mesajı
+  /// danışana diyetisyenin adıyla, admin'e "Diyetisyen"; danışanın mesajı
+  /// danışanın adıyla.
+  String _senderLabel(String senderId) {
+    if (senderId == _currentUid) return _youLabel;
+    if (ChatManager.isAdminUid(senderId)) {
+      return _isAdminUser
+          ? _officeLabel
+          : PushNotificationReference.chatAdminToUserTitle;
+    }
+    return _clientName ?? _clientFallbackLabel;
+  }
+
+  /// Fotoğrafı tam ekranda açar: önce küçük görsel görünür, orijinal iner.
+  void _openPhoto(MessageData message) {
+    final String? imageUrl = message.imageUrl;
+    if (imageUrl == null) return;
+
+    final Meals? meal = message.isMealPhoto ? message.photoMeal : null;
+    final DateTime? sentAt = message.sentAt;
+    showFullScreenImage<void>(
+      context,
+      imageUrl: imageUrl,
+      thumbUrl: message.thumbUrl,
+      title: [
+        if (meal != null) meal.displayLabel,
+        if (sentAt != null) DateFormatter.formatLongDateTime(sentAt),
+      ].join(' · '),
+    );
+  }
+
+  /// Admin: danışanın öğün fotoğrafını Öğün Fotoğrafları'nda, fotoğrafın
+  /// günüyle ve danışana süzülmüş olarak açar; fotoğraf vurgulanır.
+  void _openInMealPhotos(MessageData message) {
+    final String? imageUrl = message.imageUrl;
+    if (imageUrl == null) return;
+
+    final MealManager mealManager =
+        Provider.of<MealManager>(context, listen: false);
+    final DateTime day = mealManager.mealPhotoLocation(_chatId, imageUrl)?.date ??
+        message.sentAt ??
+        DateTime.now();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AdminMealPhotosPage(
+          initialDay: day,
+          focusUserId: _chatId,
+          focusImageUrl: imageUrl,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1347,75 +1529,78 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ? _buildTappableUserTitle(_chatId)
             : Text(PushNotificationReference.chatAdminToUserTitle),
         actions: [
-          // Admins can permanently delete the chat (and its uploaded photos)
+          // Silme gibi geri alınamayan işlem menüde durur: başlıkta
+          // yanlışlıkla basılmasın. Silmeden önce onay alınır.
           if (_isAdminUser)
-            LabeledActionButton(
-              icon: Icons.delete_outline,
-              label: 'Sohbeti Sil',
-              onPressed: _confirmAndDeleteChat,
+            PopupMenuButton<_ChatMenuAction>(
+              tooltip: _chatMenuTooltip,
+              onSelected: (action) {
+                switch (action) {
+                  case _ChatMenuAction.deleteChat:
+                    _confirmAndDeleteChat();
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem<_ChatMenuAction>(
+                  value: _ChatMenuAction.deleteChat,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      Icons.delete_outline,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    title: Text(
+                      _deleteChatLabel,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
         ],
       ),
       body: Column(
         children: [
-          // Upload progress indicator - only rebuilds when upload state changes
-          Selector<ChatManager, ({bool isUploading, double? progress})>(
-            selector: (_, chat) => (isUploading: chat.isUploading, progress: chat.uploadProgress),
-            builder: (context, state, _) {
-              if (!state.isUploading) return const SizedBox.shrink();
-              
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: LinearProgressIndicator(value: state.progress),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () {
-                        context.read<ChatManager>().cancelUpload();
-                      },
-                      child: const Text('İptal'),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          
-          // Messages list - uses cached stream, doesn't rebuild on ChatManager changes
+          // Messages list - uses cached stream, doesn't rebuild on ChatManager
+          // changes; yalnızca bekleyen yüklemeler değişince yeniden çizilir.
           Expanded(
             child: Stack(
               fit: StackFit.expand,
               children: [
-                StreamBuilder<List<MessageData>>(
-                  stream: _messagesStream,
-                  builder: (context, snap) {
-                    // Akış değişince (ör. odaktan çıkınca) eldeki liste yenisi
-                    // gelene kadar ekranda kalır; yalnızca hiç veri yokken
-                    // yükleniyor gösterilir.
-                    final List<MessageData>? data = snap.data;
-                    if (data == null) {
-                      if (snap.hasError) {
-                        return const Center(
-                          child: Text(_messagesLoadErrorText),
-                        );
+                Selector<ChatManager, List<PendingUpload>>(
+                  selector: (_, chat) => chat.pendingUploadsOf(_chatId),
+                  builder: (context, pending, _) =>
+                      StreamBuilder<List<MessageData>>(
+                    stream: _messagesStream,
+                    builder: (context, snap) {
+                      // Akış değişince (ör. odaktan çıkınca) eldeki liste
+                      // yenisi gelene kadar ekranda kalır; yalnızca hiç veri
+                      // yokken yükleniyor gösterilir.
+                      final List<MessageData>? data = snap.data;
+                      if (data == null) {
+                        if (snap.hasError) {
+                          return const Center(
+                            child: Text(_messagesLoadErrorText),
+                          );
+                        }
+                        return const Center(child: CircularProgressIndicator());
                       }
-                      return const Center(child: CircularProgressIndicator());
-                    }
 
-                    _liveMessages = data;
-                    final List<MessageData> items =
-                        _olderMessages.isEmpty ? data : [...data, ..._olderMessages];
+                      _liveMessages = data;
+                      final List<MessageData> items = _olderMessages.isEmpty
+                          ? data
+                          : [...data, ..._olderMessages];
 
-                    if (items.isEmpty) {
-                      _noteNewMessages(items, focusLayout: false);
-                      return const Center(child: Text('Henüz mesaj yok.'));
-                    }
+                      if (items.isEmpty && pending.isEmpty) {
+                        _noteNewMessages(items, focusLayout: false);
+                        return const Center(child: Text('Henüz mesaj yok.'));
+                      }
 
-                    return _buildMessageList(items);
-                  },
+                      return _buildMessageList(items, pending);
+                    },
+                  ),
                 ),
                 Positioned(
                   right: 12,
@@ -1430,11 +1615,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ),
           ),
 
-          // Input row - only rebuilds when the upload state changes
           _ChatInputRow(
             controller: _messageController,
+            focusNode: _inputFocusNode,
             onSend: _sendText,
-            onMealUpload: _startMealUploadFlow,
+            // Admin öğün yüklemez: yalnızca danışan öğün fotoğrafı yükler.
+            onMealUpload: _isAdminUser ? null : _startMealUploadFlow,
+            onPhotoSend: _startPhotoSendFlow,
+            replyTarget: _replyTarget,
+            replyLabelOf: (message) => _senderLabel(message.senderId),
           ),
         ],
       ),
@@ -1450,8 +1639,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// ("center") sliver'a, hedeften yeni mesajlar ise onun altına konur.
   /// Böylece aradaki mesajlar hiç kurulmadan doğrudan hedef mesaja açılır;
   /// liste yine tek parça gibi kaydırılır (yukarı eskiye, aşağı yeniye).
-  Widget _buildMessageList(List<MessageData> items) {
-    final String? focusMessageId = _focusActive ? widget.focusMessageId : null;
+  Widget _buildMessageList(
+    List<MessageData> items,
+    List<PendingUpload> pending,
+  ) {
+    final String? focusMessageId = _focusActive ? _focusMessageId : null;
     final int targetIndex = focusMessageId == null
         ? -1
         : items.indexWhere((message) => message.id == focusMessageId);
@@ -1460,16 +1652,28 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // En üstteki satır (ters listede sonda): eski mesaj göstergesi ya da notu.
     final Widget? historyEdge = _buildHistoryEdge();
     final int edgeCount = historyEdge == null ? 0 : 1;
+    final int pendingCount = pending.length;
 
     if (targetIndex < 0) {
+      // Ters listede en altta (en yeni) bekleyen yüklemeler, sonra mesajlar.
       return _trackLatest(
         ListView.builder(
           controller: _scrollController,
           reverse: true, // Newest messages at bottom
-          itemCount: items.length + edgeCount,
-          itemBuilder: (context, i) => i < items.length
-              ? _buildMessageBubble(items[i])
-              : historyEdge!,
+          itemCount: pendingCount + items.length + edgeCount,
+          itemBuilder: (context, i) {
+            if (i < pendingCount) {
+              return _buildPendingBubble(
+                pending,
+                pendingCount - 1 - i,
+                items,
+              );
+            }
+            final int index = i - pendingCount;
+            return index < items.length
+                ? _buildMessageBubble(items, index)
+                : historyEdge!;
+          },
         ),
         focusLayout: false,
       );
@@ -1483,11 +1687,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         reverse: true, // Newest messages at bottom
         center: _focusCenterKey,
         slivers: [
-          // Hedeften yeni mesajlar: sıfır noktasının altında, yeniye doğru.
+          // Hedeften yeni mesajlar ve en altta bekleyen yüklemeler: sıfır
+          // noktasının altında, yeniye doğru.
           SliverList(
             delegate: SliverChildBuilderDelegate(
-              (context, i) => _buildMessageBubble(items[targetIndex - 1 - i]),
-              childCount: targetIndex,
+              (context, i) => i < targetIndex
+                  ? _buildMessageBubble(items, targetIndex - 1 - i)
+                  : _buildPendingBubble(pending, i - targetIndex, items),
+              childCount: targetIndex + pendingCount,
             ),
           ),
           // Hedef ve ondan eski mesajlar: sıfır noktasından yukarı doğru.
@@ -1495,7 +1702,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             key: _focusCenterKey,
             delegate: SliverChildBuilderDelegate(
               (context, i) => targetIndex + i < items.length
-                  ? _buildMessageBubble(items[targetIndex + i])
+                  ? _buildMessageBubble(items, targetIndex + i)
                   : historyEdge!,
               childCount: items.length - targetIndex + edgeCount,
             ),
@@ -1506,8 +1713,61 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Tek bir mesaj baloncuğu; listenin iki biçimi de bunu kullanır.
-  Widget _buildMessageBubble(MessageData msg) {
+  /// Baloncukların genişlik sınırları; mesaj ve bekleyen yükleme baloncuğu
+  /// aynı ölçüleri kullanır.
+  _BubbleMetrics _bubbleMetrics() =>
+      _BubbleMetrics.of(MediaQuery.sizeOf(context));
+
+  /// Mesajın gün ayırıcısı: listede kendisinden eski mesaj başka bir günse
+  /// (ya da yüklü en eski mesajsa) üstünde gün yazar.
+  String? _dayLabelAbove(List<MessageData> items, int index) {
+    final DateTime day = items[index].sentAt ?? DateTime.now();
+    if (index + 1 < items.length) {
+      final DateTime older = items[index + 1].sentAt ?? DateTime.now();
+      if (DateFormatter.isSameDay(day, older)) return null;
+    }
+    return DateFormatter.formatChatDayLabel(day);
+  }
+
+  /// Bekleyen yükleme baloncuğu ([pending] sıra sırasıyla, [index] yüklenme
+  /// sırası). İlki, son mesaj başka bir gündeyse "Bugün" ayırıcısıyla
+  /// başlar.
+  Widget _buildPendingBubble(
+    List<PendingUpload> pending,
+    int index,
+    List<MessageData> items,
+  ) {
+    final PendingUpload upload = pending[index];
+    final ChatManager chat = context.read<ChatManager>();
+    final DateTime now = DateTime.now();
+    final DateTime? newest = items.isEmpty ? null : items.first.sentAt;
+    final bool showToday =
+        index == 0 && (newest == null || !DateFormatter.isSameDay(newest, now));
+
+    final Widget bubble = PendingUploadBubble(
+      key: ValueKey<String>(upload.id),
+      upload: upload,
+      width: _bubbleMetrics().imageWidth,
+      bubbleColor: _MessageBubble.myBubbleColor,
+      onDiscard: () => chat.discardUpload(upload),
+      onRetry: () => chat.retryUpload(upload),
+    );
+    if (!showToday) return bubble;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ChatDateSeparator(label: DateFormatter.formatChatDayLabel(now)),
+        bubble,
+      ],
+    );
+  }
+
+  /// Tek bir mesaj baloncuğu (gerekirse üstünde gün ayırıcısıyla); listenin
+  /// iki biçimi de bunu kullanır.
+  Widget _buildMessageBubble(List<MessageData> items, int index) {
+    final MessageData msg = items[index];
+
     // Both sides can react (WhatsApp-style) to messages the *other* party
     // sent. `_chatId` equals the chat owner's (user's) UID, so
     // `senderId == _chatId` means the message came from the user; an admin UID
@@ -1517,10 +1777,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         (_isAdminUser
             ? msg.senderId == _chatId
             : ChatManager.isAdminUid(msg.senderId));
-
-    // Danışan sohbetten yüklediği öğün fotoğrafını uzun basarak silebilir.
-    final bool canDeletePhoto =
-        !_isAdminUser && msg.senderId == _currentUid && msg.isMealPhoto;
+    final MessageReply? reply = msg.replyTo;
 
     Widget bubble({required bool highlighted}) => _MessageBubble(
           message: msg,
@@ -1528,21 +1785,36 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           isMe: msg.senderId == _currentUid,
           myUid: _currentUid,
           canReact: canReact,
-          onImageTap: (url) => _showImageDialog(context, url),
+          actions: _actionsFor(msg),
+          metrics: _bubbleMetrics(),
+          replySenderLabel: reply == null ? null : _senderLabel(reply.senderId),
+          onImageTap: _openPhoto,
           onToggleReaction: _handleToggleReaction,
-          onDeletePhoto: canDeletePhoto ? _confirmAndDeleteMealPhoto : null,
+          onAction: _handleMessageAction,
+          onReplyTap: _focusOn,
         );
 
-    if (!_focusActive || msg.id != widget.focusMessageId) {
-      return bubble(highlighted: false);
+    final Widget body;
+    if (!_focusActive || msg.id != _focusMessageId) {
+      body = bubble(highlighted: false);
+    } else {
+      // Anahtar yalnızca hedef mesajda: ortalama bu anahtarla yapılır. Vurgu
+      // yalnızca bu baloncuğu yeniden çizer.
+      body = ValueListenableBuilder<bool>(
+        key: _focusMessageKey,
+        valueListenable: _focusHighlighted,
+        builder: (context, highlighted, _) => bubble(highlighted: highlighted),
+      );
     }
 
-    // Anahtar yalnızca hedef mesajda: ortalama bu anahtarla yapılır. Vurgu
-    // yalnızca bu baloncuğu yeniden çizer.
-    return ValueListenableBuilder<bool>(
-      key: _focusMessageKey,
-      valueListenable: _focusHighlighted,
-      builder: (context, highlighted, _) => bubble(highlighted: highlighted),
+    final String? dayLabel = _dayLabelAbove(items, index);
+    if (dayLabel == null) return body;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ChatDateSeparator(label: dayLabel),
+        body,
+      ],
     );
   }
 
@@ -1569,14 +1841,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Open the gallery listing every photo uploaded by [userId].
-  void _openUserMediaGallery(String userId) {
-    Navigator.push(
+  /// Open the gallery listing every photo uploaded by [userId]. Galeride bir
+  /// fotoğraf için "Sohbette göster" seçilirse sohbet o mesaja gider.
+  Future<void> _openUserMediaGallery(String userId) async {
+    final String? messageId = await Navigator.push<String>(
       context,
       MaterialPageRoute(
         builder: (_) => UserMediaGalleryPage(userId: userId),
       ),
     );
+    if (messageId == null || !mounted) return;
+    _focusOn(messageId);
   }
 
   /// Build a title widget displaying the user's full name.
@@ -1618,50 +1893,67 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       },
     );
   }
+}
 
-  /// Show a full-screen image dialog with zoom support.
-  void _showImageDialog(BuildContext context, String imageUrl) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        child: Stack(
-          alignment: Alignment.topRight,
-          children: [
-            InteractiveViewer(
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  
-                  return Center(
-                    child: CircularProgressIndicator(
-                      value: loadingProgress.expectedTotalBytes != null
-                          ? loadingProgress.cumulativeBytesLoaded /
-                              loadingProgress.expectedTotalBytes!
-                          : null,
-                    ),
-                  );
-                },
-                errorBuilder: (context, error, stackTrace) {
-                  return const Center(
-                    child: Text('Görsel yüklenemedi', style: TextStyle(color: Colors.red)),
-                  );
-                },
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        ),
-      ),
+/// Baloncuk ölçüleri: ekran genişliğinin bir oranı, geniş ekranda (masaüstü)
+/// sabit bir üst sınır. Mesaj ve bekleyen yükleme baloncukları aynı ölçüyü
+/// kullanır.
+class _BubbleMetrics {
+  final double textMaxWidth;
+  final double imageWidth;
+
+  /// Ölçüsü kayıtlı olmayan eski fotoğrafların yüksekliği.
+  final double legacyImageHeight;
+
+  /// En dar (dikey) ve en geniş (yatay) fotoğraf oranı. Bunların dışındaki
+  /// fotoğraflar (ör. uzun ekran görüntüsü) bu orana kırpılır; baloncuk aşırı
+  /// uzamaz.
+  static const double _minPhotoAspectRatio = 0.75;
+  static const double _maxPhotoAspectRatio = 1.9;
+
+  const _BubbleMetrics({
+    required this.textMaxWidth,
+    required this.imageWidth,
+    required this.legacyImageHeight,
+  });
+
+  /// Metin baloncuğunun en fazla genişliği: geniş satırlar okumayı zorlaştırır.
+  static const double _maxTextBubbleWidth = 520;
+  static const double _maxImageWidth = 360;
+  static const double _textWidthFactor = 0.75;
+  static const double _imageWidthFactor = 0.65;
+  static const double _legacyImageHeightFactor = 0.25;
+
+  factory _BubbleMetrics.of(Size screen) {
+    final double imageWidth =
+        (screen.width * _imageWidthFactor).clamp(0.0, _maxImageWidth);
+    return _BubbleMetrics(
+      textMaxWidth:
+          (screen.width * _textWidthFactor).clamp(0.0, _maxTextBubbleWidth),
+      imageWidth: imageWidth,
+      legacyImageHeight:
+          (screen.height * _legacyImageHeightFactor).clamp(0.0, imageWidth),
     );
+  }
+
+  /// Fotoğrafın baloncuktaki ölçüsü: tam genişlik, yükseklik fotoğrafın
+  /// oranından. Oranı kayıtlı olmayan eski fotoğrafta sabit yükseklik.
+  /// Görsel inmeden doğru yer ayrılır; liste kaymaz, fotoğraf kırpılmaz.
+  Size photoSize(double? aspectRatio) {
+    if (aspectRatio == null) return Size(imageWidth, legacyImageHeight);
+    final double ratio =
+        aspectRatio.clamp(_minPhotoAspectRatio, _maxPhotoAspectRatio);
+    return Size(imageWidth, imageWidth / ratio);
   }
 }
 
-/// Extracted message bubble widget - prevents parent rebuilds
+/// Tek mesajın baloncuğu: varsa yanıtladığı mesajın alıntısı, öğün
+/// fotoğrafında öğün etiketi, fotoğraf (oranında, küçük görselle), metin ve
+/// yalnızca saat; hepsi tek baloncukta. Gün, listedeki gün ayırıcısında
+/// yazar.
+///
+/// Dokunmatikte uzun basınca mesaj menüsü (ifadeler + işlemler) açılır;
+/// masaüstünde metin seçilebilir ve sağ tık aynı işlemleri sunar.
 class _MessageBubble extends StatelessWidget {
   final MessageData message;
   final bool isMe;
@@ -1669,26 +1961,30 @@ class _MessageBubble extends StatelessWidget {
   /// UID of the person viewing the chat (used to find their own reaction).
   final String myUid;
 
-  /// Whether a long-press on this bubble should open the reaction picker.
+  /// Karşı tarafın mesajı mı: ifade bırakılabilir.
   final bool canReact;
 
-  /// Mesaj şu an vurgulu mu ("Sohbette göster" ile bu mesaja gelindiğinde kısa süre
-  /// arka planı yanar).
+  /// Mesaj şu an vurgulu mu (bir mesaja gidildiğinde kısa süre arka planı
+  /// yanar).
   final bool highlighted;
 
-  final void Function(String url) onImageTap;
+  /// Menüde sunulan işlemler (bkz. [MessageAction]).
+  final List<MessageAction> actions;
+
+  final _BubbleMetrics metrics;
+
+  /// Yanıtlanan mesajın sahibinin adı; yanıt değilse null.
+  final String? replySenderLabel;
+
+  final void Function(MessageData message) onImageTap;
 
   /// Called with the tapped emoji when the viewer picks a reaction.
   final void Function(MessageData message, String emoji) onToggleReaction;
 
-  /// Verilirse uzun basma bu mesajın öğün fotoğrafını silme akışını açar
-  /// (danışanın kendi öğün fotoğrafları).
-  final void Function(MessageData message)? onDeletePhoto;
+  final void Function(MessageData message, MessageAction action) onAction;
 
-  static const _months = [
-    '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
-    'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
-  ];
+  /// Alıntıya dokununca yanıtlanan mesaja gidilir.
+  final void Function(String messageId) onReplyTap;
 
   const _MessageBubble({
     required this.message,
@@ -1696,154 +1992,122 @@ class _MessageBubble extends StatelessWidget {
     required this.myUid,
     required this.canReact,
     required this.highlighted,
+    required this.actions,
+    required this.metrics,
+    required this.replySenderLabel,
     required this.onImageTap,
     required this.onToggleReaction,
-    this.onDeletePhoto,
+    required this.onAction,
+    required this.onReplyTap,
   });
+
+  /// Kendi mesajlarının baloncuk rengi (bekleyen yüklemeler de bu renkte).
+  static const Color myBubbleColor = Color(0xFFBBDEFB);
+  static const Color _otherBubbleColor = Color(0xFFE0E0E0);
+
+  /// Fotoğraflı baloncuğun iç boşluğu.
+  static const double _photoPadding = 4;
 
   /// Vurgunun açılıp kapanma süresi.
   static const Duration _highlightFadeDuration = Duration(milliseconds: 300);
 
-  /// Metin baloncuğunun en fazla genişliği (ekranın %75'i, geniş ekranda bu
-  /// değer); geniş satırlar okumayı zorlaştırır.
-  static const double _maxTextBubbleWidth = 520;
-
-  /// Görselin en fazla genişliği (ekranın %55'i, geniş ekranda bu değer).
-  static const double _maxImageWidth = 360;
-
-  static const String _copyMessageLabel = 'Mesajı Kopyala';
   static const String _reactLabel = 'İfade Bırak';
-  static const String _deletePhotoLabel = 'Fotoğrafı Sil';
-  static const String _copiedText = 'Mesaj kopyalandı.';
-  static const Duration _copiedFeedbackDuration = Duration(seconds: 1);
-
-  String _formatTime(DateTime dt) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    final messageDate = DateTime(dt.year, dt.month, dt.day);
-    
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    final time = '$h:$m';
-    
-    if (messageDate == today) return time;
-    if (messageDate == yesterday) return 'Dün $time';
-    
-    final day = dt.day;
-    final month = _months[dt.month];
-    
-    if (dt.year != now.year) {
-      return '$day $month ${dt.year} $time';
-    }
-    
-    return '$day $month $time';
-  }
 
   @override
   Widget build(BuildContext context) {
-    final ts = message.createdAt ?? message.clientCreatedAt;
-    final timeStr = ts != null ? _formatTime(ts.toDate()) : 'Gönderiliyor…';
-    final bubbleColor = isMe ? Colors.blue.shade100 : Colors.grey.shade300;
-    final align = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+    final Color bubbleColor = isMe ? myBubbleColor : _otherBubbleColor;
+    final CrossAxisAlignment align =
+        isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     // Uygulamanın yazdığı öğün açıklamaları eski mesajlarda da güncel adla
     // görünür ("Ara Öğün 2" -> "Ara").
     final String text = Meals.chatTextForDisplay(message.text ?? '');
+    final String? imageUrl = message.imageUrl;
+    final bool isMealPhoto = imageUrl != null && message.isMealPhoto;
+    final MessageReply? reply = message.replyTo;
+    final String? replyLabel = replySenderLabel;
 
-    final Size screen = MediaQuery.sizeOf(context);
-    final double textMaxWidth =
-        (screen.width * 0.75).clamp(0.0, _maxTextBubbleWidth);
-    final double imageWidth = (screen.width * 0.55).clamp(0.0, _maxImageWidth);
-    final double imageHeight = (screen.height * 0.25).clamp(0.0, imageWidth);
-
-    // The message body itself (text bubble and/or image + timestamp).
-    final content = Column(
-      crossAxisAlignment: align,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Text message bubble
-        if (text.isNotEmpty)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            constraints: BoxConstraints(maxWidth: textMaxWidth),
-            decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: align,
-              children: [
-                if (message.photoDeleted)
-                  _DeletedPhotoNote(text: text)
-                else
-                  Text(text, style: const TextStyle(fontSize: 15)),
-                const SizedBox(height: 4),
-                Text(
-                  timeStr,
-                  style: const TextStyle(fontSize: 11, color: Colors.black54),
+    final Widget content = Container(
+      constraints: BoxConstraints(
+        maxWidth: imageUrl == null
+            ? metrics.textMaxWidth
+            : metrics.imageWidth + _photoPadding * 2,
+      ),
+      padding: imageUrl == null
+          ? const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
+          : const EdgeInsets.all(_photoPadding),
+      decoration: BoxDecoration(
+        color: bubbleColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      // Metin baloncuğunun genişliği içeriğe göre (kısa mesajın baloncuğu
+      // kısa kalır, saat sağ alta oturur); fotoğraflı baloncuk fotoğrafın
+      // genişliğindedir, ek ölçüm gerekmez.
+      child: _shrinkToContent(
+        imageUrl == null,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (reply != null && replyLabel != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: MessageReplyQuote(
+                  senderLabel: replyLabel,
+                  text: reply.text,
+                  imageUrl: reply.imageUrl,
+                  onTap: () => onReplyTap(reply.messageId),
                 ),
-              ],
+              ),
+            if (isMealPhoto) _MealPhotoLabel(meal: message.photoMeal, text: text),
+            if (imageUrl != null) _buildPhoto(imageUrl),
+            if (message.photoDeleted)
+              _DeletedPhotoNote(text: text)
+            else if (text.isNotEmpty && !isMealPhoto)
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  imageUrl == null ? 0 : 6,
+                  imageUrl == null ? 0 : 6,
+                  imageUrl == null ? 0 : 6,
+                  0,
+                ),
+                child: Text(text, style: const TextStyle(fontSize: 15)),
+              ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                0,
+                4,
+                imageUrl == null ? 0 : 6,
+                imageUrl == null ? 0 : 2,
+              ),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _MessageTime(message: message),
+              ),
             ),
-          ),
-
-        // Image preview
-        if (message.imageUrl != null)
-          ChatImagePreview(
-            imageUrl: message.imageUrl,
-            width: imageWidth,
-            height: imageHeight,
-            onTap: () => onImageTap(message.imageUrl!),
-            usePlaceholder: message.createdAt == null,
-          ),
-
-        // Timestamp below image
-        if (message.imageUrl != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              timeStr,
-              style: const TextStyle(fontSize: 11, color: Colors.black54),
-            ),
-          ),
-      ],
+          ],
+        ),
+      ),
     );
 
-    // Masaüstünde metin fareyle seçilebilir; sağ tık menüsü kopyalamayı ve
-    // mesaj işlemlerini (ifade, fotoğraf silme) sunar.
-    final Widget selectableContent = _isDesktopPlatform
+    final Widget body = _isDesktopPlatform
+        // Masaüstünde metin fareyle seçilebilir; sağ tık menüsü kopyalamayı
+        // ve mesaj işlemlerini sunar.
         ? SelectionArea(
             contextMenuBuilder: (menuContext, region) =>
-                _buildDesktopMenu(context, region, text),
+                _buildDesktopMenu(context, region),
             child: content,
           )
-        : content;
-
-    // Long-press to react (on the other party's messages) or, on the
-    // client's own meal photo, to delete it. HitTestBehavior.deferToChild
-    // keeps taps on the image working (opens the full-screen viewer) while
-    // still recognizing a long-press on the bubble.
-    final void Function(MessageData message)? deletePhoto = onDeletePhoto;
-    final Widget body;
-    if (canReact) {
-      body = GestureDetector(
-        behavior: HitTestBehavior.deferToChild,
-        onLongPressStart: (details) =>
-            _handleLongPress(context, details.globalPosition),
-        child: selectableContent,
-      );
-    } else if (deletePhoto != null) {
-      body = GestureDetector(
-        behavior: HitTestBehavior.deferToChild,
-        onLongPress: () => deletePhoto(message),
-        child: selectableContent,
-      );
-    } else {
-      body = selectableContent;
-    }
+        // Uzun basınca mesaj menüsü. HitTestBehavior.deferToChild keeps taps
+        // on the image working (opens the full-screen viewer).
+        : GestureDetector(
+            behavior: HitTestBehavior.deferToChild,
+            onLongPress: () => _openActionsSheet(context),
+            child: content,
+          );
 
     return AnimatedContainer(
       duration: _highlightFadeDuration,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: highlighted
             ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18)
@@ -1863,40 +2127,81 @@ class _MessageBubble extends StatelessWidget {
     );
   }
 
-  /// Masaüstü sağ tık menüsü: seçili metin varsa "Kopyala", mesaj metni
-  /// varsa "Mesajı Kopyala", karşı tarafın mesajıysa "İfade Bırak", kendi öğün
-  /// fotoğrafıysa "Fotoğrafı Sil". Menü kapanır, sonra işlem yapılır.
+  /// Fotoğraf: küçük görseli indirilir (liste kartlarının optimize
+  /// görseliyle, [MealThumbnailImage]); küçük görseli olmayan eski mesajda
+  /// orijinal küçültülerek çözülür. Orijinal yalnızca tam ekranda iner.
+  static Widget _shrinkToContent(bool shrink, Widget child) =>
+      shrink ? IntrinsicWidth(child: child) : child;
+
+  Widget _buildPhoto(String imageUrl) {
+    final Size size = metrics.photoSize(message.imageAspectRatio);
+    final String? thumbUrl = message.thumbUrl;
+    return GestureDetector(
+      onTap: () => onImageTap(message),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          width: size.width,
+          height: size.height,
+          child: MealThumbnailImage(
+            url: thumbUrl ?? imageUrl,
+            isOriginal: thumbUrl == null,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Dokunmatikte uzun basınca açılan menü: ifade ya da işlem seçilir.
+  Future<void> _openActionsSheet(BuildContext context) async {
+    final MessageActionChoice? choice = await showMessageActionsSheet(
+      context,
+      canReact: canReact,
+      actions: actions,
+      currentEmoji: message.reactions[myUid],
+    );
+    if (choice == null) return;
+
+    final String? emoji = choice.emoji;
+    final MessageAction? action = choice.action;
+    if (emoji != null) {
+      onToggleReaction(message, emoji);
+    } else if (action != null) {
+      onAction(message, action);
+    }
+  }
+
+  /// Masaüstü sağ tık menüsü: seçili metin varsa "Kopyala", ardından
+  /// "Yanıtla", karşı tarafın mesajıysa "İfade Bırak" ve mesajın diğer
+  /// işlemleri. Menü kapanır, sonra işlem yapılır.
   Widget _buildDesktopMenu(
     BuildContext context,
     SelectableRegionState region,
-    String text,
   ) {
     final Offset anchor = region.contextMenuAnchors.primaryAnchor;
-    final void Function(MessageData message)? deletePhoto = onDeletePhoto;
 
     VoidCallback closeThen(VoidCallback action) => () {
           region.hideToolbar();
           action();
         };
+    ContextMenuButtonItem itemFor(MessageAction action) =>
+        ContextMenuButtonItem(
+          label: action.label,
+          onPressed: closeThen(() => onAction(message, action)),
+        );
 
     final List<ContextMenuButtonItem> items = [
       ...region.contextMenuButtonItems
           .where((item) => item.type == ContextMenuButtonType.copy),
-      if (text.isNotEmpty && !message.isMealPhoto && !message.photoDeleted)
-        ContextMenuButtonItem(
-          label: _copyMessageLabel,
-          onPressed: closeThen(() => _copyMessage(context, text)),
-        ),
+      if (actions.contains(MessageAction.reply))
+        itemFor(MessageAction.reply),
       if (canReact)
         ContextMenuButtonItem(
           label: _reactLabel,
-          onPressed: closeThen(() => _handleLongPress(context, anchor)),
+          onPressed: closeThen(() => _pickReactionAt(context, anchor)),
         ),
-      if (deletePhoto != null)
-        ContextMenuButtonItem(
-          label: _deletePhotoLabel,
-          onPressed: closeThen(() => deletePhoto(message)),
-        ),
+      for (final MessageAction action in actions)
+        if (action != MessageAction.reply) itemFor(action),
     ];
     if (items.isEmpty) return const SizedBox.shrink();
 
@@ -1906,28 +2211,84 @@ class _MessageBubble extends StatelessWidget {
     );
   }
 
-  /// Mesajın tamamını panoya kopyalar ve kısa bir bilgi gösterir.
-  void _copyMessage(BuildContext context, String text) {
-    Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      const SnackBar(
-        content: Text(_copiedText),
-        duration: _copiedFeedbackDuration,
-      ),
-    );
-  }
-
-  /// Open the reaction picker for this message and forward the chosen emoji.
-  Future<void> _handleLongPress(BuildContext context, Offset globalPosition) async {
-    final current = message.reactions[myUid];
-    final selected = await showReactionPicker(
+  /// İfade seçicisini [globalPosition] noktasında açar.
+  Future<void> _pickReactionAt(
+    BuildContext context,
+    Offset globalPosition,
+  ) async {
+    final String? selected = await showReactionPicker(
       context,
       globalPosition: globalPosition,
-      currentEmoji: current,
+      currentEmoji: message.reactions[myUid],
     );
     if (selected != null) {
       onToggleReaction(message, selected);
     }
+  }
+}
+
+/// Öğün fotoğrafı baloncuğunun başındaki öğün etiketi ("Öğle"), öğünün
+/// renk ve ikonuyla.
+class _MealPhotoLabel extends StatelessWidget {
+  final Meals? meal;
+
+  /// Öğün çözülemezse gösterilen açıklama ("Öğün: Öğle").
+  final String text;
+
+  const _MealPhotoLabel({required this.meal, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final Meals? meal = this.meal;
+    final Color color = meal == null ? Colors.black54 : mealTypeColor(meal);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 6),
+      child: Row(
+        children: [
+          Icon(
+            meal == null ? Icons.restaurant : mealTypeIcon(meal),
+            size: 16,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              meal?.displayLabel ?? text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontWeight: FontWeight.w600, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Baloncuğun sağ altındaki saat ("14:05"). Mesaj henüz sunucuya
+/// ulaşmadıysa yanında saat ikonu görünür.
+class _MessageTime extends StatelessWidget {
+  final MessageData message;
+
+  const _MessageTime({required this.message});
+
+  static const TextStyle _style = TextStyle(fontSize: 11, color: Colors.black54);
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime? sentAt = message.sentAt;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(sentAt == null ? '' : DateFormatter.formatTime(sentAt),
+            style: _style),
+        if (message.createdAt == null) ...[
+          const SizedBox(width: 3),
+          const Icon(Icons.schedule, size: 12, color: Colors.black45),
+        ],
+      ],
+    );
   }
 }
 
@@ -1966,9 +2327,9 @@ class _DeletedPhotoNote extends StatelessWidget {
   }
 }
 
-/// Odaklı açılan sohbette en yeni mesaja dönüş düğmesi. En yeni mesaj
-/// ekranda değilken görünür; açılışta okunmamış mesaj varsa sayısı rozette
-/// yazar.
+/// En yeni mesaja dönüş düğmesi. Kullanıcı eski mesajlara kaydırınca (ya da
+/// sohbet eski bir mesajda açıldıysa) görünür; bu arada gelen okunmamış
+/// mesajların sayısı rozette yazar.
 class _JumpToLatestButton extends StatelessWidget {
   final ValueListenable<bool> visible;
   final ValueListenable<int> unreadCount;
@@ -2007,17 +2368,34 @@ class _JumpToLatestButton extends StatelessWidget {
   }
 }
 
-/// Extracted input row widget - uses Selector for targeted rebuilds
+/// Mesaj yazma satırı: ek menüsü ("Öğün Yükle", "Fotoğraf Gönder"), mesaj
+/// kutusu ve gönder düğmesi; yanıt yazılırken üstünde alıntı çubuğu.
 class _ChatInputRow extends StatefulWidget {
   /// Sohbet sayfasının mesaj kutusu (bkz. [_ChatPageState._messageController]).
   final TextEditingController controller;
+  final FocusNode focusNode;
   final VoidCallback onSend;
-  final VoidCallback onMealUpload;
+
+  /// Öğün fotoğrafı yükleme; admin öğün yüklemediği için onda null.
+  final VoidCallback? onMealUpload;
+
+  /// Öğün kaydına girmeyen fotoğraf gönderme.
+  final VoidCallback onPhotoSend;
+
+  /// Yanıtlanan mesaj; null değilse kutunun üstünde alıntısı görünür.
+  final ValueNotifier<MessageData?> replyTarget;
+
+  /// Alıntıdaki mesaj sahibinin adı.
+  final String Function(MessageData message) replyLabelOf;
 
   const _ChatInputRow({
     required this.controller,
+    required this.focusNode,
     required this.onSend,
     required this.onMealUpload,
+    required this.onPhotoSend,
+    required this.replyTarget,
+    required this.replyLabelOf,
   });
 
   @override
@@ -2025,6 +2403,12 @@ class _ChatInputRow extends StatefulWidget {
 }
 
 class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderStateMixin {
+  static const String _hintText = 'Mesaj yazın…';
+  static const String _sendTooltip = 'Gönder';
+  static const String _attachTooltip = 'Ekler';
+  static const String _mealUploadLabel = 'Öğün Yükle';
+  static const String _photoSendLabel = 'Fotoğraf Gönder';
+
   bool _isMenuOpen = false;
   late final AnimationController _animationController;
   late final Animation<double> _rotationAnimation;
@@ -2092,100 +2476,124 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final VoidCallback? onMealUpload = widget.onMealUpload;
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-        // Only rebuild when the upload state changes
-        child: Selector<ChatManager, bool>(
-          selector: (_, chat) => chat.isUploading,
-          builder: (context, isUploading, _) {
-            final isDisabled = isUploading;
-            
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Expandable attachment menu
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                  child: _isMenuOpen
-                      ? Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _AttachmentOption(
-                                icon: Icons.restaurant_rounded,
-                                label: 'Öğün Yükle',
-                                color: Colors.orange,
-                                onTap: isDisabled ? null : () => _closeMenuAndRun(widget.onMealUpload),
-                              ),
-                            ],
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-                
-                // Input row
-                Row(
-                  children: [
-                    // Plus button to toggle menu
-                    RotationTransition(
-                      turns: _rotationAnimation,
-                      child: IconButton(
-                        icon: Icon(
-                          Icons.add_circle_rounded,
-                          color: _isMenuOpen ? colorScheme.primary : null,
-                          size: 28,
-                        ),
-                        onPressed: isDisabled ? null : _toggleMenu,
-                        tooltip: 'Ekler',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Expandable attachment menu
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              child: _isMenuOpen
+                  ? Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                    ),
-                    
-                    const SizedBox(width: 4),
-                    
-                    // Text input field
-                    Expanded(
-                      child: Focus(
-                        onKeyEvent: _handleKey,
-                        child: TextField(
-                          controller: widget.controller,
-                          minLines: 1,
-                          maxLines: 4,
-                          decoration: InputDecoration(
-                            hintText: 'Mesaj yazın…',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          if (onMealUpload != null)
+                            _AttachmentOption(
+                              icon: Icons.restaurant_rounded,
+                              label: _mealUploadLabel,
+                              color: Colors.orange,
+                              onTap: () => _closeMenuAndRun(onMealUpload),
                             ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            isDense: true,
+                          _AttachmentOption(
+                            icon: Icons.photo_outlined,
+                            label: _photoSendLabel,
+                            color: Colors.blue,
+                            onTap: () => _closeMenuAndRun(widget.onPhotoSend),
                           ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+
+            // Yanıt yazılırken yanıtlanan mesajın alıntısı.
+            ValueListenableBuilder<MessageData?>(
+              valueListenable: widget.replyTarget,
+              builder: (context, target, _) {
+                if (target == null) return const SizedBox.shrink();
+                final MessageReply reply = MessageReply.of(target);
+                return MessageReplyComposerBar(
+                  senderLabel: widget.replyLabelOf(target),
+                  text: reply.text,
+                  imageUrl: reply.imageUrl,
+                  onCancel: () => widget.replyTarget.value = null,
+                );
+              },
+            ),
+
+            // Input row
+            Row(
+              children: [
+                // Plus button to toggle menu
+                RotationTransition(
+                  turns: _rotationAnimation,
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.add_circle_rounded,
+                      color: _isMenuOpen ? colorScheme.primary : null,
+                      size: 28,
+                    ),
+                    onPressed: _toggleMenu,
+                    tooltip: _attachTooltip,
+                  ),
+                ),
+
+                const SizedBox(width: 4),
+
+                // Text input field
+                Expanded(
+                  child: Focus(
+                    onKeyEvent: _handleKey,
+                    child: TextField(
+                      controller: widget.controller,
+                      focusNode: widget.focusNode,
+                      minLines: 1,
+                      maxLines: 4,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: _hintText,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
                         ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        isDense: true,
                       ),
                     ),
-                    
-                    const SizedBox(width: 4),
-                    
-                    // Send button
-                    IconButton(
+                  ),
+                ),
+
+                const SizedBox(width: 4),
+
+                // Gönder: kutu boşken pasif görünür.
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.controller,
+                  builder: (context, value, _) {
+                    final bool canSend = value.text.trim().isNotEmpty;
+                    return IconButton(
+                      tooltip: _sendTooltip,
                       icon: Icon(
                         Icons.send_rounded,
-                        color: colorScheme.primary,
+                        color: canSend ? colorScheme.primary : null,
                       ),
-                      onPressed: widget.onSend,
-                    ),
-                  ],
+                      onPressed: canSend ? widget.onSend : null,
+                    );
+                  },
                 ),
               ],
-            );
-          },
+            ),
+          ],
         ),
       ),
     );
