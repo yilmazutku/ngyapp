@@ -90,6 +90,14 @@ class ChatPage extends StatefulWidget {
     this.userDisplayName,
   });
 
+  /// Sohbet silme onaylarında neyin silinip neyin kaldığı (bkz.
+  /// [ChatManager.deleteChat]); sohbet sayfası ve Tüm Sohbetler listesi aynı
+  /// metni gösterir.
+  static const String deleteChatPhotosNote =
+      'Sohbete doğrudan gönderilmiş fotoğraflar da silinir; öğün fotoğrafları '
+      'danışanın öğün kayıtlarında kalır ve Öğün Fotoğrafları ile "Planım"da '
+      'görünmeye devam eder.';
+
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
@@ -391,15 +399,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Admin-only: confirm and permanently delete this chat.
   ///
-  /// Deletes all messages and every photo uploaded in the chat, then returns
-  /// to the previous screen (the admin chat list).
+  /// Deletes all messages and the photos sent directly to the chat (meal
+  /// photos stay in the client's meal records, see [ChatManager.deleteChat]),
+  /// then returns to the previous screen (the admin chat list).
   Future<void> _confirmAndDeleteChat() async {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Sohbeti Sil',
-      message: 'Bu sohbet ve tüm mesajları kalıcı olarak silinecek. Sohbette '
-          'gönderilen fotoğraflar da silinir; öğün fotoğrafları danışanın öğün '
-          'kayıtlarında kalır. Bu işlem geri alınamaz.\n\n'
+      message: 'Bu sohbet ve tüm mesajları kalıcı olarak silinecek. '
+          '${ChatPage.deleteChatPhotosNote} Bu işlem geri alınamaz.\n\n'
           'Devam etmek istiyor musunuz?',
       confirmText: 'Sil',
       cancelText: 'İptal',

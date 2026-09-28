@@ -269,7 +269,9 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     }
   }
 
-  /// Confirm and permanently delete a chat (with all messages and photos).
+  /// Confirm and permanently delete a chat and its messages. Öğün
+  /// fotoğrafları danışanın öğün kayıtlarında kalır (bkz.
+  /// [ChatPage.deleteChatPhotosNote]); onay metni bunu söyler.
   ///
   /// Runs from the page's own context so the confirm/loading/info dialogs stay
   /// valid even after the deleted item disappears from the streamed list.
@@ -277,8 +279,9 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Sohbeti Sil',
-      message: '"$displayName" ile olan sohbet, tüm mesajlar ve yüklenen fotoğraflar '
-          'kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\nDevam etmek istiyor musunuz?',
+      message: '"$displayName" ile olan sohbet ve tüm mesajları kalıcı olarak '
+          'silinecek. ${ChatPage.deleteChatPhotosNote} Bu işlem geri '
+          'alınamaz.\n\nDevam etmek istiyor musunuz?',
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
@@ -322,9 +325,10 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     }
   }
 
-  /// Confirm and permanently delete all currently selected chats (with their
-  /// messages and photos). Shows the same style of confirmation used for a
-  /// single deletion, then a live progress loader while deleting one by one.
+  /// Confirm and permanently delete all currently selected chats and their
+  /// messages (meal photos stay, see [ChatPage.deleteChatPhotosNote]). Shows
+  /// the same style of confirmation used for a single deletion, then a live
+  /// progress loader while deleting one by one.
   Future<void> _handleDeleteSelectedChats() async {
     final ids = _selectedChatIds.toList();
     if (ids.isEmpty) return;
@@ -332,8 +336,9 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     final confirmed = await DialogUtils.openConfirm(
       context,
       title: 'Seçili Sohbetleri Sil',
-      message: 'Seçili ${ids.length} sohbet, tüm mesajlar ve yüklenen fotoğraflar '
-          'kalıcı olarak silinecek. Bu işlem geri alınamaz.\n\nDevam etmek istiyor musunuz?',
+      message: 'Seçili ${ids.length} sohbet ve tüm mesajları kalıcı olarak '
+          'silinecek. ${ChatPage.deleteChatPhotosNote} Bu işlem geri '
+          'alınamaz.\n\nDevam etmek istiyor musunuz?',
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
