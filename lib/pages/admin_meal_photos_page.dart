@@ -43,6 +43,13 @@ import 'chat_page_new.dart';
 /// yatay bir şerit hâlinde, her fotoğrafın altında öğün adı ve yükleme saati
 /// ile listelenir. Sayfanın kendisi dikey kaydırılır; iki yönde de kaydırma
 /// çubuğu görünür durumdadır.
+class AdminMealPhotosPage extends StatefulWidget {
+  const AdminMealPhotosPage({super.key});
+
+  @override
+  State<AdminMealPhotosPage> createState() => _AdminMealPhotosPageState();
+}
+
 /// Fotoğrafa sağ tıklandığında (dokunmatikte uzun basıldığında) açılan
 /// menüdeki işlemler.
 enum _PhotoAction {
@@ -51,13 +58,6 @@ enum _PhotoAction {
 
   /// Fotoğrafın sohbetteki mesajına ifade bırakır.
   react,
-}
-
-class AdminMealPhotosPage extends StatefulWidget {
-  const AdminMealPhotosPage({super.key});
-
-  @override
-  State<AdminMealPhotosPage> createState() => _AdminMealPhotosPageState();
 }
 
 class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
@@ -81,7 +81,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _nextDayTooltip = 'Sonraki gün';
   static const String _emptyTodayText = 'Bugün fotoğraf yüklenmemiş.';
   static const String _emptyOtherDayText = 'Bu gün fotoğraf yüklenmemiş.';
-  static const String _goToChatLabel = 'Chate git';
+  static const String _goToChatLabel = 'Sohbette göster';
   static const String _reactLabel = 'İfade Bırak';
   static const String _chatLookupText = 'Sohbetteki mesaj aranıyor...';
   static const String _chatNotFoundTitle = 'Mesaj Bulunamadı';
@@ -170,9 +170,15 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   List<_ClientPhotoGroup> _visibleGroups = const [];
 
   /// Fotoğraf adresi -> o fotoğrafın sohbetteki mesajına bırakılan tepkiler
-  /// (uid -> emoji). Kartların köşesindeki rozet buradan çizilir; fotoğraflarla
-  /// aynı anda, ayrı bir sorgu kümesiyle doldurulur (bkz. [_load]).
+  /// (uid -> emoji). Kartların köşesindeki rozet buradan çizilir; her danışanın
+  /// fotoğrafları gelir gelmez o fotoğrafların adresleriyle doldurulur (bkz.
+  /// [_load]).
   final Map<String, Map<String, String>> _reactionsByImageUrl = {};
+
+  /// Rozeti ilk yüklemeden daha yeni bir bilgiyle yazılmış fotoğraflar
+  /// (buradan ifade bırakıldı ya da sohbetten dönülünce tazelendi). İlk
+  /// yüklemenin geç gelen sonucu bunların rozetini eskisiyle ezmez.
+  final Set<String> _freshReactionUrls = {};
 
   String _searchQuery = '';
   Meals? _mealFilter;
@@ -209,8 +215,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Sayfayı iki aşamada doldurur.
   ///
   /// 1. Danışan listesi (aktif paketliler) gelir gelmez kartlar çizilir.
-  /// 2. Fotoğraflar ve fotoğraflara bırakılmış tepkiler **aynı anda** istenir;
-  ///    iki sorgu kümesi birbirini beklemez, her parti geldikçe ekrana işlenir.
+  /// 2. Fotoğraflar partiler hâlinde gelir ve geldikçe ekrana işlenir; her
+  ///    partideki danışanların tepkileri o fotoğrafların adresleriyle hemen
+  ///    istenir, sonraki partileri beklemez.
   ///
   /// Böylece tüm danışanların sorgusu bitene kadar boş ekran beklenmez; sayfa
   /// dolarak açılır ve tepkiler yükleme süresine ek yük bindirmez.
@@ -242,6 +249,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       _groups = const [];
       _visibleGroups = const [];
       _reactionsByImageUrl.clear();
+      _freshReactionUrls.clear();
     });
 
     try {
@@ -283,16 +291,13 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
       if (activeCustomers.isEmpty) return;
 
-      // 2. aşama: fotoğraflar ve tepkileri yan yana istenir. İkisi de aynı
-      // danışan listesini partiler hâlinde tarar; toplam süre ikisinin toplamı
-      // değil, uzun olanı kadardır.
+      // 2. aşama: fotoğraflar partiler hâlinde gelir; her partinin
+      // tepkileri o partinin fotoğraf adresleriyle hemen istenir.
       final List<String> userIds =
           activeCustomers.map((user) => user.userId).toList();
+      final List<Future<void>> reactionLoads = [];
 
-      // Şerit altındaki "yükleniyor" satırı fotoğraflarla ilgili: tepkileri
-      // beklemeden, fotoğraflar biter bitmez kalkar.
-      final Future<void> photos = mealManager
-          .fetchMealsOfUsersForDate(
+      await mealManager.fetchMealsOfUsersForDate(
         userIds: userIds,
         date: targetDay,
         onBatch: (batch) {
@@ -301,27 +306,23 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
             _mergePhotos(batch);
             _applyFilters();
           });
+          batch.forEach((userId, meals) {
+            reactionLoads.add(_loadReactionsOf(
+              chatManager,
+              userId,
+              [for (final MealModel meal in meals) ...meal.imageUrls],
+              loadId,
+            ));
+          });
         },
-      )
-          .then((_) {
-        if (!mounted || loadId != _loadId) return;
-        setState(() => _photosLoading = false);
-      });
+      );
 
-      // Tepkiler sayfanın asıl işi değil: okunamazsa rozet çıkmaz, fotoğraflar
-      // yine gösterilir. Bu yüzden hatası yükleme akışını düşürmez.
-      final Future<void> reactions = chatManager
-          .fetchImageReactionsOfUsersForDate(
-            userIds: userIds,
-            date: targetDay,
-            onBatch: (batch) {
-              if (!mounted || loadId != _loadId || batch.isEmpty) return;
-              setState(() => _reactionsByImageUrl.addAll(batch));
-            },
-          )
-          .catchError((Object e) => <String, Map<String, String>>{});
+      // Şerit altındaki "yükleniyor" satırı fotoğraflarla ilgili: tepkileri
+      // beklemeden, fotoğraflar biter bitmez kalkar.
+      if (!mounted || loadId != _loadId) return;
+      setState(() => _photosLoading = false);
 
-      await Future.wait<void>([photos, reactions]);
+      await Future.wait<void>(reactionLoads);
     } catch (e) {
       if (!mounted || loadId != _loadId) return;
       setState(() {
@@ -330,6 +331,34 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         _photosLoading = false;
       });
     }
+  }
+
+  /// Bir danışanın fotoğraflarına bırakılmış tepkileri okuyup rozetlere işler.
+  ///
+  /// Tepkiler sayfanın asıl işi değil: okunamazsa rozet çıkmaz, fotoğraflar
+  /// yine gösterilir. Bu arada daha yeni bir bilgiyle yazılmış rozetler
+  /// ([_freshReactionUrls]) ezilmez.
+  Future<void> _loadReactionsOf(
+    ChatManager chatManager,
+    String userId,
+    List<String> imageUrls,
+    int loadId,
+  ) async {
+    final Map<String, Map<String, String>> reactions;
+    try {
+      reactions = await chatManager.fetchImageReactions(userId, imageUrls);
+    } catch (e) {
+      return;
+    }
+    if (!mounted || loadId != _loadId || reactions.isEmpty) return;
+
+    setState(() {
+      reactions.forEach((url, byUser) {
+        if (!_freshReactionUrls.contains(url)) {
+          _reactionsByImageUrl[url] = byUser;
+        }
+      });
+    });
   }
 
   /// Gelen parti sonucunu mevcut kartlara işler ve sırayı tazeler.
@@ -393,14 +422,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     return [for (final int i in order) photos[i]];
   }
 
-  /// Arama ve öğün filtresini uygulayıp [_visibleGroups] sonucunu tazeler.
-  ///
-  /// Sonuç saklanır: liste her yeniden çizimde değil, yalnızca girdiler
-  /// (yükleme, arama, öğün filtresi) değişince hesaplanır.
-  ///
-  /// Arama danışanı listeden çıkarır; öğün filtresi ise danışanı listede
-  /// bırakıp yalnızca fotoğraflarını süzer — böylece "bu öğünü kim yüklememiş"
-  /// de görülebilir.
   /// [type] seçili öğün filtresine uyuyor mu. Filtre bir ara öğünse üç ara
   /// öğünün hepsi eşleşir (bkz. [_mealFilterOptions]).
   bool _matchesMealFilter(Meals type) {
@@ -409,6 +430,14 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     return filter.isSnack ? type.isSnack : type == filter;
   }
 
+  /// Arama ve öğün filtresini uygulayıp [_visibleGroups] sonucunu tazeler.
+  ///
+  /// Sonuç saklanır: liste her yeniden çizimde değil, yalnızca girdiler
+  /// (yükleme, arama, öğün filtresi) değişince hesaplanır.
+  ///
+  /// Arama danışanı listeden çıkarır; öğün filtresi ise danışanı listede
+  /// bırakıp yalnızca fotoğraflarını süzer — böylece "bu öğünü kim yüklememiş"
+  /// de görülebilir.
   void _applyFilters() {
     final List<String> queryWords = searchWordsOf(_searchQuery);
     final List<_ClientPhotoGroup> visible = [];
@@ -592,9 +621,11 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   /// Sohbeti fotoğrafın mesajında açar.
   ///
-  /// Mesaj sohbetin gösterdiği son 50 mesajdan eskiyse sohbet her zamanki gibi
-  /// en alttan açılır. Sohbetten dönülünce o danışanın rozetleri tazelenir:
-  /// sohbette bırakılan/kaldırılan ifade ya da silinen sohbet kartlara yansır.
+  /// Sohbet mesajı kapsayacak kadar geriden yüklenir (bkz.
+  /// [ChatManager.openFocusWindow]); mesaj sohbetin çok gerisindeyse sohbet en
+  /// yeni mesajdan açılır ve bu kullanıcıya söylenir. Sohbetten dönülünce o
+  /// danışanın rozetleri tazelenir: sohbette bırakılan/kaldırılan ifade ya da
+  /// silinen sohbet kartlara yansır.
   Future<void> _goToChatMessage(
     _ClientPhotoGroup group,
     MealModel photo,
@@ -633,13 +664,16 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     final ChatManager chatManager =
         Provider.of<ChatManager>(context, listen: false);
     final int loadId = _loadId;
+    final List<String> imageUrls = [
+      for (final _ClientPhotoGroup group in _groups)
+        if (group.user.userId == userId)
+          for (final MealModel photo in group.photos) photo.imageUrl,
+    ];
+    if (imageUrls.isEmpty) return;
 
     final Map<String, Map<String, String>> fresh;
     try {
-      fresh = await chatManager.fetchImageReactionsOfUserForDate(
-        userId: userId,
-        date: _day,
-      );
+      fresh = await chatManager.fetchImageReactions(userId, imageUrls);
     } catch (e) {
       return;
     }
@@ -647,13 +681,11 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     if (!mounted || loadId != _loadId) return;
 
     setState(() {
-      for (final _ClientPhotoGroup group in _groups) {
-        if (group.user.userId != userId) continue;
-        for (final MealModel photo in group.photos) {
-          _reactionsByImageUrl.remove(photo.imageUrl);
-        }
+      for (final String url in imageUrls) {
+        _reactionsByImageUrl.remove(url);
       }
       _reactionsByImageUrl.addAll(fresh);
+      _freshReactionUrls.addAll(imageUrls);
     });
   }
 
@@ -715,6 +747,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           } else {
             _reactionsByImageUrl[photo.imageUrl] = updated;
           }
+          _freshReactionUrls.add(photo.imageUrl);
         });
       }
 

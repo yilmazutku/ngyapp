@@ -468,9 +468,10 @@ function buildAdminReactionBody(message, emoji) {
  *
  * Reactions are stored on the message document as a map keyed by the reactor's
  * UID: `reactions.<uid> = emoji`. This fires on message UPDATES (message
- * creation is handled by the functions above) and only notifies when a *new or
- * changed* reaction authored by an admin appears on a message the user sent.
- * Removing a reaction does not notify.
+ * creation is handled by the functions above) and only notifies when a *new*
+ * reaction authored by an admin appears on a message the user sent. Changing
+ * an existing reaction (e.g. correcting 👍 to ❤️) or removing it does not
+ * notify, so a correction never sends the user a second notification.
  *
  * Path: chats/{chatId}/messages/{messageId}. In our model chatId == user UID
  * (the receiver of the notification).
@@ -498,15 +499,16 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
           (after.reactions && typeof after.reactions === 'object') ?
               after.reactions : {};
 
-      // Find a newly added or changed reaction authored by an admin.
+      // Find a newly added reaction authored by an admin.
       let emoji = null;
       for (const [uid, value] of Object.entries(afterReactions)) {
         if (!ADMIN_UIDS.has(uid)) continue; // only admin reactions notify
-        if (beforeReactions[uid] === value) continue; // unchanged
-        emoji = value; // added or changed
+        if (beforeReactions[uid]) continue; // had one: unchanged or changed
+        emoji = value; // newly added
       }
 
-      // Nothing new from an admin (e.g. a removal, or a non-admin reaction).
+      // Nothing new from an admin (e.g. a change, a removal, or a non-admin
+      // reaction).
       if (!emoji) return;
 
       const userDoc = await admin.firestore()
@@ -565,9 +567,9 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
  * reaction on one of the admin's messages.
  *
  * Mirror of notifyUserOnAdminReaction: same message-update trigger and same
- * "newly added or changed reaction" detection, but the reactor must be the
- * chat's own user and the reacted-to message must have been sent by an admin.
- * Removing a reaction does not notify.
+ * "newly added reaction" detection, but the reactor must be the chat's own
+ * user and the reacted-to message must have been sent by an admin. Changing or
+ * removing a reaction does not notify.
  *
  * Path: chats/{chatId}/messages/{messageId}. In our model chatId == user UID
  * (the reactor).
@@ -599,7 +601,8 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
       // any other UID (e.g. a second admin) is ignored.
       const emoji = afterReactions[chatId];
       if (!emoji) return; // no reaction, or it was removed
-      if (beforeReactions[chatId] === emoji) return; // unchanged
+      // Had one already: unchanged, or changed (a correction does not notify).
+      if (beforeReactions[chatId]) return;
 
       // Collect admin tokens (single token per admin)
       const tokens = [];

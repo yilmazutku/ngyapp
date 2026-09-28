@@ -50,10 +50,12 @@ class ChatPage extends StatefulWidget {
   /// - If non-null: Opens the specified user's chat (admin only)
   final String? overrideChatId;
 
-  /// Açılışta gidilecek mesajın kimliği. Verilirse ve mesaj yüklenen son
-  /// mesajlar arasındaysa sohbet, en yeni mesaj yerine o mesajda açılır ve
-  /// mesaj kısa süre vurgulanır (bkz. [_buildMessageList]). Öğün Fotoğrafları
-  /// sayfasındaki "Chate git" (bkz. [ChatManager.findImageMessage]) ve
+  /// Açılışta gidilecek mesajın kimliği. Verilirse sohbet mesajı kapsayacak
+  /// kadar geriden yüklenir ([ChatManager.openFocusWindow]), en yeni mesaj
+  /// yerine o mesajda açılır ve mesaj kısa süre vurgulanır (bkz.
+  /// [_buildMessageList]). Mesaj bulunamazsa ya da sohbetin çok gerisindeyse
+  /// sohbet en yeni mesajdan açılır ve kullanıcıya söylenir. Öğün Fotoğrafları
+  /// sayfasındaki "Sohbette göster" (bkz. [ChatManager.findImageMessage]) ve
   /// danışana giden ifade bildirimi bunu kullanır.
   final String? focusMessageId;
 
@@ -83,6 +85,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       'Fotoğrafınız öğün kaydınıza eklendi ancak sohbete gönderilemedi. '
       'Diyetisyeniniz fotoğrafı öğün kayıtlarınızda görebilir; tekrar '
       'yüklemenize gerek yok.';
+  static const String _focusNotFoundText =
+      'Mesaj sohbette bulunamadı; sohbet en yeni mesajdan açıldı.';
+  static const String _focusTooOldText =
+      'Bu mesaj sohbetin çok gerisinde kaldığı için gösterilemiyor; sohbet en '
+      'yeni mesajdan açıldı.';
+  static const String _focusErrorText =
+      'Mesaja gidilemedi; sohbet en yeni mesajdan açıldı.';
+  static const String _messagesLoadErrorText =
+      'Mesajlar yüklenemedi. Lütfen tekrar deneyin.';
+  static const String _sendErrorTitle = 'Mesaj Gönderim Hatası';
+  static const String _sendErrorText = 'Mesaj gönderilemedi.';
   static const String _deletePhotoTitle = 'Fotoğrafı Sil';
   static const String _deletePhotoConfirmText =
       'Bu öğün fotoğrafı silinecek. Fotoğraf öğün kayıtlarınızdan da '
@@ -106,8 +119,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Whether the current user is an admin
   late final bool _isAdminUser;
 
-  /// Cached messages stream to prevent recreation on rebuilds
+  /// Mesaj akışı. Normalde son mesajlar ([ChatManager.messagesStreamFor]);
+  /// sohbet bir mesajda açıldıysa o mesajı kapsayan pencere
+  /// ([ChatManager.openFocusWindow]). Pencere yüklenirken null.
   Stream<List<MessageData>>? _messagesStream;
+
+  /// Odaklı açılışta hedeften eski, bağlam için bir kez okunan mesajlar.
+  List<MessageData> _focusOlderMessages = const [];
+
+  /// Mesaj yazma kutusu. Sayfaya aittir: bir sohbette yazılıp gönderilmeyen
+  /// metin başka bir sohbetin kutusuna taşınmaz.
+  final TextEditingController _messageController = TextEditingController();
 
   /// Öğün seçicinin seçenekleri; seçici ilk açıldığında bir kez okunur (bkz.
   /// [_loadMealChoices]).
@@ -157,6 +179,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// En yeni mesaj bu kadar piksel içindeyse "ekranda" sayılır.
   static const double _latestTolerance = 16.0;
 
+  /// En yeni mesaj şu an ekranda mı (bkz. [_onListMetrics]).
+  bool _atLatest = true;
+
+  /// Son çizilen listedeki en yeni mesajın kimliği; yeni gelen mesajları
+  /// ayırt etmek için (bkz. [_noteNewMessages]).
+  String? _newestMessageId;
+
+  /// En yeni mesaja kaydırma süresi.
+  static const Duration _scrollToLatestDuration = Duration(milliseconds: 250);
+
   /// Hedef baloncuğun kurulmasını beklerken en fazla kaç kare denenir. Mesaj
   /// zaten ilk karede kurulu olur; bu, gecikmeli bir kareye karşı emniyet payı.
   static const int _maxFocusRevealAttempts = 10;
@@ -192,14 +224,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .fetchUserDetails(userId: _chatId);
     }
 
-    // Set active chat ID to suppress notifications for this chat
-    FcmService().setActiveChatId(_chatId);
+    // Suppress in-app notifications for this chat while it is on top.
+    FcmService().openChat(_chatId);
 
     if (_focusActive) {
       // Ekran eski bir mesajda açılıyor: okundu işareti en yeniye inilince.
       _markReadPending = true;
       _loadUnreadCount();
+      _openFocusWindow();
     } else {
+      _messagesStream = context.read<ChatManager>().messagesStreamFor(_chatId);
       _markChatAsRead();
     }
   }
@@ -208,8 +242,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void dispose() {
     // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
-    // Clear active chat ID to resume receiving notifications
-    FcmService().clearActiveChatId();
+    // Resume in-app notifications for this chat (another chat page below
+    // keeps its own suppression).
+    FcmService().closeChat(_chatId);
+    _messageController.dispose();
     _scrollController.dispose();
     _focusHighlighted.dispose();
     _showJumpToLatest.dispose();
@@ -313,14 +349,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     
-    // When app goes to background, clear active chat ID so notifications can come through
-    // When app returns to foreground, re-set active chat ID to suppress in-app banners
+    // In the background no chat's notifications are suppressed; back in the
+    // foreground the chat on top is suppressed again.
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      // App is going to background - allow notifications
-      FcmService().clearActiveChatId();
+      FcmService().setInForeground(false);
     } else if (state == AppLifecycleState.resumed) {
-      // App is back in foreground - suppress notifications for this chat again
-      FcmService().setActiveChatId(_chatId);
+      FcmService().setInForeground(true);
       // Re-mark as read when returning to foreground (unless the newest
       // messages have not been reached yet in a focused chat).
       if (!_markReadPending) {
@@ -516,6 +550,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
       if (limitReached && mounted) {
         await _showMealImageLimitDialog();
+      } else if (mounted) {
+        _showLatest();
       }
     } on MealChatPostException {
       // Fotoğraf öğüne kaydedildi, yalnızca sohbete düşmedi: öğün yüklenmiş
@@ -732,10 +768,54 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Get or create the cached messages stream
-  Stream<List<MessageData>> _getMessagesStream(ChatManager chat) {
-    _messagesStream ??= chat.messagesStreamFor(_chatId);
-    return _messagesStream!;
+  /// Sohbeti hedef mesajda açmak için mesaj penceresini yükler (bkz.
+  /// [ChatManager.openFocusWindow]). Açılamazsa sohbet en yeni mesajdan açılır
+  /// ve nedeni kullanıcıya söylenir.
+  Future<void> _openFocusWindow() async {
+    final ChatManager chat = context.read<ChatManager>();
+
+    final FocusWindow window;
+    try {
+      window = await chat.openFocusWindow(_chatId, widget.focusMessageId!);
+    } catch (e) {
+      if (!mounted || !_focusActive) return;
+      _showFocusUnavailable(_focusErrorText);
+      return;
+    }
+    // Bu arada odaktan çıkıldıysa (ör. mesaj gönderildi) pencereye gerek yok.
+    if (!mounted || !_focusActive) return;
+
+    final Stream<List<MessageData>>? messages = window.messages;
+    if (messages == null) {
+      _showFocusUnavailable(window.failure == FocusWindowFailure.tooOld
+          ? _focusTooOldText
+          : _focusNotFoundText);
+      return;
+    }
+
+    setState(() {
+      _messagesStream = messages;
+      _focusOlderMessages = window.olderMessages;
+    });
+  }
+
+  /// Hedef mesaja gidilemedi: sohbet en yeni mesajdan açılır ve nedeni kısa
+  /// bir bilgi şeridiyle söylenir.
+  void _showFocusUnavailable(String message) {
+    _leaveFocus();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  /// Odaklı düzenden çıkar: liste son mesajlarla, en yeni mesajdan başlar.
+  void _leaveFocus() {
+    _showJumpToLatest.value = false;
+    setState(() {
+      _focusActive = false;
+      _focusOlderMessages = const [];
+      _messagesStream = context.read<ChatManager>().messagesStreamFor(_chatId);
+    });
   }
 
   /// İlk çizimden sonra hedef mesajı ortalamayı bir kez planlar.
@@ -800,6 +880,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     final bool atLatest =
         metrics.pixels <= metrics.minScrollExtent + _latestTolerance;
+    _atLatest = atLatest;
     if (atLatest && _markReadPending) {
       _markReadPending = false;
       _unreadCount.value = 0;
@@ -830,11 +911,88 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Odaklı düzenden çıkıp en yeni mesaja iner: liste normal düzende en
-  /// yeniden başlar, okundu işareti de orada konur.
-  void _jumpToLatest() {
-    _showJumpToLatest.value = false;
-    setState(() => _focusActive = false);
+  /// "En yeniye git": odaklı düzenden çıkıp en yeni mesaja iner; liste
+  /// normal düzende en yeniden başlar, okundu işareti de orada konur.
+  void _jumpToLatest() => _leaveFocus();
+
+  /// Kullanıcının az önce gönderdiği mesaj ekranda görünsün: odaklı düzendeyse
+  /// normal düzene geçilir, normal düzende en yeni mesaja kaydırılır.
+  void _showLatest() {
+    if (_focusActive) {
+      _leaveFocus();
+      return;
+    }
+    _scrollToLatest();
+  }
+
+  /// Listeyi en yeni mesaja kaydırır (ters listede kaydırma aralığının alt
+  /// ucu).
+  void _scrollToLatest() {
+    if (!_scrollController.hasClients) return;
+    final ScrollPosition position = _scrollController.positions.last;
+    if (position.pixels <= position.minScrollExtent) return;
+    position.animateTo(
+      position.minScrollExtent,
+      duration: _scrollToLatestDuration,
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// Liste her yenilendiğinde yeni gelen mesajlara bakar. Yalnızca odaklı
+  /// düzende gerekir: orada yeni mesajlar görünür alanın altına eklenir.
+  /// Kullanıcı en yeni mesajdaysa liste yeni mesajı gösterecek kadar kayar;
+  /// değilse karşı taraftan gelenler "En yeniye git" rozetindeki sayıya
+  /// eklenir. (Normal düzende en yeni mesaj zaten alta eklenir.)
+  void _noteNewMessages(List<MessageData> items, {required bool focusLayout}) {
+    final String? previous = _newestMessageId;
+    _newestMessageId = items.isEmpty ? null : items.first.id;
+    if (!focusLayout || previous == null) return;
+
+    final int previousIndex =
+        items.indexWhere((message) => message.id == previous);
+    if (previousIndex <= 0) return;
+
+    final int incoming = items
+        .take(previousIndex)
+        .where((message) => message.senderId != _currentUid)
+        .length;
+    final bool follow = _atLatest;
+
+    // Liste bu karede yerleşince uygulanır: yeni mesajın yeri ancak o zaman
+    // bellidir; bildirim de çizim sırasında değil sonrasında yapılmalı.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (follow) {
+        _scrollToLatest();
+      } else if (incoming > 0) {
+        _unreadCount.value += incoming;
+      }
+    });
+  }
+
+  /// Yazılan metni gönderir. Kutu hemen boşalır; gönderilemezse metin geri
+  /// konur. Gönderilen mesaj ekranda görünsün diye en yeni mesaja inilir.
+  Future<void> _sendText() async {
+    final String text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
+    final ChatManager chat = context.read<ChatManager>();
+    _messageController.clear();
+
+    try {
+      await chat.sendTextTo(_chatId, text);
+      if (!mounted) return;
+      _showLatest();
+    } catch (e) {
+      if (!mounted) return;
+      // Bu arada yeni bir şey yazılmadıysa gönderilemeyen metin geri gelir.
+      if (_messageController.text.isEmpty) _messageController.text = text;
+      DialogUtils.openError(
+        context,
+        title: _sendErrorTitle,
+        message: _sendErrorText,
+      );
+    }
   }
 
   /// Danışanın kendi gönderdiği öğün fotoğrafını onay alarak siler.
@@ -928,17 +1086,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (!mounted) return;
       DialogUtils.openError(
         context,
-        title: 'Tepki Eklenemedi',
-        message: 'Tepki kaydedilemedi. Lütfen tekrar deneyin.',
+        title: 'İfade Bırakılamadı',
+        message: 'İfade kaydedilemedi. Lütfen tekrar deneyin.',
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Use read() instead of watch() - we'll use Selector for specific rebuilds
-    final chat = context.read<ChatManager>();
-
     return Scaffold(
       appBar: AppBar(
         // If admin is viewing a user's chat, show the user's name as a tappable
@@ -991,13 +1146,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               fit: StackFit.expand,
               children: [
                 StreamBuilder<List<MessageData>>(
-                  stream: _getMessagesStream(chat),
+                  stream: _messagesStream,
                   builder: (context, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
+                    // Akış değişince (ör. odaktan çıkınca) eldeki liste yenisi
+                    // gelene kadar ekranda kalır; yalnızca hiç veri yokken
+                    // yükleniyor gösterilir.
+                    final List<MessageData>? data = snap.data;
+                    if (data == null) {
+                      if (snap.hasError) {
+                        return const Center(
+                          child: Text(_messagesLoadErrorText),
+                        );
+                      }
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    final items = snap.data ?? const <MessageData>[];
+                    final List<MessageData> items = _focusActive
+                        ? [...data, ..._focusOlderMessages]
+                        : data;
 
                     if (items.isEmpty) {
                       return const Center(child: Text('Henüz mesaj yok.'));
@@ -1021,7 +1187,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
           // Input row - only rebuilds when sending/uploading state changes
           _ChatInputRow(
-            chatId: _chatId,
+            controller: _messageController,
+            onSend: _sendText,
             onMealUpload: _startMealUploadFlow,
           ),
         ],
@@ -1031,9 +1198,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Mesaj listesi.
   ///
-  /// Hedef mesaj yoksa -- ya da yüklenen son mesajlar arasında değilse (sohbet
-  /// son 50 mesajı gösterir) ya da "En yeniye git" ile odaktan çıkıldıysa --
-  /// sohbet her zamanki gibi en yeni mesajdan açılır. Hedef varsa liste ikiye
+  /// Hedef mesaj yoksa -- ya da bulunamadıysa ya da "En yeniye git" veya bir
+  /// gönderimle odaktan çıkıldıysa -- sohbet her zamanki gibi en yeni mesajdan
+  /// açılır. Hedef varsa (odak penceresi onu hep kapsar) liste ikiye
   /// bölünür: hedef ve ondan eski mesajlar viewport'un sıfır noktasına oturan
   /// ("center") sliver'a, hedeften yeni mesajlar ise onun altına konur.
   /// Böylece aradaki mesajlar hiç kurulmadan doğrudan hedef mesaja açılır;
@@ -1043,6 +1210,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final int targetIndex = focusMessageId == null
         ? -1
         : items.indexWhere((message) => message.id == focusMessageId);
+    _noteNewMessages(items, focusLayout: targetIndex >= 0);
 
     if (targetIndex < 0) {
       return _trackLatest(
@@ -1251,7 +1419,7 @@ class _MessageBubble extends StatelessWidget {
   /// Whether a long-press on this bubble should open the reaction picker.
   final bool canReact;
 
-  /// Mesaj şu an vurgulu mu ("Chate git" ile bu mesaja gelindiğinde kısa süre
+  /// Mesaj şu an vurgulu mu ("Sohbette göster" ile bu mesaja gelindiğinde kısa süre
   /// arka planı yanar).
   final bool highlighted;
 
@@ -1505,11 +1673,14 @@ class _JumpToLatestButton extends StatelessWidget {
 
 /// Extracted input row widget - uses Selector for targeted rebuilds
 class _ChatInputRow extends StatefulWidget {
-  final String chatId;
+  /// Sohbet sayfasının mesaj kutusu (bkz. [_ChatPageState._messageController]).
+  final TextEditingController controller;
+  final VoidCallback onSend;
   final VoidCallback onMealUpload;
 
   const _ChatInputRow({
-    required this.chatId,
+    required this.controller,
+    required this.onSend,
     required this.onMealUpload,
   });
 
@@ -1627,7 +1798,7 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                     // Text input field
                     Expanded(
                       child: TextField(
-                        controller: context.read<ChatManager>().messageController,
+                        controller: widget.controller,
                         minLines: 1,
                         maxLines: 4,
                         decoration: InputDecoration(
@@ -1649,18 +1820,7 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                         Icons.send_rounded,
                         color: colorScheme.primary,
                       ),
-                      onPressed: state.sending
-                          ? null
-                          : () async {
-                        final chat = context.read<ChatManager>();
-                        
-                        try {
-                          await chat.sendTextTo(widget.chatId);
-                        } catch (e) {
-                          if (!context.mounted) return;
-                          DialogUtils.openError(context, title: 'Mesaj Gönderim Hatası', message: 'Mesaj gönderilemedi.');
-                        }
-                      },
+                      onPressed: state.sending ? null : widget.onSend,
                     ),
                   ],
                 ),
