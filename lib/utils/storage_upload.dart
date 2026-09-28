@@ -116,6 +116,10 @@ abstract class UploadObserver {
   /// Yükleme iptal edildi mi (kullanıcı ya da zaman aşımı).
   bool get isCancelled;
 
+  /// Dosyalar yüklendi, kayıtlar henüz yazılmadı. Küçük görselin baytları
+  /// burada verilir: kayıt yazılınca görsel yeniden indirilmeden gösterilsin.
+  void onUploaded(UploadedImage image);
+
   /// Dosyalar yüklendi ve kayıtlar yazılmaya başlandı: bundan sonra iptal
   /// edilemez; kayıt yerel önbellekte hemen görünür.
   void onSaving();
@@ -129,13 +133,14 @@ class UploadCancelledException implements Exception {
   String toString() => 'UploadCancelledException';
 }
 
-/// Storage'a yüklenmiş bir görsel: adresi, küçük görselinin adresi
-/// (üretilemediyse null) ve piksel ölçüsü (okunamadıysa null).
+/// Storage'a yüklenmiş bir görsel: adresi, küçük görselinin adresi ve
+/// baytları (üretilemediyse null) ve piksel ölçüsü (okunamadıysa null).
 class UploadedImage {
   final Reference ref;
   final String url;
   final Reference? thumbRef;
   final String? thumbUrl;
+  final Uint8List? thumbBytes;
   final ImagePixelSize? size;
 
   const UploadedImage({
@@ -143,6 +148,7 @@ class UploadedImage {
     required this.url,
     required this.thumbRef,
     required this.thumbUrl,
+    required this.thumbBytes,
     required this.size,
   });
 
@@ -182,7 +188,7 @@ Future<UploadedImage> uploadImageWithThumbnail({
   );
   // Asıl dosyanın görevi önce bildirilir: ilerleme onunkidir.
   observer?.onTask(task);
-  final Future<({Reference ref, String url})?> thumbnail =
+  final Future<({Reference ref, String url, Uint8List bytes})?> thumbnail =
       _uploadThumbnail(ref, prepared.bytes, observer);
   final Future<ImagePixelSize?> size = readImagePixelSize(prepared.bytes);
 
@@ -198,18 +204,21 @@ Future<UploadedImage> uploadImageWithThumbnail({
     rethrow;
   }
 
-  final ({Reference ref, String url})? thumb = await thumbnail;
+  final ({Reference ref, String url, Uint8List bytes})? thumb =
+      await thumbnail;
   final UploadedImage uploaded = UploadedImage(
     ref: ref,
     url: url,
     thumbRef: thumb?.ref,
     thumbUrl: thumb?.url,
+    thumbBytes: thumb?.bytes,
     size: await size,
   );
   if (observer?.isCancelled ?? false) {
     await uploaded.delete();
     throw const UploadCancelledException();
   }
+  observer?.onUploaded(uploaded);
   return uploaded;
 }
 
@@ -225,7 +234,7 @@ Future<void> _deleteQuietly(Reference? ref, Reference? thumbRef) async {
 
 /// Küçük görseli üretip orijinalin yanına `<ad>_thumb.<uzantı>` adıyla
 /// yükler; başarısız olursa null döner.
-Future<({Reference ref, String url})?> _uploadThumbnail(
+Future<({Reference ref, String url, Uint8List bytes})?> _uploadThumbnail(
   Reference original,
   Uint8List bytes,
   UploadObserver? observer,
@@ -241,7 +250,11 @@ Future<({Reference ref, String url})?> _uploadThumbnail(
     );
     observer?.onTask(task);
     await task;
-    return (ref: thumbRef, url: await thumbRef.getDownloadURL());
+    return (
+      ref: thumbRef,
+      url: await thumbRef.getDownloadURL(),
+      bytes: thumb.bytes,
+    );
   } catch (e) {
     return null;
   }

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/test_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/storage_upload.dart';
+import '../widgets/full_screen_image_page.dart';
 import '../widgets/labeled_action_button.dart';
 
 /// Tests tab behaves like Tanita explorer: header + list + upload in-place
@@ -204,40 +205,10 @@ class _TestsTabState extends State<TestsTab> {
     }
   }
 
+  /// Görseli ortak tam ekran görüntüleyicide açar (yakınlaştırma,
+  /// kaydırarak kapatma, Esc).
   void _showImagePreview(String url, String title) {
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        insetPadding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              alignment: Alignment.centerLeft,
-              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-            const Divider(height: 1),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 800, maxHeight: 600),
-              child: InteractiveViewer(
-                child: Image.network(
-                  url,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.low,
-                  errorBuilder: (_, __, ___) => const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('Görüntü yüklenemedi'),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Kapat')),
-          ],
-        ),
-      ),
-    );
+    showFullScreenImage<void>(context, imageUrl: url, title: title);
   }
 
   Widget _buildHeader(BuildContext context) {

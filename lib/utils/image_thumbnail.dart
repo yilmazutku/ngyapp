@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
+import 'package:image_picker/image_picker.dart' show XFile;
 
 /// Küçük görselin kısa kenarı (piksel). Liste kartları ~200, sohbet
 /// baloncukları ~240 mantıksal px; 480 px, 2-3x yoğunluklu telefon ekranında
@@ -35,6 +36,27 @@ Future<ImagePixelSize?> readImagePixelSize(Uint8List bytes) async {
   } finally {
     descriptor?.dispose();
     buffer?.dispose();
+  }
+}
+
+/// Görsel dosyanın başlığı genellikle bu kadar baytın içindedir (JPEG'de
+/// EXIF bloğu en fazla 64 KB).
+const int _headerReadBytes = 256 * 1024;
+
+/// [file] görselinin ölçüsünü (EXIF yönü uygulanmış) önce yalnızca dosyanın
+/// başını okuyarak verir; olmazsa dosyanın tamamını okur. Okunamazsa null.
+/// Sohbette sıradaki fotoğrafın baloncuğu gerçek oranında çizilsin diye.
+Future<ImagePixelSize?> readImageFilePixelSize(XFile file) async {
+  try {
+    final BytesBuilder header = BytesBuilder(copy: false);
+    await for (final List<int> chunk in file.openRead(0, _headerReadBytes)) {
+      header.add(chunk);
+    }
+    final ImagePixelSize? size = await readImagePixelSize(header.takeBytes());
+    if (size != null) return size;
+    return readImagePixelSize(await file.readAsBytes());
+  } catch (e) {
+    return null;
   }
 }
 

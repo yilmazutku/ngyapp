@@ -1,11 +1,16 @@
 // lib/providers/chat_manager_new.dart
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io' show File, InternetAddress;
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
+import 'package:image_picker/image_picker.dart' show XFile;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/meal_model.dart';
 import '../models/pending_upload.dart';
@@ -293,12 +298,36 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// başlar).
   bool _observingLifecycle = false;
 
+  bool _appInForeground = true;
+
+  /// Yüklenemeyen fotoğraflar için bağlantı yoklaması aralığı: bağlantı
+  /// gelince fotoğraflar kendiliğinden yeniden denenir.
+  static const Duration _autoRetryInterval = Duration(seconds: 20);
+
+  /// Bağlantı yoklamasında adı çözülen sunucu (Storage).
+  static const String _connectivityProbeHost = 'firebasestorage.googleapis.com';
+  static const Duration _connectivityProbeTimeout = Duration(seconds: 5);
+  Timer? _autoRetryTimer;
+
+  /// Sıranın cihazda saklandığı anahtar (bkz. [restorePendingUploads]).
+  static const String _persistedUploadsKey = 'chat_pending_meal_uploads_v1';
+
+  /// Saklanan sıra kayıtları (anahtar -> kayıt); ilk kullanımda okunur.
+  Map<String, Map<String, dynamic>>? _persistedUploads;
+
+  /// Sıra kaydına yazımlar birbirini beklesin (sıra bozulmasın).
+  Future<void> _persistChain = Future<void>.value();
+
+  /// Sırası bu oturumda geri yüklenmiş kullanıcılar.
+  final Set<String> _restoredUsers = {};
+
   /// [chatId] sohbetinde yüklenmeyi bekleyen fotoğraflar.
   List<PendingUpload> pendingUploadsOf(String chatId) =>
       _pendingUploads[chatId] ?? const [];
 
   /// Fotoğrafları sıraya ekler ve sırayı işletir. Sohbet ekranı kapansa da
-  /// yükleme sürer.
+  /// yükleme sürer; uygulama kapansa da sıra cihazda saklanır ve açılışta
+  /// kaldığı yerden sürer (bkz. [restorePendingUploads]).
   void enqueueUploads(List<PendingUpload> uploads) {
     if (uploads.isEmpty) return;
     if (!_observingLifecycle) {
@@ -312,17 +341,22 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
         upload,
       ];
       chatIds.add(upload.chatId);
+      unawaited(upload.loadPreviewAspectRatio());
+      _persistUpload(upload);
     }
     notifyListeners();
     chatIds.forEach(_drainUploads);
   }
 
-  /// Yüklenemeyen fotoğrafı aynı yerinde yeniden sıraya koyar.
-  void retryUpload(PendingUpload upload) {
+  /// Yüklenemeyen fotoğrafı aynı yerinde yeniden sıraya koyar. [automatic]
+  /// ise bağlantı gelince kendiliğinden yapılan denemedir (bkz.
+  /// [PendingUpload.maxAutoRetries]).
+  void retryUpload(PendingUpload upload, {bool automatic = false}) {
     final List<PendingUpload> current = pendingUploadsOf(upload.chatId);
     final int index = current.indexOf(upload);
     if (index < 0) return;
-    _pendingUploads[upload.chatId] = [...current]..[index] = upload.retryCopy();
+    _pendingUploads[upload.chatId] = [...current]
+      ..[index] = upload.retryCopy(automatic: automatic);
     notifyListeners();
     _drainUploads(upload.chatId);
   }
@@ -330,6 +364,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// Fotoğrafı sıradan çıkarır; yükleniyorsa iptal edilir, mesaj yazılmaz.
   void discardUpload(PendingUpload upload) {
     upload.cancel();
+    _forgetUpload(upload);
     _removePendingUpload(upload);
   }
 
@@ -365,35 +400,113 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// Tek bir yüklemeyi yapar. İptal ya da zaman aşımında yarıda kalan
   /// yükleme beklenmez ([PendingUpload.aborted]); iptal edilmiş yükleme kayıt
   /// yazmaz (bkz. [uploadImageWithThumbnail]).
+  ///
+  /// Kayıtlar yazılmaya başlayınca sıra kaydı silinir: bundan sonrasını
+  /// Firestore üstlenir (çevrimdışıysa yazımı bağlantı gelince iletir);
+  /// uygulama bu arada kapansa da fotoğraf açılışta ikinci kez yüklenmez.
   Future<void> _runUpload(PendingUpload upload) async {
+    void forgetWhenSaving() {
+      if (upload.status.value == PendingUploadStatus.saving) {
+        _forgetUpload(upload);
+      }
+    }
+
+    upload.status.addListener(forgetWhenSaving);
     upload.markUploading();
     try {
       await Future.any<void>([upload.runner(upload), upload.aborted]);
       if (upload.timedOut) {
-        upload.markFailed(PendingUpload.timeoutText);
+        _markUploadFailed(upload, PendingUpload.timeoutText);
       } else {
+        _forgetUpload(upload);
         _removePendingUpload(upload);
       }
     } on UploadFailure catch (e) {
-      upload.markFailed(e.message, canRetry: e.canRetry);
+      _markUploadFailed(upload, e.message, canRetry: e.canRetry);
     } catch (e) {
       if (upload.cancelledByUser) {
         _removePendingUpload(upload);
       } else {
-        upload.markFailed(upload.timedOut
-            ? PendingUpload.timeoutText
-            : PendingUpload.defaultErrorText);
+        _markUploadFailed(
+          upload,
+          upload.timedOut
+              ? PendingUpload.timeoutText
+              : PendingUpload.defaultErrorText,
+        );
       }
+    } finally {
+      upload.status.removeListener(forgetWhenSaving);
+    }
+  }
+
+  /// Yüklemeyi başarısız işaretler. Yeniden denenebilecekse bağlantı
+  /// yoklaması kurulur; denenemeyecekse (ör. öğünün sınırı dolmuş) sıra
+  /// kaydı silinir.
+  void _markUploadFailed(
+    PendingUpload upload,
+    String message, {
+    bool canRetry = true,
+  }) {
+    upload.markFailed(message, canRetry: canRetry);
+    if (canRetry) {
+      _scheduleAutoRetry();
+    } else {
+      _forgetUpload(upload);
+    }
+  }
+
+  /// Kendiliğinden yeniden denenecek yüklemeler.
+  List<PendingUpload> get _autoRetryCandidates => [
+        for (final List<PendingUpload> uploads in _pendingUploads.values)
+          for (final PendingUpload upload in uploads)
+            if (upload.willAutoRetry) upload,
+      ];
+
+  void _scheduleAutoRetry() {
+    if (_autoRetryTimer != null) return;
+    _autoRetryTimer = Timer(_autoRetryInterval, _autoRetryNow);
+  }
+
+  /// Bağlantı varsa yüklenemeyen fotoğrafları yeniden dener; yoksa bir
+  /// süre sonra yeniden bakar. Uygulama arka plandayken denenmez, öne
+  /// gelince hemen bakılır.
+  Future<void> _autoRetryNow() async {
+    _autoRetryTimer?.cancel();
+    _autoRetryTimer = null;
+    if (!_appInForeground || _autoRetryCandidates.isEmpty) return;
+
+    if (!await _hasConnection()) {
+      _scheduleAutoRetry();
+      return;
+    }
+    for (final PendingUpload upload in _autoRetryCandidates) {
+      retryUpload(upload, automatic: true);
+    }
+  }
+
+  /// Sunucunun adı çözülebiliyor mu: çevrimdışıyken hemen hata verir.
+  /// Web'de yoklama yapılamaz; bağlantı var sayılır.
+  static Future<bool> _hasConnection() async {
+    if (kIsWeb) return true;
+    try {
+      final List<InternetAddress> addresses =
+          await InternetAddress.lookup(_connectivityProbeHost)
+              .timeout(_connectivityProbeTimeout);
+      return addresses.isNotEmpty;
+    } catch (e) {
+      return false;
     }
   }
 
   /// Arka planda yüklemelerin zaman aşımı sayılmaz (bkz.
-  /// [PendingUpload.suspendWatchdog]); öne gelince baştan sayılır.
+  /// [PendingUpload.suspendWatchdog]); öne gelince baştan sayılır ve
+  /// yüklenemeyenler için bağlantıya hemen bakılır.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final bool background = state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden;
     if (!background && state != AppLifecycleState.resumed) return;
+    _appInForeground = !background;
     for (final List<PendingUpload> uploads in _pendingUploads.values) {
       for (final PendingUpload upload in uploads) {
         if (background) {
@@ -403,12 +516,156 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
     }
+    if (!background) unawaited(_autoRetryNow());
   }
 
   @override
   void dispose() {
+    _autoRetryTimer?.cancel();
     if (_observingLifecycle) WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  // ----- Sıranın cihazda saklanması -----
+
+  /// Uygulama kapanınca kalan sırayı geri yükler: [userId] kullanıcısının
+  /// gönderilemeyen öğün fotoğrafları sıraya yeniden eklenir ve yüklenir
+  /// ([runner] ile). Oturumda kullanıcı başına bir kez çalışır.
+  ///
+  /// Dönen `restored` sıraya eklenen, `missing` dosyası cihazda artık
+  /// bulunmadığı için gönderilemeyen fotoğraf sayısıdır.
+  Future<({int restored, int missing})> restorePendingUploads({
+    required String userId,
+    required Future<void> Function(PendingUpload upload) runner,
+  }) async {
+    if (kIsWeb || !_restoredUsers.add(userId)) {
+      return (restored: 0, missing: 0);
+    }
+
+    final Map<String, Map<String, dynamic>> entries =
+        await _readPersistedUploads();
+    final Set<String> queuedKeys = {
+      for (final PendingUpload upload in pendingUploadsOf(userId))
+        upload.persistKey,
+    };
+
+    final List<PendingUpload> restored = [];
+    int missing = 0;
+    for (final Map<String, dynamic> entry in entries.values.toList()) {
+      final Object? key = entry['key'];
+      final Object? path = entry['path'];
+      final Object? createdAt = entry['createdAt'];
+      if (entry['chatId'] != userId || key is! String) continue;
+      if (queuedKeys.contains(key)) continue;
+
+      final Meals? meal = Meals.fromName('${entry['meal']}');
+      if (meal == null ||
+          path is! String ||
+          createdAt is! int ||
+          !await File(path).exists()) {
+        missing++;
+        _forgetKey(key);
+        continue;
+      }
+
+      final Object? name = entry['name'];
+      final Object? mimeType = entry['mimeType'];
+      restored.add(PendingUpload(
+        chatId: userId,
+        image: XFile(
+          path,
+          name: name is String ? name : null,
+          mimeType: mimeType is String ? mimeType : null,
+        ),
+        meal: meal,
+        runner: runner,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(createdAt),
+        persistKey: key,
+      ));
+    }
+
+    enqueueUploads(restored);
+    return (restored: restored.length, missing: missing);
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _readPersistedUploads() {
+    final Completer<Map<String, Map<String, dynamic>>> result = Completer();
+    _updatePersistedUploads((entries) => result.complete(entries));
+    return result.future;
+  }
+
+  /// Fotoğrafı sıra kaydına ekler (dosyanın yolu, öğünü, gönderildiği an).
+  void _persistUpload(PendingUpload upload) {
+    final XFile image = upload.image;
+    _updatePersistedUploads((entries) {
+      entries[upload.persistKey] = {
+        'key': upload.persistKey,
+        'chatId': upload.chatId,
+        'path': image.path,
+        'name': image.name,
+        if (image.mimeType != null) 'mimeType': image.mimeType,
+        'meal': upload.meal.name,
+        'createdAt': upload.createdAt.millisecondsSinceEpoch,
+      };
+    });
+  }
+
+  void _forgetUpload(PendingUpload upload) => _forgetKey(upload.persistKey);
+
+  void _forgetKey(String key) {
+    _updatePersistedUploads((entries) => entries.remove(key));
+  }
+
+  /// Sıra kaydını okuyup [change] ile değiştirir ve geri yazar. Değişiklikler
+  /// sırayla uygulanır; yazılamazsa sıra yalnızca bellekte kalır. Web'de
+  /// dosya yolu kalıcı olmadığı için saklanmaz.
+  void _updatePersistedUploads(
+    void Function(Map<String, Map<String, dynamic>> entries) change,
+  ) {
+    if (kIsWeb) {
+      change({});
+      return;
+    }
+    _persistChain = _persistChain.then((_) async {
+      SharedPreferences? prefs;
+      try {
+        prefs = await SharedPreferences.getInstance();
+        _persistedUploads ??=
+            _decodePersistedUploads(prefs.getString(_persistedUploadsKey));
+      } catch (e) {
+        prefs = null;
+      }
+      final Map<String, Map<String, dynamic>> entries =
+          _persistedUploads ??= {};
+      final String before = jsonEncode(entries.values.toList());
+      change(entries);
+      final String after = jsonEncode(entries.values.toList());
+      if (prefs == null || after == before) return;
+      try {
+        await prefs.setString(_persistedUploadsKey, after);
+      } catch (e) {
+        return;
+      }
+    });
+  }
+
+  static Map<String, Map<String, dynamic>> _decodePersistedUploads(
+    String? raw,
+  ) {
+    final Map<String, Map<String, dynamic>> entries = {};
+    if (raw == null || raw.isEmpty) return entries;
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! List) return entries;
+      for (final Object? item in decoded) {
+        if (item is! Map) continue;
+        final Object? key = item['key'];
+        if (key is String) entries[key] = Map<String, dynamic>.from(item);
+      }
+    } catch (e) {
+      return entries;
+    }
+    return entries;
   }
 
   /// Current authenticated user's UID
@@ -466,8 +723,9 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// [before] anından eski en fazla [limit] mesaj, tek seferlik (en yeni
-  /// başta). Sohbette yukarı kaydırıldıkça eski mesajları sayfa sayfa yüklemek
-  /// için kullanılır.
+  /// başta). Sohbet bir mesajda açılırken hedeften eski bağlam mesajları için
+  /// kullanılır ([openFocusWindow]); yukarı kaydırınca yüklenen sayfalar için
+  /// bkz. [fetchOlderPage].
   ///
   /// Sunucudan okunur: çevrimdışıyken önbellekten gelen eksik bir sonuç
   /// "sohbetin başına gelindi" sanılmasın, hata olarak dönsün.
@@ -481,6 +739,29 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
         .limit(limit)
         .get(const GetOptions(source: Source.server));
     return _toMessages(snap);
+  }
+
+  /// Sohbette yukarı kaydırılınca yüklenen eski mesaj sayfası
+  /// ([fetchMessagesBefore] gibi, en yeni başta).
+  ///
+  /// Sunucuya ulaşılamazsa (çevrimdışı) cihazdaki önbellekten okunur ve
+  /// `fromCache` true döner: sayfa eksik olabilir, kısa gelmesi "sohbetin
+  /// başı" sayılmamalı; daha eskisi bağlantı gelince yüklenir.
+  Future<({List<MessageData> messages, bool fromCache})> fetchOlderPage(
+    String chatId,
+    Timestamp before,
+  ) async {
+    final Query<Map<String, dynamic>> query =
+        _newestFirst(chatId).startAfter([before]).limit(messagesPageSize);
+    try {
+      final QuerySnapshot<Map<String, dynamic>> snap =
+          await query.get(const GetOptions(source: Source.server));
+      return (messages: _toMessages(snap), fromCache: false);
+    } catch (e) {
+      final QuerySnapshot<Map<String, dynamic>> cached =
+          await query.get(const GetOptions(source: Source.cache));
+      return (messages: _toMessages(cached), fromCache: true);
+    }
   }
 
   /// Tek bir mesajı okur; yoksa null. Canlı dinlenmeyen eski sayfalardaki bir
@@ -521,8 +802,10 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   static const int _whereInLimit = 30;
 
   /// ADMIN ÇAĞIRIR: [chatId] sohbetinde verilen fotoğrafların ([imageUrls])
-  /// mesajlarına bırakılmış tepkiler (adres -> (uid -> emoji)); yalnızca
-  /// tepkisi olan fotoğraflar döner.
+  /// mesajları (adres -> mesaj). Sohbette mesajı olmayan fotoğraf sonuçta
+  /// yer almaz. Mesajla birlikte üzerindeki tepkiler de gelir: sayfa hem
+  /// rozetleri çizer hem de "Sohbette göster" / "İfade Bırak" için mesajı
+  /// ayrıca aramaz.
   ///
   /// Öğün fotoğrafı sohbete yüklenirken mesaja fotoğrafın indirme adresi
   /// yazılır ([findImageMessage] ile aynı eşleme), bu yüzden mesajlar gün
@@ -530,7 +813,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// ya da gece yarısına ne kadar yakın yüklenmiş olursa olsun mesajı
   /// kaçırılmaz ve yalnızca fotoğraf mesajları okunur. Sorgu tek alan üzerinde
   /// (`imageUrl`), bileşik indeks gerekmez.
-  Future<Map<String, Map<String, String>>> fetchImageReactions(
+  Future<Map<String, MessageData>> fetchImageMessages(
     String chatId,
     List<String> imageUrls,
   ) async {
@@ -549,20 +832,18 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
             .get(),
     ];
 
-    final Map<String, Map<String, String>> reactions = {};
+    final Map<String, MessageData> messages = {};
     for (final QuerySnapshot<Map<String, dynamic>> snapshot
         in await Future.wait(queries)) {
       for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
           in snapshot.docs) {
-        final Map<String, dynamic> data = doc.data();
-        final String imageUrl = (data['imageUrl'] as String?) ?? '';
-        final Map<String, String> parsed =
-            MessageData.parseReactions(data['reactions']);
-        if (imageUrl.isEmpty || parsed.isEmpty) continue;
-        reactions[imageUrl] = parsed;
+        final MessageData message = MessageData.fromSnapshot(doc);
+        final String? imageUrl = message.imageUrl;
+        if (imageUrl == null || imageUrl.isEmpty) continue;
+        messages[imageUrl] = message;
       }
     }
-    return reactions;
+    return messages;
   }
 
   /// Sohbet bir mesajda açıldığında (bkz. [openFocusWindow]) hedeften yeni en

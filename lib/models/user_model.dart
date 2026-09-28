@@ -106,6 +106,17 @@ class UserModel {
   /// missing one of them never renders a stray space.
   String get fullName => '$name $surname'.trim();
 
+  /// Avatardaki baş harfler: ad ve soyadın ilk harfleri (Türkçe büyük harfle,
+  /// "i" -> "İ"), ikisi de boşsa "?".
+  String get initials {
+    final String first = name.trim();
+    final String last = surname.trim();
+    final String letters =
+        '${first.isEmpty ? '' : first[0]}${last.isEmpty ? '' : last[0]}';
+    if (letters.isEmpty) return '?';
+    return letters.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
+  }
+
   @override
   String toString() {
     return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, phone: $phone, birthDate: $birthDate, medicationsAndConditions: $medicationsAndConditions}';
