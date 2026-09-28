@@ -156,7 +156,7 @@ Future<String?> showAllReactionsSheet(
               ),
               const SizedBox(height: 12),
               const Text(
-                'Tepki Seç',
+                'İfade Seç',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
@@ -314,7 +314,7 @@ class _ReactionMoreButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     return Tooltip(
-      message: 'Tüm tepkiler',
+      message: 'Tüm ifadeler',
       child: InkWell(
         onTap: onTap,
         customBorder: const CircleBorder(),

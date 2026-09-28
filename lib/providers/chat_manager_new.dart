@@ -117,6 +117,35 @@ class MessageData {
   }
 }
 
+/// Sohbet bir mesajda açılamadığında sebebi (bkz. [ChatManager.openFocusWindow]).
+enum FocusWindowFailure {
+  /// Mesaj sohbette yok (ör. sohbet silinmiş).
+  notFound,
+
+  /// Mesaj sohbetin çok gerisinde: ondan sonra
+  /// [ChatManager.focusWindowMaxNewer]'dan fazla mesaj var.
+  tooOld,
+}
+
+/// Sohbeti bir mesajda açmak için yüklenen mesajlar: hedef ve ondan yeniler
+/// canlı ([messages], en yeni başta), hedeften eski birkaç mesaj tek seferlik
+/// ([olderMessages], en yeni başta). Açılamadıysa [failure] dolu, diğerleri
+/// boştur.
+class FocusWindow {
+  final Stream<List<MessageData>>? messages;
+  final List<MessageData> olderMessages;
+  final FocusWindowFailure? failure;
+
+  const FocusWindow._({
+    required Stream<List<MessageData>> this.messages,
+    required this.olderMessages,
+  }) : failure = null;
+
+  const FocusWindow.failed(FocusWindowFailure this.failure)
+      : messages = null,
+        olderMessages = const [];
+}
+
 /// Enum to distinguish between different types of upload operations.
 /// Used for UI feedback and progress tracking.
 enum UploadKind { 
@@ -164,11 +193,6 @@ class ChatManager extends ChangeNotifier {
     required this.storage,
   });
 
-  // ===== UI Controllers =====
-  // These controllers are owned and managed by ChatManager for lifecycle consistency
-  
-  /// Text input controller for the message input field
-  final TextEditingController messageController = TextEditingController();
 
   // ===== State Management =====
   
@@ -255,124 +279,108 @@ class ChatManager extends ChangeNotifier {
     return MessageData.fromSnapshot(matches.docs.first);
   }
 
-  /// Tepki sorgularında aynı anda kaç danışanın sohbeti açılır. Öğün
-  /// sorgularıyla aynı ölçekte tutuldu (bkz. `MealManager.USER_BATCH_SIZE`):
-  /// iki yükleme yan yana koştuğunda açılan bağlantı sayısı dengeli kalsın.
-  static const int reactionsUserBatchSize = 20;
+  /// Firestore `whereIn` sorgusunun tek seferde kabul ettiği değer sayısı.
+  static const int _whereInLimit = 30;
 
-  /// Gün penceresinin iki ucuna eklenen pay. Fotoğrafın hangi güne ait
-  /// sayılacağını danışanın saati belirler (öğün dokümanı `yyyy-MM-dd` ile
-  /// isimlenir), mesajın `createdAt` alanını ise sunucu yazar; gece yarısına
-  /// yakın yüklemelerde ya da saati kaymış bir cihazda ikisi farklı güne
-  /// düşebiliyor. Pencere biraz geniş tutulunca mesaj yine bulunur;
-  /// eşleştirme fotoğraf adresi üzerinden olduğu için fazladan okunan mesaj
-  /// yanlış bir rozet üretmez.
-  static const Duration reactionsDayMargin = Duration(minutes: 10);
-
-  /// ADMIN ÇAĞIRIR: Verilen danışanların [date] gününde sohbetlerine düşmüş
-  /// fotoğraflarının tepkilerini, fotoğraf adresine göre döndürür
-  /// (adres -> (uid -> emoji)).
+  /// ADMIN ÇAĞIRIR: [chatId] sohbetinde verilen fotoğrafların ([imageUrls])
+  /// mesajlarına bırakılmış tepkiler (adres -> (uid -> emoji)); yalnızca
+  /// tepkisi olan fotoğraflar döner.
   ///
   /// Öğün fotoğrafı sohbete yüklenirken mesaja fotoğrafın indirme adresi
-  /// yazılır ([findImageMessage] ile aynı eşleme), bu yüzden dönen map'in
-  /// anahtarı doğrudan fotoğrafın adresidir. Adresler danışanlar arasında
-  /// benzersiz olduğundan tek map bütün sayfaya yeter.
-  ///
-  /// Yalnızca tepkisi olan fotoğraflar döner. Sorgu tek alan üzerinde
-  /// (`createdAt` aralığı) olduğu için bileşik indeks gerekmez ve yalnızca o
-  /// günün mesajları okunur.
-  ///
-  /// [onBatch] verilirse her parti biter bitmez o partinin sonucuyla çağrılır:
-  /// çağıran taraf tüm danışanları beklemeden rozetleri çizmeye başlayabilir.
-  Future<Map<String, Map<String, String>>> fetchImageReactionsOfUsersForDate({
-    required List<String> userIds,
-    required DateTime date,
-    void Function(Map<String, Map<String, String>> batchResult)? onBatch,
-  }) async {
-    final (Timestamp start, Timestamp end) = _reactionsDayWindow(date);
+  /// yazılır ([findImageMessage] ile aynı eşleme), bu yüzden mesajlar gün
+  /// aralığıyla değil doğrudan adresle bulunur: fotoğraf hangi saat diliminde
+  /// ya da gece yarısına ne kadar yakın yüklenmiş olursa olsun mesajı
+  /// kaçırılmaz ve yalnızca fotoğraf mesajları okunur. Sorgu tek alan üzerinde
+  /// (`imageUrl`), bileşik indeks gerekmez.
+  Future<Map<String, Map<String, String>>> fetchImageReactions(
+    String chatId,
+    List<String> imageUrls,
+  ) async {
+    final List<String> urls =
+        imageUrls.where((url) => url.isNotEmpty).toSet().toList();
+    if (urls.isEmpty) return {};
 
-    final Map<String, Map<String, String>> reactionsByImageUrl = {};
+    final List<Future<QuerySnapshot<Map<String, dynamic>>>> queries = [
+      for (int from = 0; from < urls.length; from += _whereInLimit)
+        _chatDoc(chatId)
+            .collection('messages')
+            .where(
+              'imageUrl',
+              whereIn: urls.sublist(from, min(from + _whereInLimit, urls.length)),
+            )
+            .get(),
+    ];
 
-    for (int from = 0; from < userIds.length; from += reactionsUserBatchSize) {
-      final int to = from + reactionsUserBatchSize < userIds.length
-          ? from + reactionsUserBatchSize
-          : userIds.length;
-
-      final List<Map<String, Map<String, String>>> batchResults =
-          await Future.wait(
-        // Tepkiler sayfanın asıl işi değil: bir sohbet okunamazsa o danışanın
-        // rozeti çıkmaz, diğerleri yine gösterilir.
-        userIds.sublist(from, to).map((userId) =>
-            _fetchImageReactionsForDay(userId, start, end).catchError(
-                (Object e) => <String, Map<String, String>>{})),
-      );
-
-      final Map<String, Map<String, String>> batchReactions = {};
-      for (final Map<String, Map<String, String>> result in batchResults) {
-        batchReactions.addAll(result);
+    final Map<String, Map<String, String>> reactions = {};
+    for (final QuerySnapshot<Map<String, dynamic>> snapshot
+        in await Future.wait(queries)) {
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs) {
+        final Map<String, dynamic> data = doc.data();
+        final String imageUrl = (data['imageUrl'] as String?) ?? '';
+        final Map<String, String> parsed =
+            MessageData.parseReactions(data['reactions']);
+        if (imageUrl.isEmpty || parsed.isEmpty) continue;
+        reactions[imageUrl] = parsed;
       }
+    }
+    return reactions;
+  }
 
-      if (batchReactions.isEmpty) continue;
-      reactionsByImageUrl.addAll(batchReactions);
-      onBatch?.call(batchReactions);
+  /// Sohbet bir mesajda açıldığında (bkz. [openFocusWindow]) hedeften yeni en
+  /// fazla kaç mesaj yüklenir. Hedef bundan daha gerideyse sohbet en yeni
+  /// mesajdan açılır: yüzlerce mesajı birden okumak hem yavaş hem pahalı.
+  static const int focusWindowMaxNewer = 300;
+
+  /// Hedef mesajın üstünde, bağlam için gösterilen eski mesaj sayısı.
+  static const int focusWindowOlderCount = 20;
+
+  /// Sohbeti [messageId] mesajında açmak için gereken mesajları yükler.
+  ///
+  /// Normal sohbet yalnızca son 50 mesajı gösterir; hedef daha eskiyse onu
+  /// göremezdi. Burada sorgu hedefi kapsayacak şekilde kurulur: hedef ve ondan
+  /// yeni bütün mesajlar canlı dinlenir (`endAt`), hedeften eski
+  /// [focusWindowOlderCount] mesaj da bağlam için bir kez okunur. Yeni mesaj
+  /// geldikçe pencere büyür, hedef pencereden hiç düşmez.
+  ///
+  /// Mesaj yoksa ya da hedeften sonra [focusWindowMaxNewer]'dan fazla mesaj
+  /// varsa pencere açılmaz; sebep [FocusWindow.failure] ile döner.
+  Future<FocusWindow> openFocusWindow(String chatId, String messageId) async {
+    final CollectionReference<Map<String, dynamic>> messages =
+        _chatDoc(chatId).collection('messages');
+
+    final DocumentSnapshot<Map<String, dynamic>> target =
+        await messages.doc(messageId).get();
+    final Map<String, dynamic>? data = target.data();
+    final Object? createdAt = data?['createdAt'] ?? data?['clientCreatedAt'];
+    if (createdAt is! Timestamp) {
+      return const FocusWindow.failed(FocusWindowFailure.notFound);
     }
 
-    return reactionsByImageUrl;
-  }
+    final AggregateQuerySnapshot newer = await messages
+        .where('createdAt', isGreaterThanOrEqualTo: createdAt)
+        .count()
+        .get();
+    if ((newer.count ?? 0) > focusWindowMaxNewer) {
+      return const FocusWindow.failed(FocusWindowFailure.tooOld);
+    }
 
-  /// ADMIN ÇAĞIRIR: Tek danışanın [date] gününde sohbetine düşmüş
-  /// fotoğraflarının tepkileri ([fetchImageReactionsOfUsersForDate] ile aynı
-  /// biçim). Sohbetten dönüldüğünde yalnızca o danışanın rozetlerini tazelemek
-  /// için kullanılır; okuma hatası yutulmaz ki çağıran eldeki rozetleri
-  /// boşuna silmesin.
-  Future<Map<String, Map<String, String>>> fetchImageReactionsOfUserForDate({
-    required String userId,
-    required DateTime date,
-  }) {
-    final (Timestamp start, Timestamp end) = _reactionsDayWindow(date);
-    return _fetchImageReactionsForDay(userId, start, end);
-  }
-
-  /// [date] gününün tepki sorgusu aralığı; iki uca [reactionsDayMargin] payı
-  /// eklenir.
-  (Timestamp, Timestamp) _reactionsDayWindow(DateTime date) {
-    final DateTime dayStart = DateTime(date.year, date.month, date.day);
-    return (
-      Timestamp.fromDate(dayStart.subtract(reactionsDayMargin)),
-      Timestamp.fromDate(
-          dayStart.add(const Duration(days: 1) + reactionsDayMargin)),
-    );
-  }
-
-  /// Tek bir sohbetin [start] ile [end] arasındaki fotoğraflı mesajlarının
-  /// tepkileri (adres -> (uid -> emoji)); yalnızca tepkisi olanlar döner.
-  Future<Map<String, Map<String, String>>> _fetchImageReactionsForDay(
-    String chatId,
-    Timestamp start,
-    Timestamp end,
-  ) async {
-    final Map<String, Map<String, String>> reactions = {};
-
-    final QuerySnapshot<Map<String, dynamic>> snapshot = await _chatDoc(chatId)
-        .collection('messages')
-        .where('createdAt', isGreaterThanOrEqualTo: start)
-        .where('createdAt', isLessThan: end)
+    final Query<Map<String, dynamic>> newestFirst =
+        messages.orderBy('createdAt', descending: true);
+    final QuerySnapshot<Map<String, dynamic>> older = await newestFirst
+        .startAfter([createdAt])
+        .limit(focusWindowOlderCount)
         .get();
 
-    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
-        in snapshot.docs) {
-      final Map<String, dynamic> data = doc.data();
-      final String imageUrl = (data['imageUrl'] as String?) ?? '';
-      if (imageUrl.isEmpty) continue;
-
-      final Map<String, String> parsed =
-          MessageData.parseReactions(data['reactions']);
-      if (parsed.isEmpty) continue;
-
-      reactions[imageUrl] = parsed;
-    }
-
-    return reactions;
+    return FocusWindow._(
+      messages: newestFirst
+          .endAt([createdAt])
+          .snapshots()
+          .map((snap) =>
+              snap.docs.map((d) => MessageData.fromSnapshot(d)).toList()),
+      olderMessages:
+          older.docs.map((d) => MessageData.fromSnapshot(d)).toList(),
+    );
   }
 
   /// Returns a live stream of every photo the *user* (chatId == userId) has
@@ -615,11 +623,15 @@ class ChatManager extends ChangeNotifier {
   /// 1. Validates input (non-empty, not already sending)
   /// 2. Ensures chat document exists with updated metadata
   /// 3. Adds message to messages subcollection
-  /// 4. Clears the message controller
+  ///
+  /// Metin kutusu sohbet sayfasına aittir; gönderim başarılı olunca kutuyu
+  /// sayfa temizler. Böylece bir sohbette yazılıp gönderilmeyen metin başka
+  /// bir sohbetin kutusuna taşınmaz.
   /// 
   /// @param chatId The target chat ID (user UID in our model)
-  Future<void> sendTextTo(String chatId) async {
-    final text = messageController.text.trim();
+  /// @param rawText The text typed by the user (trimmed here)
+  Future<void> sendTextTo(String chatId, String rawText) async {
+    final text = rawText.trim();
     
     // Guard: Prevent empty messages or concurrent sends
     if (text.isEmpty || _sending) {
@@ -653,9 +665,6 @@ class ChatManager extends ChangeNotifier {
         'createdAt': FieldValue.serverTimestamp(),
         'clientCreatedAt': Timestamp.now(),
       });
-      
-      messageController.clear();
-      
     } catch (e) {
       rethrow;
     } finally {
@@ -1013,11 +1022,5 @@ class ChatManager extends ChangeNotifier {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     final r = Random.secure();
     return List.generate(n, (_) => chars[r.nextInt(chars.length)]).join();
-  }
-
-  @override
-  void dispose() {
-    messageController.dispose();
-    super.dispose();
   }
 }

@@ -125,10 +125,11 @@ They notify users/admins about new chat messages.
 | `CHAT_CHANNEL_ID` | `'chat_messages_v2'` | Android notification channel ID |
 
 **Reaction notifications** are sent by two mirrored Cloud Functions, both
-triggered on message *updates*. Removing a reaction never notifies, and a
+triggered on message *updates*. Only a newly added reaction notifies: changing
+an existing reaction (e.g. correcting 👍 to ❤️) or removing it never does, and a
 reaction only notifies the *other* side.
 
-- `notifyUserOnAdminReaction`: an admin leaves or changes a reaction
+- `notifyUserOnAdminReaction`: an admin leaves a new reaction
   (`reactions.<adminUid> = emoji`) on a message the user sent → the user is
   notified. Title `Nilay Göktepe Yılmaz` (`CHAT_ADMIN_TO_USER_TITLE`), body
   worded after the message: `Öğle öğün fotoğrafınıza 👍 bıraktı` for a meal
@@ -136,7 +137,7 @@ reaction only notifies the *other* side.
   `bir mesajınıza 👍 ifadesi bıraktı` for a text message. Data
   `type: 'chat'` plus `messageId`, so the tap opens the chat at that message
   (`ChatPage(focusMessageId: messageId)`).
-- `notifyAdminsOnUserReaction`: the user leaves or changes a reaction
+- `notifyAdminsOnUserReaction`: the user leaves a new reaction
   (`reactions.<userUid> = emoji`) on a message an admin sent → every admin with
   an FCM token is notified. Title is the client's `name surname` (falling back
   to `CHAT_USER_TO_ADMIN_DEFAULT_TITLE`), same body template, data

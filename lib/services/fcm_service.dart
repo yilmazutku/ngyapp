@@ -93,8 +93,15 @@ class FcmService {
   // Overlay entry for in-app notification banner
   OverlayEntry? _currentBanner;
 
-  // Currently active chat ID (to suppress notifications when already in that chat)
-  String? _activeChatId;
+  /// Açık sohbet sayfalarının kimlikleri; en üstteki (görünen) en sonda.
+  /// Sohbet üstüne sohbet açılabilir (ör. bir sohbetteyken başka bir
+  /// danışanın bildirimine basılınca); üstteki kapanınca alttakinin bildirim
+  /// bastırması geri gelir.
+  final List<String> _openChatIds = [];
+
+  /// Uygulama ön planda mı. Arka plandayken hiçbir sohbetin bildirimi
+  /// bastırılmaz.
+  bool _inForeground = true;
 
   /// Initialize FCM service
   /// 
@@ -273,7 +280,7 @@ class FcmService {
     }
 
     // Suppress if the notification is for the chat the user is currently viewing
-    return _activeChatId != null && _activeChatId == notificationChatId;
+    return activeChatId == notificationChatId;
   }
 
   /// Show in-app notification banner
@@ -511,20 +518,27 @@ class FcmService {
   /// Check if a user is an admin
   static bool isAdmin(String uid) => _adminUids.contains(uid);
 
-  /// Set the currently active chat ID.
-  /// Call this when entering a chat page to suppress notifications for that chat.
-  void setActiveChatId(String? chatId) {
-    _activeChatId = chatId;
+  /// Bir sohbet sayfası açıldı: o sohbetin uygulama içi bildirimleri, sayfa
+  /// en üstte kaldıkça bastırılır.
+  void openChat(String chatId) {
+    _openChatIds.add(chatId);
   }
 
-  /// Clear the active chat ID.
-  /// Call this when leaving a chat page.
-  void clearActiveChatId() {
-    _activeChatId = null;
+  /// Sohbet sayfası kapandı. Yalnızca o sayfanın kaydı düşer; altta açık
+  /// başka bir sohbet varsa onun bastırması sürer.
+  void closeChat(String chatId) {
+    final int index = _openChatIds.lastIndexOf(chatId);
+    if (index >= 0) _openChatIds.removeAt(index);
   }
 
-  /// Get the currently active chat ID (for debugging/testing).
-  String? get activeChatId => _activeChatId;
+  /// Uygulama ön plana geldi / arka plana gitti.
+  void setInForeground(bool inForeground) {
+    _inForeground = inForeground;
+  }
+
+  /// Bildirimleri bastırılan (ekranda görünen) sohbet; yoksa null.
+  String? get activeChatId =>
+      _inForeground && _openChatIds.isNotEmpty ? _openChatIds.last : null;
 }
 
 /// In-app notification banner widget (WhatsApp-style)
