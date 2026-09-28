@@ -48,7 +48,8 @@ class PendingUploadBubble extends StatelessWidget {
           return const SizedBox.shrink();
         }
 
-        final Meals? meal = upload.meal;
+        final Meals meal = upload.meal;
+        final Color mealColor = mealTypeColor(meal);
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Align(
@@ -64,27 +65,22 @@ class PendingUploadBubble extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (meal != null)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-                      child: Row(
-                        children: [
-                          Icon(
-                            mealTypeIcon(meal),
-                            size: 16,
-                            color: mealTypeColor(meal),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                    child: Row(
+                      children: [
+                        Icon(mealTypeIcon(meal), size: 16, color: mealColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          meal.displayLabel,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: mealColor,
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            meal.displayLabel,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: mealTypeColor(meal),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
+                  ),
                   _buildPreview(context, status),
                   const SizedBox(height: 4),
                   _buildFooter(context, status),

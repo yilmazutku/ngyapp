@@ -153,7 +153,6 @@ class UploadedImage {
 
 /// Görseli küçültüp ([prepareImageForUpload]) [refFor] ile verilen yere
 /// yükler, yanına küçük görselini ([thumbnailRefFor]) koyar ve ölçüsünü okur.
-/// Öğün fotoğrafı ve sohbete gönderilen fotoğraf aynı yolu izler.
 ///
 /// Küçük görsel, asıl dosya yüklenirken üretilip yanında yüklenir; sırayla
 /// beklenmez. Küçük görsel yardımcıdır: üretilemez ya da yüklenemezse görsel
