@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/meal_model.dart';
@@ -255,7 +255,7 @@ class FocusWindow {
 /// 
 /// Admin UID:
 /// - Nilay: 0MvvbZsjbmNPW4QYShRNSOOtkE43
-class ChatManager extends ChangeNotifier {
+class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   final FirebaseFirestore db;
   final FirebaseAuth auth;
   final FirebaseStorage storage;
@@ -290,6 +290,10 @@ class ChatManager extends ChangeNotifier {
   /// yapılır (aynı öğün kaydına iki fotoğraf aynı anda yazılmasın).
   final Set<String> _drainingChats = {};
 
+  /// Uygulamanın ön/arka plan geçişleri izleniyor mu (ilk yüklemeyle
+  /// başlar).
+  bool _observingLifecycle = false;
+
   /// [chatId] sohbetinde yüklenmeyi bekleyen fotoğraflar.
   List<PendingUpload> pendingUploadsOf(String chatId) =>
       _pendingUploads[chatId] ?? const [];
@@ -298,6 +302,10 @@ class ChatManager extends ChangeNotifier {
   /// yükleme sürer.
   void enqueueUploads(List<PendingUpload> uploads) {
     if (uploads.isEmpty) return;
+    if (!_observingLifecycle) {
+      _observingLifecycle = true;
+      WidgetsBinding.instance.addObserver(this);
+    }
     final Set<String> chatIds = {};
     for (final PendingUpload upload in uploads) {
       _pendingUploads[upload.chatId] = [
@@ -378,6 +386,30 @@ class ChatManager extends ChangeNotifier {
             : PendingUpload.defaultErrorText);
       }
     }
+  }
+
+  /// Arka planda yüklemelerin zaman aşımı sayılmaz (bkz.
+  /// [PendingUpload.suspendWatchdog]); öne gelince baştan sayılır.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final bool background = state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden;
+    if (!background && state != AppLifecycleState.resumed) return;
+    for (final List<PendingUpload> uploads in _pendingUploads.values) {
+      for (final PendingUpload upload in uploads) {
+        if (background) {
+          upload.suspendWatchdog();
+        } else {
+          upload.resumeWatchdog();
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_observingLifecycle) WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   /// Current authenticated user's UID
