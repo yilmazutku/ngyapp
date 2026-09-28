@@ -1,16 +1,16 @@
 // lib/providers/chat_manager_new.dart
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 
 import '../models/meal_model.dart';
+import '../models/pending_upload.dart';
+import '../utils/storage_upload.dart';
 
 /// Data Transfer Object representing a chat message from Firestore.
 /// 
@@ -25,6 +25,9 @@ import '../models/meal_model.dart';
 /// - clientCreatedAt: Client-side timestamp (fallback while server timestamp is pending)
 /// - reactions: Map of reactorUid -> emoji (e.g. {adminUid: '👍'}). Empty when no
 ///   one has reacted. Only one reaction per person is kept (WhatsApp-style).
+/// - thumbUrl / imageWidth / imageHeight: fotoğrafın küçük görseli ve piksel
+///   ölçüsü (bu alanlardan önceki mesajlarda yok).
+/// - replyTo: yanıtlanan mesajın özeti (bkz. [MessageReply]).
 class MessageData {
   final String id;
   final String chatId; //chatId if provided (admin viewing another user), otherwise current user's UID
@@ -34,6 +37,18 @@ class MessageData {
   final String? storagePath;
   final Timestamp? createdAt;
   final Timestamp? clientCreatedAt;
+
+  /// Fotoğrafın küçük görseli: sohbet baloncuğu ve listeler bunu indirir,
+  /// orijinal yalnızca büyütünce iner. Eski mesajlarda null.
+  final String? thumbUrl;
+
+  /// Fotoğrafın piksel ölçüsü: baloncuk, görsel inmeden doğru oranda yer
+  /// ayırır (liste kaymaz). Eski mesajlarda null.
+  final int? imageWidth;
+  final int? imageHeight;
+
+  /// Bu mesaj bir mesaja yanıtsa, yanıtlanan mesajın özeti.
+  final MessageReply? replyTo;
 
   /// Reactions left on this message, keyed by the reactor's UID.
   /// The value is the reaction emoji (e.g. '👍' or '❤️').
@@ -55,7 +70,24 @@ class MessageData {
     this.clientCreatedAt,
     this.reactions = const {},
     this.photoDeleted = false,
+    this.thumbUrl,
+    this.imageWidth,
+    this.imageHeight,
+    this.replyTo,
   });
+
+  /// Fotoğrafın en/boy oranı; ölçüsü kayıtlı değilse null.
+  double? get imageAspectRatio {
+    final int? width = imageWidth;
+    final int? height = imageHeight;
+    if (width == null || height == null || width <= 0 || height <= 0) {
+      return null;
+    }
+    return width / height;
+  }
+
+  /// Mesajın zamanı: sunucu zamanı, henüz yoksa cihazın yazdığı zaman.
+  DateTime? get sentAt => (createdAt ?? clientCreatedAt)?.toDate();
 
   /// Danışanın sohbetten yüklediği öğün fotoğrafı mı (bkz.
   /// `MealManager.uploadMealImg`, `alsoPostToChat`).
@@ -99,6 +131,10 @@ class MessageData {
       clientCreatedAt: data['clientCreatedAt'] as Timestamp?,
       reactions: parseReactions(data['reactions']),
       photoDeleted: data['photoDeleted'] == true,
+      thumbUrl: data['thumbUrl'] as String?,
+      imageWidth: (data['imageWidth'] as num?)?.toInt(),
+      imageHeight: (data['imageHeight'] as num?)?.toInt(),
+      replyTo: MessageReply.fromMap(data['replyTo']),
     );
   }
 
@@ -115,6 +151,65 @@ class MessageData {
     });
     return out;
   }
+}
+
+/// Yanıtlanan mesajın, yanıtın içinde saklanan özeti. Yanıt baloncuğunda
+/// alıntı olarak görünür; alıntıya dokununca sohbet o mesaja gider
+/// ([messageId]). Özet yanıt anında kopyalanır: asıl mesaj sonradan
+/// değişse de alıntı okunur kalır.
+class MessageReply {
+  final String messageId;
+  final String senderId;
+
+  /// Mesajın metni (kısaltılmış); fotoğraf mesajında açıklaması ya da boş.
+  final String text;
+
+  /// Fotoğraf mesajıysa küçük görseli (yoksa asıl görseli).
+  final String? imageUrl;
+
+  const MessageReply({
+    required this.messageId,
+    required this.senderId,
+    required this.text,
+    this.imageUrl,
+  });
+
+  /// Alıntıda saklanan en uzun metin.
+  static const int _maxTextLength = 200;
+
+  factory MessageReply.of(MessageData message) {
+    final String text = Meals.chatTextForDisplay(message.text ?? '').trim();
+    return MessageReply(
+      messageId: message.id,
+      senderId: message.senderId,
+      text: text.length > _maxTextLength
+          ? '${text.substring(0, _maxTextLength)}…'
+          : text,
+      imageUrl: message.thumbUrl ?? message.imageUrl,
+    );
+  }
+
+  static MessageReply? fromMap(Object? raw) {
+    if (raw is! Map) return null;
+    final Object? id = raw['messageId'];
+    final Object? senderId = raw['senderId'];
+    if (id is! String || senderId is! String) return null;
+    final Object? text = raw['text'];
+    final Object? imageUrl = raw['imageUrl'];
+    return MessageReply(
+      messageId: id,
+      senderId: senderId,
+      text: text is String ? text : '',
+      imageUrl: imageUrl is String && imageUrl.isNotEmpty ? imageUrl : null,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'messageId': messageId,
+        'senderId': senderId,
+        'text': text,
+        if (imageUrl != null) 'imageUrl': imageUrl,
+      };
 }
 
 /// Sohbet bir mesajda açılamadığında sebebi (bkz. [ChatManager.openFocusWindow]).
@@ -146,17 +241,10 @@ class FocusWindow {
         olderMessages = const [];
 }
 
-/// Enum to distinguish between different types of upload operations.
-/// Used for UI feedback and progress tracking.
-enum UploadKind { 
-  chatImage,  // Regular chat image upload
-  mealImage   // Meal-specific image upload
-}
-
 /// ChatManager handles all chat-related operations including:
 /// - Sending text messages
-/// - Sending images with compression and progress tracking
-/// - Uploading meal photos
+/// - Sending images with compression, thumbnails and progress tracking
+/// - Keeping the queue of photos waiting to be uploaded ([PendingUpload])
 /// - Managing chat document structure
 /// 
 /// Architecture:
@@ -171,10 +259,7 @@ class ChatManager extends ChangeNotifier {
   final FirebaseFirestore db;
   final FirebaseAuth auth;
   final FirebaseStorage storage;
-  
-  /// Maximum allowed image size: 5MB
-  final MAX_IMG_SIZE = 5 * 1024 * 1024;
-  
+
   /// Admin user IDs - these users have elevated permissions and are participants in all chats
   static const Set<String> adminIds = {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
@@ -194,25 +279,106 @@ class ChatManager extends ChangeNotifier {
   });
 
 
-  // ===== State Management =====
-  
-  /// Active Firebase Storage upload task (null when no upload is in progress)
-  UploadTask? _activeTask;
-  
-  /// Upload progress: 0.0-1.0 for actual upload, null during compression phase
-  double? _uploadProgress;
-  
-  /// Type of upload currently in progress (chatImage or mealImage)
-  UploadKind? _uploadKind;
+  // ===== Bekleyen fotoğraf yüklemeleri =====
 
-  /// True if an image upload is currently in progress
-  bool get isUploading => _activeTask != null;
-  
-  /// Current upload progress (0.0-1.0) or null if indeterminate
-  double? get uploadProgress => _uploadProgress;
-  
-  /// Type of upload currently in progress
-  UploadKind? get uploadKind => _uploadKind;
+  /// Sohbet -> yüklenmeyi bekleyen fotoğraflar (sıra sırasıyla). Liste her
+  /// değişiklikte yenisiyle değiştirilir: ekran `Selector` ile yalnızca
+  /// değişince yeniden çizilir.
+  final Map<String, List<PendingUpload>> _pendingUploads = {};
+
+  /// Sırası şu an işlenen sohbetler; bir sohbette aynı anda tek yükleme
+  /// yapılır (aynı öğün kaydına iki fotoğraf aynı anda yazılmasın).
+  final Set<String> _drainingChats = {};
+
+  /// [chatId] sohbetinde yüklenmeyi bekleyen fotoğraflar.
+  List<PendingUpload> pendingUploadsOf(String chatId) =>
+      _pendingUploads[chatId] ?? const [];
+
+  /// Fotoğrafları sıraya ekler ve sırayı işletir. Sohbet ekranı kapansa da
+  /// yükleme sürer.
+  void enqueueUploads(List<PendingUpload> uploads) {
+    if (uploads.isEmpty) return;
+    final Set<String> chatIds = {};
+    for (final PendingUpload upload in uploads) {
+      _pendingUploads[upload.chatId] = [
+        ...pendingUploadsOf(upload.chatId),
+        upload,
+      ];
+      chatIds.add(upload.chatId);
+    }
+    notifyListeners();
+    chatIds.forEach(_drainUploads);
+  }
+
+  /// Yüklenemeyen fotoğrafı aynı yerinde yeniden sıraya koyar.
+  void retryUpload(PendingUpload upload) {
+    final List<PendingUpload> current = pendingUploadsOf(upload.chatId);
+    final int index = current.indexOf(upload);
+    if (index < 0) return;
+    _pendingUploads[upload.chatId] = [...current]..[index] = upload.retryCopy();
+    notifyListeners();
+    _drainUploads(upload.chatId);
+  }
+
+  /// Fotoğrafı sıradan çıkarır; yükleniyorsa iptal edilir, mesaj yazılmaz.
+  void discardUpload(PendingUpload upload) {
+    upload.cancel();
+    _removePendingUpload(upload);
+  }
+
+  void _removePendingUpload(PendingUpload upload) {
+    final List<PendingUpload> current = pendingUploadsOf(upload.chatId);
+    if (!current.contains(upload)) return;
+    _pendingUploads[upload.chatId] =
+        current.where((item) => item != upload).toList();
+    notifyListeners();
+  }
+
+  /// Sohbetin sırasını baştan sona tek tek işler.
+  Future<void> _drainUploads(String chatId) async {
+    if (!_drainingChats.add(chatId)) return;
+    try {
+      while (true) {
+        final PendingUpload? next = _nextWaitingUpload(chatId);
+        if (next == null) return;
+        await _runUpload(next);
+      }
+    } finally {
+      _drainingChats.remove(chatId);
+    }
+  }
+
+  PendingUpload? _nextWaitingUpload(String chatId) {
+    for (final PendingUpload upload in pendingUploadsOf(chatId)) {
+      if (upload.status.value == PendingUploadStatus.waiting) return upload;
+    }
+    return null;
+  }
+
+  /// Tek bir yüklemeyi yapar. İptal ya da zaman aşımında yarıda kalan
+  /// yükleme beklenmez ([PendingUpload.aborted]); iptal edilmiş yükleme kayıt
+  /// yazmaz (bkz. [uploadImageWithThumbnail]).
+  Future<void> _runUpload(PendingUpload upload) async {
+    upload.markUploading();
+    try {
+      await Future.any<void>([upload.runner(upload), upload.aborted]);
+      if (upload.timedOut) {
+        upload.markFailed(PendingUpload.timeoutText);
+      } else {
+        _removePendingUpload(upload);
+      }
+    } on UploadFailure catch (e) {
+      upload.markFailed(e.message, canRetry: e.canRetry);
+    } catch (e) {
+      if (upload.cancelledByUser) {
+        _removePendingUpload(upload);
+      } else {
+        upload.markFailed(upload.timedOut
+            ? PendingUpload.timeoutText
+            : PendingUpload.defaultErrorText);
+      }
+    }
+  }
 
   /// Current authenticated user's UID
   String get userId => auth.currentUser!.uid;
@@ -452,46 +618,21 @@ class ChatManager extends ChangeNotifier {
     });
   }
 
-  /// Ensures the chat document exists with up-to-date metadata.
-  /// 
-  /// This method:
+  /// Sohbet dokümanına `set(merge: true)` ile yazılan özet ve sayaçlar;
+  /// mesajla aynı toplu yazımda gider.
+  ///
+  /// This data:
   /// - Creates the chat document if it doesn't exist
   /// - Adds both admin UIDs and the user as participants
   /// - Updates last message info for the admin chat list
   /// - Increments unread count for admins when user sends a message
   /// - Increments unread count for user when admin sends a message
   /// - Updates hasUnreadFor array for efficient unread count queries
-  /// - Uses merge: true to avoid overwriting existing fields
-  /// - Uses a separate update() call for dot-notation nested fields
-  ///   (adminUnreadCount.<uid>) because set()+merge does NOT reliably
-  ///   interpret dot-separated keys as nested field paths in the Flutter SDK.
-  Future<void> _ensureChatDoc(
-      String chatId, {
-        String? lastMessage,
-        String? lastImageUrl,
-        Timestamp? lastAt,
-        bool incrementUnreadForAdmins = false,
-        bool incrementUnreadForUser = false,
-      }) async {
-    await _chatDoc(chatId).set(
-      _chatSummaryData(
-        chatId,
-        lastMessage: lastMessage,
-        lastImageUrl: lastImageUrl,
-        lastAt: lastAt,
-        incrementUnreadForAdmins: incrementUnreadForAdmins,
-        incrementUnreadForUser: incrementUnreadForUser,
-      ),
-      SetOptions(merge: true),
-    );
-  }
-
-  /// Sohbet dokümanına `set(merge: true)` ile yazılan özet ve sayaçlar (bkz.
-  /// [_ensureChatDoc]); toplu yazımda da aynı veri kullanılır.
   Map<String, dynamic> _chatSummaryData(
       String chatId, {
         String? lastMessage,
         String? lastImageUrl,
+        String? lastImageThumbUrl,
         Timestamp? lastAt,
         bool incrementUnreadForAdmins = false,
         bool incrementUnreadForUser = false,
@@ -512,6 +653,7 @@ class ChatManager extends ChangeNotifier {
       'participants': participants,
       if (lastMessage != null) 'lastMessage': lastMessage,
       if (lastImageUrl != null) 'lastImageUrl': lastImageUrl,
+      if (lastImageThumbUrl != null) 'lastImageThumbUrl': lastImageThumbUrl,
       if (lastAt != null) 'lastMessageAt': lastAt,
       'updatedAt': FieldValue.serverTimestamp(),
       if (incrementUnreadForAdmins)
@@ -685,7 +827,12 @@ class ChatManager extends ChangeNotifier {
   ///
   /// @param chatId The target chat ID (user UID in our model)
   /// @param rawText The text typed by the user (trimmed here)
-  Future<void> sendTextTo(String chatId, String rawText) async {
+  /// @param replyTo Yanıtlanan mesajın özeti; yanıt değilse null.
+  Future<void> sendTextTo(
+    String chatId,
+    String rawText, {
+    MessageReply? replyTo,
+  }) async {
     final text = rawText.trim();
     if (text.isEmpty) return;
 
@@ -698,7 +845,9 @@ class ChatManager extends ChangeNotifier {
       _chatSummaryData(
         chatId,
         lastMessage: text,
-        lastImageUrl: '', // text-only message clears the image preview
+        // Text-only message clears the image preview.
+        lastImageUrl: '',
+        lastImageThumbUrl: '',
         lastAt: Timestamp.now(),
         incrementUnreadForAdmins: !isAdminMessage,
         incrementUnreadForUser: isAdminMessage,
@@ -709,115 +858,94 @@ class ChatManager extends ChangeNotifier {
       'chatId': chatId,
       'senderId': userId,
       'text': text,
+      if (replyTo != null) 'replyTo': replyTo.toMap(),
       'createdAt': FieldValue.serverTimestamp(),
       'clientCreatedAt': Timestamp.now(),
     });
     await batch.commit();
   }
 
-  /// Send an image message to a specific chat.
-  /// 
-  /// Flow:
-  /// 1. Validates no concurrent send/upload operations
-  /// 2. Compresses the image to meet size requirements (≤5MB)
-  /// 3. Uploads to Firebase Storage with progress tracking
-  /// 4. Updates chat document with image metadata
-  /// 5. Adds message to messages subcollection
-  /// 6. Cleans up temporary files
-  /// 
-  /// Progress tracking:
-  /// - During compression: uploadProgress is null (indeterminate)
-  /// - During upload: uploadProgress is 0.0-1.0
-  /// - UI can listen to isUploading, uploadProgress, and uploadKind
-  /// 
+  /// Fotoğraf mesajının görsel alanları (adres, küçük görsel, ölçü). Öğün
+  /// fotoğrafı ve sohbete gönderilen fotoğraf aynı alanları yazar.
+  static Map<String, dynamic> imageMessageFields(UploadedImage image) => {
+        'imageUrl': image.url,
+        if (image.thumbUrl != null) 'thumbUrl': image.thumbUrl,
+        if (image.size != null) 'imageWidth': image.size!.width,
+        if (image.size != null) 'imageHeight': image.size!.height,
+      };
+
+  /// [imageMessageFields] alanlarının adları; fotoğrafı silinen mesajdan
+  /// hepsi kaldırılır.
+  static const List<String> imageFieldNames = [
+    'imageUrl',
+    'thumbUrl',
+    'imageWidth',
+    'imageHeight',
+  ];
+
+  /// Sohbete bir fotoğraf gönderir (öğün kaydına girmez).
+  ///
+  /// Fotoğraf küçültülür, küçük görseli ve ölçüsüyle birlikte yüklenir
+  /// ([uploadImageWithThumbnail]); özet ve mesaj tek toplu yazımla gider (bkz.
+  /// [sendTextTo]). [observer] ilerlemeyi izler ve iptal edebilir; iptal
+  /// edilirse mesaj yazılmaz ve [UploadCancelledException] fırlatılır.
+  ///
   /// @param chatId The target chat ID (user UID in our model)
   /// @param image The image file selected by the user
-  Future<void> sendImageTo(String chatId, XFile image) async {
-    // Guard: Prevent concurrent operations
-    if (isUploading) {
-      return;
-    }
-    
-    // Set upload state for UI feedback
-    _uploadKind = UploadKind.chatImage;
-    _uploadProgress = null; // null = indeterminate (compression phase)
-    notifyListeners();
+  Future<void> sendImageTo(
+    String chatId,
+    XFile image, {
+    UploadObserver? observer,
+  }) async {
+    final UploadedImage uploaded = await uploadImageWithThumbnail(
+      bytes: await image.readAsBytes(),
+      fileName: image.name,
+      mimeType: image.mimeType,
+      refFor: (fileName) => storage.ref(
+        '${_chatStorageFolder(chatId)}/'
+        '${DateTime.now().millisecondsSinceEpoch}_${_rand(5)}'
+        '${_extensionOf(fileName)}',
+      ),
+      observer: observer,
+    );
 
-    File? tempCompressed;
-    StreamSubscription<TaskSnapshot>? sub;
-    
-    try {
-      // Step 1: Read original file
-      final original = File(image.path);
-
-      // Step 2: Compress image
-      tempCompressed = await _compressImage(original);
-      final uploadFile = tempCompressed.existsSync() ? tempCompressed : original;
-
-      // Step 3: Prepare storage reference
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${_rand(5)}.jpg';
-      final path = '${_chatStorageFolder(chatId)}/$fileName';
-      final ref = storage.ref(path);
-      final meta = SettableMetadata(contentType: 'image/jpeg');
-
-      // Step 4: Upload with progress tracking
-      final task = ref.putFile(uploadFile, meta);
-      _activeTask = task;
-      
-      sub = task.snapshotEvents.listen((snapshot) {
-        if (snapshot.totalBytes > 0) {
-          _uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
-          notifyListeners();
-        }
-      });
-
-      await task.whenComplete(() {});
-      final url = await ref.getDownloadURL();
-
-      // Step 5: Update chat document with image metadata
-      // Determine who should get unread notification
-      final isUserMessage = !isAdminUid(userId);
-      final isAdminMessage = isAdminUid(userId);
-      
-      await _ensureChatDoc(
-        chatId, 
-        lastMessage: 'Fotoğraf', 
-        lastImageUrl: url, 
+    // User sends → notify admins; admin sends → notify user.
+    final bool isAdminMessage = isAdminUid(userId);
+    final WriteBatch batch = db.batch();
+    batch.set(
+      _chatDoc(chatId),
+      _chatSummaryData(
+        chatId,
+        lastMessage: _photoSummaryText,
+        lastImageUrl: uploaded.url,
+        lastImageThumbUrl: uploaded.thumbUrl ?? '',
         lastAt: Timestamp.now(),
-        incrementUnreadForAdmins: isUserMessage,  // User sends → notify admins
-        incrementUnreadForUser: isAdminMessage,   // Admin sends → notify user
-      );
-
-      // Step 6: Add message to subcollection
-      await _chatDoc(chatId).collection('messages').add({
-        'chatId': chatId,
-        'senderId': userId,
-        'imageUrl': url,
-        'storagePath': path,
-        'createdAt': FieldValue.serverTimestamp(),
-        'clientCreatedAt': Timestamp.now(),
-      });
-    } catch (e) {
-      rethrow;
-    } finally {
-      // Cleanup: Cancel subscription and delete temp files
-      await sub?.cancel();
-      
-      try {
-        if (tempCompressed != null && tempCompressed.existsSync()) {
-          tempCompressed.deleteSync();
-        }
-      } catch (e) {
-      }
-      
-      // Reset upload state
-      _activeTask = null;
-      _uploadProgress = null;
-      _uploadKind = null;
-      notifyListeners();
-    }
+        incrementUnreadForAdmins: !isAdminMessage,
+        incrementUnreadForUser: isAdminMessage,
+      ),
+      SetOptions(merge: true),
+    );
+    batch.set(_chatDoc(chatId).collection('messages').doc(), {
+      'chatId': chatId,
+      'senderId': userId,
+      ...imageMessageFields(uploaded),
+      'storagePath': uploaded.ref.fullPath,
+      'createdAt': FieldValue.serverTimestamp(),
+      'clientCreatedAt': Timestamp.now(),
+    });
+    final Future<void> commit = batch.commit();
+    observer?.onSaving();
+    await commit;
   }
 
+  /// Sohbet listesinde fotoğraf mesajının özeti.
+  static const String _photoSummaryText = 'Fotoğraf';
+
+  /// Dosya adının uzantısı (noktayla); yoksa `.jpg`.
+  static String _extensionOf(String fileName) {
+    final int dot = fileName.lastIndexOf('.');
+    return dot > 0 ? fileName.substring(dot).toLowerCase() : '.jpg';
+  }
 
   // ===== Reactions =====
 
@@ -892,17 +1020,6 @@ class ChatManager extends ChangeNotifier {
     }
   }
 
-  /// Cancel the current upload operation.
-  ///
-  /// This method attempts to cancel the active Firebase Storage upload task.
-  /// Safe to call even if no upload is in progress.
-  Future<void> cancelUpload() async {
-    try {
-      await _activeTask?.cancel();
-    } catch (e) {
-    }
-  }
-
   /// Permanently delete an entire chat and all of its data.
   ///
   /// This is an ADMIN-ONLY destructive operation that:
@@ -939,14 +1056,17 @@ class ChatManager extends ChangeNotifier {
     final chatFolder = '${_chatStorageFolder(chatId)}/';
     final imageUrls = <String>{};
     for (final doc in snapshot.docs) {
-      final url = (doc.data()['imageUrl'] as String?)?.trim() ?? '';
-      if (url.isEmpty) continue;
-      try {
-        if (storage.refFromURL(url).fullPath.startsWith(chatFolder)) {
-          imageUrls.add(url);
+      // Görselin kendisi ve küçük görseli.
+      for (final String field in const ['imageUrl', 'thumbUrl']) {
+        final url = (doc.data()[field] as String?)?.trim() ?? '';
+        if (url.isEmpty) continue;
+        try {
+          if (storage.refFromURL(url).fullPath.startsWith(chatFolder)) {
+            imageUrls.add(url);
+          }
+        } catch (e) {
+          // Not a Firebase Storage URL: nothing of ours to delete.
         }
-      } catch (e) {
-        // Not a Firebase Storage URL: nothing of ours to delete.
       }
     }
 
@@ -985,77 +1105,6 @@ class ChatManager extends ChangeNotifier {
     await _chatDoc(chatId).delete();
 
     notifyListeners();
-  }
-
-  /// Compress an image to meet the maximum size requirement (5MB).
-  /// 
-  /// Strategy:
-  /// - Uses multiple compression attempts with decreasing quality/dimensions
-  /// - On Android/iOS: Uses flutter_image_compress (hardware-accelerated)
-  /// - On Web/Desktop: Uses package:image (pure Dart fallback)
-  /// 
-  /// Compression attempts (in order):
-  /// 1. 1600x1600, quality 85%
-  /// 2. 1280x1280, quality 75%
-  /// 3. 1024x1024, quality 65%
-  /// 
-  /// @param input The original image file
-  /// @return The compressed image file (or original if compression failed)
-  Future<File> _compressImage(File input) async {
-    // Define compression attempts with decreasing quality/size
-    final attempts = <({int w, int h, int q})>[
-      (w: 1600, h: 1600, q: 85),  // First attempt: high quality
-      (w: 1280, h: 1280, q: 75),  // Second attempt: medium quality
-      (w: 1024, h: 1024, q: 65),  // Third attempt: lower quality
-    ];
-
-    File current = input;
-
-    for (final a in attempts) {
-      final outPath = _deriveOutPath(current.path);
-
-      final result = await fic.FlutterImageCompress.compressAndGetFile(
-        current.path,
-        outPath,
-        quality: a.q,
-        minWidth: a.w,
-        minHeight: a.h,
-        format: fic.CompressFormat.jpeg,
-        keepExif: false,
-      );
-      
-      if (result == null) {
-        continue;
-      }
-      
-      final f = File(result.path);
-      final size = await _safeFileLength(f);
-      
-      if (size <= MAX_IMG_SIZE) {
-        return f;
-      }
-      
-      current = f;
-    }
-
-    return current;
-  }
-
-  /// Safely get file length, returning -1 if the operation fails.
-  Future<int> _safeFileLength(File f) async {
-    try {
-      return await f.length();
-    } catch (e) {
-      return -1;
-    }
-  }
-
-  /// Generate a temporary output path for compressed images.
-  /// Appends '_cmp.jpg' before the file extension.
-  String _deriveOutPath(String inPath) {
-    final idx = inPath.lastIndexOf('.');
-    final base = idx > 0 ? inPath.substring(0, idx) : inPath;
-    return '${base}_cmp.jpg';
   }
 
   /// Generate a random alphanumeric string of length n.

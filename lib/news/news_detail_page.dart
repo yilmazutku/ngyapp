@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../widgets/full_screen_image_page.dart';
+
 import 'news_model.dart';
 
 /// Detail page showing full news content with image and clickable links
@@ -25,11 +27,7 @@ class NewsDetailPage extends StatelessWidget {
   }
 
   void _showFullScreenImage(BuildContext context, String imageUrl) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => _FullScreenImagePage(imageUrl: imageUrl),
-      ),
-    );
+    showFullScreenImage<void>(context, imageUrl: imageUrl);
   }
 
   @override
@@ -289,60 +287,3 @@ class NewsDetailPage extends StatelessWidget {
     );
   }
 }
-
-/// Full screen image viewer with zoom and pan support
-class _FullScreenImagePage extends StatelessWidget {
-  final String imageUrl;
-
-  const _FullScreenImagePage({required this.imageUrl});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-        elevation: 0,
-      ),
-      body: Center(
-        child: InteractiveViewer(
-          minScale: 0.5,
-          maxScale: 4.0,
-          child: Image.network(
-            imageUrl,
-            fit: BoxFit.contain,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) return child;
-              return Center(
-                child: CircularProgressIndicator(
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded /
-                          loadingProgress.expectedTotalBytes!
-                      : null,
-                  color: Colors.white,
-                ),
-              );
-            },
-            errorBuilder: (context, error, stackTrace) {
-              return const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.broken_image, size: 64, color: Colors.white54),
-                    SizedBox(height: 16),
-                    Text(
-                      'Görsel yüklenemedi',
-                      style: TextStyle(color: Colors.white54),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
-

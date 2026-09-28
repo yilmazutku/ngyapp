@@ -228,23 +228,54 @@ class _ReactionPickerBar extends StatelessWidget {
             ),
           ],
         ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final emoji in emojis)
-                _ReactionPickerButton(
-                  emoji: emoji,
-                  selected: emoji == currentEmoji,
-                  onTap: () => onSelected(emoji),
-                  glyphSize: kReactionPillGlyphSize,
-                  glyphPadding: kReactionPillGlyphPadding,
-                ),
-              if (onShowAll != null) _ReactionMoreButton(onTap: onShowAll!),
-            ],
-          ),
+        child: QuickReactionRow(
+          emojis: emojis,
+          currentEmoji: currentEmoji,
+          onSelected: onSelected,
+          onShowAll: onShowAll,
         ),
+      ),
+    );
+  }
+}
+
+/// Hızlı ifadelerin yatay satırı (sığmazsa kaydırılır) ve sonunda "Tüm
+/// ifadeler" düğmesi. Uzun basma seçicisi, mesaj işlemleri menüsü ve tam
+/// ekran fotoğraftaki ifade satırı aynı satırı kullanır.
+class QuickReactionRow extends StatelessWidget {
+  final List<String> emojis;
+  final String? currentEmoji;
+  final ValueChanged<String> onSelected;
+
+  /// Tüm ifadeleri açar; null ise düğme gösterilmez.
+  final VoidCallback? onShowAll;
+
+  const QuickReactionRow({
+    super.key,
+    this.emojis = kChatQuickReactionEmojis,
+    required this.currentEmoji,
+    required this.onSelected,
+    this.onShowAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final VoidCallback? showAll = onShowAll;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final emoji in emojis)
+            _ReactionPickerButton(
+              emoji: emoji,
+              selected: emoji == currentEmoji,
+              onTap: () => onSelected(emoji),
+              glyphSize: kReactionPillGlyphSize,
+              glyphPadding: kReactionPillGlyphPadding,
+            ),
+          if (showAll != null) _ReactionMoreButton(onTap: showAll),
+        ],
       ),
     );
   }

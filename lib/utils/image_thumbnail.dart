@@ -3,12 +3,40 @@ import 'dart:ui' as ui;
 
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 
-/// Küçük görselin kısa kenarı (piksel). Liste kartları ~200 mantıksal px;
-/// 320 px, 1.5x yoğunluklu ekranda bile net kalır.
-const int kThumbnailShortSide = 320;
+/// Küçük görselin kısa kenarı (piksel). Liste kartları ~200, sohbet
+/// baloncukları ~240 mantıksal px; 480 px, 2-3x yoğunluklu telefon ekranında
+/// da baloncukta bulanık durmaz.
+const int kThumbnailShortSide = 480;
 
-/// Küçük görsel JPEG kalitesi. Kartta fark edilmez, dosya ~25-40 KB olur.
+/// Küçük görsel JPEG kalitesi. Kartta fark edilmez, dosya ~40-60 KB olur.
 const int kThumbnailJpegQuality = 75;
+
+/// Görselin piksel ölçüsü.
+class ImagePixelSize {
+  final int width;
+  final int height;
+
+  const ImagePixelSize(this.width, this.height);
+}
+
+/// [bytes] ile verilen görselin ölçüsünü yalnızca başlığını okuyarak verir
+/// (görsel çözülmez); okunamazsa null. Sohbet baloncuğu görsel inmeden önce
+/// doğru oranda yer ayırsın diye mesaja yazılır.
+Future<ImagePixelSize?> readImagePixelSize(Uint8List bytes) async {
+  ui.ImmutableBuffer? buffer;
+  ui.ImageDescriptor? descriptor;
+  try {
+    buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    descriptor = await ui.ImageDescriptor.encoded(buffer);
+    if (descriptor.width <= 0 || descriptor.height <= 0) return null;
+    return ImagePixelSize(descriptor.width, descriptor.height);
+  } catch (e) {
+    return null;
+  } finally {
+    descriptor?.dispose();
+    buffer?.dispose();
+  }
+}
 
 /// Üretilmiş küçük görsel.
 class ThumbnailData {

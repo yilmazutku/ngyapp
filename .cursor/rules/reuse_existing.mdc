@@ -1,0 +1,13 @@
+---
+description: Var olan widget ve yardımcıları kullan
+alwaysApply: true
+---
+- Yeni bir widget, yardımcı fonksiyon ya da servis yazmadan önce projede benzeri aranır: `lib/widgets`, `lib/utils`, `lib/services` ve ilgili sayfalar.
+- Var olan widget yeterliyse yenisi tanımlanmaz; var olan kullanılır.
+- Neredeyse yeterliyse var olan genişletilir (ör. isteğe bağlı bir parametre); aynı işi yapan ikinci bir widget yazılmaz.
+- Bir sayfaya özel (private) widget başka yerde de gerekiyorsa kopyalanmaz; ortak bir dosyaya taşınır ve iki yer de onu kullanır.
+- Fotoğraf gösterimi için var olanlar:
+  - Listelerde ve küçük önizlemelerde `MealThumbnailImage` (küçük görsel, indirme sırası, çözülürken küçültme).
+  - Öğün fotoğrafının büyük görseli için `showMealImageDetailsDialog` (gerekirse `footerBuilder` ile alt satır).
+  - Tam ekran için `showFullScreenImage` / `FullScreenImagePage`.
+  - Yüklemede küçültme ve küçük görsel için `uploadImageWithThumbnail` (`prepareImageForUpload`, `generateThumbnail`).

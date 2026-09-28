@@ -43,8 +43,27 @@ import 'chat_page_new.dart';
 /// yatay bir şerit hâlinde, her fotoğrafın altında öğün adı ve yükleme saati
 /// ile listelenir. Sayfanın kendisi dikey kaydırılır; iki yönde de kaydırma
 /// çubuğu görünür durumdadır.
+///
+/// Sohbetteki bir öğün fotoğrafından da açılır ("Öğün Fotoğrafları'nda
+/// göster"): sayfa fotoğrafın gününde, o danışana süzülmüş açılır ve fotoğraf
+/// vurgulanır.
 class AdminMealPhotosPage extends StatefulWidget {
-  const AdminMealPhotosPage({super.key});
+  /// Açılıştaki gün; verilmezse bugün.
+  final DateTime? initialDay;
+
+  /// Verilirse liste açılışta bu danışana süzülür (arama kutusuna adı
+  /// yazılır; silinince herkes görünür).
+  final String? focusUserId;
+
+  /// Verilirse bu fotoğraf vurgulanır ve şeridi ona kaydırılır.
+  final String? focusImageUrl;
+
+  const AdminMealPhotosPage({
+    super.key,
+    this.initialDay,
+    this.focusUserId,
+    this.focusImageUrl,
+  });
 
   @override
   State<AdminMealPhotosPage> createState() => _AdminMealPhotosPageState();
@@ -100,18 +119,27 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       'İfade bırakılamadı. Lütfen tekrar deneyin.';
   static const String _reactionSavedText = 'İfade bırakıldı:';
   static const String _reactionRemovedText = 'İfade kaldırıldı.';
+  static const String _viewerNoMessageText =
+      'Bu fotoğrafın sohbette mesajı yok; ifade bırakılamaz.';
+  static const String _viewerLookupErrorText =
+      'Sohbetteki mesaj okunamadı. Lütfen tekrar deneyin.';
+  static const String _focusUserMissingText =
+      'Danışanın aktif paketi olmadığı için fotoğrafları bu sayfada '
+      'listelenmiyor.';
 
   /// İfade sonrası bilgi şeridinin ekranda kalma süresi.
   static const Duration _reactionFeedbackDuration = Duration(seconds: 2);
 
   /// Öğün filtresindeki seçenekler. Ara öğünler tek seçenekte toplanır:
   /// [Meals.firstmid] üçünü birden temsil eder (bkz. [_matchesMealFilter]),
-  /// böylece filtrede üç ayrı "Ara" satırı çıkmaz.
+  /// böylece filtrede üç ayrı "Ara" satırı çıkmaz. "Diğer" diyet dışı öğün
+  /// fotoğraflarıdır; filtre seçilince kaybolmasınlar diye ayrı seçenektir.
   static const List<Meals> _mealFilterOptions = [
     Meals.br,
     Meals.firstmid,
     Meals.lunch,
     Meals.dinner,
+    Meals.none,
   ];
 
   /// Tarih seçicide gidilebilecek en eski gün. Uygulamada bundan öncesine ait
@@ -187,6 +215,21 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// üstünde uyarı şeridi çıkar: test verisi danışanların üstünde unutulmasın.
   List<MockTestRun> _testRuns = const [];
 
+  /// Aktif paketi olan danışanlar; bir kez okunur. Gün değişince yeniden
+  /// okunmaz (yalnızca fotoğraflar ve ifadeler), "Yenile" yeniden okur.
+  List<UserModel>? _activeCustomers;
+
+  /// Sohbetten gelindiyse vurgulanan fotoğraf (bkz.
+  /// [AdminMealPhotosPage.focusImageUrl]).
+  String? _focusImageUrl;
+
+  /// Vurgulanan fotoğrafın şeridi ona bir kez kaydırılır; sonra kullanıcı
+  /// şeridi serbestçe kaydırabilir.
+  bool _focusScrollPending = false;
+
+  /// Açılıştaki danışan süzmesi bir kez yapılır.
+  bool _focusFilterApplied = false;
+
   static DateTime _todayStart() {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
@@ -195,6 +238,14 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   @override
   void initState() {
     super.initState();
+    final DateTime? initialDay = widget.initialDay;
+    if (initialDay != null) {
+      final DateTime day =
+          DateTime(initialDay.year, initialDay.month, initialDay.day);
+      _day = day.isAfter(_todayStart()) ? _todayStart() : day;
+    }
+    _focusImageUrl = widget.focusImageUrl;
+    _focusScrollPending = _focusImageUrl != null;
     // İlk kare çizildikten sonra yüklenir: sayfa "yükleniyor" durumuyla açılır.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -223,11 +274,13 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// dolarak açılır ve tepkiler yükleme süresine ek yük bindirmez.
   ///
   /// [day] verilmezse o an seçili gün yeniden yüklenir; böylece "Yenile"
-  /// seçili günü korur.
+  /// seçili günü korur. [reloadClients] false ise (gün değişimi) danışan
+  /// listesi ve paketler yeniden okunmaz; yalnızca o günün fotoğrafları ve
+  /// ifadeleri okunur.
   ///
   /// Sağlayıcılar await'lerden önce alınır; sonrasında yalnızca `mounted`
   /// kontrolüyle state güncellenir.
-  Future<void> _load({DateTime? day}) async {
+  Future<void> _load({DateTime? day, bool reloadClients = true}) async {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final subProvider = Provider.of<SubProvider>(context, listen: false);
     final mealManager = Provider.of<MealManager>(context, listen: false);
@@ -253,28 +306,38 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     });
 
     try {
-      // Danışan listesi ve test verisi uyarısı birbirinden bağımsız: aynı anda
-      // istenir, iki tur beklenmez.
-      final List<Object?> initial = await Future.wait<Object?>([
-        userProvider.fetchAllCustomers(),
-        // Uyarı sayfanın asıl işi değil: okunamazsa sayfa yine çalışır.
-        mockProvider.fetchRuns().catchError((Object e) {
-          return <MockTestRun>[];
-        }),
-      ]);
-      final List<UserModel> customers = initial[0] as List<UserModel>;
-      final List<MockTestRun> testRuns = initial[1] as List<MockTestRun>;
+      final List<UserModel>? cachedCustomers =
+          reloadClients ? null : _activeCustomers;
+      final List<UserModel> activeCustomers;
+      List<MockTestRun> testRuns = _testRuns;
+      if (cachedCustomers != null) {
+        activeCustomers = cachedCustomers;
+      } else {
+        // Danışan listesi ve test verisi uyarısı birbirinden bağımsız: aynı
+        // anda istenir, iki tur beklenmez.
+        final List<Object?> initial = await Future.wait<Object?>([
+          userProvider.fetchAllCustomers(),
+          // Uyarı sayfanın asıl işi değil: okunamazsa sayfa yine çalışır.
+          mockProvider.fetchRuns().catchError((Object e) {
+            return <MockTestRun>[];
+          }),
+        ]);
+        final List<UserModel> customers = initial[0] as List<UserModel>;
+        testRuns = initial[1] as List<MockTestRun>;
 
-      // Sayfanın ilk koşulu: yalnızca aktif paketi olan danışanlar.
-      final Map<String, SubscriptionModel> activeSubs =
-          await subProvider.fetchActiveSubscriptionsOfUsers(
-        customers.map((user) => user.userId).toList(),
-      );
-      final List<UserModel> activeCustomers = customers
-          .where((user) => activeSubs.containsKey(user.userId))
-          .toList();
+        // Sayfanın ilk koşulu: yalnızca aktif paketi olan danışanlar.
+        final Map<String, SubscriptionModel> activeSubs =
+            await subProvider.fetchActiveSubscriptionsOfUsers(
+          customers.map((user) => user.userId).toList(),
+        );
+        activeCustomers = customers
+            .where((user) => activeSubs.containsKey(user.userId))
+            .toList();
+      }
 
       if (!mounted || loadId != _loadId) return;
+      _activeCustomers = activeCustomers;
+      _applyFocusFilter(activeCustomers);
 
       // 1. aşama: kartlar fotoğrafsız çizilir.
       final List<_ClientPhotoGroup> groups = activeCustomers
@@ -331,6 +394,27 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         _photosLoading = false;
       });
     }
+  }
+
+  /// Sohbetten "Öğün Fotoğrafları'nda göster" ile gelindiyse liste bir kez o
+  /// danışana süzülür: arama kutusuna adı yazılır, silinince herkes görünür.
+  void _applyFocusFilter(List<UserModel> customers) {
+    final String? focusUserId = widget.focusUserId;
+    if (_focusFilterApplied || focusUserId == null) return;
+    _focusFilterApplied = true;
+
+    for (final UserModel user in customers) {
+      if (user.userId != focusUserId) continue;
+      final String query = user.fullName.isEmpty ? user.email : user.fullName;
+      _searchController.text = query;
+      _searchQuery = query;
+      return;
+    }
+
+    // Sayfa yalnızca aktif paketi olanları listeler: fotoğraf burada yok.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(_focusUserMissingText)),
+    );
   }
 
   /// Bir danışanın fotoğraflarına bırakılmış tepkileri okuyup rozetlere işler.
@@ -477,7 +561,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   Future<void> _selectDay(DateTime day) async {
     final DateTime normalized = DateTime(day.year, day.month, day.day);
     if (normalized == _day) return;
-    await _load(day: normalized);
+    await _load(day: normalized, reloadClients: false);
   }
 
   /// Bir gün geri/ileri gider. İleri yön bugünü aşmaz: gelecekte fotoğraf
@@ -630,8 +714,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     _ClientPhotoGroup group,
     MealModel photo,
   ) async {
-    final NavigatorState navigator = Navigator.of(context);
-
     final MessageData? message = await _findChatMessage(
       group,
       photo,
@@ -640,6 +722,14 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     );
     if (message == null) return;
     if (!mounted) return;
+
+    await _openChatAt(group, message);
+  }
+
+  /// Sohbeti [message] mesajında açar; dönüşte o danışanın rozetlerini
+  /// tazeler.
+  Future<void> _openChatAt(_ClientPhotoGroup group, MessageData message) async {
+    final NavigatorState navigator = Navigator.of(context);
 
     await navigator.push(
       MaterialPageRoute(
@@ -767,6 +857,83 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         message: _reactErrorText,
       );
     }
+  }
+
+  /// Fotoğrafın büyük görsel diyaloğunu ([showMealImageDetailsDialog]) açar;
+  /// altında fotoğrafın sohbetteki mesajına hızlı ifade bırakılabilir ya da
+  /// sohbet o mesajda açılabilir ("Sohbette göster"). Mesaj açılışta bir kez
+  /// aranır.
+  Future<void> _openPhotoDialog(
+    _ClientPhotoGroup group,
+    MealModel photo,
+    double dialogImageHeight,
+  ) async {
+    final ChatManager chatManager =
+        Provider.of<ChatManager>(context, listen: false);
+    final Future<MessageData?> messageFuture =
+        chatManager.findImageMessage(group.user.userId, photo.imageUrl);
+
+    final MessageData? goTo = await showMealImageDetailsDialog<MessageData>(
+      context,
+      photo,
+      dialogImageHeight: dialogImageHeight,
+      heroTag: MealImageCard.heroTagFor(photo),
+      footerBuilder: (dialogContext) => _PhotoChatActions(
+        messageFuture: messageFuture,
+        myUid: chatManager.userId,
+        goToChatLabel: _goToChatLabel,
+        noMessageText: _viewerNoMessageText,
+        lookupErrorText: _viewerLookupErrorText,
+        errorText: _reactErrorText,
+        onReact: (message, emoji) =>
+            _toggleReactionFromDialog(group, photo, message, emoji),
+        onGoToChat: (message) => Navigator.of(dialogContext).pop(message),
+      ),
+    );
+
+    if (goTo == null || !mounted) return;
+    await _openChatAt(group, goTo);
+  }
+
+  /// Diyalogdan bırakılan ifadeyi kaydeder ve kart rozetini hemen tazeler;
+  /// güncel tepkileri döner (diyalogdaki seçim buna göre işaretlenir).
+  Future<Map<String, String>> _toggleReactionFromDialog(
+    _ClientPhotoGroup group,
+    MealModel photo,
+    MessageData message,
+    String emoji,
+  ) async {
+    final ChatManager chatManager =
+        Provider.of<ChatManager>(context, listen: false);
+    final String uid = chatManager.userId;
+    final Map<String, String> current =
+        _reactionsByImageUrl[photo.imageUrl] ?? message.reactions;
+    final String? currentEmoji = current[uid];
+
+    await chatManager.toggleReaction(
+      group.user.userId,
+      message.id,
+      emoji,
+      currentEmoji: currentEmoji,
+    );
+
+    final Map<String, String> updated = Map<String, String>.from(current);
+    if (emoji == currentEmoji) {
+      updated.remove(uid);
+    } else {
+      updated[uid] = emoji;
+    }
+    if (mounted) {
+      setState(() {
+        if (updated.isEmpty) {
+          _reactionsByImageUrl.remove(photo.imageUrl);
+        } else {
+          _reactionsByImageUrl[photo.imageUrl] = updated;
+        }
+        _freshReactionUrls.add(photo.imageUrl);
+      });
+    }
+    return updated;
   }
 
   @override
@@ -1025,6 +1192,11 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
                 group: group,
                 onPhotoMenu: (photo, globalPosition) =>
                     _openPhotoMenu(group, photo, globalPosition),
+                onPhotoTap: (photo, dialogImageHeight) =>
+                    _openPhotoDialog(group, photo, dialogImageHeight),
+                focusImageUrl: _focusImageUrl,
+                scrollToFocus: _focusScrollPending,
+                onScrolledToFocus: () => _focusScrollPending = false,
                 reactionsByImageUrl: _reactionsByImageUrl,
                 stripController: _stripControllerFor(group.user.userId),
                 photoWidth: photoWidth,
@@ -1115,6 +1287,19 @@ class _ClientPhotoSection extends StatelessWidget {
   /// menü [globalPosition] noktasında açılır.
   final void Function(MealModel photo, Offset globalPosition) onPhotoMenu;
 
+  /// Fotoğrafa dokununca (büyük görsel diyaloğu, ifade ve "Sohbette göster"
+  /// satırıyla).
+  final void Function(MealModel photo, double dialogImageHeight) onPhotoTap;
+
+  /// Vurgulanan fotoğraf (sohbetten gelindiyse).
+  final String? focusImageUrl;
+
+  /// Şerit vurgulanan fotoğrafa kaydırılsın mı (yalnızca ilk kez).
+  final bool scrollToFocus;
+
+  /// Şerit vurgulanan fotoğrafa kaydırıldı.
+  final VoidCallback onScrolledToFocus;
+
   /// Fotoğraf adresi -> o fotoğrafa bırakılan tepkiler; kart rozetleri buradan
   /// çizilir. Tepkisi olmayan fotoğraf bu map'te bulunmaz.
   final Map<String, Map<String, String>> reactionsByImageUrl;
@@ -1136,6 +1321,10 @@ class _ClientPhotoSection extends StatelessWidget {
     super.key,
     required this.group,
     required this.onPhotoMenu,
+    required this.onPhotoTap,
+    required this.focusImageUrl,
+    required this.scrollToFocus,
+    required this.onScrolledToFocus,
     required this.reactionsByImageUrl,
     required this.stripController,
     required this.photoWidth,
@@ -1187,9 +1376,34 @@ class _ClientPhotoSection extends StatelessWidget {
     );
   }
 
+  /// Vurgulanan fotoğraf bu şeritteyse şerit bir kez ona kaydırılır (ilk
+  /// çizimden sonra).
+  void _scrollToFocusedPhoto() {
+    final String? focusUrl = focusImageUrl;
+    if (!scrollToFocus || focusUrl == null) return;
+    final int index =
+        group.photos.indexWhere((photo) => photo.imageUrl == focusUrl);
+    if (index < 0) return;
+    onScrolledToFocus();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!stripController.hasClients) return;
+      final ScrollPosition position = stripController.position;
+      final double target = (index * (photoWidth + _photoGap))
+          .clamp(position.minScrollExtent, position.maxScrollExtent);
+      if ((position.pixels - target).abs() < 1) return;
+      stripController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   Widget _buildStrip(BuildContext context) {
     final double dialogImageHeight =
         (photoWidth * kMealDialogMultiplier).clamp(240.0, 480.0);
+    _scrollToFocusedPhoto();
 
     return SizedBox(
       height: stripHeight,
@@ -1219,6 +1433,8 @@ class _ClientPhotoSection extends StatelessWidget {
                   backfillUserId: group.user.userId,
                   reactions:
                       reactionsByImageUrl[photo.imageUrl] ?? const {},
+                  highlighted: photo.imageUrl == focusImageUrl,
+                  onTap: () => onPhotoTap(photo, dialogImageHeight),
                 ),
               ),
             );
@@ -1408,6 +1624,124 @@ class _SummaryChip extends StatelessWidget {
           Text(text, style: theme.textTheme.bodyMedium),
         ],
       ),
+    );
+  }
+}
+
+/// Büyük görsel diyaloğunun altındaki satır: fotoğrafın sohbetteki mesajına
+/// hızlı ifade (bırakanın mevcut ifadesi işaretli) ve "Sohbette göster".
+/// Mesaj aranırken gösterge, mesaj yoksa kısa bir not görünür.
+class _PhotoChatActions extends StatefulWidget {
+  final Future<MessageData?> messageFuture;
+  final String myUid;
+  final String goToChatLabel;
+  final String noMessageText;
+  final String lookupErrorText;
+  final String errorText;
+
+  /// İfadeyi kaydeder ve güncel tepkileri döner.
+  final Future<Map<String, String>> Function(
+    MessageData message,
+    String emoji,
+  ) onReact;
+
+  final void Function(MessageData message) onGoToChat;
+
+  const _PhotoChatActions({
+    required this.messageFuture,
+    required this.myUid,
+    required this.goToChatLabel,
+    required this.noMessageText,
+    required this.lookupErrorText,
+    required this.errorText,
+    required this.onReact,
+    required this.onGoToChat,
+  });
+
+  @override
+  State<_PhotoChatActions> createState() => _PhotoChatActionsState();
+}
+
+class _PhotoChatActionsState extends State<_PhotoChatActions> {
+  /// Bu diyalogda bırakılan son ifadeden sonraki tepkiler; null ise
+  /// mesajdaki tepkiler geçerli.
+  Map<String, String>? _reactions;
+  bool _saving = false;
+  bool _failed = false;
+
+  Future<void> _react(MessageData message, String emoji) async {
+    setState(() {
+      _saving = true;
+      _failed = false;
+    });
+    try {
+      final Map<String, String> updated = await widget.onReact(message, emoji);
+      if (!mounted) return;
+      setState(() {
+        _reactions = updated;
+        _saving = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _failed = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return FutureBuilder<MessageData?>(
+      future: widget.messageFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+
+        final MessageData? message = snapshot.data;
+        if (message == null) {
+          return Text(
+            snapshot.hasError ? widget.lookupErrorText : widget.noMessageText,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          );
+        }
+
+        final Map<String, String> reactions = _reactions ?? message.reactions;
+        return Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            IgnorePointer(
+              ignoring: _saving,
+              child: QuickReactionRow(
+                currentEmoji: reactions[widget.myUid],
+                onSelected: (emoji) => _react(message, emoji),
+              ),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: Text(widget.goToChatLabel),
+              onPressed: () => widget.onGoToChat(message),
+            ),
+            if (_failed)
+              Text(
+                widget.errorText,
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+          ],
+        );
+      },
     );
   }
 }

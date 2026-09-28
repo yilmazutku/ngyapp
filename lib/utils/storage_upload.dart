@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 
+import 'image_thumbnail.dart';
+
 /// Maximum accepted upload size, in bytes (50 MB).
 ///
 /// Files larger than this are rejected up-front (with a clear message) instead
@@ -101,6 +103,162 @@ Future<PreparedUploadImage> prepareImageForUpload({
     // Masaüstünde eklenti yok; orijinal dosya yüklenir.
     return original;
   }
+}
+
+/// Bir görsel yüklemesini izleyen ve iptal edebilen taraf (ör. sohbette
+/// yüklenmeyi bekleyen fotoğraf). Yükleme adımları ona haber verir; iptal
+/// edilmişse kayıt yazılmaz, yüklenen dosyalar silinir.
+abstract class UploadObserver {
+  /// Yeni bir Storage görevi başladı (önce asıl dosya, sonra küçük görsel).
+  /// İlerleme buradan izlenir, iptal de bu görev üzerinden yapılır.
+  void onTask(UploadTask task);
+
+  /// Yükleme iptal edildi mi (kullanıcı ya da zaman aşımı).
+  bool get isCancelled;
+
+  /// Dosyalar yüklendi ve kayıtlar yazılmaya başlandı: bundan sonra iptal
+  /// edilemez; kayıt yerel önbellekte hemen görünür.
+  void onSaving();
+}
+
+/// Yükleme [UploadObserver] üzerinden iptal edildi.
+class UploadCancelledException implements Exception {
+  const UploadCancelledException();
+
+  @override
+  String toString() => 'UploadCancelledException';
+}
+
+/// Storage'a yüklenmiş bir görsel: adresi, küçük görselinin adresi
+/// (üretilemediyse null) ve piksel ölçüsü (okunamadıysa null).
+class UploadedImage {
+  final Reference ref;
+  final String url;
+  final Reference? thumbRef;
+  final String? thumbUrl;
+  final ImagePixelSize? size;
+
+  const UploadedImage({
+    required this.ref,
+    required this.url,
+    required this.thumbRef,
+    required this.thumbUrl,
+    required this.size,
+  });
+
+  /// Yüklenen dosyaları siler (iptal ya da yarım kalan yükleme sonrası
+  /// temizlik); hatası yutulur.
+  Future<void> delete() => _deleteQuietly(ref, thumbRef);
+}
+
+/// Görseli küçültüp ([prepareImageForUpload]) [refFor] ile verilen yere
+/// yükler, yanına küçük görselini ([thumbnailRefFor]) koyar ve ölçüsünü okur.
+/// Öğün fotoğrafı ve sohbete gönderilen fotoğraf aynı yolu izler.
+///
+/// Küçük görsel, asıl dosya yüklenirken üretilip yanında yüklenir; sırayla
+/// beklenmez. Küçük görsel yardımcıdır: üretilemez ya da yüklenemezse görsel
+/// onsuz kalır.
+///
+/// [observer] ilerlemeyi izler ve iptal edebilir; iptal edilirse ya da asıl
+/// dosya yüklenemezse yüklenen dosyalar silinir. İptalde
+/// [UploadCancelledException] fırlatılır.
+Future<UploadedImage> uploadImageWithThumbnail({
+  required Uint8List bytes,
+  required String fileName,
+  String? mimeType,
+  required Reference Function(String fileName) refFor,
+  UploadObserver? observer,
+}) async {
+  final PreparedUploadImage prepared = await prepareImageForUpload(
+    bytes: bytes,
+    fileName: fileName,
+    mimeType: mimeType,
+  );
+  if (observer?.isCancelled ?? false) throw const UploadCancelledException();
+
+  final Reference ref = refFor(prepared.fileName);
+  final UploadTask task = ref.putData(
+    prepared.bytes,
+    SettableMetadata(contentType: prepared.contentType),
+  );
+  // Asıl dosyanın görevi önce bildirilir: ilerleme onunkidir.
+  observer?.onTask(task);
+  final Future<({Reference ref, String url})?> thumbnail =
+      _uploadThumbnail(ref, prepared.bytes, observer);
+  final Future<ImagePixelSize?> size = readImagePixelSize(prepared.bytes);
+
+  final String url;
+  try {
+    await task;
+    url = await ref.getDownloadURL();
+  } catch (e) {
+    await _deleteQuietly(null, (await thumbnail)?.ref);
+    if (e is FirebaseException && (observer?.isCancelled ?? false)) {
+      throw const UploadCancelledException();
+    }
+    rethrow;
+  }
+
+  final ({Reference ref, String url})? thumb = await thumbnail;
+  final UploadedImage uploaded = UploadedImage(
+    ref: ref,
+    url: url,
+    thumbRef: thumb?.ref,
+    thumbUrl: thumb?.url,
+    size: await size,
+  );
+  if (observer?.isCancelled ?? false) {
+    await uploaded.delete();
+    throw const UploadCancelledException();
+  }
+  return uploaded;
+}
+
+Future<void> _deleteQuietly(Reference? ref, Reference? thumbRef) async {
+  for (final Reference? target in [ref, thumbRef]) {
+    if (target == null) continue;
+    try {
+      await target.delete();
+    } catch (e) {
+    }
+  }
+}
+
+/// Küçük görseli üretip orijinalin yanına `<ad>_thumb.<uzantı>` adıyla
+/// yükler; başarısız olursa null döner.
+Future<({Reference ref, String url})?> _uploadThumbnail(
+  Reference original,
+  Uint8List bytes,
+  UploadObserver? observer,
+) async {
+  try {
+    final ThumbnailData? thumb = await generateThumbnail(bytes);
+    if (thumb == null || (observer?.isCancelled ?? false)) return null;
+
+    final Reference thumbRef = thumbnailRefFor(original, thumb.extension);
+    final UploadTask task = thumbRef.putData(
+      thumb.bytes,
+      SettableMetadata(contentType: thumb.contentType),
+    );
+    observer?.onTask(task);
+    await task;
+    return (ref: thumbRef, url: await thumbRef.getDownloadURL());
+  } catch (e) {
+    return null;
+  }
+}
+
+/// Orijinal dosyanın klasöründe, aynı ad + `_thumb` son ekiyle küçük görsel
+/// yolu. Hem yüklemede hem sonradan üretimde aynı kural kullanılır.
+Reference thumbnailRefFor(Reference original, String extension) {
+  final String name = original.name;
+  final int dot = name.lastIndexOf('.');
+  final String base = dot > 0 ? name.substring(0, dot) : name;
+  final Reference? parent = original.parent;
+  final String thumbName = '${base}_thumb$extension';
+  return parent == null
+      ? FirebaseStorage.instance.ref(thumbName)
+      : parent.child(thumbName);
 }
 
 String _withJpegExtension(String fileName) {

@@ -77,12 +77,23 @@ class MealImageCard extends StatelessWidget {
   /// gösterilmeyen ekranlarda verilmez.
   final Map<String, String> reactions;
 
+  /// Verilirse karta dokununca varsayılan ayrıntı diyaloğu yerine bu
+  /// çağrılır: sayfa aynı diyaloğu ([showMealImageDetailsDialog]) kendi
+  /// alt satırıyla (ör. "Sohbette göster") açar.
+  final VoidCallback? onTap;
+
+  /// Kart vurgulu mu (ör. sohbetten "Öğün Fotoğrafları'nda göster" ile bu
+  /// fotoğrafa gelindi).
+  final bool highlighted;
+
   const MealImageCard({
     super.key,
     required this.meal,
     required this.dialogImageHeight,
     this.backfillUserId,
     this.reactions = const {},
+    this.onTap,
+    this.highlighted = false,
   });
 
   // Card metrics (previously the kMealCard* constants in ImagesTab).
@@ -93,6 +104,11 @@ class MealImageCard extends StatelessWidget {
   static const double _labelFontSize = 12;
   static const double _timeIconSize = 12;
   static const double _timeFontSize = 11;
+  static const double _highlightBorderWidth = 3;
+
+  /// Kartın ve ayrıntı diyaloğunun ortak Hero etiketi (büyütme animasyonu).
+  static String heroTagFor(MealModel meal) =>
+      '${meal.imageUrl}_${meal.timestamp.millisecondsSinceEpoch}';
 
   /// Orijinal indirildiğinde küçük görseli üretip kaydeden geri çağrı.
   /// Sağlayıcı build sırasında alınır; geri çağrı sonradan, context'e
@@ -112,8 +128,7 @@ class MealImageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color typeColor = mealTypeColor(meal.mealType);
     final String timeStr = DateFormat('HH:mm').format(meal.timestamp);
-    final String heroTag =
-        '${meal.imageUrl}_${meal.timestamp.millisecondsSinceEpoch}';
+    final String heroTag = heroTagFor(meal);
     final int imageCount = meal.imageUrls.length;
 
     // Küçük görsel varsa yalnızca o indirilir; yoksa orijinal indirilir,
@@ -135,15 +150,21 @@ class MealImageCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: typeColor.withValues(alpha: 0.5), width: 1),
+        side: highlighted
+            ? BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+                width: _highlightBorderWidth,
+              )
+            : BorderSide(color: typeColor.withValues(alpha: 0.5), width: 1),
       ),
       child: InkWell(
-        onTap: () => showMealImageDetailsDialog(
-          context,
-          meal,
-          dialogImageHeight: dialogImageHeight,
-          heroTag: heroTag,
-        ),
+        onTap: onTap ??
+            () => showMealImageDetailsDialog(
+                  context,
+                  meal,
+                  dialogImageHeight: dialogImageHeight,
+                  heroTag: heroTag,
+                ),
         child: Column(
           mainAxisSize: MainAxisSize.max,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -312,13 +333,17 @@ class _MealReactionBadge extends StatelessWidget {
 /// meal type and upload date & time in the title, and the description if any.
 ///
 /// Normally invoked by tapping a [MealImageCard]; exposed for reuse.
-Future<void> showMealImageDetailsDialog(
+/// [footerBuilder] verilirse görselin altında sayfaya özel bir satır çıkar
+/// (ör. Öğün Fotoğrafları'nda hızlı ifadeler ve "Sohbette göster"); satır
+/// diyaloğu bir değerle kapatabilir, o değer döner.
+Future<T?> showMealImageDetailsDialog<T>(
   BuildContext context,
   MealModel meal, {
   required double dialogImageHeight,
   required String heroTag,
+  WidgetBuilder? footerBuilder,
 }) {
-  return showDialog(
+  return showDialog<T>(
     context: context,
     builder: (dialogContext) {
       const double kDialogMaxWidth = 520;
@@ -384,6 +409,10 @@ Future<void> showMealImageDetailsDialog(
                     );
                   }),
                 const SizedBox(height: 16),
+                if (footerBuilder != null) ...[
+                  footerBuilder(dialogContext),
+                  const SizedBox(height: 16),
+                ],
                 if (meal.description != null &&
                     meal.description!.isNotEmpty) ...[
                   const Text(
