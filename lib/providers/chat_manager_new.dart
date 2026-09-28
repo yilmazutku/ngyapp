@@ -235,7 +235,7 @@ class ChatManager extends ChangeNotifier {
 
   /// Sohbet açılışında ve eski mesajlar yüklenirken bir seferde okunan mesaj
   /// sayısı.
-  static const int messagesPageSize = 50;
+  static const int messagesPageSize = 30;
 
   /// Messages of a chat, newest first.
   Query<Map<String, dynamic>> _newestFirst(String chatId) => _chatDoc(chatId)

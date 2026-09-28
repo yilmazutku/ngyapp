@@ -3,6 +3,29 @@ import 'package:intl/intl.dart';
 /// A utility class to standardize date formatting throughout the app
 /// Uses Turkish locale for all date/time formatting
 class DateFormatter {
+  static const String _yesterdayLabel = 'Dün';
+
+  /// Son bir haftada gün adı gösterilir; daha eskisinde tarih.
+  static const int _weekdayNameMaxDaysAgo = 6;
+
+  /// Sohbet listesindeki son mesaj zamanı (WhatsApp gibi): bugünse "14:05",
+  /// dünse "Dün", son bir haftadaysa gün adı ("Salı"), daha eskiyse
+  /// "12.09.2026". Takvim günleri karşılaştırılır; cihaz saati geride
+  /// kaldığı için "gelecekte" görünen zaman bugün sayılır.
+  static String formatChatListTime(DateTime date, {DateTime? now}) {
+    final DateTime current = now ?? DateTime.now();
+    final int daysAgo = DateTime.utc(current.year, current.month, current.day)
+        .difference(DateTime.utc(date.year, date.month, date.day))
+        .inDays;
+
+    if (daysAgo <= 0) return formatTime(date);
+    if (daysAgo == 1) return _yesterdayLabel;
+    if (daysAgo <= _weekdayNameMaxDaysAgo) {
+      return DateFormat('EEEE', 'tr_TR').format(date);
+    }
+    return formatNumericDate(date);
+  }
+
   /// Numeric date shown across the app / dialogs: 01.02.2023 (gg.aa.yyyy)
   static String formatNumericDate(DateTime date) {
     return DateFormat('dd.MM.yyyy', 'tr_TR').format(date);

@@ -10,6 +10,7 @@ import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/widgets/chat_image_preview.dart';
+import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import '../widgets/labeled_action_button.dart';
 
@@ -425,11 +426,9 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
               final lastImageUrl = data['lastImageUrl'] as String?;
               final lastAt = data['lastMessageAt'] as Timestamp?;
               
-              // Format timestamp
               final ts = lastAt?.toDate();
-              final timeStr = ts == null
-                  ? ''
-                  : '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}';
+              final timeStr =
+                  ts == null ? '' : DateFormatter.formatChatListTime(ts);
               
               // Show image preview if lastImageUrl exists and is not empty
               // (lastImageUrl is cleared when a text-only message is sent)
