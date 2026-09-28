@@ -12,3 +12,6 @@
 - Proje kuralları `.cursor/rules/` altındadır; her değişiklikten önce geçerli olanlar okunur.
 - Değişiklikten sonra `flutter analyze lib` çalıştırılır: hata bırakılmaz, dokunulan dosyalarda yeni uyarı bırakılmaz.
 - `flutter analyze` çalışırken `analysis_options.yaml`, `pubspec.lock` ve `lib/l10n/app_localizations.dart` (gen-l10n çıktısı) dosyalarını değiştirebiliyor; bunlar commit'e dahil edilmez.
+
+## Test
+- Sayfanın kendisi yerine aynı mantığın bir kopyasıyla (platform taklidiyle, `debugDefaultTargetPlatformOverride`) yazılan testlerde başka platformlar deneniyorsa **iOS da mutlaka denenir**; iOS listeden çıkarılmaz.
