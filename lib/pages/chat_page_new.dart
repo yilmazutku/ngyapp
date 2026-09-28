@@ -970,8 +970,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
-  /// Yazılan metni gönderir. Kutu hemen boşalır; gönderilemezse metin geri
-  /// konur. Gönderilen mesaj ekranda görünsün diye en yeni mesaja inilir.
+  /// Yazılan metni gönderir. Kutu hemen boşalır ve mesaj yerelde hemen
+  /// listeye düşer (bkz. [ChatManager.sendTextTo]); ekranda görünsün diye en
+  /// yeni mesaja inilir. Sunucu reddederse metin kutuya geri konur.
   Future<void> _sendText() async {
     final String text = _messageController.text.trim();
     if (text.isEmpty) return;
@@ -979,10 +980,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final ChatManager chat = context.read<ChatManager>();
     _messageController.clear();
 
+    final Future<void> sending = chat.sendTextTo(_chatId, text);
+    _showLatest();
+
     try {
-      await chat.sendTextTo(_chatId, text);
-      if (!mounted) return;
-      _showLatest();
+      await sending;
     } catch (e) {
       if (!mounted) return;
       // Bu arada yeni bir şey yazılmadıysa gönderilemeyen metin geri gelir.
@@ -1185,7 +1187,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ),
           ),
 
-          // Input row - only rebuilds when sending/uploading state changes
+          // Input row - only rebuilds when the upload state changes
           _ChatInputRow(
             controller: _messageController,
             onSend: _sendText,
@@ -1740,11 +1742,11 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-        // Only rebuild when sending/uploading state changes
-        child: Selector<ChatManager, ({bool sending, bool uploading})>(
-          selector: (_, chat) => (sending: chat.sending, uploading: chat.isUploading),
-          builder: (context, state, _) {
-            final isDisabled = state.sending || state.uploading;
+        // Only rebuild when the upload state changes
+        child: Selector<ChatManager, bool>(
+          selector: (_, chat) => chat.isUploading,
+          builder: (context, isUploading, _) {
+            final isDisabled = isUploading;
             
             return Column(
               mainAxisSize: MainAxisSize.min,
@@ -1820,7 +1822,7 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                         Icons.send_rounded,
                         color: colorScheme.primary,
                       ),
-                      onPressed: state.sending ? null : widget.onSend,
+                      onPressed: widget.onSend,
                     ),
                   ],
                 ),
