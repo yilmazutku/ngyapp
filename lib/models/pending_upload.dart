@@ -35,21 +35,21 @@ class UploadFailure implements Exception {
   String toString() => 'UploadFailure($message)';
 }
 
-/// Sohbette yüklenmeyi bekleyen fotoğraf. Sohbet ekranı kilitlenmeden,
+/// Sohbette yüklenmeyi bekleyen öğün fotoğrafı. Sohbet ekranı kilitlenmeden,
 /// listenin altında ilerlemesiyle görünür; iptal edilebilir, bağlantı kesilip
 /// yükleme ilerlemezse [stallTimeout] sonunda durdurulur ve "Tekrar dene"
 /// sunulur.
 ///
 /// Sıra `ChatManager` içinde tutulur: sohbetten çıkılsa da yükleme sürer,
 /// sohbete dönülünce kaldığı yerden görünür. [runner] asıl yüklemeyi yapar
-/// (öğün fotoğrafı ya da sohbete gönderilen fotoğraf) ve ilerlemeyi bu nesne
-/// üzerinden ([UploadObserver]) bildirir.
+/// (öğün kaydı + sohbet mesajı) ve ilerlemeyi bu nesne üzerinden
+/// ([UploadObserver]) bildirir.
 class PendingUpload implements UploadObserver {
   PendingUpload({
     required this.chatId,
     required this.image,
+    required this.meal,
     required this.runner,
-    this.meal,
   }) : id = '${DateTime.now().microsecondsSinceEpoch}_${_sequence++}';
 
   static int _sequence = 0;
@@ -67,8 +67,8 @@ class PendingUpload implements UploadObserver {
   final String chatId;
   final XFile image;
 
-  /// Öğün fotoğrafıysa öğünü; sohbete doğrudan gönderilen fotoğrafta null.
-  final Meals? meal;
+  /// Fotoğrafın eklendiği öğün.
+  final Meals meal;
 
   final Future<void> Function(PendingUpload upload) runner;
 
@@ -147,8 +147,8 @@ class PendingUpload implements UploadObserver {
   PendingUpload retryCopy() => PendingUpload(
         chatId: chatId,
         image: image,
-        runner: runner,
         meal: meal,
+        runner: runner,
       );
 
   /// Kullanıcı yüklemeyi iptal etti: süren Storage görevi durdurulur, yüklenmiş

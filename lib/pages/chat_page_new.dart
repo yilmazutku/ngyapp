@@ -138,9 +138,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const String _chatMenuTooltip = 'Diğer işlemler';
   static const String _deleteChatLabel = 'Sohbeti Sil';
 
-  /// Tek seferde sohbete gönderilebilecek en fazla fotoğraf.
-  static const int _maxPhotosPerSend = 10;
-
   /// Kullanıcı en yeni mesajdan bu kadar yukarı kaydırınca "En yeniye git"
   /// düğmesi görünür.
   static const double _jumpButtonThreshold = 300.0;
@@ -588,29 +585,25 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return _picker.pickMultiImage(limit: limit);
   }
 
-  /// Seçici sınırı uygulamadıysa (bazı platformlar) fazla fotoğraflar
-  /// bırakılır ve kullanıcıya söylenir.
-  Future<List<XFile>> _limitPicked(
-    List<XFile> picked,
-    int limit, {
-    required String limitMessage,
-  }) async {
+  /// Seçici sınırı uygulamadıysa (bazı platformlar) öğünün kalan hakkından
+  /// fazla fotoğraflar bırakılır ve kullanıcıya söylenir.
+  Future<List<XFile>> _limitPicked(List<XFile> picked, int limit) async {
     if (picked.length <= limit) return picked;
     if (mounted) {
       await DialogUtils.openInfo(
         context,
         title: _photoLimitTitle,
-        message: '$limitMessage\n\nSeçtiğiniz fotoğraflardan ilk $limit '
-            'tanesi gönderilecek.',
+        message: '${MealModel.maxImagesReachedMessage}\n\nSeçtiğiniz '
+            'fotoğraflardan ilk $limit tanesi gönderilecek.',
       );
     }
     return picked.take(limit).toList();
   }
 
-  /// Seçilen fotoğrafları sıraya ekler: fotoğraflar listenin altında hemen
-  /// görünür ve tek tek yüklenir (bkz. [PendingUpload]); ekran kilitlenmez.
-  /// [meal] verilirse öğün kaydına da eklenir.
-  void _enqueueUploads(List<XFile> images, {Meals? meal}) {
+  /// Seçilen öğün fotoğraflarını sıraya ekler: fotoğraflar listenin altında
+  /// hemen görünür ve tek tek yüklenir (bkz. [PendingUpload]); ekran
+  /// kilitlenmez.
+  void _enqueueMealUploads(List<XFile> images, Meals meal) {
     if (images.isEmpty || !mounted) return;
     final ChatManager chat = context.read<ChatManager>();
     final MealManager mealManager =
@@ -622,10 +615,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           chatId: _chatId,
           image: image,
           meal: meal,
-          runner: meal == null
-              ? (upload) =>
-                  chat.sendImageTo(_chatId, upload.image, observer: upload)
-              : (upload) => _uploadMealPhoto(upload, meal, mealManager, chat),
+          runner: (upload) => _uploadMealPhoto(upload, meal, mealManager, chat),
         ),
     ]);
     _showLatest();
@@ -698,26 +688,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final List<XFile> picked = await _limitPicked(
       await _pickImages(source, limit: slotsLeft),
       slotsLeft,
-      limitMessage: MealModel.maxImagesReachedMessage,
     );
-    _enqueueUploads(picked, meal: meal);
-  }
-
-  /// Sohbete öğün kaydına girmeyen fotoğraf gönderme akışı (ör. ürün etiketi,
-  /// tartı): kaynak → fotoğraf(lar) → sıraya ekleme.
-  Future<void> _startPhotoSendFlow() async {
-    final ImageSource? source = await _chooseSource();
-    if (source == null) {
-      return;
-    }
-
-    final List<XFile> picked = await _limitPicked(
-      await _pickImages(source, limit: _maxPhotosPerSend),
-      _maxPhotosPerSend,
-      limitMessage:
-          'Tek seferde en fazla $_maxPhotosPerSend fotoğraf gönderilebilir.',
-    );
-    _enqueueUploads(picked);
+    _enqueueMealUploads(picked, meal);
   }
 
   /// Öğüne bugün daha kaç fotoğraf eklenebilir ([MealModel.maxImages]).
@@ -1621,7 +1593,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             onSend: _sendText,
             // Admin öğün yüklemez: yalnızca danışan öğün fotoğrafı yükler.
             onMealUpload: _isAdminUser ? null : _startMealUploadFlow,
-            onPhotoSend: _startPhotoSendFlow,
             replyTarget: _replyTarget,
             replyLabelOf: (message) => _senderLabel(message.senderId),
           ),
@@ -2368,19 +2339,17 @@ class _JumpToLatestButton extends StatelessWidget {
   }
 }
 
-/// Mesaj yazma satırı: ek menüsü ("Öğün Yükle", "Fotoğraf Gönder"), mesaj
-/// kutusu ve gönder düğmesi; yanıt yazılırken üstünde alıntı çubuğu.
+/// Mesaj yazma satırı: ek menüsü ("Öğün Yükle"), mesaj kutusu ve gönder
+/// düğmesi; yanıt yazılırken üstünde alıntı çubuğu.
 class _ChatInputRow extends StatefulWidget {
   /// Sohbet sayfasının mesaj kutusu (bkz. [_ChatPageState._messageController]).
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onSend;
 
-  /// Öğün fotoğrafı yükleme; admin öğün yüklemediği için onda null.
+  /// Öğün fotoğrafı yükleme. Admin öğün yüklemediği için onda null; ek
+  /// menüsü ("+") de gösterilmez.
   final VoidCallback? onMealUpload;
-
-  /// Öğün kaydına girmeyen fotoğraf gönderme.
-  final VoidCallback onPhotoSend;
 
   /// Yanıtlanan mesaj; null değilse kutunun üstünde alıntısı görünür.
   final ValueNotifier<MessageData?> replyTarget;
@@ -2393,7 +2362,6 @@ class _ChatInputRow extends StatefulWidget {
     required this.focusNode,
     required this.onSend,
     required this.onMealUpload,
-    required this.onPhotoSend,
     required this.replyTarget,
     required this.replyLabelOf,
   });
@@ -2407,7 +2375,6 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
   static const String _sendTooltip = 'Gönder';
   static const String _attachTooltip = 'Ekler';
   static const String _mealUploadLabel = 'Öğün Yükle';
-  static const String _photoSendLabel = 'Fotoğraf Gönder';
 
   bool _isMenuOpen = false;
   late final AnimationController _animationController;
@@ -2488,7 +2455,7 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
             AnimatedSize(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeInOut,
-              child: _isMenuOpen
+              child: _isMenuOpen && onMealUpload != null
                   ? Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2499,18 +2466,11 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          if (onMealUpload != null)
-                            _AttachmentOption(
-                              icon: Icons.restaurant_rounded,
-                              label: _mealUploadLabel,
-                              color: Colors.orange,
-                              onTap: () => _closeMenuAndRun(onMealUpload),
-                            ),
                           _AttachmentOption(
-                            icon: Icons.photo_outlined,
-                            label: _photoSendLabel,
-                            color: Colors.blue,
-                            onTap: () => _closeMenuAndRun(widget.onPhotoSend),
+                            icon: Icons.restaurant_rounded,
+                            label: _mealUploadLabel,
+                            color: Colors.orange,
+                            onTap: () => _closeMenuAndRun(onMealUpload),
                           ),
                         ],
                       ),
@@ -2536,21 +2496,22 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
             // Input row
             Row(
               children: [
-                // Plus button to toggle menu
-                RotationTransition(
-                  turns: _rotationAnimation,
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.add_circle_rounded,
-                      color: _isMenuOpen ? colorScheme.primary : null,
-                      size: 28,
+                // Plus button to toggle menu (yalnızca danışanda).
+                if (onMealUpload != null) ...[
+                  RotationTransition(
+                    turns: _rotationAnimation,
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.add_circle_rounded,
+                        color: _isMenuOpen ? colorScheme.primary : null,
+                        size: 28,
+                      ),
+                      onPressed: _toggleMenu,
+                      tooltip: _attachTooltip,
                     ),
-                    onPressed: _toggleMenu,
-                    tooltip: _attachTooltip,
                   ),
-                ),
-
-                const SizedBox(width: 4),
+                  const SizedBox(width: 4),
+                ],
 
                 // Text input field
                 Expanded(

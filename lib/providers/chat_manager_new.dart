@@ -6,7 +6,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/widgets.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../models/meal_model.dart';
 import '../models/pending_upload.dart';
@@ -897,8 +896,8 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     await batch.commit();
   }
 
-  /// Fotoğraf mesajının görsel alanları (adres, küçük görsel, ölçü). Öğün
-  /// fotoğrafı ve sohbete gönderilen fotoğraf aynı alanları yazar.
+  /// Fotoğraf mesajının görsel alanları (adres, küçük görsel, ölçü); öğün
+  /// fotoğrafı sohbete bu alanlarla yazılır.
   static Map<String, dynamic> imageMessageFields(UploadedImage image) => {
         'imageUrl': image.url,
         if (image.thumbUrl != null) 'thumbUrl': image.thumbUrl,
@@ -914,70 +913,6 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     'imageWidth',
     'imageHeight',
   ];
-
-  /// Sohbete bir fotoğraf gönderir (öğün kaydına girmez).
-  ///
-  /// Fotoğraf küçültülür, küçük görseli ve ölçüsüyle birlikte yüklenir
-  /// ([uploadImageWithThumbnail]); özet ve mesaj tek toplu yazımla gider (bkz.
-  /// [sendTextTo]). [observer] ilerlemeyi izler ve iptal edebilir; iptal
-  /// edilirse mesaj yazılmaz ve [UploadCancelledException] fırlatılır.
-  ///
-  /// @param chatId The target chat ID (user UID in our model)
-  /// @param image The image file selected by the user
-  Future<void> sendImageTo(
-    String chatId,
-    XFile image, {
-    UploadObserver? observer,
-  }) async {
-    final UploadedImage uploaded = await uploadImageWithThumbnail(
-      bytes: await image.readAsBytes(),
-      fileName: image.name,
-      mimeType: image.mimeType,
-      refFor: (fileName) => storage.ref(
-        '${_chatStorageFolder(chatId)}/'
-        '${DateTime.now().millisecondsSinceEpoch}_${_rand(5)}'
-        '${_extensionOf(fileName)}',
-      ),
-      observer: observer,
-    );
-
-    // User sends → notify admins; admin sends → notify user.
-    final bool isAdminMessage = isAdminUid(userId);
-    final WriteBatch batch = db.batch();
-    batch.set(
-      _chatDoc(chatId),
-      _chatSummaryData(
-        chatId,
-        lastMessage: _photoSummaryText,
-        lastImageUrl: uploaded.url,
-        lastImageThumbUrl: uploaded.thumbUrl ?? '',
-        lastAt: Timestamp.now(),
-        incrementUnreadForAdmins: !isAdminMessage,
-        incrementUnreadForUser: isAdminMessage,
-      ),
-      SetOptions(merge: true),
-    );
-    batch.set(_chatDoc(chatId).collection('messages').doc(), {
-      'chatId': chatId,
-      'senderId': userId,
-      ...imageMessageFields(uploaded),
-      'storagePath': uploaded.ref.fullPath,
-      'createdAt': FieldValue.serverTimestamp(),
-      'clientCreatedAt': Timestamp.now(),
-    });
-    final Future<void> commit = batch.commit();
-    observer?.onSaving();
-    await commit;
-  }
-
-  /// Sohbet listesinde fotoğraf mesajının özeti.
-  static const String _photoSummaryText = 'Fotoğraf';
-
-  /// Dosya adının uzantısı (noktayla); yoksa `.jpg`.
-  static String _extensionOf(String fileName) {
-    final int dot = fileName.lastIndexOf('.');
-    return dot > 0 ? fileName.substring(dot).toLowerCase() : '.jpg';
-  }
 
   // ===== Reactions =====
 
@@ -1137,13 +1072,5 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     await _chatDoc(chatId).delete();
 
     notifyListeners();
-  }
-
-  /// Generate a random alphanumeric string of length n.
-  /// Used for creating unique file names.
-  String _rand(int n) {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    final r = Random.secure();
-    return List.generate(n, (_) => chars[r.nextInt(chars.length)]).join();
   }
 }
