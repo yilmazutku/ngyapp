@@ -41,6 +41,26 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
   /// ~200 mantıksal px; 640, 3x yoğunlukta bile net kalır.
   static const int maxDecodeWidth = 640;
 
+  /// Cihazda üretilip [url] adresine yüklenen küçük görseli önceden
+  /// hazırlar: baytlar indirme önbelleğine konur ve görsel çözülüp Flutter'ın
+  /// görsel önbelleğine alınır. Görseli gösteren ilk ekran (ör. az önce
+  /// gönderilen fotoğrafın sohbet baloncuğu) indirme ve yer tutucu beklemez.
+  static void seed(String url, Uint8List bytes) {
+    MealPhotoLoader.instance.remember(url, bytes);
+    final ImageStream stream = MealThumbnailProvider(url: url, isOriginal: false)
+        .resolve(ImageConfiguration.empty);
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (ImageInfo image, bool synchronousCall) {
+        stream.removeListener(listener);
+        image.dispose();
+      },
+      onError: (Object error, StackTrace? stackTrace) =>
+          stream.removeListener(listener),
+    );
+    stream.addListener(listener);
+  }
+
   @override
   Future<MealThumbnailProvider> obtainKey(ImageConfiguration configuration) =>
       SynchronousFuture<MealThumbnailProvider>(this);

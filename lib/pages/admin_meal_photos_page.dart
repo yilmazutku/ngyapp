@@ -1,4 +1,5 @@
 // lib/pages/admin_meal_photos_page.dart
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -58,11 +59,18 @@ class AdminMealPhotosPage extends StatefulWidget {
   /// Verilirse bu fotoğraf vurgulanır ve şeridi ona kaydırılır.
   final String? focusImageUrl;
 
+  /// Sayfa bir sohbetten açıldıysa o sohbetin sahibi. Bu danışanın bir
+  /// fotoğrafı için "Sohbette göster" seçilince yeni bir sohbet sayfası
+  /// açılmaz; sayfa mesajın kimliğiyle kapanır ve alttaki sohbet o mesaja
+  /// gider.
+  final String? returnToChatUserId;
+
   const AdminMealPhotosPage({
     super.key,
     this.initialDay,
     this.focusUserId,
     this.focusImageUrl,
+    this.returnToChatUserId,
   });
 
   @override
@@ -102,6 +110,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _emptyOtherDayText = 'Bu gün fotoğraf yüklenmemiş.';
   static const String _goToChatLabel = 'Sohbette göster';
   static const String _reactLabel = 'İfade Bırak';
+  static const String _noChatMessageHint = 'Sohbette mesajı yok';
   static const String _chatLookupText = 'Sohbetteki mesaj aranıyor...';
   static const String _chatNotFoundTitle = 'Mesaj Bulunamadı';
   static const String _chatNotFoundText =
@@ -203,6 +212,15 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// [_load]).
   final Map<String, Map<String, String>> _reactionsByImageUrl = {};
 
+  /// Fotoğraf adresi -> sohbetteki mesajı; tepkilerle aynı sorguda gelir.
+  /// "Sohbette göster" ve "İfade Bırak" mesajı ayrıca aramaz.
+  final Map<String, MessageData> _chatMessageByImageUrl = {};
+
+  /// Mesajı arandı (bulunsun bulunmasın) fotoğraflar: burada olup
+  /// [_chatMessageByImageUrl]'de olmayanın sohbette mesajı yoktur; menüsü
+  /// baştan kapalı gösterilir.
+  final Set<String> _lookedUpImageUrls = {};
+
   /// Rozeti ilk yüklemeden daha yeni bir bilgiyle yazılmış fotoğraflar
   /// (buradan ifade bırakıldı ya da sohbetten dönülünce tazelendi). İlk
   /// yüklemenin geç gelen sonucu bunların rozetini eskisiyle ezmez.
@@ -278,9 +296,17 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// listesi ve paketler yeniden okunmaz; yalnızca o günün fotoğrafları ve
   /// ifadeleri okunur.
   ///
+  /// Danışan listesi açılışta oturumdaki önbellekten gelebilir
+  /// ([UserProvider.fetchAllCustomers]); "Yenile" ([_refresh]) sunucudan
+  /// okur.
+  ///
   /// Sağlayıcılar await'lerden önce alınır; sonrasında yalnızca `mounted`
   /// kontrolüyle state güncellenir.
-  Future<void> _load({DateTime? day, bool reloadClients = true}) async {
+  Future<void> _load({
+    DateTime? day,
+    bool reloadClients = true,
+    bool forceRefresh = false,
+  }) async {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     final subProvider = Provider.of<SubProvider>(context, listen: false);
     final mealManager = Provider.of<MealManager>(context, listen: false);
@@ -303,6 +329,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       _visibleGroups = const [];
       _reactionsByImageUrl.clear();
       _freshReactionUrls.clear();
+      _chatMessageByImageUrl.clear();
+      _lookedUpImageUrls.clear();
     });
 
     try {
@@ -316,7 +344,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         // Danışan listesi ve test verisi uyarısı birbirinden bağımsız: aynı
         // anda istenir, iki tur beklenmez.
         final List<Object?> initial = await Future.wait<Object?>([
-          userProvider.fetchAllCustomers(),
+          userProvider.fetchAllCustomers(forceRefresh: forceRefresh),
           // Uyarı sayfanın asıl işi değil: okunamazsa sayfa yine çalışır.
           mockProvider.fetchRuns().catchError((Object e) {
             return <MockTestRun>[];
@@ -370,7 +398,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
             _applyFilters();
           });
           batch.forEach((userId, meals) {
-            reactionLoads.add(_loadReactionsOf(
+            reactionLoads.add(_loadChatMessagesOf(
               chatManager,
               userId,
               [for (final MealModel meal in meals) ...meal.imageUrls],
@@ -417,32 +445,72 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     );
   }
 
-  /// Bir danışanın fotoğraflarına bırakılmış tepkileri okuyup rozetlere işler.
+  /// Bir danışanın fotoğraflarının sohbetteki mesajlarını okur: tepkiler
+  /// rozetlere işlenir, mesajlar menü ve diyalog için saklanır.
   ///
-  /// Tepkiler sayfanın asıl işi değil: okunamazsa rozet çıkmaz, fotoğraflar
-  /// yine gösterilir. Bu arada daha yeni bir bilgiyle yazılmış rozetler
-  /// ([_freshReactionUrls]) ezilmez.
-  Future<void> _loadReactionsOf(
+  /// Sayfanın asıl işi değil: okunamazsa rozet çıkmaz, fotoğraflar yine
+  /// gösterilir; menüden seçilince mesaj o an aranır. Bu arada daha yeni bir
+  /// bilgiyle yazılmış rozetler ([_freshReactionUrls]) ezilmez.
+  Future<void> _loadChatMessagesOf(
     ChatManager chatManager,
     String userId,
     List<String> imageUrls,
     int loadId,
   ) async {
-    final Map<String, Map<String, String>> reactions;
+    final Map<String, MessageData> messages;
     try {
-      reactions = await chatManager.fetchImageReactions(userId, imageUrls);
+      messages = await chatManager.fetchImageMessages(userId, imageUrls);
     } catch (e) {
       return;
     }
-    if (!mounted || loadId != _loadId || reactions.isEmpty) return;
+    if (!mounted || loadId != _loadId) return;
 
     setState(() {
-      reactions.forEach((url, byUser) {
+      _lookedUpImageUrls.addAll(imageUrls);
+      messages.forEach((url, message) {
+        _chatMessageByImageUrl[url] = message;
         if (!_freshReactionUrls.contains(url)) {
-          _reactionsByImageUrl[url] = byUser;
+          _setReactions(url, message.reactions);
         }
       });
     });
+  }
+
+  /// Kart rozetinin tepkilerini yazar; tepki yoksa rozet kalkar.
+  void _setReactions(String imageUrl, Map<String, String> reactions) {
+    if (reactions.isEmpty) {
+      _reactionsByImageUrl.remove(imageUrl);
+    } else {
+      _reactionsByImageUrl[imageUrl] = reactions;
+    }
+  }
+
+  /// Fotoğrafın sohbette mesajı var mı: true/false, henüz bilinmiyorsa
+  /// (aranmadı ya da okunamadı) null.
+  bool? _hasChatMessage(String imageUrl) {
+    if (_chatMessageByImageUrl.containsKey(imageUrl)) return true;
+    return _lookedUpImageUrls.contains(imageUrl) ? false : null;
+  }
+
+  /// Fotoğrafın sohbetteki mesajını arar ve saklar (mesajı henüz
+  /// bilinmiyorsa).
+  Future<MessageData?> _lookUpChatMessage(String userId, String imageUrl) async {
+    final ChatManager chatManager =
+        Provider.of<ChatManager>(context, listen: false);
+    final int loadId = _loadId;
+    final MessageData? message =
+        await chatManager.findImageMessage(userId, imageUrl);
+    if (mounted && loadId == _loadId) {
+      setState(() {
+        _lookedUpImageUrls.add(imageUrl);
+        if (message != null) {
+          _chatMessageByImageUrl[imageUrl] = message;
+          _setReactions(imageUrl, message.reactions);
+          _freshReactionUrls.add(imageUrl);
+        }
+      });
+    }
+    return message;
   }
 
   /// Gelen parti sonucunu mevcut kartlara işler ve sırayı tazeler.
@@ -584,6 +652,10 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     await _selectDay(picked);
   }
 
+  /// "Yenile": seçili gün, danışan listesi de sunucudan okunarak yeniden
+  /// yüklenir.
+  Future<void> _refresh() => _load(forceRefresh: true);
+
   /// Test verisi üreten sayfayı açar; dönüşte liste tazelenir ki üretilen
   /// fotoğraflar hemen görünsün.
   Future<void> _openMockPage() async {
@@ -592,7 +664,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       MaterialPageRoute(builder: (_) => const AdminMockMealPhotosPage()),
     );
     if (!mounted) return;
-    await _load();
+    await _refresh();
   }
 
   /// Fotoğrafa sağ tıklandığında (dokunmatikte uzun basıldığında) açılan menü:
@@ -606,27 +678,37 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         Overlay.of(context).context.findRenderObject();
     if (overlay is! RenderBox) return;
 
+    // Mesajı olmadığı bilinen fotoğrafta işlemler baştan kapalıdır; bilinmiyorsa
+    // seçilince aranır.
+    final bool enabled = _hasChatMessage(photo.imageUrl) != false;
+    final Widget? hint = enabled ? null : const Text(_noChatMessageHint);
     final _PhotoAction? action = await showMenu<_PhotoAction>(
       context: context,
       position: RelativeRect.fromRect(
         globalPosition & Size.zero,
         Offset.zero & overlay.size,
       ),
-      items: const [
+      items: [
         PopupMenuItem<_PhotoAction>(
           value: _PhotoAction.goToChat,
+          enabled: enabled,
           child: ListTile(
+            enabled: enabled,
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.chat_bubble_outline),
-            title: Text(_goToChatLabel),
+            leading: const Icon(Icons.chat_bubble_outline),
+            title: const Text(_goToChatLabel),
+            subtitle: hint,
           ),
         ),
         PopupMenuItem<_PhotoAction>(
           value: _PhotoAction.react,
+          enabled: enabled,
           child: ListTile(
+            enabled: enabled,
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.add_reaction_outlined),
-            title: Text(_reactLabel),
+            leading: const Icon(Icons.add_reaction_outlined),
+            title: const Text(_reactLabel),
+            subtitle: hint,
           ),
         ),
       ],
@@ -644,7 +726,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     }
   }
 
-  /// Fotoğrafın sohbetteki mesajını yükleme diyaloğu eşliğinde arar.
+  /// Fotoğrafın sohbetteki mesajı. Genellikle sayfa yüklenirken
+  /// öğrenilmiştir ([_loadChatMessagesOf]) ve hemen döner; öğrenilemediyse
+  /// yükleme diyaloğu eşliğinde aranır.
   ///
   /// Öğün fotoğrafı sohbete yüklenirken mesaja aynı indirme adresi yazıldığı
   /// için eşleme adres üzerinden yapılır. Mesaj yoksa (ör. "Planım"
@@ -657,20 +741,19 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     required String notFoundText,
     required String errorText,
   }) async {
-    final ChatManager chatManager =
-        Provider.of<ChatManager>(context, listen: false);
+    final MessageData? known = _chatMessageByImageUrl[photo.imageUrl];
+    if (known != null) return known;
 
     bool loadingOpen = false;
-    if (mounted) {
+    if (mounted && _hasChatMessage(photo.imageUrl) == null) {
       DialogUtils.openLoading(context, message: _chatLookupText);
       loadingOpen = true;
     }
 
     try {
-      final MessageData? message = await chatManager.findImageMessage(
-        group.user.userId,
-        photo.imageUrl,
-      );
+      final MessageData? message = loadingOpen
+          ? await _lookUpChatMessage(group.user.userId, photo.imageUrl)
+          : null;
 
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -727,9 +810,15 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   }
 
   /// Sohbeti [message] mesajında açar; dönüşte o danışanın rozetlerini
-  /// tazeler.
+  /// tazeler. Sayfa bu danışanın sohbetinden açıldıysa yeni sohbet sayfası
+  /// açılmaz: sayfa kapanır, alttaki sohbet mesaja gider (bkz.
+  /// [AdminMealPhotosPage.returnToChatUserId]).
   Future<void> _openChatAt(_ClientPhotoGroup group, MessageData message) async {
     final NavigatorState navigator = Navigator.of(context);
+    if (group.user.userId == widget.returnToChatUserId) {
+      navigator.pop(message.id);
+      return;
+    }
 
     await navigator.push(
       MaterialPageRoute(
@@ -761,9 +850,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     ];
     if (imageUrls.isEmpty) return;
 
-    final Map<String, Map<String, String>> fresh;
+    final Map<String, MessageData> fresh;
     try {
-      fresh = await chatManager.fetchImageReactions(userId, imageUrls);
+      fresh = await chatManager.fetchImageMessages(userId, imageUrls);
     } catch (e) {
       return;
     }
@@ -773,8 +862,13 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     setState(() {
       for (final String url in imageUrls) {
         _reactionsByImageUrl.remove(url);
+        _chatMessageByImageUrl.remove(url);
       }
-      _reactionsByImageUrl.addAll(fresh);
+      fresh.forEach((url, message) {
+        _chatMessageByImageUrl[url] = message;
+        _setReactions(url, message.reactions);
+      });
+      _lookedUpImageUrls.addAll(imageUrls);
       _freshReactionUrls.addAll(imageUrls);
     });
   }
@@ -804,7 +898,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     if (message == null) return;
     if (!mounted) return;
 
-    final String? currentEmoji = message.reactions[chatManager.userId];
+    final Map<String, String> currentReactions =
+        _reactionsByImageUrl[photo.imageUrl] ?? const {};
+    final String? currentEmoji = currentReactions[chatManager.userId];
     final String? selected = await showReactionPicker(
       context,
       globalPosition: globalPosition,
@@ -821,22 +917,18 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       );
 
       // Kart rozeti hemen tazelenir: sunucudan yeni okuma beklenmez. Taban,
-      // az önce okunan mesajın tepkileri; üstüne bu işlem yazılır.
+      // rozetteki güncel tepkiler; üstüne bu işlem yazılır.
       if (mounted) {
         setState(() {
           final Map<String, String> updated =
-              Map<String, String>.from(message.reactions);
+              Map<String, String>.from(currentReactions);
           if (selected == currentEmoji) {
             updated.remove(chatManager.userId);
           } else {
             updated[chatManager.userId] = selected;
           }
 
-          if (updated.isEmpty) {
-            _reactionsByImageUrl.remove(photo.imageUrl);
-          } else {
-            _reactionsByImageUrl[photo.imageUrl] = updated;
-          }
+          _setReactions(photo.imageUrl, updated);
           _freshReactionUrls.add(photo.imageUrl);
         });
       }
@@ -861,8 +953,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   /// Fotoğrafın büyük görsel diyaloğunu ([showMealImageDetailsDialog]) açar;
   /// altında fotoğrafın sohbetteki mesajına hızlı ifade bırakılabilir ya da
-  /// sohbet o mesajda açılabilir ("Sohbette göster"). Mesaj açılışta bir kez
-  /// aranır.
+  /// sohbet o mesajda açılabilir ("Sohbette göster"). Mesaj sayfa yüklenirken
+  /// öğrenildiyse hemen görünür; öğrenilemediyse açılışta aranır.
   Future<void> _openPhotoDialog(
     _ClientPhotoGroup group,
     MealModel photo,
@@ -870,8 +962,11 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   ) async {
     final ChatManager chatManager =
         Provider.of<ChatManager>(context, listen: false);
+    final String imageUrl = photo.imageUrl;
     final Future<MessageData?> messageFuture =
-        chatManager.findImageMessage(group.user.userId, photo.imageUrl);
+        _hasChatMessage(imageUrl) == null
+            ? _lookUpChatMessage(group.user.userId, imageUrl)
+            : SynchronousFuture<MessageData?>(_chatMessageByImageUrl[imageUrl]);
 
     final MessageData? goTo = await showMealImageDetailsDialog<MessageData>(
       context,
@@ -885,6 +980,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         noMessageText: _viewerNoMessageText,
         lookupErrorText: _viewerLookupErrorText,
         errorText: _reactErrorText,
+        reactionsOf: (message) =>
+            _reactionsByImageUrl[imageUrl] ?? const <String, String>{},
         onReact: (message, emoji) =>
             _toggleReactionFromDialog(group, photo, message, emoji),
         onGoToChat: (message) => Navigator.of(dialogContext).pop(message),
@@ -907,7 +1004,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         Provider.of<ChatManager>(context, listen: false);
     final String uid = chatManager.userId;
     final Map<String, String> current =
-        _reactionsByImageUrl[photo.imageUrl] ?? message.reactions;
+        _reactionsByImageUrl[photo.imageUrl] ?? const {};
     final String? currentEmoji = current[uid];
 
     await chatManager.toggleReaction(
@@ -925,11 +1022,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     }
     if (mounted) {
       setState(() {
-        if (updated.isEmpty) {
-          _reactionsByImageUrl.remove(photo.imageUrl);
-        } else {
-          _reactionsByImageUrl[photo.imageUrl] = updated;
-        }
+        _setReactions(photo.imageUrl, updated);
         _freshReactionUrls.add(photo.imageUrl);
       });
     }
@@ -955,7 +1048,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           LabeledActionButton(
             icon: Icons.refresh,
             label: _refreshLabel,
-            onPressed: _isLoading ? null : _load,
+            onPressed: _isLoading ? null : _refresh,
           ),
         ],
       ),
@@ -1149,7 +1242,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         action: LabeledActionButton(
           icon: Icons.refresh,
           label: _refreshLabel,
-          onPressed: _load,
+          onPressed: _refresh,
         ),
       );
     }
@@ -1263,15 +1356,6 @@ class _ClientPhotoGroup {
       countsByMeal: countsByMeal,
       searchWords: searchWordsOf('${user.fullName} ${user.email}'),
     );
-  }
-
-  /// Avatardaki baş harfler: ad ve soyadın ilk harfleri, ikisi de boşsa "?".
-  String get initials {
-    final String first = user.name.trim();
-    final String last = user.surname.trim();
-    final String letters =
-        '${first.isEmpty ? '' : first[0]}${last.isEmpty ? '' : last[0]}';
-    return letters.isEmpty ? '?' : letters.toUpperCase();
   }
 
   String get displayName => user.fullName.isEmpty ? user.email : user.fullName;
@@ -1493,7 +1577,7 @@ class _ClientPhotoSection extends StatelessWidget {
                 ? theme.colorScheme.primaryContainer
                 : theme.colorScheme.surfaceContainerHighest,
             child: Text(
-              group.initials,
+              group.user.initials,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: hasPhotos
@@ -1639,6 +1723,9 @@ class _PhotoChatActions extends StatefulWidget {
   final String lookupErrorText;
   final String errorText;
 
+  /// Mesajın güncel tepkileri (kart rozetiyle aynı kaynak).
+  final Map<String, String> Function(MessageData message) reactionsOf;
+
   /// İfadeyi kaydeder ve güncel tepkileri döner.
   final Future<Map<String, String>> Function(
     MessageData message,
@@ -1654,6 +1741,7 @@ class _PhotoChatActions extends StatefulWidget {
     required this.noMessageText,
     required this.lookupErrorText,
     required this.errorText,
+    required this.reactionsOf,
     required this.onReact,
     required this.onGoToChat,
   });
@@ -1716,7 +1804,8 @@ class _PhotoChatActionsState extends State<_PhotoChatActions> {
           );
         }
 
-        final Map<String, String> reactions = _reactions ?? message.reactions;
+        final Map<String, String> reactions =
+            _reactions ?? widget.reactionsOf(message);
         return Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
           spacing: 12,
@@ -1727,6 +1816,13 @@ class _PhotoChatActionsState extends State<_PhotoChatActions> {
               child: QuickReactionRow(
                 currentEmoji: reactions[widget.myUid],
                 onSelected: (emoji) => _react(message, emoji),
+                onShowAll: () async {
+                  final String? emoji = await showAllReactionsSheet(
+                    context,
+                    currentEmoji: reactions[widget.myUid],
+                  );
+                  if (emoji != null && mounted) _react(message, emoji);
+                },
               ),
             ),
             FilledButton.icon(

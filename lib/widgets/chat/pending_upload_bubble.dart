@@ -9,13 +9,17 @@ import '../meal_image_card.dart';
 
 /// Sohbette yüklenmeyi bekleyen fotoğrafın baloncuğu (bkz. [PendingUpload]).
 ///
-/// Fotoğraf cihazdaki dosyadan hemen gösterilir; üstünde ilerleme ve iptal,
+/// Fotoğraf cihazdaki dosyadan hemen, gerçek oranında (mesaj baloncuğuyla aynı
+/// ölçüde, bkz. [photoSizeOf]) gösterilir; üstünde ilerleme ve iptal,
 /// sıradaysa "Sırada", yüklenemediyse sebebi ile "Tekrar dene" / "Kaldır"
 /// görünür. Yükleme bitince baloncuk kalkar, yerine gerçek mesaj gelir.
 /// Ekran kilitlenmez: bu sırada yazışmaya devam edilebilir.
 class PendingUploadBubble extends StatelessWidget {
   final PendingUpload upload;
-  final double width;
+
+  /// Fotoğrafın baloncuktaki ölçüsü, en/boy oranından; gönderilen mesajın
+  /// baloncuğu da aynı ölçüyü kullanır, yükleme bitince boyut değişmez.
+  final Size Function(double aspectRatio) photoSizeOf;
   final Color bubbleColor;
   final VoidCallback onDiscard;
   final VoidCallback onRetry;
@@ -23,7 +27,7 @@ class PendingUploadBubble extends StatelessWidget {
   const PendingUploadBubble({
     super.key,
     required this.upload,
-    required this.width,
+    required this.photoSizeOf,
     required this.bubbleColor,
     required this.onDiscard,
     required this.onRetry,
@@ -35,9 +39,11 @@ class PendingUploadBubble extends StatelessWidget {
   static const String _cancelTooltip = 'Gönderimi iptal et';
   static const String _retryLabel = 'Tekrar dene';
   static const String _discardLabel = 'Kaldır';
+  static const String _autoRetryText =
+      'Bağlantı gelince kendiliğinden yeniden denenecek.';
 
-  /// Oranı bilinmeyen yerel fotoğrafın yüksekliği / genişliği.
-  static const double _previewAspect = 0.75;
+  /// Oranı henüz okunmamış fotoğrafın en/boy oranı.
+  static const double _defaultAspectRatio = 4 / 3;
 
   @override
   Widget build(BuildContext context) {
@@ -50,57 +56,67 @@ class PendingUploadBubble extends StatelessWidget {
 
         final Meals meal = upload.meal;
         final Color mealColor = mealTypeColor(meal);
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: Container(
-              width: width + 12,
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-                    child: Row(
-                      children: [
-                        Icon(mealTypeIcon(meal), size: 16, color: mealColor),
-                        const SizedBox(width: 6),
-                        Text(
-                          meal.displayLabel,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: mealColor,
-                          ),
-                        ),
-                      ],
-                    ),
+        return ValueListenableBuilder<double?>(
+          valueListenable: upload.previewAspectRatio,
+          builder: (context, aspectRatio, _) {
+            final Size photoSize =
+                photoSizeOf(aspectRatio ?? _defaultAspectRatio);
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Container(
+                  width: photoSize.width + 12,
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: bubbleColor,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  _buildPreview(context, status),
-                  const SizedBox(height: 4),
-                  _buildFooter(context, status),
-                ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                        child: Row(
+                          children: [
+                            Icon(mealTypeIcon(meal),
+                                size: 16, color: mealColor),
+                            const SizedBox(width: 6),
+                            Text(
+                              meal.displayLabel,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: mealColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      _buildPreview(context, status, photoSize),
+                      const SizedBox(height: 4),
+                      _buildFooter(context, status),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildPreview(BuildContext context, PendingUploadStatus status) {
-    final double height = width * _previewAspect;
-
+  Widget _buildPreview(
+    BuildContext context,
+    PendingUploadStatus status,
+    Size size,
+  ) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
       child: SizedBox(
-        width: width,
-        height: height,
+        width: size.width,
+        height: size.height,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -108,7 +124,7 @@ class PendingUploadBubble extends StatelessWidget {
               File(upload.image.path),
               fit: BoxFit.cover,
               cacheWidth:
-                  (width * MediaQuery.devicePixelRatioOf(context)).round(),
+                  (size.width * MediaQuery.devicePixelRatioOf(context)).round(),
               errorBuilder: (context, error, stackTrace) =>
                   ColoredBox(color: Colors.grey.shade300),
             ),
@@ -164,7 +180,10 @@ class PendingUploadBubble extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
-              upload.errorText ?? PendingUpload.defaultErrorText,
+              upload.willAutoRetry
+                  ? '${upload.errorText ?? PendingUpload.defaultErrorText} '
+                      '$_autoRetryText'
+                  : upload.errorText ?? PendingUpload.defaultErrorText,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
             ),
@@ -172,7 +191,8 @@ class PendingUploadBubble extends StatelessWidget {
           Wrap(
             alignment: WrapAlignment.end,
             children: [
-              TextButton(onPressed: onDiscard, child: const Text(_discardLabel)),
+              TextButton(
+                  onPressed: onDiscard, child: const Text(_discardLabel)),
               if (upload.canRetry)
                 TextButton(onPressed: onRetry, child: const Text(_retryLabel)),
             ],

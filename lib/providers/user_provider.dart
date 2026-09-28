@@ -50,6 +50,7 @@ class UserProvider extends ChangeNotifier {
           .collection('users')
           .doc(updatedUser.userId);
       await userDoc.update(updatedUser.toMap());
+      invalidateCustomers();
       notifyListeners();
       return true;
     } catch (e) {
@@ -115,6 +116,7 @@ class UserProvider extends ChangeNotifier {
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
+      invalidateCustomers();
       notifyListeners();
       return;
     }
@@ -183,6 +185,7 @@ class UserProvider extends ChangeNotifier {
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
+      invalidateCustomers();
       notifyListeners();
       return;
     }
@@ -235,24 +238,66 @@ class UserProvider extends ChangeNotifier {
     }
   }
 
+  /// [fetchAllCustomers] sonucunun oturum içinde saklandığı süre.
+  static const Duration customersCacheTtl = Duration(minutes: 5);
+
+  List<UserModel>? _customersCache;
+  DateTime? _customersCachedAt;
+
+  /// Önbelleği dolduran oturumun kullanıcısı: hesap değişince eski liste
+  /// kullanılmaz.
+  String? _customersCacheOwner;
+  Future<List<UserModel>>? _customersInFlight;
+
   /// Fetches all customer users from the database
-  /// 
+  ///
+  /// Liste [customersCacheTtl] boyunca saklanır: Tüm Sohbetler, Yeni Sohbet,
+  /// Öğün Fotoğrafları gibi ekranlar arka arkaya açılınca bütün danışanlar
+  /// her seferinde yeniden okunmaz; aynı anda gelen istekler tek okumayı
+  /// paylaşır. "Yenile" gibi durumlarda [forceRefresh] ile sunucudan okunur.
+  /// Çağıranlar listeyi sıralayabilsin diye her seferinde kopyası döner.
+  ///
   /// @return A list of UserModel objects representing all customer users
-  Future<List<UserModel>> fetchAllCustomers() async {
-    try {
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .where('role', isEqualTo: 'customer')
-          .get();
-
-      final users = querySnapshot.docs.map((doc) {
-        return UserModel.fromDocument(doc);
-      }).toList();
-
-      return users;
-    } catch (e) {
-      rethrow;
+  Future<List<UserModel>> fetchAllCustomers({bool forceRefresh = false}) async {
+    final String? owner = FirebaseAuth.instance.currentUser?.uid;
+    final List<UserModel>? cached = _customersCache;
+    final DateTime? cachedAt = _customersCachedAt;
+    if (!forceRefresh &&
+        cached != null &&
+        cachedAt != null &&
+        owner == _customersCacheOwner &&
+        DateTime.now().difference(cachedAt) < customersCacheTtl) {
+      return List<UserModel>.of(cached);
     }
+
+    final Future<List<UserModel>> loading =
+        _customersInFlight ??= _loadCustomers(owner);
+    try {
+      return List<UserModel>.of(await loading);
+    } finally {
+      if (identical(_customersInFlight, loading)) _customersInFlight = null;
+    }
+  }
+
+  Future<List<UserModel>> _loadCustomers(String? owner) async {
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .where('role', isEqualTo: 'customer')
+        .get();
+
+    final List<UserModel> users =
+        querySnapshot.docs.map(UserModel.fromDocument).toList();
+    _customersCache = users;
+    _customersCachedAt = DateTime.now();
+    _customersCacheOwner = owner;
+    return users;
+  }
+
+  /// Danışan listesi değişti (kayıt, silme, güncelleme): bir sonraki
+  /// [fetchAllCustomers] sunucudan okur.
+  void invalidateCustomers() {
+    _customersCache = null;
+    _customersCachedAt = null;
   }
 
   // ============ KVKK Consent Methods ============

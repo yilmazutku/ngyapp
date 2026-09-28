@@ -23,6 +23,7 @@ import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/chat_image_preview.dart';
 import '../widgets/diet_plan_view.dart';
+import '../widgets/full_screen_image_page.dart';
 import '../widgets/loading_overlay.dart';
 import 'dart:async';
 
@@ -1327,7 +1328,7 @@ class _MealUploadPageState extends State<MealUploadPage>
                                             children: [
                                               GestureDetector(
                                                 onTap: () =>
-                                                    _showFullImage(url),
+                                                    _showFullImage(url, meal),
                                                 child: ClipRRect(
                                                   borderRadius:
                                                       BorderRadius.circular(
@@ -1445,32 +1446,13 @@ class _MealUploadPageState extends State<MealUploadPage>
   }
 
   /// Shows a full-screen preview of a meal image.
-  void _showFullImage(String url) {
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.black,
-        insetPadding: const EdgeInsets.all(16),
-        child: Stack(
-          children: [
-            Center(
-              child: InteractiveViewer(
-                minScale: 1.0,
-                maxScale: 4.0,
-                child: Image.network(url, fit: BoxFit.contain),
-              ),
-            ),
-            Positioned(
-              top: 8,
-              right: 8,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                onPressed: () => Navigator.pop(ctx),
-              ),
-            ),
-          ],
-        ),
-      ),
+  /// Fotoğrafı ortak tam ekran görüntüleyicide açar (sohbet ve Öğün
+  /// Fotoğrafları ile aynı: yakınlaştırma, kaydırarak kapatma, Esc).
+  void _showFullImage(String url, Meals meal) {
+    showFullScreenImage<void>(
+      context,
+      imageUrl: url,
+      title: meal.displayLabel,
     );
   }
 

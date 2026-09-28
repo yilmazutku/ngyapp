@@ -435,6 +435,9 @@ class _HomePageState extends State<HomePage> {
     } else {
       // Regular user: count of unread messages in their chat
       _unreadChatsStream = chatManager.userUnreadCountStream();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _restorePendingUploads(userId);
+      });
     }
 
     // Pending-payment indicator for the user-side "Ödemelerim" tile. Applies
@@ -444,6 +447,36 @@ class _HomePageState extends State<HomePage> {
         context.read<PaymentProvider>().hasPlannedPaymentStream(userId);
 
     _streamInitialized = true;
+  }
+
+  /// Danışan: uygulama kapandığında sohbette gönderilmeyi bekleyen öğün
+  /// fotoğrafları sıraya geri konur ve yüklenir (bkz.
+  /// [ChatManager.restorePendingUploads]); kullanıcıya kısa bir notla
+  /// söylenir.
+  Future<void> _restorePendingUploads(String userId) async {
+    final ChatManager chatManager = context.read<ChatManager>();
+    final MealManager mealManager = context.read<MealManager>();
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    final ({int restored, int missing}) result =
+        await chatManager.restorePendingUploads(
+      userId: userId,
+      runner: (upload) => mealManager.uploadChatMealPhoto(
+        upload,
+        userId: userId,
+        chatManager: chatManager,
+      ),
+    );
+    final List<String> notes = [
+      if (result.restored > 0)
+        'Gönderilemeyen ${result.restored} öğün fotoğrafı yeniden '
+            'gönderiliyor; sohbette görebilirsiniz.',
+      if (result.missing > 0)
+        '${result.missing} öğün fotoğrafı cihazda bulunamadığı için '
+            'gönderilemedi; lütfen yeniden seçin.',
+    ];
+    if (notes.isEmpty || !mounted) return;
+    messenger.showSnackBar(SnackBar(content: Text(notes.join('\n'))));
   }
 
   // Fetch user role (optional, for admin features)

@@ -6,6 +6,9 @@ import 'package:intl/intl.dart';
 
 import '../models/meal_model.dart';
 import '../models/filter_params.dart';
+import '../models/pending_upload.dart';
+import '../services/meal_reminder_service.dart';
+import '../utils/date_formatter.dart';
 import '../utils/image_thumbnail.dart';
 import '../utils/storage_upload.dart';
 import '../providers/chat_manager_new.dart';
@@ -270,6 +273,49 @@ Future<int> mealImageSlotsLeft({
   if (!mealDoc.exists) return MealModel.maxImages;
   final int used = MealModel.fromDocument(mealDoc).imageUrls.length;
   return used >= MealModel.maxImages ? 0 : MealModel.maxImages - used;
+}
+
+/// Sohbetten gönderilen öğün fotoğrafını ([PendingUpload]) öğün kaydına
+/// ekler ve sohbete yazar; fotoğraf gönderildiği anın gününe ve saatine
+/// kaydedilir ([PendingUpload.createdAt]), yükleme gecikse de. O gün bugünse
+/// öğünün "yüklediniz mi?" hatırlatması iptal olur. Sohbet ekranı ve
+/// uygulama açılışında geri yüklenen sıra (bkz.
+/// [ChatManager.restorePendingUploads]) aynı yolu kullanır.
+///
+/// Fotoğraf öğüne kaydedildi ama sohbete düşmediyse false döner (tekrar
+/// yüklenmemeli). Öğünün fotoğraf sınırı dolmuşsa tekrar denenmeyen bir
+/// [UploadFailure] fırlatır.
+Future<bool> uploadChatMealPhoto(
+  PendingUpload upload, {
+  required String userId,
+  required ChatManager chatManager,
+}) async {
+  bool postedToChat = true;
+  try {
+    final String? downloadUrl = await uploadMealImg(
+      meal: upload.meal,
+      image: upload.image,
+      userId: userId,
+      subscriptionId: userId,
+      overrideDate: upload.createdAt,
+      alsoPostToChat: true,
+      chatManager: chatManager,
+      observer: upload,
+    );
+    // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
+    if (downloadUrl == null) {
+      throw const UploadFailure(
+        MealModel.maxImagesReachedMessage,
+        canRetry: false,
+      );
+    }
+  } on MealChatPostException {
+    postedToChat = false;
+  }
+  if (DateFormatter.isSameDay(upload.createdAt, DateTime.now())) {
+    MealReminderService().cancelMealReminder(upload.meal);
+  }
+  return postedToChat;
 }
 
 /// Uploads a meal photo to Firebase Storage and appends it to the meal document.

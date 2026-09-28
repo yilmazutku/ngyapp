@@ -4,7 +4,9 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../utils/image_thumbnail.dart';
 import '../utils/storage_upload.dart';
+import '../widgets/meal_thumbnail_image.dart';
 import 'meal_model.dart';
 
 /// Sohbette yüklenmeyi bekleyen bir fotoğrafın durumu.
@@ -50,7 +52,15 @@ class PendingUpload implements UploadObserver {
     required this.image,
     required this.meal,
     required this.runner,
-  }) : id = '${DateTime.now().microsecondsSinceEpoch}_${_sequence++}';
+    DateTime? createdAt,
+    String? persistKey,
+    this.autoRetries = 0,
+    double? previewAspectRatio,
+  })  : id = '${DateTime.now().microsecondsSinceEpoch}_${_sequence++}',
+        createdAt = createdAt ?? DateTime.now(),
+        previewAspectRatio = ValueNotifier<double?>(previewAspectRatio) {
+    this.persistKey = persistKey ?? id;
+  }
 
   static int _sequence = 0;
 
@@ -60,6 +70,11 @@ class PendingUpload implements UploadObserver {
 
   static const String timeoutText =
       'Bağlantı yok ya da çok yavaş; fotoğraf gönderilemedi.';
+
+  /// Yüklenemeyen fotoğraf, bağlantı geri gelince en fazla bu kadar kez
+  /// kendiliğinden yeniden denenir (bkz. `ChatManager`); sonra "Tekrar dene"
+  /// beklenir.
+  static const int maxAutoRetries = 5;
   static const String defaultErrorText =
       'Fotoğraf gönderilemedi. Lütfen tekrar deneyin.';
 
@@ -70,6 +85,18 @@ class PendingUpload implements UploadObserver {
   /// Fotoğrafın eklendiği öğün.
   final Meals meal;
 
+  /// Fotoğrafın gönderildiği an. Yükleme gecikse de (sırada bekledi, bağlantı
+  /// yoktu, uygulama kapanıp açıldı) fotoğraf bu anın gününe ve saatine
+  /// kaydedilir.
+  final DateTime createdAt;
+
+  /// Cihazda saklanan sıra kaydının anahtarı; yeniden denemelerde aynı kalır
+  /// (bkz. `ChatManager.restorePendingUploads`).
+  late final String persistKey;
+
+  /// Kendiliğinden yapılmış yeniden deneme sayısı ([maxAutoRetries]).
+  final int autoRetries;
+
   final Future<void> Function(PendingUpload upload) runner;
 
   final ValueNotifier<PendingUploadStatus> status =
@@ -77,6 +104,11 @@ class PendingUpload implements UploadObserver {
 
   /// Asıl dosyanın yüklenme oranı (0-1); hazırlanırken null.
   final ValueNotifier<double?> progress = ValueNotifier<double?>(null);
+
+  /// Fotoğrafın en/boy oranı; dosyanın başlığından okunur (bkz.
+  /// [loadPreviewAspectRatio]), okunana kadar null. Bekleyen baloncuk
+  /// fotoğrafı gerçek oranında gösterir; mesaj gelince boyut değişmez.
+  final ValueNotifier<double?> previewAspectRatio;
 
   String? errorText;
   bool canRetry = true;
@@ -91,6 +123,17 @@ class PendingUpload implements UploadObserver {
   /// dönüşte geçmiş süre "bağlantı yok" sanılmasın.
   bool _watchdogSuspended = false;
   final Completer<void> _aborted = Completer<void>();
+
+  /// Sırada ya da yükleniyor: öğün kaydına henüz yazılmadı ama yazılacak.
+  bool get isQueued =>
+      status.value == PendingUploadStatus.waiting ||
+      status.value == PendingUploadStatus.uploading;
+
+  /// Yüklenemedi ama bağlantı gelince kendiliğinden yeniden denenecek.
+  bool get willAutoRetry =>
+      status.value == PendingUploadStatus.failed &&
+      canRetry &&
+      autoRetries < maxAutoRetries;
 
   bool get cancelledByUser => _cancelledByUser;
   bool get timedOut => _timedOut;
@@ -123,6 +166,24 @@ class PendingUpload implements UploadObserver {
     ));
   }
 
+  /// Fotoğrafın oranını dosyanın başlığından okur (bir kez).
+  Future<void> loadPreviewAspectRatio() async {
+    if (previewAspectRatio.value != null) return;
+    final ImagePixelSize? size = await readImageFilePixelSize(image);
+    if (size != null) previewAspectRatio.value = size.width / size.height;
+  }
+
+  /// Küçük görsel cihazda üretildi: mesaj yazılınca sohbet onu indirmeden
+  /// gösterir.
+  @override
+  void onUploaded(UploadedImage image) {
+    final String? thumbUrl = image.thumbUrl;
+    final Uint8List? thumbBytes = image.thumbBytes;
+    if (thumbUrl != null && thumbBytes != null) {
+      MealThumbnailProvider.seed(thumbUrl, thumbBytes);
+    }
+  }
+
   @override
   void onSaving() {
     _stopTracking();
@@ -144,11 +205,17 @@ class PendingUpload implements UploadObserver {
   /// Başarısız yüklemenin yeniden denenecek kopyası. Yeni nesnedir: zaman
   /// aşımına uğrayıp arka planda hâlâ süren eski deneme, iptal edilmiş
   /// saydığı bu nesneyle kayıt yazamaz (aynı fotoğraf iki kez gönderilmez).
-  PendingUpload retryCopy() => PendingUpload(
+  /// [automatic] ise kendiliğinden deneme sayısı artar; kullanıcı "Tekrar
+  /// dene"ye basınca sayı sıfırlanır.
+  PendingUpload retryCopy({bool automatic = false}) => PendingUpload(
         chatId: chatId,
         image: image,
         meal: meal,
         runner: runner,
+        createdAt: createdAt,
+        persistKey: persistKey,
+        autoRetries: automatic ? autoRetries + 1 : 0,
+        previewAspectRatio: previewAspectRatio.value,
       );
 
   /// Kullanıcı yüklemeyi iptal etti: süren Storage görevi durdurulur, yüklenmiş

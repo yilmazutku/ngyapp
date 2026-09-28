@@ -25,7 +25,8 @@ import '../widgets/search_field.dart';
 /// - Real-time updates via Firestore streams
 /// - Admins can initiate new chats with any customer user
 /// - Danışan adına göre arama ve "Okunmamışlar" süzgeci; adlar bir kez okunur
-///   ve saklanır (liste her güncellendiğinde yeniden okunmaz)
+///   ve saklanır (liste her güncellendiğinde yeniden okunmaz). Arama listede
+///   sohbeti olmayan danışanları da bulur; onlarla sohbet buradan açılır
 /// 
 /// Architecture:
 /// - Uses server-side sorting (requires Firestore composite index)
@@ -53,6 +54,8 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   static const String _unreadOnlyLabel = 'Okunmamışlar';
   static const String _noMatchText = 'Aramaya uyan sohbet yok.';
   static const String _noUnreadText = 'Okunmamış sohbet yok.';
+  static const String _otherCustomersTitle = 'Listede olmayan danışanlar';
+  static const String _openChatLabel = 'Sohbeti aç';
 
   /// Flag to ignore the first purely-cached snapshot to avoid showing stale data
   bool _serverSeen = false;
@@ -97,12 +100,14 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     _loadCustomers();
   }
 
-  /// Danışan adlarını bir kez okur.
-  Future<void> _loadCustomers() async {
+  /// Danışan adlarını okur: açılışta oturumdaki önbellekten gelebilir,
+  /// "Yenile" ile ([forceRefresh]) sunucudan okunur.
+  Future<void> _loadCustomers({bool forceRefresh = false}) async {
     final UserProvider userProvider =
         Provider.of<UserProvider>(context, listen: false);
     try {
-      final List<UserModel> customers = await userProvider.fetchAllCustomers();
+      final List<UserModel> customers =
+          await userProvider.fetchAllCustomers(forceRefresh: forceRefresh);
       if (!mounted) return;
       setState(() {
         for (final UserModel user in customers) {
@@ -147,6 +152,41 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     final UserModel? user = _usersById[userId];
     if (user == null) return _missingUserIds.contains(userId) ? userId : null;
     return user.fullName.isEmpty ? user.email : user.fullName;
+  }
+
+  /// Sohbeti açar. Ad biliniyorsa sohbet sayfası başlık için ayrıca okumaz.
+  void _openChat(String chatId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatPage(
+          overrideChatId: chatId,
+          userDisplayName: _usersById.containsKey(chatId)
+              ? _displayNameOf(chatId)
+              : null,
+        ),
+      ),
+    );
+  }
+
+  /// Aramaya uyan ama listede sohbeti olmayan danışanlar (sohbeti hiç
+  /// başlamamış ya da listenin gösterdiği son sohbetlerden eski), ada göre.
+  List<UserModel> _otherMatchingCustomers(
+    List<String> queryWords,
+    Set<String> listedChatIds,
+  ) {
+    if (queryWords.isEmpty || _unreadOnly || _selectionMode) return const [];
+    final List<UserModel> matches = [
+      for (final UserModel user in _usersById.values)
+        if (!listedChatIds.contains(user.userId) &&
+            matchesSearchWords(
+              queryWords,
+              _searchWordsById[user.userId] ?? const [],
+            ))
+          user,
+    ];
+    matches.sort((a, b) => compareSearchText(a.fullName, b.fullName));
+    return matches;
   }
 
   /// Builds the Firestore stream of chats where this admin is a participant.
@@ -225,12 +265,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     );
     
     if (selectedUserId != null && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChatPage(overrideChatId: selectedUserId),
-        ),
-      );
+      _openChat(selectedUserId);
     }
   }
 
@@ -395,6 +430,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
             setState(() {
               _chatStream = _buildChatStream();
             });
+            _loadCustomers(forceRefresh: true);
           },
         ),
       ],
@@ -455,14 +491,25 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     );
   }
 
+  /// Sohbet satırları; aramada altta listede sohbeti olmayan danışanlar
+  /// ([otherCustomers]).
   Widget _buildChatList(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
     String adminUid,
+    List<UserModel> otherCustomers,
   ) {
+    final int otherCount =
+        otherCustomers.isEmpty ? 0 : otherCustomers.length + 1;
     return ListView.separated(
-      itemCount: docs.length,
+      itemCount: docs.length + otherCount,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, i) {
+        if (i >= docs.length) {
+          final int index = i - docs.length;
+          if (index == 0) return const _SectionTitle(_otherCustomersTitle);
+          return _buildOtherCustomer(otherCustomers[index - 1]);
+        }
+
         final d = docs[i];
         final chatId = d.id; // In one-chat-per-user model, chatId == userUid
         final data = d.data();
@@ -472,25 +519,28 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
         // ("Öğün Fotoğrafı (Ara Öğün 2)" -> "(Ara)").
         final lastMsg =
             Meals.chatTextForDisplay((data['lastMessage'] ?? '') as String);
-        final lastImageUrl = data['lastImageUrl'] as String?;
         final lastAt = data['lastMessageAt'] as Timestamp?;
 
         final ts = lastAt?.toDate();
         final timeStr = ts == null ? '' : DateFormatter.formatChatListTime(ts);
 
-        // Show image preview if lastImageUrl exists and is not empty
-        // (lastImageUrl is cleared when a text-only message is sent)
-        final hasImage = lastImageUrl != null && lastImageUrl.isNotEmpty;
+        // Son mesaj fotoğrafsa küçük görseli (eski özetlerde orijinali); metin
+        // mesajı özeti boşaltır.
+        final String lastImageUrl = (data['lastImageUrl'] as String?) ?? '';
+        final String thumbUrl = (data['lastImageThumbUrl'] as String?) ?? '';
 
         return _ChatListItem(
           chatId: chatId,
           displayName: _displayNameOf(chatId),
+          initials: _usersById[chatId]?.initials,
           lastMsg: lastMsg,
-          lastImageUrl: lastImageUrl,
-          lastImageThumbUrl: data['lastImageThumbUrl'] as String?,
+          previewUrl: thumbUrl.isNotEmpty
+              ? thumbUrl
+              : (lastImageUrl.isEmpty ? null : lastImageUrl),
+          previewIsOriginal: thumbUrl.isEmpty,
           timeStr: timeStr,
-          hasImage: hasImage,
           unreadCount: ChatManager.getUnreadCountFromChatData(data, adminUid),
+          onOpen: _openChat,
           onDelete: _handleDeleteChat,
           selectionMode: _selectionMode,
           selected: _selectedChatIds.contains(chatId),
@@ -498,6 +548,25 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
           onLongPressSelect: _enterSelectionMode,
         );
       },
+    );
+  }
+
+  /// Aramada bulunan, listede sohbeti olmayan danışan; sohbet buradan açılır.
+  Widget _buildOtherCustomer(UserModel user) {
+    final String name = user.fullName.isEmpty ? user.email : user.fullName;
+    return ListTile(
+      leading: _InitialsAvatar(initials: user.initials),
+      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        user.email,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: TextButton(
+        onPressed: () => _openChat(user.userId),
+        child: const Text(_openChatLabel),
+      ),
+      onTap: () => _openChat(user.userId),
     );
   }
 
@@ -569,6 +638,10 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
                   0)
               .length;
           final List<String> queryWords = searchWordsOf(_searchQuery);
+          final List<UserModel> otherCustomers = _otherMatchingCustomers(
+            queryWords,
+            {for (final doc in docs) doc.id},
+          );
           final visibleDocs = docs.where((doc) {
             if (_unreadOnly &&
                 ChatManager.getUnreadCountFromChatData(doc.data(), adminUid) ==
@@ -590,10 +663,10 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
               _buildFilters(unreadChats),
               const Divider(height: 1),
               Expanded(
-                child: visibleDocs.isEmpty
+                child: visibleDocs.isEmpty && otherCustomers.isEmpty
                     ? _CenterNote(
                         queryWords.isEmpty ? _noUnreadText : _noMatchText)
-                    : _buildChatList(visibleDocs, adminUid),
+                    : _buildChatList(visibleDocs, adminUid, otherCustomers),
               ),
             ],
           );
@@ -605,23 +678,28 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
 
 /// Widget representing a single chat item in the admin chat list.
 ///
-/// Shows the client's name, last message, image preview (küçük görsel),
-/// timestamp, and unread badge. Silme, yanlışlıkla basılmasın diye satırın
-/// "⋮" menüsündedir ve onay ister.
+/// Solda danışanın baş harfleri, altında son mesaj (fotoğrafsa küçük
+/// görseliyle, metni yoksa "Fotoğraf"), sağda saat ve okunmamış sayısı.
+/// Silme, yanlışlıkla basılmasın diye satırın "⋮" menüsündedir ve onay ister.
 class _ChatListItem extends StatelessWidget {
   final String chatId;
 
   /// Danışanın adı; henüz okunmadıysa null.
   final String? displayName;
-  final String lastMsg;
-  final String? lastImageUrl;
 
-  /// Son fotoğrafın küçük görseli; yoksa (eski özet) orijinal küçültülerek
-  /// gösterilir.
-  final String? lastImageThumbUrl;
+  /// Avatardaki baş harfler; ad henüz okunmadıysa null.
+  final String? initials;
+  final String lastMsg;
+
+  /// Son mesaj fotoğrafsa küçük görseli (yoksa orijinali); değilse null.
+  final String? previewUrl;
+
+  /// [previewUrl] küçük görsel değil, orijinal mi (eski özet).
+  final bool previewIsOriginal;
   final String timeStr;
-  final bool hasImage;
   final int unreadCount;
+
+  final void Function(String chatId) onOpen;
 
   /// Called when the admin taps the delete (trash) icon for this chat.
   /// Receives the chatId and the resolved display name for the confirmation.
@@ -642,12 +720,13 @@ class _ChatListItem extends StatelessWidget {
   const _ChatListItem({
     required this.chatId,
     required this.displayName,
+    required this.initials,
     required this.lastMsg,
-    required this.lastImageUrl,
-    required this.lastImageThumbUrl,
+    required this.previewUrl,
+    required this.previewIsOriginal,
     required this.timeStr,
-    required this.hasImage,
     required this.unreadCount,
+    required this.onOpen,
     required this.onDelete,
     required this.selectionMode,
     required this.selected,
@@ -656,183 +735,188 @@ class _ChatListItem extends StatelessWidget {
   });
 
   static const String _loadingName = 'Yükleniyor…';
+  static const String _photoText = 'Fotoğraf';
   static const String _menuTooltip = 'Diğer işlemler';
   static const String _deleteLabel = 'Sohbeti Sil';
-  static const double _previewWidth = 80;
-  static const double _previewHeight = 60;
+  static const double _previewSize = 32;
 
   @override
   Widget build(BuildContext context) {
     final String? name = displayName;
     final ThemeData theme = Theme.of(context);
-    final String? thumbUrl =
-        (lastImageThumbUrl ?? '').isEmpty ? null : lastImageThumbUrl;
+    final String? preview = previewUrl;
+    final bool unread = unreadCount > 0;
 
-    return Column(
-      children: [
-        // Main chat list tile
-        ListTile(
-          selected: selectionMode && selected,
-          selectedTileColor:
-              Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
-          leading: selectionMode
-              ? Checkbox(
-                  value: selected,
-                  onChanged: (_) => onToggleSelected(chatId),
-                )
-              : const Icon(Icons.person),
-          title: Text(
-            name ?? _loadingName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w500,
-              color: name == null ? theme.colorScheme.onSurfaceVariant : null,
-            ),
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Show last message text if available
-              if (lastMsg.isNotEmpty)
-                Text(
-                  lastMsg,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              
-              // Show image indicator if last message included an image
-              if (hasImage)
-                const Padding(
-                  padding: EdgeInsets.only(top: 4.0),
-                  child: Row(
-                    children: [
-                      Icon(Icons.image, size: 16, color: Colors.blue),
-                      SizedBox(width: 4),
-                      Text('Görsel', style: TextStyle(color: Colors.blue)),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    timeStr,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: unreadCount > 0 ? Colors.green.shade700 : Colors.grey,
-                      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  if (unreadCount > 0) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.green,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        unreadCount > 99 ? '99+' : unreadCount.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              // Delete chat (and all its photos) — admin only, onaylı.
-              // Hidden in bulk-select mode (bulk delete lives in the app bar).
-              if (!selectionMode)
-                PopupMenuButton<_ChatRowAction>(
-                  tooltip: _menuTooltip,
-                  onSelected: (action) {
-                    switch (action) {
-                      case _ChatRowAction.delete:
-                        onDelete(chatId, name ?? chatId);
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem<_ChatRowAction>(
-                      value: _ChatRowAction.delete,
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          Icons.delete_outline,
-                          color: theme.colorScheme.error,
-                        ),
-                        title: Text(
-                          _deleteLabel,
-                          style: TextStyle(color: theme.colorScheme.error),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-          onLongPress:
-              selectionMode ? null : () => onLongPressSelect(chatId),
-          onTap: selectionMode
-              ? () => onToggleSelected(chatId)
-              : () async {
-                  // Mark chat as read when admin opens it
-                  final chatManager = Provider.of<ChatManager>(context, listen: false);
-                  await chatManager.markChatAsRead(chatId);
-                  if (!context.mounted) return;
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ChatPage(overrideChatId: chatId),
-                    ),
-                  );
-                },
+    return ListTile(
+      selected: selectionMode && selected,
+      selectedTileColor: theme.colorScheme.primary.withValues(alpha: 0.08),
+      leading: selectionMode
+          ? Checkbox(
+              value: selected,
+              onChanged: (_) => onToggleSelected(chatId),
+            )
+          : _InitialsAvatar(initials: initials),
+      title: Text(
+        name ?? _loadingName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontWeight: unread ? FontWeight.bold : FontWeight.w500,
+          color: name == null ? theme.colorScheme.onSurfaceVariant : null,
         ),
-        
-        // Show image preview below the list tile if available
-        if (hasImage)
-          Padding(
-            padding: const EdgeInsets.only(left: 72.0, bottom: 8.0, right: 16.0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: GestureDetector(
-                onTap: selectionMode
-                    ? () => onToggleSelected(chatId)
-                    : () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ChatPage(overrideChatId: chatId),
-                          ),
-                        );
-                      },
-                // Liste kartlarının optimize görseli: küçük görsel iner,
-                // eski özetlerde orijinal küçültülerek çözülür; indirmeler
-                // sıraya girer (200 satır aynı anda indirmez).
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: _previewWidth,
-                    height: _previewHeight,
-                    child: MealThumbnailImage(
-                      url: thumbUrl ?? lastImageUrl!,
-                      isOriginal: thumbUrl == null,
-                    ),
-                  ),
+      ),
+      subtitle: Row(
+        children: [
+          if (preview != null) ...[
+            // Liste kartlarının optimize görseli: küçük görsel iner, eski
+            // özetlerde orijinal küçültülerek çözülür; indirmeler sıraya
+            // girer (200 satır aynı anda indirmez).
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: SizedBox(
+                width: _previewSize,
+                height: _previewSize,
+                child: MealThumbnailImage(
+                  url: preview,
+                  isOriginal: previewIsOriginal,
                 ),
               ),
             ),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Text(
+              lastMsg.isEmpty && preview != null ? _photoText : lastMsg,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: unread
+                  ? TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface,
+                    )
+                  : null,
+            ),
           ),
-      ],
+        ],
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                timeStr,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: unread ? Colors.green.shade700 : Colors.grey,
+                  fontWeight: unread ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              if (unread) ...[
+                const SizedBox(height: 4),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    unreadCount > 99 ? '99+' : unreadCount.toString(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          // Delete chat — admin only, onaylı. Hidden in bulk-select mode
+          // (bulk delete lives in the app bar).
+          if (!selectionMode)
+            PopupMenuButton<_ChatRowAction>(
+              tooltip: _menuTooltip,
+              onSelected: (action) {
+                switch (action) {
+                  case _ChatRowAction.delete:
+                    onDelete(chatId, name ?? chatId);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem<_ChatRowAction>(
+                  value: _ChatRowAction.delete,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      Icons.delete_outline,
+                      color: theme.colorScheme.error,
+                    ),
+                    title: Text(
+                      _deleteLabel,
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+      onLongPress: selectionMode ? null : () => onLongPressSelect(chatId),
+      // Okundu işaretini sohbet sayfası açılınca kendisi koyar; burada
+      // beklenirse sayfa geç (çevrimdışıyken hiç) açılır.
+      onTap: selectionMode
+          ? () => onToggleSelected(chatId)
+          : () => onOpen(chatId),
+    );
+  }
+}
+
+/// Danışanın baş harfleriyle yuvarlak avatar; ad henüz okunmadıysa kişi
+/// ikonu.
+class _InitialsAvatar extends StatelessWidget {
+  final String? initials;
+
+  const _InitialsAvatar({required this.initials});
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String? letters = initials;
+    return CircleAvatar(
+      backgroundColor: colors.primaryContainer,
+      foregroundColor: colors.onPrimaryContainer,
+      child: letters == null
+          ? const Icon(Icons.person)
+          : Text(
+              letters,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+    );
+  }
+}
+
+/// Listedeki bölüm başlığı ("Listede olmayan danışanlar").
+class _SectionTitle extends StatelessWidget {
+  final String text;
+
+  const _SectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      color: theme.colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Text(
+        text,
+        style: theme.textTheme.labelLarge
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      ),
     );
   }
 }
@@ -1072,16 +1156,7 @@ class _UserSelectionDialogState extends State<_UserSelectionDialog> {
         final displayName = fullName.isNotEmpty ? fullName : 'İsimsiz Kullanıcı';
         
         return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            child: Text(
-              displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onPrimaryContainer,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+          leading: _InitialsAvatar(initials: user.initials),
           title: Text(
             displayName,
             maxLines: 1,

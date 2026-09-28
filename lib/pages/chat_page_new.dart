@@ -116,6 +116,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       'Mesajlar yüklenemedi. Lütfen tekrar deneyin.';
   static const String _historyStartText = 'Sohbetin başı';
   static const String _olderLoadErrorText = 'Eski mesajlar yüklenemedi.';
+  static const String _olderOfflineText =
+      'Bağlantı yok; daha eski mesajlar bağlantı gelince yüklenir.';
   static const String _retryLabel = 'Tekrar dene';
   static const String _sendErrorTitle = 'Mesaj Gönderim Hatası';
   static const String _sendErrorText = 'Mesaj gönderilemedi.';
@@ -177,6 +179,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Son eski sayfa yüklenemedi; otomatik tekrar denenmez, en üstte "Tekrar
   /// dene" görünür.
   bool _olderLoadFailed = false;
+
+  /// Eski sayfa sunucu yerine cihazdaki önbellekten geldi (çevrimdışı) ve
+  /// önbellekte daha eskisi yok: en üstte bağlantı notu görünür.
+  bool _olderOffline = false;
 
   /// Sohbetin ilk mesajına gelindi; daha eski mesaj yok (bkz.
   /// [_atHistoryStart]).
@@ -332,8 +338,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _loadUnreadCount();
       _openFocusWindow();
     } else {
+      // Okundu işareti ilk liste gelince konur (bkz. [_noteNewMessages]).
       _messagesStream = _chatManager.messagesStreamFor(_chatId);
-      _markChatAsRead();
     }
   }
 
@@ -344,11 +350,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Resume in-app notifications for this chat (another chat page below
     // keeps its own suppression).
     FcmService().closeChat(_chatId);
-    // Çıkarken en yeni mesaj ekrandaysa sohbet okunmuş sayılır: bu arada gelip
-    // görülen mesajlar okunmamış rozeti bırakmaz.
-    if (_atLatest && !_markReadPending && _appInForeground) {
-      _markChatAsRead();
-    }
     _messageController.dispose();
     _inputFocusNode.dispose();
     _replyTarget.dispose();
@@ -615,55 +616,35 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           chatId: _chatId,
           image: image,
           meal: meal,
-          runner: (upload) => _uploadMealPhoto(upload, meal, mealManager, chat),
+          runner: (upload) => _uploadMealPhoto(upload, mealManager, chat),
         ),
     ]);
     _showLatest();
   }
 
-  /// Öğün fotoğrafını öğün kaydına ekler ve sohbete gönderir; öğünün
-  /// hatırlatması iptal olur. Sohbet ekranı kapanmış olsa da çalışır:
-  /// context'e dokunmaz, diyalog yalnızca ekran açıksa gösterilir.
+  /// Öğün fotoğrafını öğün kaydına ekler ve sohbete gönderir (bkz.
+  /// [MealManager.uploadChatMealPhoto]). Sohbet ekranı kapanmış olsa da
+  /// çalışır: context'e dokunmaz, diyalog yalnızca ekran açıksa gösterilir.
   Future<void> _uploadMealPhoto(
     PendingUpload upload,
-    Meals meal,
     MealManager mealManager,
     ChatManager chat,
   ) async {
-    final String? downloadUrl;
-    try {
-      downloadUrl = await mealManager.uploadMealImg(
-        meal: meal,
-        image: upload.image,
-        userId: _currentUid,
-        subscriptionId: _currentUid,
-        alsoPostToChat: true,
-        chatManager: chat,
-        observer: upload,
-      );
-    } on MealChatPostException {
-      // Fotoğraf öğüne kaydedildi, yalnızca sohbete düşmedi: öğün yüklenmiş
-      // sayılır; kullanıcı fotoğrafı tekrar yüklemesin.
-      _cancelMealReminder(meal);
-      // Beklenmez: sıradaki fotoğraflar diyalog kapanmadan da yüklensin.
-      if (mounted) {
-        DialogUtils.openInfo(
-          context,
-          title: _chatPostFailedTitle,
-          message: _chatPostFailedText,
-        );
-      }
-      return;
-    }
-
-    // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
-    if (downloadUrl == null) {
-      throw const UploadFailure(
-        MealModel.maxImagesReachedMessage,
-        canRetry: false,
+    final bool postedToChat = await mealManager.uploadChatMealPhoto(
+      upload,
+      userId: _currentUid,
+      chatManager: chat,
+    );
+    // Fotoğraf öğüne kaydedildi, yalnızca sohbete düşmedi: kullanıcı onu
+    // tekrar yüklemesin. Beklenmez: sıradakiler diyalog kapanmadan da
+    // yüklensin.
+    if (!postedToChat && mounted) {
+      DialogUtils.openInfo(
+        context,
+        title: _chatPostFailedTitle,
+        message: _chatPostFailedText,
       );
     }
-    _cancelMealReminder(meal);
   }
 
   /// Öğün fotoğrafı yükleme akışı: öğün seçimi → öğünün kalan fotoğraf
@@ -693,22 +674,33 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Öğüne bugün daha kaç fotoğraf eklenebilir ([MealModel.maxImages]).
-  /// Hak kalmadıysa uyarı gösterip 0 döner; kullanıcı fotoğraf seçip
-  /// yüklemeyi beklemeden öğrenir. Okunamazsa sınır sayılır: yükleme
-  /// sırasında [MealManager.uploadMealImg] sınırı yine uygular.
+  /// Sırada bekleyen ya da yüklenen aynı öğün fotoğrafları da hak sayılır:
+  /// kayıtta henüz görünmeseler de yüklenecekler. Hak kalmadıysa uyarı
+  /// gösterip 0 döner; kullanıcı fotoğraf seçip yüklemeyi beklemeden öğrenir.
+  /// Okunamazsa sınır sayılır: yükleme sırasında [MealManager.uploadMealImg]
+  /// sınırı yine uygular.
   Future<int> _mealImageSlotsLeft(Meals meal) async {
     if (!mounted) return 0;
     final mealManager = Provider.of<MealManager>(context, listen: false);
+    final ChatManager chat = context.read<ChatManager>();
 
-    final int slotsLeft;
+    int slotsLeft;
     try {
       slotsLeft = await mealManager.mealImageSlotsLeft(
         userId: _currentUid,
         meal: meal,
       );
     } catch (e) {
-      return MealModel.maxImages;
+      slotsLeft = MealModel.maxImages;
     }
+    final DateTime now = DateTime.now();
+    slotsLeft -= chat
+        .pendingUploadsOf(_chatId)
+        .where((upload) =>
+            upload.meal == meal &&
+            upload.isQueued &&
+            DateFormatter.isSameDay(upload.createdAt, now))
+        .length;
     if (slotsLeft > 0) return slotsLeft;
 
     if (!mounted) return 0;
@@ -898,15 +890,39 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Sohbeti [messageId] mesajında yeniden açar (bkz. [_openFocusWindow]):
   /// yanıttaki alıntıya ya da galerideki bir fotoğrafa dokununca. Mesaj
   /// yüklü olmasa da (eski sayfalarda) bulunur ve vurgulanır.
+  ///
+  /// Mesaj zaten yüklüyse (canlı listede ya da eski sayfalarda) sorgu
+  /// yapılmaz: liste yerinde o mesaja odaklanır. Canlı akışın alt ucu
+  /// sabitlenir ki yeni mesajlar gelince hedef listeden düşmesin.
   void _focusOn(String messageId) {
     _showJumpToLatest.value = false;
+    final bool loaded =
+        _liveMessages.any((message) => message.id == messageId) ||
+            _olderMessages.any((message) => message.id == messageId);
     setState(() {
       _focusMessageId = messageId;
       _focusActive = true;
       _focusRevealStarted = false;
-      _resetPaging();
+      if (loaded) {
+        _anchorLiveMessages();
+      } else {
+        _resetPaging();
+      }
     });
-    _openFocusWindow();
+    if (!loaded) _openFocusWindow();
+  }
+
+  /// Canlı akışın alt ucunu listedeki en eski canlı mesaja sabitler
+  /// ([ChatManager.messagesSinceStream]): yeni mesaj geldikçe liste büyür,
+  /// hiçbir mesaj listeden düşmez. Zaten sabitse bir şey yapmaz.
+  void _anchorLiveMessages() {
+    if (_liveAnchored || _liveMessages.isEmpty) return;
+    final MessageData oldestLive = _liveMessages.last;
+    final Timestamp? cursor =
+        oldestLive.createdAt ?? oldestLive.clientCreatedAt;
+    if (cursor == null) return;
+    _liveAnchored = true;
+    _messagesStream = _chatManager.messagesSinceStream(_chatId, cursor);
   }
 
   /// Odaklı düzenden çıkar: liste son mesajlarla, en yeni mesajdan başlar.
@@ -926,6 +942,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _liveAnchored = false;
     _loadingOlder = false;
     _olderLoadFailed = false;
+    _olderOffline = false;
     _reachedStart = false;
   }
 
@@ -953,9 +970,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// üste) ekler.
   ///
   /// İlk sayfada canlı akışın alt ucu, o an listedeki en eski mesaja
-  /// sabitlenir ([ChatManager.messagesSinceStream]): yeni mesaj geldikçe canlı
-  /// liste büyür, eski sayfalarla arasında boşluk kalmaz. Sayfa sunucudan
-  /// okunur; yüklenemezse en üstte "Tekrar dene" görünür.
+  /// sabitlenir ([_anchorLiveMessages]): yeni mesaj geldikçe canlı liste
+  /// büyür, eski sayfalarla arasında boşluk kalmaz. Sayfa sunucudan okunur;
+  /// çevrimdışıyken cihazdaki önbellekten gelir, önbellekte daha eskisi
+  /// yoksa en üstte bağlantı notu ve "Tekrar dene" görünür.
   Future<void> _loadOlderMessages() async {
     if (!mounted ||
         _loadingOlder ||
@@ -980,19 +998,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final int generation = _pagingGeneration;
     setState(() {
       _loadingOlder = true;
-      if (!_liveAnchored) {
-        _liveAnchored = true;
-        _messagesStream = _chatManager.messagesSinceStream(_chatId, cursor);
-      }
+      _anchorLiveMessages();
     });
 
     try {
-      final List<MessageData> page =
-          await _chatManager.fetchMessagesBefore(_chatId, cursor);
+      final ({List<MessageData> messages, bool fromCache}) page =
+          await _chatManager.fetchOlderPage(_chatId, cursor);
       if (!mounted || generation != _pagingGeneration) return;
+      final bool shortPage =
+          page.messages.length < ChatManager.messagesPageSize;
       setState(() {
-        _olderMessages = [..._olderMessages, ...page];
-        _reachedStart = page.length < ChatManager.messagesPageSize;
+        _olderMessages = [..._olderMessages, ...page.messages];
+        if (page.fromCache) {
+          // Önbellek eksik olabilir: kısa sayfa sohbetin başı sayılmaz.
+          _olderOffline = shortPage;
+          _olderLoadFailed = shortPage;
+        } else {
+          _reachedStart = shortPage;
+        }
         _loadingOlder = false;
       });
     } catch (e) {
@@ -1005,7 +1028,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   void _retryOlderMessages() {
-    setState(() => _olderLoadFailed = false);
+    setState(() {
+      _olderLoadFailed = false;
+      _olderOffline = false;
+    });
     _loadOlderMessages();
   }
 
@@ -1052,7 +1078,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         child: TextButton.icon(
           onPressed: _retryOlderMessages,
           icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('$_olderLoadErrorText $_retryLabel'),
+          label: Text(
+            '${_olderOffline ? _olderOfflineText : _olderLoadErrorText} '
+            '$_retryLabel',
+            textAlign: TextAlign.center,
+          ),
         ),
       );
     }
@@ -1202,6 +1232,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Liste her yenilendiğinde yeni gelen mesajlara bakar.
   ///
+  /// İlk liste gelince (odaklı açılış değilse) sohbet okunmuş işaretlenir:
+  /// işaret listedeki mesajlardan sonra yazıldığı için açılış anında gelen
+  /// bir mesaj da okunmuş sayılır. Sonra gelen mesajlar aşağıdaki gibi
+  /// işaretlenir; çıkarken ayrıca işaret yazılmaz.
+  ///
   /// Kullanıcı en yeni mesajdaysa yeni mesaj ekrandadır: sohbet okunmuş
   /// sayılır (sohbet açıkken gelen mesaj okunmamış rozeti bırakmaz); odaklı
   /// düzende yeni mesajlar görünür alanın altına eklendiği için liste onları
@@ -1213,7 +1248,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _messagesShown = true;
     final String? previous = _newestMessageId;
     _newestMessageId = items.isEmpty ? null : items.first.id;
-    if (firstList) return;
+    if (firstList) {
+      if (!_markReadPending) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _markIncomingSeen();
+        });
+      }
+      return;
+    }
 
     // Liste boştuysa (yeni sohbet) gelen her mesaj yenidir.
     final int previousIndex = previous == null
@@ -1353,12 +1395,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Öğünün fotoğrafı yüklendi: o öğünün bugünkü "yüklediniz mi?"
-  /// hatırlatması iptal edilir ("Planım"daki yüklemeyle aynı davranış).
-  void _cancelMealReminder(Meals meal) {
-    MealReminderService().cancelMealReminder(meal);
-  }
-
   /// Öğün hatırlatmalarını günün güncel durumuna göre yeniden kurar: silinen
   /// fotoğraf öğünün son fotoğrafıysa o öğünün hatırlatması geri gelir.
   void _rescheduleMealReminders() {
@@ -1468,8 +1504,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Admin: danışanın öğün fotoğrafını Öğün Fotoğrafları'nda, fotoğrafın
-  /// günüyle ve danışana süzülmüş olarak açar; fotoğraf vurgulanır.
-  void _openInMealPhotos(MessageData message) {
+  /// günüyle ve danışana süzülmüş olarak açar; fotoğraf vurgulanır. Orada bu
+  /// danışanın bir fotoğrafı için "Sohbette göster" seçilirse sayfa kapanır
+  /// ve sohbet o mesaja gider (yeni bir sohbet sayfası açılmaz).
+  Future<void> _openInMealPhotos(MessageData message) async {
     final String? imageUrl = message.imageUrl;
     if (imageUrl == null) return;
 
@@ -1478,16 +1516,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final DateTime day = mealManager.mealPhotoLocation(_chatId, imageUrl)?.date ??
         message.sentAt ??
         DateTime.now();
-    Navigator.push(
+    final String? messageId = await Navigator.push<String>(
       context,
       MaterialPageRoute(
         builder: (_) => AdminMealPhotosPage(
           initialDay: day,
           focusUserId: _chatId,
           focusImageUrl: imageUrl,
+          returnToChatUserId: _chatId,
         ),
       ),
     );
+    if (messageId == null || !mounted) return;
+    _focusOn(messageId);
   }
 
   @override
@@ -1610,14 +1651,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// ("center") sliver'a, hedeften yeni mesajlar ise onun altına konur.
   /// Böylece aradaki mesajlar hiç kurulmadan doğrudan hedef mesaja açılır;
   /// liste yine tek parça gibi kaydırılır (yukarı eskiye, aşağı yeniye).
+  ///
+  /// Arka arkaya gönderilen aynı öğünün fotoğrafları tek albüm baloncuğunda
+  /// toplanır (bkz. [_groupIntoRows]); liste satırlardan kurulur.
   Widget _buildMessageList(
     List<MessageData> items,
     List<PendingUpload> pending,
   ) {
+    final List<_ChatRow> rows = _groupIntoRows(items);
     final String? focusMessageId = _focusActive ? _focusMessageId : null;
     final int targetIndex = focusMessageId == null
         ? -1
-        : items.indexWhere((message) => message.id == focusMessageId);
+        : rows.indexWhere((row) => row.contains(focusMessageId));
     _noteNewMessages(items, focusLayout: targetIndex >= 0);
 
     // En üstteki satır (ters listede sonda): eski mesaj göstergesi ya da notu.
@@ -1631,7 +1676,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         ListView.builder(
           controller: _scrollController,
           reverse: true, // Newest messages at bottom
-          itemCount: pendingCount + items.length + edgeCount,
+          itemCount: pendingCount + rows.length + edgeCount,
           itemBuilder: (context, i) {
             if (i < pendingCount) {
               return _buildPendingBubble(
@@ -1641,8 +1686,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               );
             }
             final int index = i - pendingCount;
-            return index < items.length
-                ? _buildMessageBubble(items, index)
+            return index < rows.length
+                ? _buildRow(rows, index)
                 : historyEdge!;
           },
         ),
@@ -1663,7 +1708,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, i) => i < targetIndex
-                  ? _buildMessageBubble(items, targetIndex - 1 - i)
+                  ? _buildRow(rows, targetIndex - 1 - i)
                   : _buildPendingBubble(pending, i - targetIndex, items),
               childCount: targetIndex + pendingCount,
             ),
@@ -1672,10 +1717,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           SliverList(
             key: _focusCenterKey,
             delegate: SliverChildBuilderDelegate(
-              (context, i) => targetIndex + i < items.length
-                  ? _buildMessageBubble(items, targetIndex + i)
+              (context, i) => targetIndex + i < rows.length
+                  ? _buildRow(rows, targetIndex + i)
                   : historyEdge!,
-              childCount: items.length - targetIndex + edgeCount,
+              childCount: rows.length - targetIndex + edgeCount,
             ),
           ),
         ],
@@ -1689,16 +1734,60 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   _BubbleMetrics _bubbleMetrics() =>
       _BubbleMetrics.of(MediaQuery.sizeOf(context));
 
-  /// Mesajın gün ayırıcısı: listede kendisinden eski mesaj başka bir günse
-  /// (ya da yüklü en eski mesajsa) üstünde gün yazar.
-  String? _dayLabelAbove(List<MessageData> items, int index) {
-    final DateTime day = items[index].sentAt ?? DateTime.now();
-    if (index + 1 < items.length) {
-      final DateTime older = items[index + 1].sentAt ?? DateTime.now();
+  /// Satırın gün ayırıcısı: listede kendisinden eski satır başka bir günse
+  /// (ya da yüklü en eski satırsa) üstünde gün yazar.
+  String? _dayLabelAbove(List<_ChatRow> rows, int index) {
+    final DateTime day = rows[index].oldest.sentAt ?? DateTime.now();
+    if (index + 1 < rows.length) {
+      final DateTime older = rows[index + 1].newest.sentAt ?? DateTime.now();
       if (DateFormatter.isSameDay(day, older)) return null;
     }
     return DateFormatter.formatChatDayLabel(day);
   }
+
+  /// Albümdeki iki fotoğraf arasında en fazla bu kadar süre olabilir.
+  static const Duration _albumGap = Duration(minutes: 2);
+
+  /// Mesajları liste satırlarına ayırır (en yeni başta): aynı kişinin arka
+  /// arkaya ([_albumGap] içinde, aynı gün) gönderdiği aynı öğünün
+  /// fotoğrafları tek satırda (albüm) toplanır; diğer her mesaj kendi
+  /// satırındadır. Yanıt olan ya da fotoğrafı silinmiş mesaj albüme girmez.
+  static List<_ChatRow> _groupIntoRows(List<MessageData> items) {
+    final List<_ChatRow> rows = [];
+    List<MessageData> group = [];
+    for (final MessageData message in items) {
+      if (group.isNotEmpty && _joinsAlbum(group, message)) {
+        group.add(message);
+        continue;
+      }
+      if (group.isNotEmpty) rows.add(_ChatRow(group));
+      group = [message];
+    }
+    if (group.isNotEmpty) rows.add(_ChatRow(group));
+    return rows;
+  }
+
+  /// [older], en yeni başta sıralı [group] albümüne katılabilir mi.
+  static bool _joinsAlbum(List<MessageData> group, MessageData older) {
+    final MessageData first = group.first;
+    final MessageData last = group.last;
+    if (!_isAlbumPhoto(first) || !_isAlbumPhoto(older)) return false;
+    if (older.senderId != first.senderId ||
+        older.photoMeal != first.photoMeal) {
+      return false;
+    }
+    final DateTime newerAt = last.sentAt!;
+    final DateTime olderAt = older.sentAt!;
+    return DateFormatter.isSameDay(newerAt, olderAt) &&
+        newerAt.difference(olderAt).abs() <= _albumGap;
+  }
+
+  static bool _isAlbumPhoto(MessageData message) =>
+      message.isMealPhoto &&
+      !message.photoDeleted &&
+      message.replyTo == null &&
+      message.photoMeal != null &&
+      message.sentAt != null;
 
   /// Bekleyen yükleme baloncuğu ([pending] sıra sırasıyla, [index] yüklenme
   /// sırası). İlki, son mesaj başka bir gündeyse "Bugün" ayırıcısıyla
@@ -1718,7 +1807,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final Widget bubble = PendingUploadBubble(
       key: ValueKey<String>(upload.id),
       upload: upload,
-      width: _bubbleMetrics().imageWidth,
+      photoSizeOf: _bubbleMetrics().photoSize,
       bubbleColor: _MessageBubble.myBubbleColor,
       onDiscard: () => chat.discardUpload(upload),
       onRetry: () => chat.retryUpload(upload),
@@ -1734,43 +1823,62 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Tek bir mesaj baloncuğu (gerekirse üstünde gün ayırıcısıyla); listenin
-  /// iki biçimi de bunu kullanır.
-  Widget _buildMessageBubble(List<MessageData> items, int index) {
-    final MessageData msg = items[index];
+  /// Karşı tarafın mesajıysa ifade bırakılabilir. `_chatId` sohbet sahibinin
+  /// (danışanın) UID'si: `senderId == _chatId` mesajın danışandan geldiğini,
+  /// admin UID'si ofisten geldiğini gösterir. Kendi mesajına ifade
+  /// bırakılamaz; fotoğrafı silinmiş mesaja da.
+  bool _canReactTo(MessageData message) =>
+      !message.photoDeleted &&
+      (_isAdminUser
+          ? message.senderId == _chatId
+          : ChatManager.isAdminUid(message.senderId));
 
-    // Both sides can react (WhatsApp-style) to messages the *other* party
-    // sent. `_chatId` equals the chat owner's (user's) UID, so
-    // `senderId == _chatId` means the message came from the user; an admin UID
-    // means it came from the office. Reacting to your own message stays
-    // disabled on both sides.
-    final bool canReact = !msg.photoDeleted &&
-        (_isAdminUser
-            ? msg.senderId == _chatId
-            : ChatManager.isAdminUid(msg.senderId));
-    final MessageReply? reply = msg.replyTo;
+  /// Tek bir satır: mesaj baloncuğu ya da albüm (gerekirse üstünde gün
+  /// ayırıcısıyla); listenin iki biçimi de bunu kullanır.
+  Widget _buildRow(List<_ChatRow> rows, int index) {
+    final _ChatRow row = rows[index];
 
-    Widget bubble({required bool highlighted}) => _MessageBubble(
-          message: msg,
-          highlighted: highlighted,
-          isMe: msg.senderId == _currentUid,
+    Widget bubble({required bool highlighted}) {
+      if (row.isAlbum) {
+        return _AlbumBubble(
+          messages: row.messages.reversed.toList(),
+          isMe: row.newest.senderId == _currentUid,
           myUid: _currentUid,
-          canReact: canReact,
-          actions: _actionsFor(msg),
+          highlighted: highlighted,
           metrics: _bubbleMetrics(),
-          replySenderLabel: reply == null ? null : _senderLabel(reply.senderId),
+          canReactTo: _canReactTo,
+          actionsFor: _actionsFor,
           onImageTap: _openPhoto,
           onToggleReaction: _handleToggleReaction,
           onAction: _handleMessageAction,
-          onReplyTap: _focusOn,
         );
+      }
 
+      final MessageData msg = row.newest;
+      final MessageReply? reply = msg.replyTo;
+      return _MessageBubble(
+        message: msg,
+        highlighted: highlighted,
+        isMe: msg.senderId == _currentUid,
+        myUid: _currentUid,
+        canReact: _canReactTo(msg),
+        actions: _actionsFor(msg),
+        metrics: _bubbleMetrics(),
+        replySenderLabel: reply == null ? null : _senderLabel(reply.senderId),
+        onImageTap: _openPhoto,
+        onToggleReaction: _handleToggleReaction,
+        onAction: _handleMessageAction,
+        onReplyTap: _focusOn,
+      );
+    }
+
+    final String? focusMessageId = _focusActive ? _focusMessageId : null;
     final Widget body;
-    if (!_focusActive || msg.id != _focusMessageId) {
+    if (focusMessageId == null || !row.contains(focusMessageId)) {
       body = bubble(highlighted: false);
     } else {
-      // Anahtar yalnızca hedef mesajda: ortalama bu anahtarla yapılır. Vurgu
-      // yalnızca bu baloncuğu yeniden çizer.
+      // Anahtar yalnızca hedef satırda: ortalama bu anahtarla yapılır. Vurgu
+      // yalnızca bu satırı yeniden çizer.
       body = ValueListenableBuilder<bool>(
         key: _focusMessageKey,
         valueListenable: _focusHighlighted,
@@ -1778,7 +1886,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
     }
 
-    final String? dayLabel = _dayLabelAbove(items, index);
+    final String? dayLabel = _dayLabelAbove(rows, index);
     if (dayLabel == null) return body;
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1915,6 +2023,238 @@ class _BubbleMetrics {
     final double ratio =
         aspectRatio.clamp(_minPhotoAspectRatio, _maxPhotoAspectRatio);
     return Size(imageWidth, imageWidth / ratio);
+  }
+}
+
+/// Mesaj listesinin bir satırı: tek mesaj ya da aynı öğünün arka arkaya
+/// gönderilmiş fotoğraflarından oluşan albüm (bkz.
+/// [_ChatPageState._groupIntoRows]).
+class _ChatRow {
+  /// Satırdaki mesajlar, en yeni başta.
+  final List<MessageData> messages;
+
+  const _ChatRow(this.messages);
+
+  MessageData get newest => messages.first;
+  MessageData get oldest => messages.last;
+  bool get isAlbum => messages.length > 1;
+
+  bool contains(String messageId) =>
+      messages.any((message) => message.id == messageId);
+}
+
+/// Albüm baloncuğu: aynı öğünün arka arkaya gönderilen fotoğrafları tek
+/// baloncukta, iki sütunlu kare ızgarada (tek kalan son fotoğraf tam
+/// genişlikte). Her fotoğraf kendi mesajıdır: dokununca tam ekranda açılır,
+/// uzun basınca (masaüstünde sağ tıklayınca) o fotoğrafın menüsü açılır ve
+/// ifadesi kendi köşesinde görünür.
+class _AlbumBubble extends StatelessWidget {
+  /// Albümdeki fotoğraf mesajları, eskiden yeniye.
+  final List<MessageData> messages;
+  final bool isMe;
+  final String myUid;
+  final bool highlighted;
+  final _BubbleMetrics metrics;
+  final bool Function(MessageData message) canReactTo;
+  final List<MessageAction> Function(MessageData message) actionsFor;
+  final void Function(MessageData message) onImageTap;
+  final void Function(MessageData message, String emoji) onToggleReaction;
+  final void Function(MessageData message, MessageAction action) onAction;
+
+  const _AlbumBubble({
+    required this.messages,
+    required this.isMe,
+    required this.myUid,
+    required this.highlighted,
+    required this.metrics,
+    required this.canReactTo,
+    required this.actionsFor,
+    required this.onImageTap,
+    required this.onToggleReaction,
+    required this.onAction,
+  });
+
+  /// Izgaradaki fotoğraflar arası boşluk.
+  static const double _gap = 3;
+  static const double _padding = 4;
+  static const String _reactLabel = 'İfade Bırak';
+
+  /// Masaüstü menüsünde "İfade Bırak" seçeneğinin değeri.
+  static const String _reactMenuValue = 'react';
+
+  @override
+  Widget build(BuildContext context) {
+    final MessageData newest = messages.last;
+    final double width = metrics.imageWidth;
+    final double tile = (width - _gap) / 2;
+    // Henüz sunucuya ulaşmamış fotoğraf varsa saat ikonu onda görünür.
+    final MessageData timeOf = messages.firstWhere(
+      (message) => message.createdAt == null,
+      orElse: () => newest,
+    );
+
+    final List<Widget> gridRows = [
+      for (int i = 0; i < messages.length; i += 2)
+        Padding(
+          padding: EdgeInsets.only(top: i == 0 ? 0 : _gap),
+          child: i + 1 < messages.length
+              ? Row(
+                  children: [
+                    _buildTile(context, messages[i], tile, tile),
+                    const SizedBox(width: _gap),
+                    _buildTile(context, messages[i + 1], tile, tile),
+                  ],
+                )
+              : _buildTile(context, messages[i], width, tile),
+        ),
+    ];
+
+    return AnimatedContainer(
+      duration: _MessageBubble._highlightFadeDuration,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: highlighted
+            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        width: width + _padding * 2,
+        padding: const EdgeInsets.all(_padding),
+        decoration: BoxDecoration(
+          color: isMe
+              ? _MessageBubble.myBubbleColor
+              : _MessageBubble._otherBubbleColor,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _MealPhotoLabel(
+              meal: newest.photoMeal,
+              text: Meals.chatTextForDisplay(newest.text ?? ''),
+            ),
+            ...gridRows,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 4, 6, 2),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _MessageTime(message: timeOf),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTile(
+    BuildContext context,
+    MessageData message,
+    double width,
+    double height,
+  ) {
+    final String? thumbUrl = message.thumbUrl;
+    return SizedBox(
+      width: width,
+      height: height,
+      child: GestureDetector(
+        onTap: () => onImageTap(message),
+        onLongPress:
+            _isDesktopPlatform ? null : () => _openActionsSheet(context, message),
+        onSecondaryTapDown: _isDesktopPlatform
+            ? (details) => _openMenuAt(context, message, details.globalPosition)
+            : null,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: MealThumbnailImage(
+                url: thumbUrl ?? message.imageUrl ?? '',
+                isOriginal: thumbUrl == null,
+              ),
+            ),
+            if (message.reactions.isNotEmpty)
+              Positioned(
+                left: 4,
+                bottom: 0,
+                child: ReactionBadge(reactions: message.reactions),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Dokunmatikte uzun basınca: fotoğrafın ifade ve işlem menüsü.
+  Future<void> _openActionsSheet(
+    BuildContext context,
+    MessageData message,
+  ) async {
+    final MessageActionChoice? choice = await showMessageActionsSheet(
+      context,
+      canReact: canReactTo(message),
+      actions: actionsFor(message),
+      currentEmoji: message.reactions[myUid],
+    );
+    if (choice == null) return;
+
+    final String? emoji = choice.emoji;
+    final MessageAction? action = choice.action;
+    if (emoji != null) {
+      onToggleReaction(message, emoji);
+    } else if (action != null) {
+      onAction(message, action);
+    }
+  }
+
+  /// Masaüstünde sağ tıklayınca: "Yanıtla", karşı tarafın fotoğrafıysa
+  /// "İfade Bırak" ve fotoğrafın diğer işlemleri.
+  Future<void> _openMenuAt(
+    BuildContext context,
+    MessageData message,
+    Offset position,
+  ) async {
+    final RenderObject? overlay =
+        Overlay.of(context).context.findRenderObject();
+    if (overlay is! RenderBox) return;
+
+    final List<MessageAction> actions = actionsFor(message);
+    final Object? choice = await showMenu<Object>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & Size.zero,
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        for (final MessageAction action in actions)
+          if (action == MessageAction.reply)
+            PopupMenuItem<Object>(value: action, child: Text(action.label)),
+        if (canReactTo(message))
+          const PopupMenuItem<Object>(
+            value: _reactMenuValue,
+            child: Text(_reactLabel),
+          ),
+        for (final MessageAction action in actions)
+          if (action != MessageAction.reply)
+            PopupMenuItem<Object>(value: action, child: Text(action.label)),
+      ],
+    );
+    if (choice == null || !context.mounted) return;
+
+    if (choice is MessageAction) {
+      onAction(message, choice);
+      return;
+    }
+    final String? emoji = await showReactionPicker(
+      context,
+      globalPosition: position,
+      currentEmoji: message.reactions[myUid],
+    );
+    if (emoji != null) onToggleReaction(message, emoji);
   }
 }
 
@@ -2398,11 +2738,17 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
     super.dispose();
   }
 
-  /// Masaüstünde Enter mesajı gönderir, Shift+Enter yeni satır ekler.
-  /// Dokunmatik klavyede Enter her zamanki gibi yeni satırdır.
+  /// Masaüstünde Enter mesajı gönderir, Shift+Enter yeni satır ekler; Esc
+  /// yazılan yanıtı iptal eder. Dokunmatik klavyede Enter her zamanki gibi
+  /// yeni satırdır.
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     if (!_isDesktopPlatform || event is! KeyDownEvent) {
       return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape &&
+        widget.replyTarget.value != null) {
+      widget.replyTarget.value = null;
+      return KeyEventResult.handled;
     }
     final bool isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter;

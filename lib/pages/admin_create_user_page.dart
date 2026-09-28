@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:provider/provider.dart';
 import '../firebase_options.dart';
 import '../models/user_model.dart';
+import '../providers/user_provider.dart';
 import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -183,6 +185,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
           .set(newUser.toMap());
 
       if (!mounted) return;
+      Provider.of<UserProvider>(context, listen: false).invalidateCustomers();
       _resetForm();
       await DialogUtils.openInfo(
         context,
