@@ -1,9 +1,12 @@
 // lib/pages/chat_page_new.dart
 import 'dart:io' show Platform;
 
+import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, ValueListenable, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -26,6 +29,15 @@ import 'package:ngy_app/services/meal_reminder_service.dart';
 
 import '../constants/app_constants.dart';
 import '../widgets/labeled_action_button.dart';
+
+/// Masaüstü platformu mu (Windows, macOS, Linux). Enter ile gönderme, sağ tık
+/// menüsü ve seçilebilir metin yalnızca burada açılır; dokunmatikte uzun basma
+/// davranışları olduğu gibi kalır.
+bool get _isDesktopPlatform => const {
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+      TargetPlatform.linux,
+    }.contains(defaultTargetPlatform);
 
 /// ChatPage displays the chat interface for both regular users and admins.
 /// 
@@ -94,6 +106,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       'Mesaja gidilemedi; sohbet en yeni mesajdan açıldı.';
   static const String _messagesLoadErrorText =
       'Mesajlar yüklenemedi. Lütfen tekrar deneyin.';
+  static const String _historyStartText = 'Sohbetin başı';
+  static const String _olderLoadErrorText = 'Eski mesajlar yüklenemedi.';
+  static const String _retryLabel = 'Tekrar dene';
   static const String _sendErrorTitle = 'Mesaj Gönderim Hatası';
   static const String _sendErrorText = 'Mesaj gönderilemedi.';
   static const String _deletePhotoTitle = 'Fotoğrafı Sil';
@@ -124,8 +139,41 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// ([ChatManager.openFocusWindow]). Pencere yüklenirken null.
   Stream<List<MessageData>>? _messagesStream;
 
-  /// Odaklı açılışta hedeften eski, bağlam için bir kez okunan mesajlar.
-  List<MessageData> _focusOlderMessages = const [];
+  /// Canlı akışın altına eklenen eski mesaj sayfaları (en yeni başta); canlı
+  /// dinlenmez. Odaklı açılışta ilk sayfa, hedeften eski bağlam mesajlarıdır.
+  /// Liste en üste yaklaştıkça bir sayfa daha eklenir (bkz.
+  /// [_loadOlderMessages]).
+  List<MessageData> _olderMessages = const [];
+
+  /// Son gelen canlı mesaj listesi (en yeni başta).
+  List<MessageData> _liveMessages = const [];
+
+  /// Canlı akışın alt ucu sabit mi ([ChatManager.messagesSinceStream]):
+  /// odaklı açılışta ya da ilk eski sayfa yüklenince sabitlenir; yeni mesaj
+  /// geldikçe canlı liste büyür ve eski sayfalarla arasında boşluk kalmaz.
+  bool _liveAnchored = false;
+
+  bool _loadingOlder = false;
+
+  /// Son eski sayfa yüklenemedi; otomatik tekrar denenmez, en üstte "Tekrar
+  /// dene" görünür.
+  bool _olderLoadFailed = false;
+
+  /// Sohbetin ilk mesajına gelindi; daha eski mesaj yok (bkz.
+  /// [_atHistoryStart]).
+  bool _reachedStart = false;
+
+  /// Sayfalama sıfırlandıkça artar; bu arada tamamlanan eski bir yükleme
+  /// sonucunu yok saymak için.
+  int _pagingGeneration = 0;
+
+  /// Liste en üste bu kadar piksel kala eski mesajlar istenir.
+  static const double _loadOlderThreshold = 400.0;
+
+  /// Uygulama ön planda mı; arka plandayken gelen mesajlar okunmuş sayılmaz.
+  bool _appInForeground = true;
+
+  late final ChatManager _chatManager;
 
   /// Mesaj yazma kutusu. Sayfaya aittir: bir sohbette yazılıp gönderilmeyen
   /// metin başka bir sohbetin kutusuna taşınmaz.
@@ -186,6 +234,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// ayırt etmek için (bkz. [_noteNewMessages]).
   String? _newestMessageId;
 
+  /// Mesaj listesi (boş da olsa) en az bir kez çizildi mi; ilk listedeki
+  /// mesajlar yeni gelmiş sayılmaz.
+  bool _messagesShown = false;
+
   /// En yeni mesaja kaydırma süresi.
   static const Duration _scrollToLatestDuration = Duration(milliseconds: 250);
 
@@ -210,6 +262,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     
     _currentUid = FirebaseAuth.instance.currentUser!.uid;
+    _chatManager = context.read<ChatManager>();
     
     // Resolve chat ID once and cache it
     _chatId = widget.overrideChatId ?? _currentUid;
@@ -218,6 +271,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _isAdminUser = ChatManager.isAdminUid(_currentUid);
 
     _focusActive = widget.focusMessageId != null;
+    // Odaklı açılışta ekran eski bir mesajdadır, en yeni mesaj görünmez.
+    _atLatest = !_focusActive;
 
     if (_showsUserTitle && widget.userDisplayName == null) {
       _userFuture = Provider.of<UserProvider>(context, listen: false)
@@ -233,7 +288,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _loadUnreadCount();
       _openFocusWindow();
     } else {
-      _messagesStream = context.read<ChatManager>().messagesStreamFor(_chatId);
+      _messagesStream = _chatManager.messagesStreamFor(_chatId);
       _markChatAsRead();
     }
   }
@@ -245,6 +300,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Resume in-app notifications for this chat (another chat page below
     // keeps its own suppression).
     FcmService().closeChat(_chatId);
+    // Çıkarken en yeni mesaj ekrandaysa sohbet okunmuş sayılır: bu arada gelip
+    // görülen mesajlar okunmamış rozeti bırakmaz.
+    if (_atLatest && !_markReadPending && _appInForeground) {
+      _markChatAsRead();
+    }
     _messageController.dispose();
     _scrollController.dispose();
     _focusHighlighted.dispose();
@@ -257,14 +317,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// görünür.
   bool get _showsUserTitle => widget.overrideChatId != null && _isAdminUser;
 
-  /// Mark chat as read (resets unread count) based on user type.
+  /// Mark chat as read (resets unread count) based on user type. Sayfa
+  /// kapanırken de çağrıldığı için context kullanmaz.
   Future<void> _markChatAsRead() async {
     try {
-      final chatManager = context.read<ChatManager>();
       if (_isAdminUser) {
-        await chatManager.markChatAsRead(_chatId);
+        await _chatManager.markChatAsRead(_chatId);
       } else {
-        await chatManager.markChatAsReadForUser(_chatId);
+        await _chatManager.markChatAsReadForUser(_chatId);
       }
     } catch (e) {
     }
@@ -272,9 +332,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// "En yeniye git" düğmesindeki okunmamış sayısını okur.
   Future<void> _loadUnreadCount() async {
-    final ChatManager chatManager = context.read<ChatManager>();
     try {
-      final int count = await chatManager.currentUserUnreadCount(_chatId);
+      final int count = await _chatManager.currentUserUnreadCount(_chatId);
       // Bu arada en yeniye inilip okundu işaretlendiyse sayı artık geçersiz.
       if (!mounted || !_markReadPending) return;
       _unreadCount.value = count;
@@ -352,12 +411,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // In the background no chat's notifications are suppressed; back in the
     // foreground the chat on top is suppressed again.
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _appInForeground = false;
       FcmService().setInForeground(false);
     } else if (state == AppLifecycleState.resumed) {
+      _appInForeground = true;
       FcmService().setInForeground(true);
-      // Re-mark as read when returning to foreground (unless the newest
-      // messages have not been reached yet in a focused chat).
-      if (!_markReadPending) {
+      // Ekran en yeni mesajdaysa (arka plandayken gelenler dahil) sohbet
+      // okunmuş sayılır; değilse işaret en yeniye inilince konur.
+      if (_atLatest) {
+        _markReadPending = false;
+        _unreadCount.value = 0;
         _markChatAsRead();
       }
     }
@@ -772,11 +835,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// [ChatManager.openFocusWindow]). Açılamazsa sohbet en yeni mesajdan açılır
   /// ve nedeni kullanıcıya söylenir.
   Future<void> _openFocusWindow() async {
-    final ChatManager chat = context.read<ChatManager>();
-
     final FocusWindow window;
     try {
-      window = await chat.openFocusWindow(_chatId, widget.focusMessageId!);
+      window =
+          await _chatManager.openFocusWindow(_chatId, widget.focusMessageId!);
     } catch (e) {
       if (!mounted || !_focusActive) return;
       _showFocusUnavailable(_focusErrorText);
@@ -795,7 +857,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     setState(() {
       _messagesStream = messages;
-      _focusOlderMessages = window.olderMessages;
+      _liveAnchored = true;
+      _olderMessages = window.olderMessages;
+      _reachedStart =
+          window.olderMessages.length < ChatManager.focusWindowOlderCount;
     });
   }
 
@@ -813,9 +878,160 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _showJumpToLatest.value = false;
     setState(() {
       _focusActive = false;
-      _focusOlderMessages = const [];
-      _messagesStream = context.read<ChatManager>().messagesStreamFor(_chatId);
+      _resetPaging();
+      _messagesStream = _chatManager.messagesStreamFor(_chatId);
     });
+  }
+
+  /// Eski sayfaları bırakır; sohbet yeniden son mesajlarla başlar.
+  void _resetPaging() {
+    _pagingGeneration++;
+    _olderMessages = const [];
+    _liveAnchored = false;
+    _loadingOlder = false;
+    _olderLoadFailed = false;
+    _reachedStart = false;
+  }
+
+  /// Sohbetin başı listede mi. Canlı akış sabitlenmemişken yalnızca son
+  /// [ChatManager.messagesPageSize] mesaj dinlenir; yeni mesajlarla liste
+  /// dolunca en eski mesaj listeden düşer ve baş artık listede değildir.
+  bool get _atHistoryStart =>
+      _reachedStart &&
+      (_liveAnchored || _liveMessages.length < ChatManager.messagesPageSize);
+
+  /// Liste en üste yaklaşınca bir sonraki eski sayfayı ister. Kaydırma ya da
+  /// ölçü bildirimi sırasında çağrılır; durum değişikliği hemen ardından
+  /// yapılır.
+  void _requestOlderMessages() {
+    if (_loadingOlder ||
+        _atHistoryStart ||
+        _olderLoadFailed ||
+        _liveMessages.isEmpty) {
+      return;
+    }
+    Future<void>.microtask(_loadOlderMessages);
+  }
+
+  /// Eski mesajların bir sonraki sayfasını yükler ve listenin altına (en
+  /// üste) ekler.
+  ///
+  /// İlk sayfada canlı akışın alt ucu, o an listedeki en eski mesaja
+  /// sabitlenir ([ChatManager.messagesSinceStream]): yeni mesaj geldikçe canlı
+  /// liste büyür, eski sayfalarla arasında boşluk kalmaz. Sayfa sunucudan
+  /// okunur; yüklenemezse en üstte "Tekrar dene" görünür.
+  Future<void> _loadOlderMessages() async {
+    if (!mounted ||
+        _loadingOlder ||
+        _atHistoryStart ||
+        _olderLoadFailed ||
+        _liveMessages.isEmpty) {
+      return;
+    }
+
+    // Son mesajlar tek sayfaya sığdıysa daha eskisi yoktur.
+    if (!_liveAnchored &&
+        _liveMessages.length < ChatManager.messagesPageSize) {
+      setState(() => _reachedStart = true);
+      return;
+    }
+
+    final MessageData oldest =
+        _olderMessages.isNotEmpty ? _olderMessages.last : _liveMessages.last;
+    final Timestamp? cursor = oldest.createdAt ?? oldest.clientCreatedAt;
+    if (cursor == null) return;
+
+    final int generation = _pagingGeneration;
+    setState(() {
+      _loadingOlder = true;
+      if (!_liveAnchored) {
+        _liveAnchored = true;
+        _messagesStream = _chatManager.messagesSinceStream(_chatId, cursor);
+      }
+    });
+
+    try {
+      final List<MessageData> page =
+          await _chatManager.fetchMessagesBefore(_chatId, cursor);
+      if (!mounted || generation != _pagingGeneration) return;
+      setState(() {
+        _olderMessages = [..._olderMessages, ...page];
+        _reachedStart = page.length < ChatManager.messagesPageSize;
+        _loadingOlder = false;
+      });
+    } catch (e) {
+      if (!mounted || generation != _pagingGeneration) return;
+      setState(() {
+        _loadingOlder = false;
+        _olderLoadFailed = true;
+      });
+    }
+  }
+
+  void _retryOlderMessages() {
+    setState(() => _olderLoadFailed = false);
+    _loadOlderMessages();
+  }
+
+  /// Eski sayfalar canlı dinlenmez: üzerinde işlem yapılan mesaj (ifade,
+  /// fotoğraf silme) yeniden okunup listede güncellenir. Canlı listedeki
+  /// mesajlar zaten kendiliğinden güncellenir.
+  Future<void> _refreshOlderMessage(String messageId) async {
+    if (!_olderMessages.any((message) => message.id == messageId)) return;
+
+    final int generation = _pagingGeneration;
+    final MessageData? fresh;
+    try {
+      fresh = await _chatManager.fetchMessage(_chatId, messageId);
+    } catch (e) {
+      return;
+    }
+    if (fresh == null || !mounted || generation != _pagingGeneration) return;
+
+    final int index =
+        _olderMessages.indexWhere((message) => message.id == messageId);
+    if (index < 0) return;
+    setState(() {
+      _olderMessages = [..._olderMessages]..[index] = fresh!;
+    });
+  }
+
+  /// Listenin en üstündeki satır: eski mesajlar yüklenirken gösterge,
+  /// yüklenemediyse "Tekrar dene", sohbetin başına gelindiyse küçük bir not.
+  Widget? _buildHistoryEdge() {
+    if (_loadingOlder) {
+      return const Padding(
+        padding: EdgeInsets.all(12),
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    if (_olderLoadFailed) {
+      return Center(
+        child: TextButton.icon(
+          onPressed: _retryOlderMessages,
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('$_olderLoadErrorText $_retryLabel'),
+        ),
+      );
+    }
+    if (_atHistoryStart) {
+      return Padding(
+        padding: const EdgeInsets.all(12),
+        child: Center(
+          child: Text(
+            _historyStartText,
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+        ),
+      );
+    }
+    return null;
   }
 
   /// İlk çizimden sonra hedef mesajı ortalamayı bir kez planlar.
@@ -881,7 +1097,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final bool atLatest =
         metrics.pixels <= metrics.minScrollExtent + _latestTolerance;
     _atLatest = atLatest;
-    if (atLatest && _markReadPending) {
+
+    // Ters listede en eski mesaj kaydırma aralığının üst ucunda.
+    if (metrics.maxScrollExtent - metrics.pixels <= _loadOlderThreshold) {
+      _requestOlderMessages();
+    }
+    if (atLatest && _markReadPending && _appInForeground) {
       _markReadPending = false;
       _unreadCount.value = 0;
       _markChatAsRead();
@@ -938,36 +1159,55 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Liste her yenilendiğinde yeni gelen mesajlara bakar. Yalnızca odaklı
-  /// düzende gerekir: orada yeni mesajlar görünür alanın altına eklenir.
-  /// Kullanıcı en yeni mesajdaysa liste yeni mesajı gösterecek kadar kayar;
-  /// değilse karşı taraftan gelenler "En yeniye git" rozetindeki sayıya
-  /// eklenir. (Normal düzende en yeni mesaj zaten alta eklenir.)
+  /// Liste her yenilendiğinde yeni gelen mesajlara bakar.
+  ///
+  /// Kullanıcı en yeni mesajdaysa yeni mesaj ekrandadır: sohbet okunmuş
+  /// sayılır (sohbet açıkken gelen mesaj okunmamış rozeti bırakmaz); odaklı
+  /// düzende yeni mesajlar görünür alanın altına eklendiği için liste onları
+  /// gösterecek kadar kayar. Kullanıcı eski mesajlardaysa okundu işareti en
+  /// yeniye inince konur; odaklı düzende karşı taraftan gelenler "En yeniye
+  /// git" rozetindeki sayıya eklenir.
   void _noteNewMessages(List<MessageData> items, {required bool focusLayout}) {
+    final bool firstList = !_messagesShown;
+    _messagesShown = true;
     final String? previous = _newestMessageId;
     _newestMessageId = items.isEmpty ? null : items.first.id;
-    if (!focusLayout || previous == null) return;
+    if (firstList) return;
 
-    final int previousIndex =
-        items.indexWhere((message) => message.id == previous);
+    // Liste boştuysa (yeni sohbet) gelen her mesaj yenidir.
+    final int previousIndex = previous == null
+        ? items.length
+        : items.indexWhere((message) => message.id == previous);
     if (previousIndex <= 0) return;
 
     final int incoming = items
         .take(previousIndex)
         .where((message) => message.senderId != _currentUid)
         .length;
-    final bool follow = _atLatest;
+    final bool atLatest = _atLatest;
 
     // Liste bu karede yerleşince uygulanır: yeni mesajın yeri ancak o zaman
     // bellidir; bildirim de çizim sırasında değil sonrasında yapılmalı.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (follow) {
-        _scrollToLatest();
+      if (atLatest) {
+        if (focusLayout) _scrollToLatest();
+        if (incoming > 0) _markIncomingSeen();
       } else if (incoming > 0) {
-        _unreadCount.value += incoming;
+        _markReadPending = true;
+        if (focusLayout) _unreadCount.value += incoming;
       }
     });
+  }
+
+  /// En yeni mesajdayken gelen mesaj görüldü: uygulama ön plandaysa sohbet
+  /// okunmuş işaretlenir; arka plandaysa işaret, uygulamaya dönülünce konur.
+  void _markIncomingSeen() {
+    if (_appInForeground) {
+      _markChatAsRead();
+    } else {
+      _markReadPending = true;
+    }
   }
 
   /// Yazılan metni gönderir. Kutu hemen boşalır ve mesaj yerelde hemen
@@ -1033,6 +1273,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         fallbackMeal: message.photoMeal,
         fallbackDate: (message.clientCreatedAt ?? message.createdAt)?.toDate(),
       );
+      _refreshOlderMessage(message.id);
 
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -1084,6 +1325,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     try {
       await chat.toggleReaction(_chatId, message.id, emoji, currentEmoji: current);
+      _refreshOlderMessage(message.id);
     } catch (e) {
       if (!mounted) return;
       DialogUtils.openError(
@@ -1163,11 +1405,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    final List<MessageData> items = _focusActive
-                        ? [...data, ..._focusOlderMessages]
-                        : data;
+                    _liveMessages = data;
+                    final List<MessageData> items =
+                        _olderMessages.isEmpty ? data : [...data, ..._olderMessages];
 
                     if (items.isEmpty) {
+                      _noteNewMessages(items, focusLayout: false);
                       return const Center(child: Text('Henüz mesaj yok.'));
                     }
 
@@ -1214,13 +1457,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         : items.indexWhere((message) => message.id == focusMessageId);
     _noteNewMessages(items, focusLayout: targetIndex >= 0);
 
+    // En üstteki satır (ters listede sonda): eski mesaj göstergesi ya da notu.
+    final Widget? historyEdge = _buildHistoryEdge();
+    final int edgeCount = historyEdge == null ? 0 : 1;
+
     if (targetIndex < 0) {
       return _trackLatest(
         ListView.builder(
           controller: _scrollController,
           reverse: true, // Newest messages at bottom
-          itemCount: items.length,
-          itemBuilder: (context, i) => _buildMessageBubble(items[i]),
+          itemCount: items.length + edgeCount,
+          itemBuilder: (context, i) => i < items.length
+              ? _buildMessageBubble(items[i])
+              : historyEdge!,
         ),
         focusLayout: false,
       );
@@ -1245,8 +1494,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           SliverList(
             key: _focusCenterKey,
             delegate: SliverChildBuilderDelegate(
-              (context, i) => _buildMessageBubble(items[targetIndex + i]),
-              childCount: items.length - targetIndex,
+              (context, i) => targetIndex + i < items.length
+                  ? _buildMessageBubble(items[targetIndex + i])
+                  : historyEdge!,
+              childCount: items.length - targetIndex + edgeCount,
             ),
           ),
         ],
@@ -1453,6 +1704,19 @@ class _MessageBubble extends StatelessWidget {
   /// Vurgunun açılıp kapanma süresi.
   static const Duration _highlightFadeDuration = Duration(milliseconds: 300);
 
+  /// Metin baloncuğunun en fazla genişliği (ekranın %75'i, geniş ekranda bu
+  /// değer); geniş satırlar okumayı zorlaştırır.
+  static const double _maxTextBubbleWidth = 520;
+
+  /// Görselin en fazla genişliği (ekranın %55'i, geniş ekranda bu değer).
+  static const double _maxImageWidth = 360;
+
+  static const String _copyMessageLabel = 'Mesajı Kopyala';
+  static const String _reactLabel = 'İfade Bırak';
+  static const String _deletePhotoLabel = 'Fotoğrafı Sil';
+  static const String _copiedText = 'Mesaj kopyalandı.';
+  static const Duration _copiedFeedbackDuration = Duration(seconds: 1);
+
   String _formatTime(DateTime dt) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -1486,6 +1750,12 @@ class _MessageBubble extends StatelessWidget {
     // görünür ("Ara Öğün 2" -> "Ara").
     final String text = Meals.chatTextForDisplay(message.text ?? '');
 
+    final Size screen = MediaQuery.sizeOf(context);
+    final double textMaxWidth =
+        (screen.width * 0.75).clamp(0.0, _maxTextBubbleWidth);
+    final double imageWidth = (screen.width * 0.55).clamp(0.0, _maxImageWidth);
+    final double imageHeight = (screen.height * 0.25).clamp(0.0, imageWidth);
+
     // The message body itself (text bubble and/or image + timestamp).
     final content = Column(
       crossAxisAlignment: align,
@@ -1495,9 +1765,7 @@ class _MessageBubble extends StatelessWidget {
         if (text.isNotEmpty)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.75,
-            ),
+            constraints: BoxConstraints(maxWidth: textMaxWidth),
             decoration: BoxDecoration(
               color: bubbleColor,
               borderRadius: BorderRadius.circular(12),
@@ -1522,6 +1790,8 @@ class _MessageBubble extends StatelessWidget {
         if (message.imageUrl != null)
           ChatImagePreview(
             imageUrl: message.imageUrl,
+            width: imageWidth,
+            height: imageHeight,
             onTap: () => onImageTap(message.imageUrl!),
             usePlaceholder: message.createdAt == null,
           ),
@@ -1538,6 +1808,16 @@ class _MessageBubble extends StatelessWidget {
       ],
     );
 
+    // Masaüstünde metin fareyle seçilebilir; sağ tık menüsü kopyalamayı ve
+    // mesaj işlemlerini (ifade, fotoğraf silme) sunar.
+    final Widget selectableContent = _isDesktopPlatform
+        ? SelectionArea(
+            contextMenuBuilder: (menuContext, region) =>
+                _buildDesktopMenu(context, region, text),
+            child: content,
+          )
+        : content;
+
     // Long-press to react (on the other party's messages) or, on the
     // client's own meal photo, to delete it. HitTestBehavior.deferToChild
     // keeps taps on the image working (opens the full-screen viewer) while
@@ -1549,16 +1829,16 @@ class _MessageBubble extends StatelessWidget {
         behavior: HitTestBehavior.deferToChild,
         onLongPressStart: (details) =>
             _handleLongPress(context, details.globalPosition),
-        child: content,
+        child: selectableContent,
       );
     } else if (deletePhoto != null) {
       body = GestureDetector(
         behavior: HitTestBehavior.deferToChild,
         onLongPress: () => deletePhoto(message),
-        child: content,
+        child: selectableContent,
       );
     } else {
-      body = content;
+      body = selectableContent;
     }
 
     return AnimatedContainer(
@@ -1579,6 +1859,60 @@ class _MessageBubble extends StatelessWidget {
           if (message.reactions.isNotEmpty)
             ReactionBadge(reactions: message.reactions),
         ],
+      ),
+    );
+  }
+
+  /// Masaüstü sağ tık menüsü: seçili metin varsa "Kopyala", mesaj metni
+  /// varsa "Mesajı Kopyala", karşı tarafın mesajıysa "İfade Bırak", kendi öğün
+  /// fotoğrafıysa "Fotoğrafı Sil". Menü kapanır, sonra işlem yapılır.
+  Widget _buildDesktopMenu(
+    BuildContext context,
+    SelectableRegionState region,
+    String text,
+  ) {
+    final Offset anchor = region.contextMenuAnchors.primaryAnchor;
+    final void Function(MessageData message)? deletePhoto = onDeletePhoto;
+
+    VoidCallback closeThen(VoidCallback action) => () {
+          region.hideToolbar();
+          action();
+        };
+
+    final List<ContextMenuButtonItem> items = [
+      ...region.contextMenuButtonItems
+          .where((item) => item.type == ContextMenuButtonType.copy),
+      if (text.isNotEmpty && !message.isMealPhoto && !message.photoDeleted)
+        ContextMenuButtonItem(
+          label: _copyMessageLabel,
+          onPressed: closeThen(() => _copyMessage(context, text)),
+        ),
+      if (canReact)
+        ContextMenuButtonItem(
+          label: _reactLabel,
+          onPressed: closeThen(() => _handleLongPress(context, anchor)),
+        ),
+      if (deletePhoto != null)
+        ContextMenuButtonItem(
+          label: _deletePhotoLabel,
+          onPressed: closeThen(() => deletePhoto(message)),
+        ),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: region.contextMenuAnchors,
+      buttonItems: items,
+    );
+  }
+
+  /// Mesajın tamamını panoya kopyalar ve kısa bir bilgi gösterir.
+  void _copyMessage(BuildContext context, String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(
+        content: Text(_copiedText),
+        duration: _copiedFeedbackDuration,
       ),
     );
   }
@@ -1713,6 +2047,26 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
     super.dispose();
   }
 
+  /// Masaüstünde Enter mesajı gönderir, Shift+Enter yeni satır ekler.
+  /// Dokunmatik klavyede Enter her zamanki gibi yeni satırdır.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (!_isDesktopPlatform || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final bool isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter;
+    if (!isEnter || HardwareKeyboard.instance.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    // Harf birleştirme (IME) sürerken Enter onu tamamlar, göndermez.
+    if (widget.controller.value.composing.isValid) {
+      return KeyEventResult.ignored;
+    }
+
+    widget.onSend();
+    return KeyEventResult.handled;
+  }
+
   void _toggleMenu() {
     setState(() {
       _isMenuOpen = !_isMenuOpen;
@@ -1799,17 +2153,20 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                     
                     // Text input field
                     Expanded(
-                      child: TextField(
-                        controller: widget.controller,
-                        minLines: 1,
-                        maxLines: 4,
-                        decoration: InputDecoration(
-                          hintText: 'Mesaj yazın…',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
+                      child: Focus(
+                        onKeyEvent: _handleKey,
+                        child: TextField(
+                          controller: widget.controller,
+                          minLines: 1,
+                          maxLines: 4,
+                          decoration: InputDecoration(
+                            hintText: 'Mesaj yazın…',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            isDense: true,
                           ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          isDense: true,
                         ),
                       ),
                     ),
