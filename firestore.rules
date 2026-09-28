@@ -1,0 +1,156 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────
+
+    // Every UID the app treats as an admin. Keep in step with:
+    //   lib/providers/chat_manager_new.dart  (ChatManager.adminIds)
+    //   lib/services/fcm_service.dart        (FcmService._adminUids)
+    //   functions/index.js                   (ADMIN_UIDS)
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.uid in [
+               '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+               'SdPI69ChOvepuq9HrlW6no9rMRn1'  // Admin
+             ];
+    }
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // A chat's participants are its owner (chatId == user UID) plus every
+    // admin; see ChatManager._chatSummaryData.
+    //
+    // Sohbetin sahibi sohbet kimliğinden tanınır (chatId == danışanın UID'si):
+    // sohbet dokümanı henüz yoksa (ilk mesaj, özet ile mesaj aynı toplu
+    // yazımda gider) ya da `participants` alanı olmadan oluşmuşsa (okundu
+    // işareti) sahibi yine de mesajlarını okuyup yazabilir. Doküman ancak
+    // sahip değilse okunur.
+    function isChatParticipant(chatId) {
+      return isOwner(chatId)
+          || (isAuth()
+              && request.auth.uid in
+                 get(/databases/$(database)/documents/chats/$(chatId))
+                     .data.get('participants', []));
+    }
+
+    // A message's `reactions` map, defaulting to empty: the field only exists
+    // once somebody has reacted.
+    function reactionMap(data) {
+      return 'reactions' in data ? data.reactions : {};
+    }
+
+    // True when an update touches nothing but the caller's own entry in the
+    // message's `reactions` map. This is what lets a client react to (and
+    // un-react from) the office's messages without being able to edit, delete
+    // or re-attribute any message, or touch anyone else's reaction.
+    function isOwnReactionChange(before, after) {
+      return after.diff(before).affectedKeys().hasOnly(['reactions'])
+          && reactionMap(after).diff(reactionMap(before))
+                 .affectedKeys().hasOnly([request.auth.uid]);
+    }
+
+    // Danışan kendi öğün fotoğrafını silince sohbetteki mesajı "fotoğraf
+    // silindi" notuna döner (MealManager._markChatPhotoDeleted): görsel
+    // alanları kalkar, metin değişir, photoDeleted true olur. Yalnızca kendi
+    // mesajında ve yalnızca bu alanlar; yerine başka görsel konamaz.
+    function isOwnPhotoDeletion(before, after) {
+      return before.senderId == request.auth.uid
+          && after.get('photoDeleted', false) == true
+          && after.diff(before).affectedKeys().hasOnly([
+               'imageUrl', 'thumbUrl', 'imageWidth', 'imageHeight',
+               'storagePath', 'text', 'photoDeleted'])
+          && !after.keys().hasAny([
+               'imageUrl', 'thumbUrl', 'imageWidth', 'imageHeight',
+               'storagePath']);
+    }
+
+    // ── Admin: unrestricted access to everything ───────────
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Appointments (collectionGroup read for availability checks) ──
+    match /{path=**}/appointments/{appointmentId} {
+      allow read: if isAuth();
+    }
+
+    // ── Users ──────────────────────────────────────────────
+    match /users/{userId} {
+      allow read:   if isOwner(userId);
+      allow update: if isOwner(userId)
+                    && request.resource.data.role == resource.data.role;
+
+      match /{path=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // ── Chats ──────────────────────────────────────────────
+    match /chats/{chatId} {
+      // Sahip, dokümanı henüz yoksa ya da `participants` alanı yoksa da
+      // okuyabilir (bkz. isChatParticipant).
+      allow read:   if isOwner(chatId)
+                    || (isAuth()
+                        && request.auth.uid in
+                           resource.data.get('participants', []));
+      // Danışan yalnızca kendi sohbetini oluşturabilir (chatId == UID).
+      allow create: if isOwner(chatId);
+      allow update: if isOwner(chatId)
+                    || (isAuth()
+                        && request.auth.uid in
+                           resource.data.get('participants', []));
+
+      match /messages/{messageId} {
+        allow read: if isChatParticipant(chatId);
+
+        // Mesaj yalnızca yazanın adına oluşturulur: kimse başkası (ör. ofis)
+        // adına mesaj yazamaz.
+        allow create: if isChatParticipant(chatId)
+                      && request.resource.data.senderId == request.auth.uid;
+
+        // Reactions only, plus the owner turning their own meal photo into a
+        // "fotoğraf silindi" note. A participant may add, change or remove
+        // their own emoji; every other field of the message stays immutable
+        // for them.
+        allow update: if isChatParticipant(chatId)
+                      && (isOwnReactionChange(resource.data,
+                                              request.resource.data)
+                          || isOwnPhotoDeletion(resource.data,
+                                                request.resource.data));
+      }
+    }
+
+    // ── News ───────────────────────────────────────────────
+    match /news/{newsId} {
+      // Signed-out reading (blog page on the login screen): published items
+      // flagged for the blog only.
+      allow read: if resource.data.isPublished == true
+                  && resource.data.showInBlog == true;
+
+      // Signed-in users can read every announcement.
+      allow read: if isAuth();
+
+      // Publishing/editing/deleting is Duyuru Yönetimi, i.e. admin-only.
+      allow write: if isAdmin();
+    }
+
+    // ── App version check (giriş öncesi de okunur) ─────────
+    // Sürüm kontrolü login ekranında da çalışıyor. Yalnızca bu döküman
+    // herkese açık; admininput altındaki diğer her şey isAuth() istiyor.
+    match /admininput/appVersion {
+      allow read: if true;
+    }
+
+    // ── Admin input (timeslots, durations, special lines, colors) ──
+    match /admininput/{document=**} {
+      allow read: if isAuth();
+    }
+  }
+}
