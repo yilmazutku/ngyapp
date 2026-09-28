@@ -86,6 +86,10 @@ class PendingUpload implements UploadObserver {
   final List<UploadTask> _tasks = [];
   final List<StreamSubscription<TaskSnapshot>> _subscriptions = [];
   Timer? _watchdog;
+
+  /// Uygulama arka plandayken süre sayılmaz: iOS uygulamayı askıya alır,
+  /// dönüşte geçmiş süre "bağlantı yok" sanılmasın.
+  bool _watchdogSuspended = false;
   final Completer<void> _aborted = Completer<void>();
 
   bool get cancelledByUser => _cancelledByUser;
@@ -154,8 +158,23 @@ class PendingUpload implements UploadObserver {
     _abort();
   }
 
+  /// Uygulama arka plana geçti: zaman aşımı sayacı durur.
+  void suspendWatchdog() {
+    _watchdogSuspended = true;
+    _watchdog?.cancel();
+    _watchdog = null;
+  }
+
+  /// Uygulama öne geldi: yükleme sürüyorsa sayaç baştan başlar.
+  void resumeWatchdog() {
+    if (!_watchdogSuspended) return;
+    _watchdogSuspended = false;
+    if (_subscriptions.isNotEmpty) _armWatchdog();
+  }
+
   void _armWatchdog() {
     _watchdog?.cancel();
+    if (_watchdogSuspended) return;
     _watchdog = Timer(stallTimeout, () {
       _timedOut = true;
       _abort();
