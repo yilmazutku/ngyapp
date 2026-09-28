@@ -233,21 +233,66 @@ class ChatManager extends ChangeNotifier {
   DocumentReference<Map<String, dynamic>> _chatDoc(String chatId) =>
       db.collection('chats').doc(chatId);
 
-  /// Returns a query for messages in a specific chat, ordered by creation time (newest first)
-  /// Limited to 50 most recent messages for performance
-  Query<Map<String, dynamic>> _messagesQuery(String chatId) => _chatDoc(chatId)
+  /// Sohbet açılışında ve eski mesajlar yüklenirken bir seferde okunan mesaj
+  /// sayısı.
+  static const int messagesPageSize = 50;
+
+  /// Messages of a chat, newest first.
+  Query<Map<String, dynamic>> _newestFirst(String chatId) => _chatDoc(chatId)
       .collection('messages')
-      .orderBy('createdAt', descending: true)
-      .limit(50);
+      .orderBy('createdAt', descending: true);
+
+  static List<MessageData> _toMessages(
+          QuerySnapshot<Map<String, dynamic>> snap) =>
+      snap.docs.map((d) => MessageData.fromSnapshot(d)).toList();
 
   /// Returns a stream of messages for a specific chat.
-  /// Messages are ordered newest-first and limited to 50.
+  /// Messages are ordered newest-first and limited to [messagesPageSize].
   ///
   /// Usage: Used by UI to reactively display messages.
   Stream<List<MessageData>> messagesStreamFor(String chatId) {
-    return _messagesQuery(chatId)
+    return _newestFirst(chatId)
+        .limit(messagesPageSize)
         .snapshots()
-        .map((snap) => snap.docs.map((d) => MessageData.fromSnapshot(d)).toList());
+        .map(_toMessages);
+  }
+
+  /// [since] anındaki mesajdan bugüne kadar bütün mesajlar, canlı (en yeni
+  /// başta). Alt ucu sabit olduğu için yeni mesaj geldikçe liste büyür, hiçbir
+  /// mesaj listeden düşmez: altına [fetchMessagesBefore] ile eklenen eski
+  /// sayfalarla arada boşluk kalmaz.
+  Stream<List<MessageData>> messagesSinceStream(
+    String chatId,
+    Timestamp since,
+  ) {
+    return _newestFirst(chatId).endAt([since]).snapshots().map(_toMessages);
+  }
+
+  /// [before] anından eski en fazla [limit] mesaj, tek seferlik (en yeni
+  /// başta). Sohbette yukarı kaydırıldıkça eski mesajları sayfa sayfa yüklemek
+  /// için kullanılır.
+  ///
+  /// Sunucudan okunur: çevrimdışıyken önbellekten gelen eksik bir sonuç
+  /// "sohbetin başına gelindi" sanılmasın, hata olarak dönsün.
+  Future<List<MessageData>> fetchMessagesBefore(
+    String chatId,
+    Timestamp before, {
+    int limit = messagesPageSize,
+  }) async {
+    final QuerySnapshot<Map<String, dynamic>> snap = await _newestFirst(chatId)
+        .startAfter([before])
+        .limit(limit)
+        .get(const GetOptions(source: Source.server));
+    return _toMessages(snap);
+  }
+
+  /// Tek bir mesajı okur; yoksa null. Canlı dinlenmeyen eski sayfalardaki bir
+  /// mesaj üzerinde işlem yapılınca (ifade, fotoğraf silme) güncel hâlini
+  /// göstermek için kullanılır.
+  Future<MessageData?> fetchMessage(String chatId, String messageId) async {
+    final DocumentSnapshot<Map<String, dynamic>> doc =
+        await _chatDoc(chatId).collection('messages').doc(messageId).get();
+    return doc.exists ? MessageData.fromSnapshot(doc) : null;
   }
 
   /// Sohbette bir fotoğrafın mesajını adresinden ([imageUrl]) bulur.
@@ -333,11 +378,12 @@ class ChatManager extends ChangeNotifier {
 
   /// Sohbeti [messageId] mesajında açmak için gereken mesajları yükler.
   ///
-  /// Normal sohbet yalnızca son 50 mesajı gösterir; hedef daha eskiyse onu
-  /// göremezdi. Burada sorgu hedefi kapsayacak şekilde kurulur: hedef ve ondan
-  /// yeni bütün mesajlar canlı dinlenir (`endAt`), hedeften eski
-  /// [focusWindowOlderCount] mesaj da bağlam için bir kez okunur. Yeni mesaj
-  /// geldikçe pencere büyür, hedef pencereden hiç düşmez.
+  /// Normal sohbet son [messagesPageSize] mesajla açılır; hedef daha eskiyse
+  /// onu göremezdi. Burada sorgu hedefi kapsayacak şekilde kurulur: hedef ve
+  /// ondan yeni bütün mesajlar canlı dinlenir ([messagesSinceStream]), hedeften
+  /// eski [focusWindowOlderCount] mesaj da bağlam için bir kez okunur. Yeni
+  /// mesaj geldikçe pencere büyür, hedef pencereden hiç düşmez; daha eskisi
+  /// yukarı kaydırıldıkça yüklenir.
   ///
   /// Mesaj yoksa ya da hedeften sonra [focusWindowMaxNewer]'dan fazla mesaj
   /// varsa pencere açılmaz; sebep [FocusWindow.failure] ile döner.
@@ -361,21 +407,13 @@ class ChatManager extends ChangeNotifier {
       return const FocusWindow.failed(FocusWindowFailure.tooOld);
     }
 
-    final Query<Map<String, dynamic>> newestFirst =
-        messages.orderBy('createdAt', descending: true);
-    final QuerySnapshot<Map<String, dynamic>> older = await newestFirst
-        .startAfter([createdAt])
-        .limit(focusWindowOlderCount)
-        .get();
-
     return FocusWindow._(
-      messages: newestFirst
-          .endAt([createdAt])
-          .snapshots()
-          .map((snap) =>
-              snap.docs.map((d) => MessageData.fromSnapshot(d)).toList()),
-      olderMessages:
-          older.docs.map((d) => MessageData.fromSnapshot(d)).toList(),
+      messages: messagesSinceStream(chatId, createdAt),
+      olderMessages: await fetchMessagesBefore(
+        chatId,
+        createdAt,
+        limit: focusWindowOlderCount,
+      ),
     );
   }
 
@@ -388,7 +426,7 @@ class ChatManager extends ChangeNotifier {
   ///
   /// Implementation note: this filters by `senderId` only — a single-field
   /// equality that Firestore indexes automatically — and sorts client-side, so
-  /// it needs NO composite index (unlike the ordered [_messagesQuery]).
+  /// it needs NO composite index.
   Stream<List<MessageData>> userUploadedImagesStream(String userId) {
     return _chatDoc(userId)
         .collection('messages')
