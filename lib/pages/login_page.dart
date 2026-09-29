@@ -182,20 +182,7 @@ class LoginPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: loginProvider.passwordController,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      hintText: 'Şifrenizi giriniz',
-                      labelText: 'Şifre',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      prefixIcon: const Icon(Icons.lock),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 16),
-                    ),
-                  ),
+                  _PasswordField(controller: loginProvider.passwordController),
                   const SizedBox(height: 24),
                   SizedBox(
                     height: 56,
@@ -487,6 +474,68 @@ class LoginPage extends StatelessWidget {
         MaterialPageRoute(builder: (_) => const KvkkConsentPage()),
       );
     }
+  }
+}
+
+class _PasswordField extends StatefulWidget {
+  const _PasswordField({required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  State<_PasswordField> createState() => _PasswordFieldState();
+}
+
+class _PasswordFieldState extends State<_PasswordField> {
+  static const String _showPasswordTooltip = 'Şifreyi göster';
+  static const String _hidePasswordTooltip = 'Şifreyi gizle';
+
+  bool _isPasswordVisible = false;
+
+  void _togglePasswordVisibility() {
+    setState(() => _isPasswordVisible = !_isPasswordVisible);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color activeColor = Theme.of(context).primaryColor;
+    return TextField(
+      controller: widget.controller,
+      obscureText: !_isPasswordVisible,
+      decoration: InputDecoration(
+        hintText: 'Şifrenizi giriniz',
+        labelText: 'Şifre',
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        prefixIcon: const Icon(Icons.lock),
+        suffixIcon: IconButton(
+          isSelected: _isPasswordVisible,
+          icon: const Icon(Icons.visibility_off),
+          selectedIcon: const Icon(Icons.visibility),
+          tooltip: _isPasswordVisible
+              ? _hidePasswordTooltip
+              : _showPasswordTooltip,
+          onPressed: _togglePasswordVisibility,
+          style: ButtonStyle(
+            foregroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return activeColor;
+              }
+              return Colors.grey.shade500;
+            }),
+            backgroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return activeColor.withValues(alpha: 0.15);
+              }
+              return Colors.transparent;
+            }),
+          ),
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      ),
+    );
   }
 }
 
