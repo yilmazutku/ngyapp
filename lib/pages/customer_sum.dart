@@ -13,16 +13,21 @@ import '../dialogs/add_payment_dialog.dart';
 import '../dialogs/add_appointment_dialog.dart';
 import '../dialogs/add_sub_dialog.dart';
 import '../dialogs/add_diet_dialog.dart';
+import '../models/payment_model.dart';
 import '../models/user_model.dart';
 import '../tabs/basetab.dart';
 import '../tabs/sub_tab.dart';
+import '../widgets/home_button.dart';
 
 class CustomerSummaryPage extends StatefulWidget {
   final UserModel user;
 
+  final PaymentModel? focusPayment;
+
   const CustomerSummaryPage({
     super.key,
     required this.user,
+    this.focusPayment,
   });
 
   @override
@@ -31,8 +36,10 @@ class CustomerSummaryPage extends StatefulWidget {
 
 class _CustomerSummaryPageState extends State<CustomerSummaryPage>
     with SingleTickerProviderStateMixin { // <-- fix here
+  static const int _paymentsTabIndex = 2;
+
   late final TabController _tabController;
-  int _previousTabIndex = 0;
+  late int _previousTabIndex;
 
   // Mark tabs we’ve already shown so they can stay alive without refetching.
   late final List<bool> _tabVisited;
@@ -45,8 +52,12 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 8, vsync: this);
-    _tabVisited = List<bool>.filled(8, false)..[0] = true;
+    final int initialIndex =
+        widget.focusPayment != null ? _paymentsTabIndex : 0;
+    _previousTabIndex = initialIndex;
+    _tabController =
+        TabController(length: 8, vsync: this, initialIndex: initialIndex);
+    _tabVisited = List<bool>.filled(8, false)..[initialIndex] = true;
 
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
@@ -103,8 +114,12 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
         return DetailsTab(key: _keys[index], userId: userId);
       case 1:
         return AppointmentsTab(key: _keys[index], userId: userId);
-      case 2:
-        return PaymentsTab(key: _keys[index], userId: userId);
+      case _paymentsTabIndex:
+        return PaymentsTab(
+          key: _keys[index],
+          userId: userId,
+          focusPayment: widget.focusPayment,
+        );
       case 3:
         return ImagesTab(key: _keys[index], userId: userId);
       case 4:
@@ -133,8 +148,10 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
         foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
+          tooltip: 'Geri',
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: const [HomeButton()],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: !isTablet,

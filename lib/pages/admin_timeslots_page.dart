@@ -1810,6 +1810,7 @@ class _AdminTimeSlotsPageState extends State<AdminTimeSlotsPage> {
     return Scaffold(
       appBar: const AppBarWithBack(
         title: 'Zaman Aralıkları Yönetimi',
+        showHomeButton: true,
         actions: [
           // Keep any existing actions here
         ],

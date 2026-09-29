@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'home_button.dart';
+
 /// A reusable AppBar with back navigation button
 class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -12,6 +14,8 @@ class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
   final double elevation;
   final bool centerTitle;
 
+  final bool showHomeButton;
+
   const AppBarWithBack({
     super.key,
     required this.title,
@@ -23,6 +27,7 @@ class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
     this.onBackPressed,
     this.elevation = 4.0,
     this.centerTitle = false,
+    this.showHomeButton = false,
   });
 
   @override
@@ -30,9 +35,13 @@ class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
     // Cap how much horizontal space actions can take; rest belongs to the title.
     final double maxActionsWidth = MediaQuery.of(context).size.width * 0.46;
 
+    final List<Widget>? allActions = showHomeButton
+        ? <Widget>[...?actions, const HomeButton()]
+        : actions;
+
     // Wrap all actions into a single scrollable slot to avoid overflow.
-    final List<Widget>? resolvedActions = (actions == null || actions!.isEmpty)
-        ? actions
+    final List<Widget>? resolvedActions = (allActions == null || allActions.isEmpty)
+        ? allActions
         : <Widget>[
       ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxActionsWidth),
@@ -42,7 +51,7 @@ class AppBarWithBack extends StatelessWidget implements PreferredSizeWidget {
           padding: const EdgeInsets.only(right: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            children: actions!,
+            children: allActions,
           ),
         ),
       ),

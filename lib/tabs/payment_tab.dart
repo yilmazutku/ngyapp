@@ -15,7 +15,9 @@ import 'filterable_tab.dart';
 import '../widgets/labeled_action_button.dart';
 
 class PaymentsTab extends BaseTab<PaymentProvider> {
-  const PaymentsTab({super.key, required super.userId})
+  final PaymentModel? focusPayment;
+
+  const PaymentsTab({super.key, required super.userId, this.focusPayment})
       : super(allDataLabel: 'Tüm ödemeler', subscriptionDataLabel: 'Paket Ödemeleri');
 
   @override
@@ -56,7 +58,29 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
   void initState() {
     super.initState();
     _tempStatus = _selectedStatus;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _setupPaymentListener());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _setupPaymentListener();
+      _openFocusPaymentWhenVisible();
+    });
+  }
+
+  void _openFocusPaymentWhenVisible() {
+    final PaymentModel? payment = widget.focusPayment;
+    if (!mounted || payment == null) return;
+
+    final Animation<double>? animation = ModalRoute.of(context)?.animation;
+    if (animation == null || animation.isCompleted) {
+      _showEditPaymentDialog(context, payment);
+      return;
+    }
+
+    void onStatus(AnimationStatus status) {
+      if (status != AnimationStatus.completed) return;
+      animation.removeStatusListener(onStatus);
+      if (mounted) _showEditPaymentDialog(context, payment);
+    }
+
+    animation.addStatusListener(onStatus);
   }
 
   void _setupPaymentListener() {

@@ -47,7 +47,10 @@ class _DietUserViewPageState extends State<DietUserViewPage> {
         : null;
 
     return Scaffold(
-      appBar: const AppBarWithBack(title: DietUserViewPage.pageTitle),
+      appBar: const AppBarWithBack(
+        title: DietUserViewPage.pageTitle,
+        showHomeButton: true,
+      ),
       body: FutureBuilder<void>(
         future: _specialLinesFuture,
         builder: (context, snapshot) {

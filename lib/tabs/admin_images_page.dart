@@ -281,7 +281,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     return Scaffold(
       appBar: const AppBarWithBack(
         title: 'Kullanıcılar',
-        actions: [],
+        showHomeButton: true,
       ),
       body: Column(
         children: [

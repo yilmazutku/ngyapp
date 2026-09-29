@@ -263,7 +263,10 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppBarWithBack(title: 'Tanita PDF Listesi'),
+      appBar: const AppBarWithBack(
+        title: 'Tanita PDF Listesi',
+        showHomeButton: true,
+      ),
       body: Column(
         children: [
           _buildHeader(context),

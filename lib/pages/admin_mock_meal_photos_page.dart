@@ -704,6 +704,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
     return Scaffold(
       appBar: AppBarWithBack(
         title: _pageTitle,
+        showHomeButton: true,
         actions: [
           LabeledActionButton(
             icon: Icons.refresh,

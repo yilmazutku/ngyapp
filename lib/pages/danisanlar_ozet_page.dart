@@ -11,6 +11,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/search_text.dart';
 import 'customer_sum.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/home_button.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_note.dart';
 
@@ -95,6 +96,7 @@ class _DanisanlarOzetPageState extends State<DanisanlarOzetPage>
         title: const Text('Danışanlar Özet'),
         backgroundColor: _appBarColor,
         foregroundColor: Colors.white,
+        actions: const [HomeButton()],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,

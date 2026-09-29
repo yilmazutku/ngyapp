@@ -8,6 +8,7 @@ import 'news_detail_page.dart';
 import 'news_model.dart';
 import 'news_provider.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/home_button.dart';
 
 /// Admin page for managing news/announcements
 class AdminNewsPage extends StatefulWidget {
@@ -78,7 +79,7 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => NewsDetailPage(news: news),
+        builder: (_) => NewsDetailPage(news: news, showHomeButton: true),
       ),
     );
   }
@@ -178,6 +179,7 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
             label: 'Yenile',
             onPressed: _loadNews,
           ),
+          const HomeButton(),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

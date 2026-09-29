@@ -11,6 +11,7 @@ import '../providers/special_lines_provider.dart';
 import '../providers/summary_colors_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/appointment_color_picker.dart';
+import '../widgets/home_button.dart';
 import '../widgets/labeled_action_button.dart';
 
 class TestingPage extends StatefulWidget {
@@ -24,7 +25,10 @@ class _TestingPageState extends State<TestingPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin Ayarlar')),
+      appBar: AppBar(
+        title: const Text('Admin Ayarlar'),
+        actions: const [HomeButton()],
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 500),

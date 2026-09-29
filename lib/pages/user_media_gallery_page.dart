@@ -7,6 +7,7 @@ import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
+import 'package:ngy_app/widgets/home_button.dart';
 
 /// Full-page gallery of the photos a specific user has uploaded **in the chat**.
 ///
@@ -123,7 +124,10 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: _buildTitle()),
+      appBar: AppBar(
+        title: _buildTitle(),
+        actions: const [HomeButton()],
+      ),
       body: StreamBuilder<List<MessageData>>(
         stream: _imagesStream,
         builder: (context, snap) {

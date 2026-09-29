@@ -13,6 +13,7 @@ import '../providers/sub_provider.dart';
 import '../utils/date_input_utils.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/loading_overlay.dart';
+import '../widgets/home_button.dart';
 import '../widgets/labeled_action_button.dart';
 
 /// Admin page for adding multiple appointments and payments linked to a single
@@ -291,6 +292,7 @@ class _BulkAddPageState extends State<BulkAddPage> with LoadingStateMixin {
             title: const Text('Toplu Ekle'),
             backgroundColor: Colors.blue.shade800,
             foregroundColor: Colors.white,
+            actions: const [HomeButton()],
             bottom: _buildSubscriptionBar(),
           ),
           // Page is split in two: appointments on top, payments below.

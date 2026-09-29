@@ -24,6 +24,7 @@ import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/chat/message_reply_quote.dart';
 import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
 import 'package:ngy_app/widgets/full_screen_image_page.dart';
+import 'package:ngy_app/widgets/home_button.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
 import 'package:ngy_app/widgets/meal_thumbnail_image.dart';
 import 'package:ngy_app/widgets/reaction_badge.dart';
@@ -1550,6 +1551,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ? _buildTappableUserTitle(_chatId)
             : Text(PushNotificationReference.chatAdminToUserTitle),
         actions: [
+          if (_isAdminUser) const HomeButton(),
           // Silme gibi geri alınamayan işlem menüde durur: başlıkta
           // yanlışlıkla basılmasın. Silmeden önce onay alınır.
           if (_isAdminUser)
