@@ -1,0 +1,76 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Keep in step with the Firestore rules' isAdmin() and the app's
+    // ChatManager.adminIds / FcmService._adminUids / functions ADMIN_UIDS.
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.uid in [
+               '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+               'SdPI69ChOvepuq9HrlW6no9rMRn1'  // Admin
+             ];
+    }
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // Danışanın yüklediği dosya kendi klasörüne ve en fazla 50 MB olur
+    // (uygulamadaki kMaxUploadBytes ile aynı sınır; öğün fotoğrafları
+    // yüklenmeden önce ~1 MB'a küçültülür).
+    function isOwnUpload(userId) {
+      return isOwner(userId)
+          && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // ── Admin: unrestricted access to everything ───────────
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── User files (meal photos, dekont, tanita, diet PDFs, tahliller) ──
+    // Danışan kendi klasöründeki her şeyi okuyabilir. Diyet, tanita, tahlil
+    // ve dekont dosyalarını admin yükler; danışan bunları değiştiremez ya da
+    // silemez.
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isOwner(userId);
+    }
+
+    // Öğün fotoğrafları ve küçük görselleri: danışan sohbetten ya da
+    // "Planım"dan yükler, kendi fotoğrafını siler (MealManager.uploadMealImg,
+    // deleteMealImage, backfillThumbnail).
+    match /users/{userId}/mealPhotos/{allPaths=**} {
+      allow create, update: if isOwnUpload(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // Eski sürümlerin sohbet fotoğrafları (öğünsüz yükleme); güncellenmemiş
+    // uygulamalar bozulmasın diye açık.
+    match /users/{userId}/chatPhotos/{allPaths=**} {
+      allow create, update: if isOwnUpload(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // ── Chat images ────────────────────────────────────────
+    // chats/{chatId}/...; chatId danışanın kendi UID'si, yani danışan yalnızca
+    // kendi sohbetine erişir. Güncel uygulama buraya yüklemez ("Fotoğraf
+    // Gönder" kaldırıldı); eski sürümler yüklüyordu, sohbet silinince admin
+    // temizler (ChatManager.deleteChat).
+    match /chats/{chatId}/{allPaths=**} {
+      allow read, delete: if isOwner(chatId);
+      allow create, update: if isOwnUpload(chatId);
+    }
+
+    // ── News images ────────────────────────────────────────
+    // Uygulama görselleri indirme adresiyle (token'lı URL) gösterir; bu
+    // adresler kurala takılmaz, giriş yapmamış blog okuyucusu da görür.
+    match /news/{allPaths=**} {
+      allow read: if isAuth();
+    }
+  }
+}
