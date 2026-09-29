@@ -21,6 +21,7 @@ import '../widgets/app_bar_with_back.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/filter_chip_group.dart';
+import 'payment_type_payments_page.dart';
 
 final DateFormat kDateFormat = DateFormat('dd.MM.yyyy', 'tr_TR');
 final DateFormat kMonthNameFormat = DateFormat('MMMM', 'tr_TR');
@@ -457,15 +458,91 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     );
   }
 
-  Widget _statItem(String label, String value, IconData icon, Color color) {
+  Widget _paymentTypeStatItem({
+    required PaymentType type,
+    required ({double total, int count}) stats,
+    required VoidCallback onShowPayments,
+  }) {
+    const Color color = Colors.teal;
+    const TextStyle labelStyle = TextStyle(fontSize: 12);
     return Column(
       children: [
-        Icon(icon, color: color, size: 28),
+        Icon(_paymentTypeIcon(type), color: color, size: 28),
         const SizedBox(height: 8),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
+        Text('${stats.total.toStringAsFixed(0)} ₺',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 16, color: color)),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 12)),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('${type.label} · ', style: labelStyle),
+            Tooltip(
+              message: 'Ödemeleri göster',
+              child: InkWell(
+                onTap: onShowPayments,
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  child: Text(
+                    '${stats.count} ödeme',
+                    style: labelStyle.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade800,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ],
+    );
+  }
+
+  List<PaymentModel> _completedPaymentsIn(DateTimeRange range) {
+    final start = range.start;
+    final end =
+        DateTime(range.end.year, range.end.month, range.end.day, 23, 59, 59);
+    return _filteredPayments.where((payment) {
+      if (payment.status != PaymentStatus.completed) return false;
+      final date = payment.paymentDate;
+      return date != null && !date.isBefore(start) && !date.isAfter(end);
+    }).toList();
+  }
+
+  List<PaymentModel> _completedPaymentsOfType(
+          DateTimeRange range, PaymentType type) =>
+      _completedPaymentsIn(range)
+          .where((payment) => payment.paymentType == type)
+          .toList();
+
+  Future<void> _openPaymentTypePayments({
+    required PaymentType type,
+    required DateTimeRange range,
+  }) async {
+    final String title = type == PaymentType.na
+        ? 'Ödeme Tipi Belirtilmemiş Ödemeler'
+        : '${type.label} Ödemeleri';
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PaymentTypePaymentsPage(
+          title: title,
+          periodText: '${kMonthYearFormat.format(range.start)} · '
+              '${kDateFormat.format(range.start)} - '
+              '${kDateFormat.format(range.end)}',
+          icon: _paymentTypeIcon(type),
+          payments: _completedPaymentsOfType(range, type),
+          userOf: (userId) => _userById[userId],
+          reloadPayments: () async {
+            await _loadData();
+            return _completedPaymentsOfType(range, type);
+          },
+        ),
+      ),
     );
   }
 
@@ -571,11 +648,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     final end = DateTime(range.end.year, range.end.month, range.end.day, 23, 59, 59);
 
     // Month tabs: only completed payments, matched by their payment date.
-    final payments = _filteredPayments.where((payment) {
-      if (payment.status != PaymentStatus.completed) return false;
-      final date = payment.paymentDate;
-      return date != null && !date.isBefore(start) && !date.isAfter(end);
-    }).toList();
+    final payments = _completedPaymentsIn(range);
 
     final totalPaid = payments.fold<double>(0, (sum, p) => sum + p.amount);
     final statsByType = _statsByPaymentType(payments);
@@ -665,8 +738,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                     firstChild: _buildMonthStatsCard(
                       title: statsTitle,
                       statsByType: statsByType,
-                      start: start,
-                      end: range.end,
+                      range: range,
                     ),
                     secondChild: const SizedBox.shrink(),
                     crossFadeState: _showStats
@@ -898,10 +970,10 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
   Widget _buildMonthStatsCard({
     required String title,
     required Map<PaymentType, ({double total, int count})> statsByType,
-    required DateTime start,
-    required DateTime end,
+    required DateTimeRange range,
   }) {
-    final rangeText = '${kDateFormat.format(start)} - ${kDateFormat.format(end)}';
+    final rangeText =
+        '${kDateFormat.format(range.start)} - ${kDateFormat.format(range.end)}';
 
     return Card(
       margin: const EdgeInsets.all(8),
@@ -931,11 +1003,13 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
                 runSpacing: 16,
                 alignment: WrapAlignment.spaceAround,
                 children: statsByType.entries
-                    .map((entry) => _statItem(
-                          '${entry.key.label} · ${entry.value.count} ödeme',
-                          '${entry.value.total.toStringAsFixed(0)} ₺',
-                          _paymentTypeIcon(entry.key),
-                          Colors.teal,
+                    .map((entry) => _paymentTypeStatItem(
+                          type: entry.key,
+                          stats: entry.value,
+                          onShowPayments: () => _openPaymentTypePayments(
+                            type: entry.key,
+                            range: range,
+                          ),
                         ))
                     .toList(),
               ),
@@ -1004,6 +1078,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Ödemeler',
+        showHomeButton: true,
         actions: [
           Tooltip(
             message: 'Ödeme Ekle',

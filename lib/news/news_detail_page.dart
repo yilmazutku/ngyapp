@@ -4,14 +4,20 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/full_screen_image_page.dart';
+import '../widgets/home_button.dart';
 
 import 'news_model.dart';
 
 /// Detail page showing full news content with image and clickable links
 class NewsDetailPage extends StatelessWidget {
   final NewsModel news;
+  final bool showHomeButton;
 
-  const NewsDetailPage({super.key, required this.news});
+  const NewsDetailPage({
+    super.key,
+    required this.news,
+    this.showHomeButton = false,
+  });
 
   // Regex pattern to detect URLs in text
   static final RegExp _urlRegex = RegExp(
@@ -43,6 +49,7 @@ class NewsDetailPage extends StatelessWidget {
                 ? 250
                 : 0,
             pinned: true,
+            actions: [if (showHomeButton) const HomeButton()],
             // Ensure back button is visible against any background
             foregroundColor: news.imageUrl != null && news.imageUrl!.isNotEmpty
                 ? Colors.white

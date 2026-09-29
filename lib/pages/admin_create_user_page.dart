@@ -287,7 +287,10 @@ class _CreateUserPageState extends State<CreateUserPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppBarWithBack(title: 'Kullanıcı Ekle'),
+      appBar: const AppBarWithBack(
+        title: 'Kullanıcı Ekle',
+        showHomeButton: true,
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {

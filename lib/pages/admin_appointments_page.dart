@@ -1501,6 +1501,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     return Scaffold(
       appBar: AppBarWithBack(
         title: 'Danışan Randevuları',
+        showHomeButton: true,
         actions: [
           LabeledActionButton(
             icon: Icons.refresh,

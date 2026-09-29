@@ -1036,6 +1036,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     return Scaffold(
       appBar: AppBarWithBack(
         title: _pageTitle,
+        showHomeButton: true,
         actions: [
           // Test verisi yükleme şimdilik kapalı.
           // LabeledActionButton(

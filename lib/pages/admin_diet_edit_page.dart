@@ -136,6 +136,7 @@ class _DietEditPageState extends State<DietEditPage> {
     return Scaffold(
       appBar: AppBarWithBack(
         title: pageTitle,
+        showHomeButton: true,
         actions: [
           // Only show edit controls if not in view-only mode
           if (!widget.viewOnly) ...[
