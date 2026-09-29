@@ -1,10 +1,10 @@
 {
   "name": "ngyapp-firestore-rules-test",
   "private": true,
-  "description": "firestore.rules dosyasını Firestore emülatöründe uygulamanın gerçek yazımlarıyla dener (uygulamanın parçası değildir).",
+  "description": "firestore.rules ve storage.rules dosyalarını Firebase emülatöründe uygulamanın gerçek yazımlarıyla dener (uygulamanın parçası değildir).",
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore --project demo-ngy \"node rules.test.mjs ../../firestore.rules\""
+    "test": "firebase emulators:exec --only firestore,storage --project demo-ngy \"node rules.test.mjs ../../firestore.rules && node storage.rules.test.mjs ../../storage.rules\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",
