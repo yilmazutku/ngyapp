@@ -668,7 +668,7 @@ class _HomePageState extends State<HomePage> {
         final List<Map<String, dynamic>> userItems = [
           {
             'icon': Icons.chat,
-            'label': 'Chat',
+            'label': 'Sohbet',
             'onTap': () => _navigateToChat(context, userId, isAdmin),
             // Only admins get the badge stream (using cached stream)
             'badgeStream': _unreadChatsStream,
