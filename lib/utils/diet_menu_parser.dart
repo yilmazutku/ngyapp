@@ -106,6 +106,44 @@ TimeOfDay? parseMealTime(String? timeString) {
   return null;
 }
 
+class MealHeaderLine {
+  final String? time;
+  final String inlineContent;
+
+  const MealHeaderLine({required this.time, required this.inlineContent});
+}
+
+final RegExp _kMealHeaderTimeRegex =
+    RegExp(r'\(\s*(\d{1,2})\s*[.:]\s*(\d{2})\s*\)');
+
+MealHeaderLine parseMealHeaderLine(String line) {
+  final RegExpMatch? timeMatch = _kMealHeaderTimeRegex.firstMatch(line);
+
+  int separatorIdx = line.indexOf(':');
+  if (timeMatch != null &&
+      separatorIdx >= timeMatch.start &&
+      separatorIdx < timeMatch.end) {
+    separatorIdx = line.indexOf(':', timeMatch.end);
+  }
+
+  String? time;
+  if (timeMatch != null &&
+      (separatorIdx == -1 || timeMatch.start < separatorIdx)) {
+    final int hour = int.parse(timeMatch.group(1)!);
+    final int minute = int.parse(timeMatch.group(2)!);
+    if (hour <= 23 && minute <= 59) {
+      time = '${hour.toString().padLeft(2, '0')}:'
+          '${minute.toString().padLeft(2, '0')}';
+    }
+  }
+
+  return MealHeaderLine(
+    time: time,
+    inlineContent:
+        separatorIdx == -1 ? '' : line.substring(separatorIdx + 1).trim(),
+  );
+}
+
 /// Öğün saati yazılı olmadığında gösterilen işaret.
 const String kMissingMealTimeText = '-';
 
