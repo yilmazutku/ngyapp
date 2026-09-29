@@ -42,7 +42,7 @@ class PaymentTypePaymentsPage extends StatefulWidget {
 class _PaymentTypePaymentsPageState extends State<PaymentTypePaymentsPage> {
   static const String _unknownUserName = 'Bilinmiyor';
   static const String _tapHint =
-      'Ödemeyi danışanın Ödeme sekmesinde açmak için satıra dokunun.';
+      'Danışanın Ödeme sekmesini açmak için satıra dokunun.';
   static const String _emptyText = 'Bu dönemde bu tipte ödeme kalmadı.';
 
   static const double _maxContentWidth = 720;
@@ -81,7 +81,7 @@ class _PaymentTypePaymentsPageState extends State<PaymentTypePaymentsPage> {
   String _userName(String userId) =>
       widget.userOf(userId)?.fullName ?? _unknownUserName;
 
-  Future<void> _openPayment(PaymentModel payment) async {
+  Future<void> _openPaymentsTab(PaymentModel payment) async {
     final UserModel? user = widget.userOf(payment.userId);
     if (user == null) {
       await DialogUtils.openError(
@@ -95,7 +95,7 @@ class _PaymentTypePaymentsPageState extends State<PaymentTypePaymentsPage> {
     final Object? result = await Navigator.push<Object?>(
       context,
       MaterialPageRoute(
-        builder: (_) => CustomerSummaryPage(user: user, focusPayment: payment),
+        builder: (_) => CustomerSummaryPage(user: user, openPaymentsTab: true),
       ),
     );
     if (!mounted) return;
@@ -224,7 +224,7 @@ class _PaymentTypePaymentsPageState extends State<PaymentTypePaymentsPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        onTap: _isReloading ? null : () => _openPayment(payment),
+        onTap: _isReloading ? null : () => _openPaymentsTab(payment),
         leading: CircleAvatar(
           backgroundColor: Colors.blue.shade50,
           foregroundColor: Colors.blue.shade800,
