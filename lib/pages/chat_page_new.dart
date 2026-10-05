@@ -34,6 +34,7 @@ import 'package:ngy_app/pages/user_media_gallery_page.dart';
 import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
+import 'package:ngy_app/utils/menu_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 import 'package:ngy_app/services/meal_reminder_service.dart';
 
@@ -372,6 +373,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Admin başka bir danışanın sohbetine bakıyorsa başlıkta danışanın adı
   /// görünür.
   bool get _showsUserTitle => widget.overrideChatId != null && _isAdminUser;
+
+  bool get _opensGalleryFromTitle => _showsUserTitle || !_isAdminUser;
 
   /// Mark chat as read (resets unread count) based on user type. Sayfa
   /// kapanırken de çağrıldığı için context kullanmaz.
@@ -1544,12 +1547,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // If admin is viewing a user's chat, show the user's name as a tappable
-        // title that opens their uploaded-photos gallery.
-        // Otherwise show the default (non-tappable) chat title.
-        title: _showsUserTitle
-            ? _buildTappableUserTitle(_chatId)
-            : Text(PushNotificationReference.chatAdminToUserTitle),
+        // Başlığa dokununca sohbette yüklenen fotoğrafların galerisi açılır:
+        // admin danışanın adına, danışan diyetisyenin adına dokunur.
+        title: _opensGalleryFromTitle
+            ? _buildGalleryTitle(
+                _showsUserTitle
+                    ? _buildUserNameTitle()
+                    : const Text(
+                        PushNotificationReference.chatAdminToUserTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+              )
+            : const Text(PushNotificationReference.chatAdminToUserTitle),
         actions: [
           if (_isAdminUser) const HomeButton(),
           // Silme gibi geri alınamayan işlem menüde durur: başlıkta
@@ -1907,20 +1917,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Admin-only tappable app bar title: the user's name plus a small photo
-  /// icon hinting that it opens the user's uploaded-photos gallery.
-  Widget _buildTappableUserTitle(String userId) {
+  /// Tappable app bar title: [title] plus a small photo icon hinting that it
+  /// opens the gallery of photos uploaded in this chat.
+  Widget _buildGalleryTitle(Widget title) {
     return Tooltip(
       message: 'Yüklenen fotoğrafları gör',
       child: InkWell(
-        onTap: () => _openUserMediaGallery(userId),
+        onTap: _openUserMediaGallery,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Flexible(child: _buildUserNameTitle()),
+              Flexible(child: title),
               const SizedBox(width: 6),
               const Icon(Icons.photo_library_outlined, size: 18),
             ],
@@ -1930,13 +1940,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Open the gallery listing every photo uploaded by [userId]. Galeride bir
+  /// Open the gallery listing every photo uploaded in this chat. Galeride bir
   /// fotoğraf için "Sohbette göster" seçilirse sohbet o mesaja gider.
-  Future<void> _openUserMediaGallery(String userId) async {
+  Future<void> _openUserMediaGallery() async {
     final String? messageId = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => UserMediaGalleryPage(userId: userId),
+        builder: (_) => UserMediaGalleryPage(
+          userId: _chatId,
+          onDeletePhoto: _isAdminUser ? null : _confirmAndDeleteMealPhoto,
+        ),
       ),
     );
     if (messageId == null || !mounted) return;
@@ -2228,17 +2241,10 @@ class _AlbumBubble extends StatelessWidget {
     MessageData message,
     Offset position,
   ) async {
-    final RenderObject? overlay =
-        Overlay.of(context).context.findRenderObject();
-    if (overlay is! RenderBox) return;
-
     final List<MessageAction> actions = actionsFor(message);
-    final Object? choice = await showMenu<Object>(
-      context: context,
-      position: RelativeRect.fromRect(
-        position & Size.zero,
-        Offset.zero & overlay.size,
-      ),
+    final Object? choice = await showMenuAt<Object>(
+      context,
+      globalPosition: position,
       items: [
         for (final MessageAction action in actions)
           if (action == MessageAction.reply)

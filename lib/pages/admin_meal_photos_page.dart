@@ -14,6 +14,7 @@ import '../providers/mock_test_data_provider.dart';
 import '../providers/sub_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/menu_utils.dart';
 import '../utils/search_text.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/filter_chip_group.dart';
@@ -674,20 +675,13 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     MealModel photo,
     Offset globalPosition,
   ) async {
-    final RenderObject? overlay =
-        Overlay.of(context).context.findRenderObject();
-    if (overlay is! RenderBox) return;
-
     // Mesajı olmadığı bilinen fotoğrafta işlemler baştan kapalıdır; bilinmiyorsa
     // seçilince aranır.
     final bool enabled = _hasChatMessage(photo.imageUrl) != false;
     final Widget? hint = enabled ? null : const Text(_noChatMessageHint);
-    final _PhotoAction? action = await showMenu<_PhotoAction>(
-      context: context,
-      position: RelativeRect.fromRect(
-        globalPosition & Size.zero,
-        Offset.zero & overlay.size,
-      ),
+    final _PhotoAction? action = await showMenuAt<_PhotoAction>(
+      context,
+      globalPosition: globalPosition,
       items: [
         PopupMenuItem<_PhotoAction>(
           value: _PhotoAction.goToChat,
@@ -1505,22 +1499,14 @@ class _ClientPhotoSection extends StatelessWidget {
             final MealModel photo = group.photos[index];
             return SizedBox(
               width: photoWidth,
-              // Sağ tık masaüstünde, uzun basma dokunmatikte aynı menüyü açar.
-              // Karta sol tık (büyütme) [MealImageCard] içinde kalır.
-              child: GestureDetector(
-                onSecondaryTapDown: (details) =>
-                    onPhotoMenu(photo, details.globalPosition),
-                onLongPressStart: (details) =>
-                    onPhotoMenu(photo, details.globalPosition),
-                child: MealImageCard(
-                  meal: photo,
-                  dialogImageHeight: dialogImageHeight,
-                  backfillUserId: group.user.userId,
-                  reactions:
-                      reactionsByImageUrl[photo.imageUrl] ?? const {},
-                  highlighted: photo.imageUrl == focusImageUrl,
-                  onTap: () => onPhotoTap(photo, dialogImageHeight),
-                ),
+              child: MealImageCard(
+                meal: photo,
+                dialogImageHeight: dialogImageHeight,
+                backfillUserId: group.user.userId,
+                reactions: reactionsByImageUrl[photo.imageUrl] ?? const {},
+                highlighted: photo.imageUrl == focusImageUrl,
+                onTap: () => onPhotoTap(photo, dialogImageHeight),
+                onMenu: (globalPosition) => onPhotoMenu(photo, globalPosition),
               ),
             );
           },

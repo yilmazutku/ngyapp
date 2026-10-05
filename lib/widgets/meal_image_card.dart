@@ -86,6 +86,8 @@ class MealImageCard extends StatelessWidget {
   /// fotoğrafa gelindi).
   final bool highlighted;
 
+  final void Function(Offset globalPosition)? onMenu;
+
   const MealImageCard({
     super.key,
     required this.meal,
@@ -94,6 +96,7 @@ class MealImageCard extends StatelessWidget {
     this.reactions = const {},
     this.onTap,
     this.highlighted = false,
+    this.onMenu,
   });
 
   // Card metrics (previously the kMealCard* constants in ImagesTab).
@@ -144,7 +147,7 @@ class MealImageCard extends StatelessWidget {
               )
             : null;
 
-    return Card(
+    final Widget card = Card(
       elevation: 2,
       margin: const EdgeInsets.all(_cardMargin),
       clipBehavior: Clip.antiAlias,
@@ -278,6 +281,14 @@ class MealImageCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+
+    final void Function(Offset globalPosition)? onMenu = this.onMenu;
+    if (onMenu == null) return card;
+    return GestureDetector(
+      onSecondaryTapDown: (details) => onMenu(details.globalPosition),
+      onLongPressStart: (details) => onMenu(details.globalPosition),
+      child: card,
     );
   }
 }

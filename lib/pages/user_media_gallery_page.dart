@@ -1,4 +1,5 @@
 // lib/pages/user_media_gallery_page.dart
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,13 +7,16 @@ import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/user_provider.dart';
+import 'package:ngy_app/utils/menu_utils.dart';
+import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
 import 'package:ngy_app/widgets/home_button.dart';
 
 /// Full-page gallery of the photos a specific user has uploaded **in the chat**.
 ///
-/// Opened by an admin from the chat screen by tapping the user's name in the
-/// app bar. Unlike the images tab (which also shows meal photos uploaded
+/// Opened from the chat screen by tapping the title in the app bar: the admin
+/// taps the user's name, the user taps the dietitian's name and sees their own
+/// photos. Unlike the images tab (which also shows meal photos uploaded
 /// elsewhere), this shows ONLY chat-uploaded photos.
 ///
 /// Architecture:
@@ -29,7 +33,13 @@ class UserMediaGalleryPage extends StatefulWidget {
   /// The user whose chat-uploaded photos are shown (chatId == userId).
   final String userId;
 
-  const UserMediaGalleryPage({super.key, required this.userId});
+  final Future<void> Function(MessageData message)? onDeletePhoto;
+
+  const UserMediaGalleryPage({
+    super.key,
+    required this.userId,
+    this.onDeletePhoto,
+  });
 
   @override
   State<UserMediaGalleryPage> createState() => _UserMediaGalleryPageState();
@@ -37,6 +47,9 @@ class UserMediaGalleryPage extends StatefulWidget {
 
 class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   static const String _titleFallback = 'Fotoğraflar';
+  static const String _ownTitle = 'Fotoğraflarım';
+  static const String _emptyText = 'Bu kişi sohbette henüz fotoğraf yüklemedi.';
+  static const String _ownEmptyText = 'Sohbette henüz fotoğraf yüklemediniz.';
   static const int _columns = 5; // 5 photos per row (as requested)
   static const double _gridGap = 6.0;
   static const double _cardAspectRatio = 1.2; // matches MealImageCard's layout
@@ -52,6 +65,8 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   /// One-shot fetch of the user's profile for the app bar title.
   Future<UserModel?>? _userFuture;
 
+  late final bool _isOwnGallery;
+
   /// Ensures the one-time "scroll to newest (bottom)" happens only once.
   bool _didAutoScroll = false;
 
@@ -59,9 +74,13 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   void initState() {
     super.initState();
     final chat = Provider.of<ChatManager>(context, listen: false);
-    final userProvider = Provider.of<UserProvider>(context, listen: false);
     _imagesStream = chat.userUploadedImagesStream(widget.userId);
-    _userFuture = userProvider.fetchUserDetails(userId: widget.userId);
+    _isOwnGallery =
+        FirebaseAuth.instance.currentUser?.uid == widget.userId;
+    if (!_isOwnGallery) {
+      _userFuture = Provider.of<UserProvider>(context, listen: false)
+          .fetchUserDetails(userId: widget.userId);
+    }
   }
 
   @override
@@ -111,6 +130,48 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
     Navigator.of(context).pop(messageId);
   }
 
+  Future<void> _openPhotoMenu(MessageData message, Offset globalPosition) async {
+    final Future<void> Function(MessageData message)? onDeletePhoto =
+        widget.onDeletePhoto;
+    final bool canDelete = onDeletePhoto != null && message.isMealPhoto;
+    final Color errorColor = Theme.of(context).colorScheme.error;
+
+    final _PhotoAction? action = await showMenuAt<_PhotoAction>(
+      context,
+      globalPosition: globalPosition,
+      items: [
+        const PopupMenuItem<_PhotoAction>(
+          value: _PhotoAction.goToChat,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.chat_bubble_outline),
+            title: Text(_goToChatLabel),
+          ),
+        ),
+        if (canDelete)
+          PopupMenuItem<_PhotoAction>(
+            value: _PhotoAction.deletePhoto,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(MessageAction.deletePhoto.icon, color: errorColor),
+              title: Text(
+                MessageAction.deletePhoto.label,
+                style: TextStyle(color: errorColor),
+              ),
+            ),
+          ),
+      ],
+    );
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case _PhotoAction.goToChat:
+        Navigator.of(context).pop(message.id);
+      case _PhotoAction.deletePhoto:
+        if (onDeletePhoto != null) await onDeletePhoto(message);
+    }
+  }
+
   /// Jump to the bottom once so the newest photo is visible on open.
   void _scheduleScrollToBottom() {
     if (_didAutoScroll) return;
@@ -145,11 +206,14 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
 
           final messages = snap.data ?? const <MessageData>[];
           if (messages.isEmpty) {
-            return const _CenteredNote(
+            return _CenteredNote(
               icon: Icons.photo_library_outlined,
-              message: 'Bu kişi sohbette henüz fotoğraf yüklemedi.',
+              message: _isOwnGallery ? _ownEmptyText : _emptyText,
             );
           }
+          final Map<String, MessageData> messagesById = {
+            for (final MessageData message in messages) message.id: message,
+          };
 
           // Oldest first so the newest photo sits at the very bottom.
           final meals = messages.map(_toMeal).toList()
@@ -186,12 +250,20 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
                           mainAxisSpacing: _gridGap,
                         ),
                         itemCount: meals.length,
-                        itemBuilder: (context, i) => MealImageCard(
-                          meal: meals[i],
-                          dialogImageHeight: dialogImageHeight,
-                          onTap: () =>
-                              _openPhoto(meals[i], dialogImageHeight),
-                        ),
+                        itemBuilder: (context, i) {
+                          final MessageData? message =
+                              messagesById[meals[i].mealId];
+                          return MealImageCard(
+                            meal: meals[i],
+                            dialogImageHeight: dialogImageHeight,
+                            onTap: () =>
+                                _openPhoto(meals[i], dialogImageHeight),
+                            onMenu: message == null
+                                ? null
+                                : (globalPosition) =>
+                                    _openPhotoMenu(message, globalPosition),
+                          );
+                        },
                       ),
                     );
                   },
@@ -207,6 +279,7 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   /// App bar title: the user's resolved full name, falling back to a generic
   /// label while loading or if the profile can't be read.
   Widget _buildTitle() {
+    if (_isOwnGallery) return const Text(_ownTitle);
     return FutureBuilder<UserModel?>(
       future: _userFuture,
       builder: (context, snap) {
@@ -222,6 +295,8 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
     );
   }
 }
+
+enum _PhotoAction { goToChat, deletePhoto }
 
 /// Small header above the grid showing how many photos the user uploaded.
 class _PhotoCountHeader extends StatelessWidget {
