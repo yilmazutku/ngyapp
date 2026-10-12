@@ -132,6 +132,7 @@ class _EditPaymentDialogState extends State<EditPaymentDialog>
             else
               DropdownButtonFormField<String?>(
                 value: _selectedSubscriptionId,
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Bağlı Paket',
                   hintText: 'Paket seçin (opsiyonel)',

@@ -67,8 +67,9 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   DateTime? _freezeDate;
   bool _isLoading = false;
   late SubActiveStatus _status;
-  // Package duration type (1 Aylık / 3 Aylık). Changing it auto-fills the
-  // suggested meeting count; the admin can still edit it afterwards.
+  // Package duration type (1 Aylık / 1 Aylık (Esnek) / 3 Aylık). Changing it
+  // auto-fills the suggested meeting count; the admin can still edit it
+  // afterwards.
   SubsPackageType? _packageType;
   late SubsMeetingType _meetingType;
   bool _isPaymentIncomplete = false;
@@ -398,7 +399,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                   setState(() {
                     _status = newValue!;
                     // Keep the package type valid for the new status (Aktif/Kilo
-                    // Takip → only "6 Aylık"; other statuses → 1/3 Aylık). When a
+                    // Takip → only "6 Aylık"; other statuses → 1 Aylık /
+                    // 1 Aylık (Esnek) / 3 Aylık). When a
                     // status leaves exactly one option, pre-select it.
                     if (_packageType == null ||
                         !_packageType!.isAvailableFor(_status)) {

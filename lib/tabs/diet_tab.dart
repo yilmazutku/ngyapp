@@ -181,6 +181,7 @@ class _DietTabState extends FilterableTabState<DietProvider, DietTab> {
                     const SizedBox(height: 16),
                     DropdownButtonFormField<SubscriptionModel>(
                       value: selected,
+                      isExpanded: true,
                       decoration: const InputDecoration(
                         labelText: 'Paket',
                         border: OutlineInputBorder(),
