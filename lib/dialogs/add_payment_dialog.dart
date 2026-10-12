@@ -106,6 +106,7 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
             else
               DropdownButtonFormField<SubscriptionModel?>(
                 value: _selectedSubscription,
+                isExpanded: true,
                 items: [
                   const DropdownMenuItem<SubscriptionModel?>(
                     value: null,
@@ -119,7 +120,10 @@ class _AddPaymentDialogState extends State<AddPaymentDialog>
                     }
                     return DropdownMenuItem<SubscriptionModel?>(
                       value: sub,
-                      child: Text('${sub.packageName}$amountInfo'),
+                      child: Text(
+                        '${sub.packageName}$amountInfo',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     );
                   }).toList(),
                 ],

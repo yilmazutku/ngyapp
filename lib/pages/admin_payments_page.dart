@@ -1686,6 +1686,7 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                   else
                     DropdownButtonFormField<SubscriptionModel?>(
                       value: _selectedSubscription,
+                      isExpanded: true,
                       items: [
                         const DropdownMenuItem<SubscriptionModel?>(
                           value: null,
@@ -1699,7 +1700,10 @@ class _AdminAddPaymentDialogState extends State<_AdminAddPaymentDialog>
                           }
                           return DropdownMenuItem<SubscriptionModel?>(
                             value: sub,
-                            child: Text('${sub.packageName}$amountInfo'),
+                            child: Text(
+                              '${sub.packageName}$amountInfo',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           );
                         }),
                       ],
@@ -2401,6 +2405,7 @@ class _AdminEditPaymentDialogState extends State<_AdminEditPaymentDialog>
                   else
                     DropdownButtonFormField<String?>(
                       value: _selectedSubscriptionId,
+                      isExpanded: true,
                       decoration: const InputDecoration(
                         labelText: 'Bağlı Paket',
                         hintText: 'Paket seçin (opsiyonel)',

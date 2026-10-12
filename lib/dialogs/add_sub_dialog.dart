@@ -55,8 +55,9 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   // Admin picks the package status. Default is Aktif/Haftalık.
   SubActiveStatus _selectedStatus = SubActiveStatus.activeWeekly;
 
-  // Package duration type (1 Aylık / 3 Aylık). Selecting one auto-fills the
-  // suggested meeting count; the admin can still edit it afterwards.
+  // Package duration type (1 Aylık / 1 Aylık (Esnek) / 3 Aylık). Selecting
+  // one auto-fills the suggested meeting count; the admin can still edit it
+  // afterwards.
   SubsPackageType? _selectedPackageType;
 
   // Weight-tracking packages have no payment; payment widgets are hidden and
@@ -132,7 +133,8 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   onChanged: (newValue) => setState(() {
                     _selectedStatus = newValue!;
                     // Package-type options depend on the status (Aktif/Kilo
-                    // Takip → only "6 Aylık"; other statuses → 1/3 Aylık). Keep
+                    // Takip → only "6 Aylık"; other statuses → 1 Aylık /
+                    // 1 Aylık (Esnek) / 3 Aylık). Keep
                     // the selection valid: drop it when no longer allowed, and
                     // when a status leaves exactly one option pre-select it (so
                     // Kilo Takip auto-picks 6 Aylık and fills its meetings).

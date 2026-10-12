@@ -549,6 +549,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog>
               else
                 DropdownButtonFormField<SubscriptionModel>(
                   value: _selectedSubscription,
+                  isExpanded: true,
                   decoration: InputDecoration(
                     labelText: 'Paket',
                     border: const OutlineInputBorder(),
