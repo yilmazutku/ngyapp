@@ -72,6 +72,7 @@ const double kPixelsPerMinute =
 const double kCardVerticalMargin = 1.0; // card margin, top and bottom
 const double kCardHorizontalMargin = 2.0;
 const double kCardPadding = 4.0; // inner padding on every side
+const double kCardBorderWidth = 1.0;
 // Line height as a multiple of the font size. Pinned instead of left to the
 // font's own metrics, otherwise "two lines" is not a number we can compute.
 const double kCardTextLineHeight = 1.15;
@@ -82,6 +83,11 @@ const double kCardMaxFontSize = 11.0;
 // Never shrink past this: below it the label is unreadable, and clipping the
 // text is the better failure.
 const double kCardMinFontSize = 7.5;
+
+const String kPostponedMark = '(E)';
+const String kBurnedMark = '(Y)';
+const String kPostponedMarkMeaning = 'Ertelenmiş randevunun ilk tarihi';
+const String kBurnedMarkMeaning = 'Yakılmış randevu';
 
 // Hoisted formatters (avoid re-creating in every build)
 final DateFormat _dayTitleFmt = DateFormat('d MMMM EEEE', 'tr_TR');
@@ -398,7 +404,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         decoration: BoxDecoration(
           color: Colors.deepPurple.shade50,
           borderRadius: BorderRadius.circular(1),
-          border: Border.all(color: Colors.deepPurple.shade200, width: 1),
+          border: Border.all(
+              color: Colors.deepPurple.shade200, width: kCardBorderWidth),
         ),
         child: _cardText(displayText, cardHeight),
       ),
@@ -865,25 +872,97 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// height nobody adjusted. Deriving the size from the real geometry is what
   /// makes "two lines fit" a fact rather than a hope.
   static double _cardFontSize(double cardHeight, {int lines = kCardMaxTextLines}) {
-    final double usable =
-        cardHeight - (2 * kCardVerticalMargin) - (2 * kCardPadding);
+    final double usable = cardHeight -
+        (2 * kCardVerticalMargin) -
+        (2 * kCardPadding) -
+        (2 * kCardBorderWidth);
     final double perLine = usable / lines;
     return (perLine / kCardTextLineHeight)
         .clamp(kCardMinFontSize, kCardMaxFontSize);
   }
 
   /// The label inside a calendar card, sized to fit [cardHeight].
-  static Widget _cardText(String text, double cardHeight) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: _cardFontSize(cardHeight),
-        height: kCardTextLineHeight,
-        fontWeight: FontWeight.bold,
-      ),
-      overflow: TextOverflow.ellipsis,
+  static Widget _cardText(String text, double cardHeight, {String marks = ''}) {
+    final TextStyle style = TextStyle(
+      fontSize: _cardFontSize(cardHeight),
+      height: kCardTextLineHeight,
+      fontWeight: FontWeight.bold,
+    );
+    if (marks.isEmpty) {
+      return Text(
+        text,
+        style: style,
+        overflow: TextOverflow.ellipsis,
+        maxLines: kCardMaxTextLines,
+      );
+    }
+    final TextStyle markStyle = style.copyWith(fontWeight: FontWeight.w900);
+    final String suffix = ' $marks';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final String head = _fitBeforeSuffix(
+            context, text, style, suffix, markStyle, constraints.maxWidth);
+        return Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(text: head, style: style),
+              TextSpan(text: suffix, style: markStyle),
+            ],
+          ),
+          overflow: TextOverflow.ellipsis,
+          maxLines: kCardMaxTextLines,
+        );
+      },
+    );
+  }
+
+  static String _fitBeforeSuffix(
+    BuildContext context,
+    String text,
+    TextStyle style,
+    String suffix,
+    TextStyle suffixStyle,
+    double maxWidth,
+  ) {
+    final TextStyle baseStyle = DefaultTextStyle.of(context).style;
+    final TextPainter painter = TextPainter(
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      locale: Localizations.maybeLocaleOf(context),
       maxLines: kCardMaxTextLines,
     );
+    bool fits(String head) {
+      painter.text = TextSpan(
+        style: baseStyle,
+        children: [
+          TextSpan(text: head, style: style),
+          TextSpan(text: suffix, style: suffixStyle),
+        ],
+      );
+      painter.layout(maxWidth: maxWidth);
+      return !painter.didExceedMaxLines;
+    }
+
+    final Characters chars = text.characters;
+    String shortened(int length) =>
+        '${chars.take(length).toString().trimRight()}…';
+
+    try {
+      if (fits(text)) return text;
+      int low = 0;
+      int high = chars.length - 1;
+      while (low < high) {
+        final int mid = (low + high + 1) ~/ 2;
+        if (fits(shortened(mid))) {
+          low = mid;
+        } else {
+          high = mid - 1;
+        }
+      }
+      return shortened(low);
+    } finally {
+      painter.dispose();
+    }
   }
 
   /// Height of an appointment card. "Tartım" visits are very short (5 min), so
@@ -917,6 +996,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         ? '$dosyaNo-$nameSurname'
         : nameSurname;
     final String displayText = '$timeRange $namePart';
+    final String marks = [
+      if (appt.wasPostponed && !isPostponed) kPostponedMark,
+      if (appt.status == AppointmentStatus.burned) kBurnedMark,
+    ].join(' ');
 
     final Color cardColor = appt.appointmentType.getBgColor(appt.meetingType);
     final Color borderColor = appt.appointmentType.getBorderColor(appt.meetingType);
@@ -933,12 +1016,13 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         decoration: BoxDecoration(
           color: cardColor,
           borderRadius: BorderRadius.circular(1),
-          border: Border.all(color: borderColor, width: 1),
+          border: Border.all(color: borderColor, width: kCardBorderWidth),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: _cardText(displayText, cardHeight)),
+            Expanded(
+                child: _cardText(displayText, cardHeight, marks: marks)),
           ],
         ),
       ),
@@ -1295,6 +1379,42 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     );
   }
 
+  Widget _buildMarkLegend() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Wrap(
+          spacing: 16,
+          runSpacing: 4,
+          children: [
+            _markLegendEntry(kPostponedMark, kPostponedMarkMeaning),
+            _markLegendEntry(kBurnedMark, kBurnedMarkMeaning),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _markLegendEntry(String mark, String meaning) {
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: mark,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          TextSpan(text: ' = $meaning'),
+        ],
+      ),
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: Colors.grey.shade700,
+      ),
+    );
+  }
+
   // ==================== Content Views ====================
 
   // Mobile header height constant (compact, just the add button)
@@ -1567,6 +1687,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               isMobile
                   ? _buildMobileDayNavigation()
                   : _buildDesktopWeekNavigation(),
+              _buildMarkLegend(),
 
               // Appointments display (expanded to fill remaining space)
               Expanded(
