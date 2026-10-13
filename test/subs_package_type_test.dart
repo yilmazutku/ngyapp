@@ -8,10 +8,9 @@ void main() {
 
   const SubsPackageType flexible = SubsPackageType.oneMonthFlexible;
 
-  test('"1 Aylık (Esnek)" 1 Aylık ile aynı görüşme ve erteleme hakkını verir', () {
+  test('"1 Aylık (Esnek)" 2 görüşme ve 1 erteleme hakkıyla gelir', () {
     expect(flexible.label, '1 Aylık (Esnek)');
-    expect(flexible.defaultMeetings, 4);
-    expect(flexible.defaultMeetings, SubsPackageType.oneMonth.defaultMeetings);
+    expect(flexible.defaultMeetings, 2);
     expect(
       SubscriptionModel.calculateAllowedPostponements(flexible.defaultMeetings),
       1,
