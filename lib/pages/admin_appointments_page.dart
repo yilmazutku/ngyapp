@@ -83,6 +83,9 @@ const double kCardMaxFontSize = 11.0;
 // text is the better failure.
 const double kCardMinFontSize = 7.5;
 
+const String kPostponedMark = '(E)';
+const String kBurnedMark = '(Y)';
+
 // Hoisted formatters (avoid re-creating in every build)
 final DateFormat _dayTitleFmt = DateFormat('d MMMM EEEE', 'tr_TR');
 final DateFormat _rangeFmt = DateFormat('d MMMM', 'tr_TR');
@@ -873,17 +876,87 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   }
 
   /// The label inside a calendar card, sized to fit [cardHeight].
-  static Widget _cardText(String text, double cardHeight) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: _cardFontSize(cardHeight),
-        height: kCardTextLineHeight,
-        fontWeight: FontWeight.bold,
-      ),
-      overflow: TextOverflow.ellipsis,
+  static Widget _cardText(String text, double cardHeight, {String marks = ''}) {
+    final TextStyle style = TextStyle(
+      fontSize: _cardFontSize(cardHeight),
+      height: kCardTextLineHeight,
+      fontWeight: FontWeight.bold,
+    );
+    if (marks.isEmpty) {
+      return Text(
+        text,
+        style: style,
+        overflow: TextOverflow.ellipsis,
+        maxLines: kCardMaxTextLines,
+      );
+    }
+    final TextStyle markStyle = style.copyWith(fontWeight: FontWeight.w900);
+    final String suffix = ' $marks';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final String head = _fitBeforeSuffix(
+            context, text, style, suffix, markStyle, constraints.maxWidth);
+        return Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(text: head, style: style),
+              TextSpan(text: suffix, style: markStyle),
+            ],
+          ),
+          overflow: TextOverflow.ellipsis,
+          maxLines: kCardMaxTextLines,
+        );
+      },
+    );
+  }
+
+  static String _fitBeforeSuffix(
+    BuildContext context,
+    String text,
+    TextStyle style,
+    String suffix,
+    TextStyle suffixStyle,
+    double maxWidth,
+  ) {
+    final TextStyle baseStyle = DefaultTextStyle.of(context).style;
+    final TextPainter painter = TextPainter(
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      locale: Localizations.maybeLocaleOf(context),
       maxLines: kCardMaxTextLines,
     );
+    bool fits(String head) {
+      painter.text = TextSpan(
+        style: baseStyle,
+        children: [
+          TextSpan(text: head, style: style),
+          TextSpan(text: suffix, style: suffixStyle),
+        ],
+      );
+      painter.layout(maxWidth: maxWidth);
+      return !painter.didExceedMaxLines;
+    }
+
+    final Characters chars = text.characters;
+    String shortened(int length) =>
+        '${chars.take(length).toString().trimRight()}…';
+
+    try {
+      if (fits(text)) return text;
+      int low = 0;
+      int high = chars.length - 1;
+      while (low < high) {
+        final int mid = (low + high + 1) ~/ 2;
+        if (fits(shortened(mid))) {
+          low = mid;
+        } else {
+          high = mid - 1;
+        }
+      }
+      return shortened(low);
+    } finally {
+      painter.dispose();
+    }
   }
 
   /// Height of an appointment card. "Tartım" visits are very short (5 min), so
@@ -917,6 +990,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         ? '$dosyaNo-$nameSurname'
         : nameSurname;
     final String displayText = '$timeRange $namePart';
+    final String marks = [
+      if (appt.wasPostponed && !isPostponed) kPostponedMark,
+      if (appt.status == AppointmentStatus.burned) kBurnedMark,
+    ].join(' ');
 
     final Color cardColor = appt.appointmentType.getBgColor(appt.meetingType);
     final Color borderColor = appt.appointmentType.getBorderColor(appt.meetingType);
@@ -938,7 +1015,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: _cardText(displayText, cardHeight)),
+            Expanded(
+                child: _cardText(displayText, cardHeight, marks: marks)),
           ],
         ),
       ),
@@ -1295,6 +1373,42 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     );
   }
 
+  Widget _buildMarkLegend() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Wrap(
+          spacing: 16,
+          runSpacing: 4,
+          children: [
+            _markLegendEntry(kPostponedMark, 'Ertelenmiş randevunun ilk tarihi'),
+            _markLegendEntry(kBurnedMark, 'Yakılmış randevu'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _markLegendEntry(String mark, String meaning) {
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: mark,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          TextSpan(text: ' = $meaning'),
+        ],
+      ),
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: Colors.grey.shade700,
+      ),
+    );
+  }
+
   // ==================== Content Views ====================
 
   // Mobile header height constant (compact, just the add button)
@@ -1567,6 +1681,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
               isMobile
                   ? _buildMobileDayNavigation()
                   : _buildDesktopWeekNavigation(),
+              _buildMarkLegend(),
 
               // Appointments display (expanded to fill remaining space)
               Expanded(
