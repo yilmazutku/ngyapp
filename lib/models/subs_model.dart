@@ -31,7 +31,7 @@ enum SubsMeetingType {
 /// the meeting count afterwards.
 enum SubsPackageType {
   oneMonth('1 Aylık', 4),
-  oneMonthFlexible('1 Aylık (Esnek)', 4),
+  oneMonthFlexible('1 Aylık (Esnek)', 2),
   threeMonth('3 Aylık', 12),
   // The exclusive duration for "Aktif/Kilo Takip" packages (see the dialogs).
   sixMonth('6 Aylık', 6);
