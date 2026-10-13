@@ -72,6 +72,7 @@ const double kPixelsPerMinute =
 const double kCardVerticalMargin = 1.0; // card margin, top and bottom
 const double kCardHorizontalMargin = 2.0;
 const double kCardPadding = 4.0; // inner padding on every side
+const double kCardBorderWidth = 1.0;
 // Line height as a multiple of the font size. Pinned instead of left to the
 // font's own metrics, otherwise "two lines" is not a number we can compute.
 const double kCardTextLineHeight = 1.15;
@@ -85,6 +86,8 @@ const double kCardMinFontSize = 7.5;
 
 const String kPostponedMark = '(E)';
 const String kBurnedMark = '(Y)';
+const String kPostponedMarkMeaning = 'Ertelenmiş randevunun ilk tarihi';
+const String kBurnedMarkMeaning = 'Yakılmış randevu';
 
 // Hoisted formatters (avoid re-creating in every build)
 final DateFormat _dayTitleFmt = DateFormat('d MMMM EEEE', 'tr_TR');
@@ -401,7 +404,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         decoration: BoxDecoration(
           color: Colors.deepPurple.shade50,
           borderRadius: BorderRadius.circular(1),
-          border: Border.all(color: Colors.deepPurple.shade200, width: 1),
+          border: Border.all(
+              color: Colors.deepPurple.shade200, width: kCardBorderWidth),
         ),
         child: _cardText(displayText, cardHeight),
       ),
@@ -868,8 +872,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// height nobody adjusted. Deriving the size from the real geometry is what
   /// makes "two lines fit" a fact rather than a hope.
   static double _cardFontSize(double cardHeight, {int lines = kCardMaxTextLines}) {
-    final double usable =
-        cardHeight - (2 * kCardVerticalMargin) - (2 * kCardPadding);
+    final double usable = cardHeight -
+        (2 * kCardVerticalMargin) -
+        (2 * kCardPadding) -
+        (2 * kCardBorderWidth);
     final double perLine = usable / lines;
     return (perLine / kCardTextLineHeight)
         .clamp(kCardMinFontSize, kCardMaxFontSize);
@@ -1010,7 +1016,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         decoration: BoxDecoration(
           color: cardColor,
           borderRadius: BorderRadius.circular(1),
-          border: Border.all(color: borderColor, width: 1),
+          border: Border.all(color: borderColor, width: kCardBorderWidth),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1382,8 +1388,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           spacing: 16,
           runSpacing: 4,
           children: [
-            _markLegendEntry(kPostponedMark, 'Ertelenmiş randevunun ilk tarihi'),
-            _markLegendEntry(kBurnedMark, 'Yakılmış randevu'),
+            _markLegendEntry(kPostponedMark, kPostponedMarkMeaning),
+            _markLegendEntry(kBurnedMark, kBurnedMarkMeaning),
           ],
         ),
       ),
