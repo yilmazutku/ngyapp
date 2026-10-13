@@ -1,0 +1,8 @@
+{
+  "name": "ngyapp-functions-test",
+  "private": true,
+  "description": "functions/index.js içindeki Cloud Functions'ı Firestore emülatöründe gerçek dokümanlarla dener; FCM gönderimleri sahte bir messaging ile yakalanır, gerçek bildirim gitmez (uygulamanın parçası değildir). Önkoşul: functions/ ve tools/firestore_rules_test/ içinde npm install yapılmış olmalı, Java kurulu olmalı.",
+  "scripts": {
+    "test": "../firestore_rules_test/node_modules/.bin/firebase emulators:exec --config firebase.json --only firestore --project demo-ngy \"node --test --test-reporter=spec functions.test.js\""
+  }
+}

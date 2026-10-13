@@ -4,7 +4,8 @@
   "description": "firestore.rules ve storage.rules dosyalarını Firebase emülatöründe uygulamanın gerçek yazımlarıyla dener (uygulamanın parçası değildir).",
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore,storage --project demo-ngy \"node rules.test.mjs ../../firestore.rules && node storage.rules.test.mjs ../../storage.rules\""
+    "test": "firebase emulators:exec --only firestore,storage --project demo-ngy \"node rules.test.mjs ../../firestore.rules && node storage.rules.test.mjs ../../storage.rules\"",
+    "test:senaryo": "firebase emulators:exec --only firestore,storage --project demo-ngy 'node scenario.rules.test.mjs ../../firestore.rules; f=$?; node scenario.storage.rules.test.mjs ../../storage.rules; s=$?; exit $((f || s))'"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",
