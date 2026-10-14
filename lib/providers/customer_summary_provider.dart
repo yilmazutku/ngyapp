@@ -11,9 +11,9 @@ import '../utils/search_text.dart';
 
 /// Aggregates, for every non-admin customer that owns a subscription with a
 /// given status (e.g. Aktif/Haftalık, Aktif/Kilo Takip, Donduruldu), the data
-/// needed by the "Danışanlar Özet" overview page: the last payment of that
-/// package (date / amount / type), the package name, and up to
-/// [CustomerSummaryRow.maxSeans] session (appointment) dates.
+/// needed by the "Danışanlar Özet" overview page: the total of that package's
+/// payments (last payment date / total amount / types), the package name, and
+/// up to [CustomerSummaryRow.maxSeans] session (appointment) dates.
 ///
 /// Every cell in a row describes the *same* subscription — payments included —
 /// so the overview cannot disagree with the package's own detail view.
@@ -115,7 +115,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
     // Payments and appointments are unrelated queries, so they are issued
     // together instead of costing two sequential round trips per customer.
     final paymentFuture =
-        _resolveLastPayment(user.userId, activeSub.subscriptionId);
+        _resolvePackagePayments(user.userId, activeSub.subscriptionId);
     final apptFuture =
         _resolveAppointmentCells(user.userId, activeSub.subscriptionId);
     final payment = await paymentFuture;
@@ -188,16 +188,17 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// and showing it here made an unpaid package look paid while its own detail
   /// still (correctly) reported "Eksik Ödeme".
   ///
-  /// Hangi ödeme gösterilir:
-  /// - Pakette tamamlanmış ödeme varsa en son alınan o gösterilir.
-  /// - Yoksa paketin planlanan ödemesi gösterilir: tutar, planlanan tarih ve
-  ///   ödeme şekli aynı sütunlara yazılır, hücreler
+  /// Ne gösterilir:
+  /// - Pakette tamamlanmış ödeme varsa tutar, paketin tamamlanmış bütün
+  ///   ödemelerinin toplamıdır; tarih en son alınan ödemenin tarihi, ödeme
+  ///   şekli de bu ödemelerin şekilleridir (farklıysa virgülle yan yana).
+  /// - Yoksa paketin planlanan ödemeleri aynı şekilde toplanır ve hücreler
   ///   [_PaymentCells.isPlanned] ile işaretlenir; tablo tutarın soluna "(P)"
-  ///   işaretini koyar. Birden fazla planlanan ödeme varsa tahsil sırası gelen
-  ///   (tarihi en yakın olan) gösterilir.
+  ///   işaretini koyar. Tarih, tahsil sırası gelen (en yakın) planlanan
+  ///   ödemenin tarihidir. Alınmış ve planlanan para birbirine eklenmez.
   /// - Pakette hiç ödeme kaydı yoksa hücreler boş kalır.
-  /// - Tarihi olmayan bir ödeme => tarih hücresinde "Hata".
-  Future<_PaymentCells> _resolveLastPayment(
+  /// - Tarihi gösterilen ödemenin tarihi yoksa => tarih hücresinde "Hata".
+  Future<_PaymentCells> _resolvePackagePayments(
       String userId, String subscriptionId) async {
     try {
       // A single equality filter needs no composite index, and a package only
@@ -223,21 +224,21 @@ class CustomerSummaryProvider extends ChangeNotifier {
         }
       }
 
-      // Alınmış para, planlanan paranın önüne geçer: en son tahsil edilen
-      // ödeme gösterilir. createDate yedek sıralama anahtarı, tarihi eksik bir
-      // ödeme listeden düşmesin diye.
+      // Alınmış para, planlanan paranın önüne geçer: tamamlanmış ödemelerin
+      // toplamı, en son tahsil edilenin tarihiyle gösterilir. createDate yedek
+      // sıralama anahtarı, tarihi eksik bir ödeme listeden düşmesin diye.
       if (completed.isNotEmpty) {
         completed.sort((a, b) => (b.effectiveDate ?? b.createDate)
             .compareTo(a.effectiveDate ?? a.createDate));
-        return _paymentCellsFor(completed.first, isPlanned: false);
+        return _paymentCellsFor(completed, isPlanned: false);
       }
 
-      // Henüz tahsil edilmemiş paket: sırada bekleyen (tarihi en yakın)
-      // planlanan ödeme gösterilir, "(Planlandı)" notuyla.
+      // Henüz tahsil edilmemiş paket: planlanan ödemelerin toplamı, sırada
+      // bekleyenin (tarihi en yakın olanın) tarihiyle ve "(P)" işaretiyle.
       if (planned.isNotEmpty) {
         planned.sort((a, b) => (a.effectiveDate ?? a.createDate)
             .compareTo(b.effectiveDate ?? b.createDate));
-        return _paymentCellsFor(planned.first, isPlanned: true);
+        return _paymentCellsFor(planned, isPlanned: true);
       }
 
       return const _PaymentCells.empty();
@@ -246,18 +247,32 @@ class CustomerSummaryProvider extends ChangeNotifier {
     }
   }
 
-  /// Turns a single payment into the three payment cells of a row.
-  _PaymentCells _paymentCellsFor(PaymentModel payment,
+  /// Turns the package's sorted [payments] into the three payment cells of a
+  /// row: the first payment's date, the total amount and the distinct types.
+  _PaymentCells _paymentCellsFor(List<PaymentModel> payments,
       {required bool isPlanned}) {
-    final DateTime? date = payment.effectiveDate;
+    final DateTime? date = payments.first.effectiveDate;
+    final double total =
+        payments.fold<double>(0, (sum, p) => sum + p.amount);
     return _PaymentCells(
       date: date != null
           ? SummaryCell(_dateFormat.format(date))
           : const SummaryCell.error(),
-      amount: SummaryCell(_amountFormat.format(payment.amount)),
-      type: SummaryCell(payment.paymentType.label),
+      amount: SummaryCell(_amountFormat.format(total)),
+      type: SummaryCell(_paymentTypesLabel(payments)),
       isPlanned: isPlanned,
     );
+  }
+
+  /// Ödemelerin şekilleri, ilk görüldükleri sırayla ve tekrarsız. Şekli
+  /// girilmemiş ("-") ödemeler, gerçek bir şekil varken listeyi kirletmez.
+  String _paymentTypesLabel(List<PaymentModel> payments) {
+    final types = <PaymentType>{
+      for (final p in payments)
+        if (p.paymentType != PaymentType.na) p.paymentType,
+    };
+    if (types.isEmpty) return PaymentType.na.label;
+    return types.map((t) => t.label).join(', ');
   }
 
   /// Resolves both the session (seans) cells and the postponement-use date

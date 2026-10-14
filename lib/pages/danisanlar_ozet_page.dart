@@ -30,8 +30,8 @@ const String _dateWidthPlaceholder = '00.00.0000';
 /// Admin overview: customers grouped by subscription status. The first tab
 /// lists everyone with an *active* subscription; the second lists everyone
 /// with a *frozen* (Donduruldu) subscription. Each row shows that
-/// subscription's latest payment (date / amount / type), the package, and up
-/// to [CustomerSummaryRow.maxSeans] session (seans) dates.
+/// subscription's payment total (last date / total amount / types), the
+/// package, and up to [CustomerSummaryRow.maxSeans] session (seans) dates.
 class DanisanlarOzetPage extends StatefulWidget {
   const DanisanlarOzetPage({super.key});
 
