@@ -40,6 +40,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
 
       final customers = customersSnap.docs
           .map((doc) => UserModel.fromDocument(doc))
+          .where((user) => !user.isExcludedFromActiveCustomers)
           .toList();
 
       // 2) Resolve each customer in parallel; null => no matching subscription.

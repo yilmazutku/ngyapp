@@ -1062,10 +1062,13 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Gün bilgisi ve o güne ait toplamlar.
   Widget _buildHeader(BuildContext context, List<_ClientPhotoGroup> visible) {
     final ThemeData theme = Theme.of(context);
+    final List<_ClientPhotoGroup> counted = visible
+        .where((group) => !group.user.isExcludedFromActiveCustomers)
+        .toList();
     final int uploaderCount =
-        visible.where((group) => group.photos.isNotEmpty).length;
+        counted.where((group) => group.photos.isNotEmpty).length;
     final int photoCount =
-        visible.fold<int>(0, (sum, group) => sum + group.photos.length);
+        counted.fold<int>(0, (sum, group) => sum + group.photos.length);
 
     return Container(
       width: double.infinity,
@@ -1079,7 +1082,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           _buildDaySelector(context),
           _SummaryChip(
             icon: Icons.people_alt_outlined,
-            text: '${visible.length} aktif danışan',
+            text: '${counted.length} aktif danışan',
           ),
           _SummaryChip(
             icon: Icons.cloud_upload_outlined,

@@ -1,9 +1,23 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/search_text.dart';
+
 class UserModel {
   /// "Kullanılan İlaçlar ve Hastalıklar" alanının ekranlarda kullanılan ortak
   /// etiketi; oluşturma ve düzenleme ekranları aynı yazımı paylaşsın diye.
   static const String medicationsLabel = 'Kullanılan İlaçlar ve Hastalıklar';
+
+  static const List<String> _excludedFromActiveCustomerNames = [
+    'Nilay Göktepe Yılmaz',
+    'Simge Erdoğan',
+    'Utku Yılmaz',
+  ];
+
+  static final Set<String> _excludedFromActiveCustomerKeys = {
+    for (final String name in _excludedFromActiveCustomerNames) _nameKey(name),
+  };
+
+  static String _nameKey(String name) => searchWordsOf(name).join(' ');
 
   final String userId;
   final String name;
@@ -105,6 +119,9 @@ class UserModel {
   /// "Ad Soyad" for display. Falls back to whichever half exists, so a record
   /// missing one of them never renders a stray space.
   String get fullName => '$name $surname'.trim();
+
+  bool get isExcludedFromActiveCustomers =>
+      _excludedFromActiveCustomerKeys.contains(_nameKey(fullName));
 
   /// Avatardaki baş harfler: ad ve soyadın ilk harfleri (Türkçe büyük harfle,
   /// "i" -> "İ"), ikisi de boşsa "?".
