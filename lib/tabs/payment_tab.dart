@@ -485,6 +485,8 @@ class _PaymentsTabState extends FilterableTabState<PaymentProvider, PaymentsTab>
                 },
               ),
             Text(dateText, style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text('Ödeme Türü: ${payment.paymentType.label}', style: TextStyle(color: Colors.grey[600])),
             if (payment.notes?.isNotEmpty == true) ...[
               const SizedBox(height: 8),
               Text(payment.notes!, maxLines: 2, overflow: TextOverflow.ellipsis),
