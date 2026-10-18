@@ -26,15 +26,15 @@ import '../widgets/status_note.dart';
 import 'admin_mock_meal_photos_page.dart';
 import 'chat_page_new.dart';
 
-/// Yönetici sayfası: **aktif paketi olan** danışanların **seçilen güne** ait
-/// öğün fotoğraflarını tek ekranda toplar. Sayfa bugünle açılır; üstteki tarih
-/// seçicisiyle geçmiş bir güne gidilebilir.
+/// Yönetici sayfası: **Aktif/Haftalık paketi olan** danışanların **seçilen
+/// güne** ait öğün fotoğraflarını tek ekranda toplar. Sayfa bugünle açılır;
+/// üstteki tarih seçicisiyle geçmiş bir güne gidilebilir.
 ///
-/// Hangi danışanlar listelenir: rolü `customer` olup aktif (Aktif/Haftalık ya
-/// da Aktif/Kilo Takip) paketi bulunanlar — Danışanlar Özet sayfasının danışan
-/// seçme koşuluyla aynı kural (bkz.
-/// [SubProvider.fetchActiveSubscriptionsOfUsers]). O gün fotoğraf yüklememiş
-/// danışan da listede kalır; kartının altı boş görünür.
+/// Hangi danışanlar listelenir: rolü `customer` olup Aktif/Haftalık paketi
+/// bulunanlar — Danışanlar Özet'in Aktif / Haftalık sekmesiyle aynı kural (bkz.
+/// [SubProvider.fetchSubscriptionsOfUsersByStatus]) — ve
+/// [UserModel.isExcludedFromActiveCustomers] kişileri. O gün fotoğraf
+/// yüklememiş danışan da listede kalır; kartının altı boş görünür.
 ///
 /// Fotoğrafların kaynağı tek: `users/{userId}/meals/{yyyy-MM-dd}/mealEntries`.
 /// Danışan fotoğrafı ister sohbetten ister "Planım" sayfasından yüklesin aynı
@@ -100,7 +100,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _loadErrorText =
       'Fotoğraflar yüklenemedi. Lütfen tekrar deneyin.';
   static const String _noCustomerText =
-      'Aktif paketi olan danışan bulunamadı.';
+      'Aktif/Haftalık paketi olan danışan bulunamadı.';
   static const String _noSearchResultText =
       'Aramanıza uyan danışan bulunamadı.';
   static const String _dayPickerHelpText = 'Gün seç';
@@ -134,7 +134,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static const String _viewerLookupErrorText =
       'Sohbetteki mesaj okunamadı. Lütfen tekrar deneyin.';
   static const String _focusUserMissingText =
-      'Danışanın aktif paketi olmadığı için fotoğrafları bu sayfada '
+      'Danışanın Aktif/Haftalık paketi olmadığı için fotoğrafları bu sayfada '
       'listelenmiyor.';
 
   /// İfade sonrası bilgi şeridinin ekranda kalma süresi.
@@ -157,8 +157,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static final DateTime _firstSelectableDay = DateTime(2023, 1, 1);
 
   static const String _sourceHint =
-      'Aktif paketi olan danışanların sohbetten ve "Planım" sayfasından '
-      'yüklediği öğün fotoğrafları';
+      'Aktif/Haftalık paketi olan danışanların sohbetten ve "Planım" '
+      'sayfasından yüklediği öğün fotoğrafları';
 
   /// Fotoğraf kartının genişliği; ekran genişliğine göre bu aralıkta değişir.
   static const double _minPhotoWidth = 150.0;
@@ -357,20 +357,19 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         final List<UserModel> customers = initial[0] as List<UserModel>;
         testRuns = initial[1] as List<MockTestRun>;
 
-        // Sayfanın ilk koşulu: yalnızca aktif paketi olan danışanlar.
-        final Map<String, SubscriptionModel> activeSubs =
-            await subProvider.fetchActiveSubscriptionsOfUsers(
+        final Map<String, SubscriptionModel> weeklySubs =
+            await subProvider.fetchSubscriptionsOfUsersByStatus(
           customers.map((user) => user.userId).toList(),
+          SubActiveStatus.activeWeekly,
         );
         activeCustomers = customers
-            .where((user) => activeSubs.containsKey(user.userId))
+            .where((user) =>
+                user.isExcludedFromActiveCustomers ||
+                weeklySubs.containsKey(user.userId))
             .toList();
         countedCustomerIds = {
           for (final UserModel user in activeCustomers)
-            if (activeSubs[user.userId]!.status ==
-                    SubActiveStatus.activeWeekly &&
-                !user.isExcludedFromActiveCustomers)
-              user.userId,
+            if (!user.isExcludedFromActiveCustomers) user.userId,
         };
       }
 
@@ -612,17 +611,19 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         continue;
       }
 
-      final _ClientPhotoGroup shown = _mealFilter == null
-          ? group
-          : _ClientPhotoGroup(
-              group.user,
-              group.photos
-                  .where((photo) => _matchesMealFilter(photo.mealType))
-                  .toList(),
-            );
+      if (_mealFilter == null) {
+        visible.add(group);
+        continue;
+      }
 
-      if (shown.photos.isEmpty && !_isCounted(shown)) continue;
-      visible.add(shown);
+      visible.add(
+        _ClientPhotoGroup(
+          group.user,
+          group.photos
+              .where((photo) => _matchesMealFilter(photo.mealType))
+              .toList(),
+        ),
+      );
     }
 
     _visibleGroups = visible;
@@ -1263,10 +1264,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     }
 
     if (visible.isEmpty) {
-      final bool searching = searchWordsOf(_searchQuery).isNotEmpty;
-      return StatusNote(
-        icon: searching ? Icons.search_off : Icons.people_outline,
-        text: searching ? _noSearchResultText : _noCustomerText,
+      return const StatusNote(
+        icon: Icons.search_off,
+        text: _noSearchResultText,
       );
     }
 
