@@ -151,6 +151,10 @@ class SubProvider extends ChangeNotifier {
     return _fetchSubscriptionsOfUsers(userIds, activeLabels);
   }
 
+  Future<Map<String, SubscriptionModel>> fetchSubscriptionsOfUsersByStatus(
+          List<String> userIds, SubActiveStatus status) =>
+      _fetchSubscriptionsOfUsers(userIds, [status.label]);
+
   /// Verilen danışanlardan **aktif paketi olanların** kimlikleri.
   ///
   /// Aktif paket tanımı [fetchActiveSubscriptionsOfUsers] ile aynıdır
