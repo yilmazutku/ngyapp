@@ -11,6 +11,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/search_text.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/status_note.dart';
 
 /// Admin page for viewing all users.
 /// Features:
@@ -38,6 +39,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   static const String _customerRole = 'customer';
 
   static const String _refreshLabel = 'Yenile';
+  static const String _loadErrorText =
+      'Kullanıcılar yüklenemedi. Lütfen tekrar deneyin.';
 
   // === State Variables ===
   
@@ -58,6 +61,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   
   /// Loading state indicator
   bool _isLoading = true;
+
+  String? _errorText;
 
   /// Aktif (Aktif/Haftalık ya da Aktif/Kilo Takip) paketi olan danışanların
   /// kimlikleri. Dondurulmuş ve tamamlanmış paketler aktif sayılmaz. Liste
@@ -106,6 +111,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
       setState(() {
         _allUsers = validUsers;
         _isLoading = false;
+        _errorText = null;
         _applySearch();
       });
 
@@ -118,6 +124,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
       setState(() {
         _isLoading = false;
         _packagesLoading = false;
+        _errorText = _loadErrorText;
       });
     });
   }
@@ -127,6 +134,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
       _isLoading = true;
       _packagesLoading = true;
       _usersWithPackage = null;
+      _errorText = null;
     });
     _loadUsers();
   }
@@ -344,19 +352,35 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
             ),
           ),
 
+          if (!_isLoading && _packagesLoading) const LinearProgressIndicator(),
+
           // User list with loading, empty, and data states
-          Expanded(
-            child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(),
-                  )
-                : _filteredUsers.isEmpty
-                    ? _buildEmptyState()
-                    : _buildUserList(),
-          ),
+          Expanded(child: _buildBody()),
         ],
       ),
     );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final String? errorText = _errorText;
+    if (errorText != null) {
+      return StatusNote(
+        icon: Icons.error_outline,
+        text: errorText,
+        isError: true,
+        action: LabeledActionButton(
+          icon: Icons.refresh,
+          label: _refreshLabel,
+          onPressed: _refresh,
+        ),
+      );
+    }
+
+    return _filteredUsers.isEmpty ? _buildEmptyState() : _buildUserList();
   }
 
   /// Builds the empty state UI when no users match the search.

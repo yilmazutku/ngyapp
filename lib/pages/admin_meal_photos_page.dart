@@ -238,8 +238,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// okunmaz (yalnızca fotoğraflar ve ifadeler), "Yenile" yeniden okur.
   List<UserModel>? _activeCustomers;
 
-  Set<String> _countedCustomerIds = const {};
-
   /// Sohbetten gelindiyse vurgulanan fotoğraf (bkz.
   /// [AdminMealPhotosPage.focusImageUrl]).
   String? _focusImageUrl;
@@ -340,7 +338,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       final List<UserModel>? cachedCustomers =
           reloadClients ? null : _activeCustomers;
       final List<UserModel> activeCustomers;
-      Set<String> countedCustomerIds = _countedCustomerIds;
       List<MockTestRun> testRuns = _testRuns;
       if (cachedCustomers != null) {
         activeCustomers = cachedCustomers;
@@ -367,15 +364,10 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
                 user.isExcludedFromActiveCustomers ||
                 weeklySubs.containsKey(user.userId))
             .toList();
-        countedCustomerIds = {
-          for (final UserModel user in activeCustomers)
-            if (!user.isExcludedFromActiveCustomers) user.userId,
-        };
       }
 
       if (!mounted || loadId != _loadId) return;
       _activeCustomers = activeCustomers;
-      _countedCustomerIds = countedCustomerIds;
       _applyFocusFilter(activeCustomers);
 
       // 1. aşama: kartlar fotoğrafsız çizilir.
@@ -628,9 +620,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
     _visibleGroups = visible;
   }
-
-  bool _isCounted(_ClientPhotoGroup group) =>
-      _countedCustomerIds.contains(group.user.userId);
 
   ScrollController _stripControllerFor(String userId) =>
       _stripControllers.putIfAbsent(userId, () => ScrollController());
@@ -1075,7 +1064,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Gün bilgisi ve o güne ait toplamlar.
   Widget _buildHeader(BuildContext context, List<_ClientPhotoGroup> visible) {
     final ThemeData theme = Theme.of(context);
-    final List<_ClientPhotoGroup> counted = visible.where(_isCounted).toList();
+    final List<_ClientPhotoGroup> counted = visible
+        .where((group) => !group.user.isExcludedFromActiveCustomers)
+        .toList();
     final int uploaderCount =
         counted.where((group) => group.photos.isNotEmpty).length;
     final int photoCount =
