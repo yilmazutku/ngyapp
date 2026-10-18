@@ -10,6 +10,7 @@ import '../pages/customer_sum.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/search_text.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/labeled_action_button.dart';
 
 /// Admin page for viewing all users.
 /// Features:
@@ -36,6 +37,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// konmaz.
   static const String _customerRole = 'customer';
 
+  static const String _refreshLabel = 'Yenile';
+
   // === State Variables ===
   
   /// Future for fetching all users from Firestore
@@ -59,7 +62,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   /// Aktif (Aktif/Haftalık ya da Aktif/Kilo Takip) paketi olan danışanların
   /// kimlikleri. Dondurulmuş ve tamamlanmış paketler aktif sayılmaz. Liste
   /// çizildikten sonra doldurulur.
-  Set<String> _usersWithPackage = const {};
+  Set<String>? _usersWithPackage;
 
   /// Paket bilgisi hâlâ yükleniyor mu. Yüklenirken hiçbir satıra "AKTİF
   /// PAKETİ YOK" yazılmaz: bilgi gelmeden danışan paketsiz sanılmasın.
@@ -102,8 +105,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
       setState(() {
         _allUsers = validUsers;
-        _filteredUsers = validUsers;
         _isLoading = false;
+        _applySearch();
       });
 
       _loadPackageOwners(validUsers);
@@ -117,6 +120,15 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         _packagesLoading = false;
       });
     });
+  }
+
+  void _refresh() {
+    setState(() {
+      _isLoading = true;
+      _packagesLoading = true;
+      _usersWithPackage = null;
+    });
+    _loadUsers();
   }
 
   /// Listede gösterilen ad: ad-soyad boşsa (profili doldurulmamış yönetici
@@ -167,10 +179,13 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
   /// [user] aktif paketsiz mi: paket bilgisi gelmiş bir danışan, aktif paketi
   /// olanlar arasında değilse. Bilgi yüklenirken hiç kimse paketsiz sayılmaz.
-  bool _hasNoPackage(UserModel user) =>
-      !_packagesLoading &&
-      _isCustomer(user) &&
-      !_usersWithPackage.contains(user.userId);
+  bool _hasNoPackage(UserModel user) {
+    final Set<String>? owners = _usersWithPackage;
+    return !_packagesLoading &&
+        owners != null &&
+        _isCustomer(user) &&
+        !owners.contains(user.userId);
+  }
 
   /// Filters the user list based on search query.
   /// 
@@ -181,21 +196,25 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   void _onSearchChanged(String query) {
     setState(() {
       _searchQuery = query.toLowerCase();
-      
-      if (_searchQuery.isEmpty) {
-        // No filter: show all users
-        _filteredUsers = _allUsers;
-      } else {
-        // Filter users by matching query in name, surname, or email
-        _filteredUsers = _allUsers.where((user) {
-          final nameMatch = user.name.toLowerCase().contains(_searchQuery);
-          final emailMatch = user.email.toLowerCase().contains(_searchQuery);
-          final surnameMatch = user.surname.toLowerCase().contains(_searchQuery);
-
-          return nameMatch || emailMatch || surnameMatch;
-        }).toList();
-      }
+      _applySearch();
     });
+  }
+
+  void _applySearch() {
+    if (_searchQuery.isEmpty) {
+      // No filter: show all users
+      _filteredUsers = _allUsers;
+      return;
+    }
+
+    // Filter users by matching query in name, surname, or email
+    _filteredUsers = _allUsers.where((user) {
+      final nameMatch = user.name.toLowerCase().contains(_searchQuery);
+      final emailMatch = user.email.toLowerCase().contains(_searchQuery);
+      final surnameMatch = user.surname.toLowerCase().contains(_searchQuery);
+
+      return nameMatch || emailMatch || surnameMatch;
+    }).toList();
   }
 
   /// Confirms and permanently deletes [user] together with everything that
@@ -279,9 +298,16 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppBarWithBack(
+      appBar: AppBarWithBack(
         title: 'Kullanıcılar',
         showHomeButton: true,
+        actions: [
+          LabeledActionButton(
+            icon: Icons.refresh,
+            label: _refreshLabel,
+            onPressed: _isLoading || _packagesLoading ? null : _refresh,
+          ),
+        ],
       ),
       body: Column(
         children: [
