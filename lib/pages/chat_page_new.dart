@@ -1836,6 +1836,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ChatDateSeparator(label: DateFormatter.formatChatDayLabel(now)),
         bubble,
@@ -1910,6 +1911,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (dayLabel == null) return body;
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ChatDateSeparator(label: dayLabel),
         body,
@@ -2441,6 +2443,7 @@ class _MessageBubble extends StatelessWidget {
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
         crossAxisAlignment: align,
         mainAxisSize: MainAxisSize.min,
