@@ -299,8 +299,10 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
       // Only notify admins when USER sends (so skip admin->user messages)
       if (ADMIN_UIDS.has(senderId)) return;
 
-      // Collect admin tokens (single token per admin)
+      // Collect admin tokens (single token per admin); notifiedAdminUids[i]
+      // owns tokens[i] (admins without a token are skipped).
       const tokens = [];
+      const notifiedAdminUids = [];
       for (const adminUid of ADMIN_UIDS) {
         const adminDoc = await admin.firestore()
             .collection('users')
@@ -310,6 +312,7 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
         const adminData = adminDoc.exists ? adminDoc.data() : null;
         if (adminData?.fcmToken) {
           tokens.push(adminData.fcmToken);
+          notifiedAdminUids.push(adminUid);
         }
       }
 
@@ -363,7 +366,6 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
       });
 
       // Clean up invalid tokens from admin docs
-      const adminUidsArray = Array.from(ADMIN_UIDS);
       for (let i = 0; i < res.responses.length; i++) {
         const response = res.responses[i];
         if (response.success) continue;
@@ -376,12 +378,13 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
 
         logger.warn('FCM send failed', {code: code});
 
-        if (isInvalid && adminUidsArray[i]) {
+        if (isInvalid && notifiedAdminUids[i]) {
           await admin.firestore()
               .collection('users')
-              .doc(adminUidsArray[i])
+              .doc(notifiedAdminUids[i])
               .update({fcmToken: admin.firestore.FieldValue.delete()});
-          logger.info(`Removed invalid token for admin ${adminUidsArray[i]}`);
+          logger.info(
+              `Removed invalid token for admin ${notifiedAdminUids[i]}`);
         }
       }
     },
@@ -707,6 +710,8 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
           type: 'chat_admin',
           chatId: chatId, // admin -> ChatPage(overrideChatId: chatId)
           senderId: chatId,
+          // The app opens the chat at this message (ChatPage.focusMessageId).
+          messageId: event.params.messageId,
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         android: buildAndroidConfig(title, body),

@@ -1,5 +1,4 @@
 // lib/pages/chat_page_new.dart
-import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
@@ -38,7 +37,6 @@ import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
 import 'package:ngy_app/utils/menu_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
-import 'package:ngy_app/services/meal_reminder_service.dart';
 
 import '../constants/app_constants.dart';
 
@@ -93,6 +91,25 @@ class ChatPage extends StatefulWidget {
     this.focusMessageId,
     this.userDisplayName,
   });
+
+  /// Sayfanın rota adı: danışanın bildirimi, açık sohbetin üstündeki
+  /// sayfaları bu ada kadar kapatır (bkz. [FcmService]).
+  static const String routeName = '/chat';
+
+  /// Sayfayı adıyla açan rota; sohbet her yerden bununla açılır.
+  static Route<void> route({
+    String? overrideChatId,
+    String? focusMessageId,
+    String? userDisplayName,
+  }) =>
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: routeName),
+        builder: (_) => ChatPage(
+          overrideChatId: overrideChatId,
+          focusMessageId: focusMessageId,
+          userDisplayName: userDisplayName,
+        ),
+      );
 
   /// Sohbet silme onaylarında neyin silinip neyin kaldığı (bkz.
   /// [ChatManager.deleteChat]); sohbet sayfası ve Tüm Sohbetler listesi aynı
@@ -345,7 +362,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
 
     // Suppress in-app notifications for this chat while it is on top.
-    FcmService().openChat(_chatId);
+    FcmService().openChat(_chatId, onFocusMessage: _focusOn);
 
     if (_focusActive) {
       // Ekran eski bir mesajda açılıyor: okundu işareti en yeniye inilince.
@@ -490,53 +507,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Check and request photo library permission.
-  /// Returns true if permission is granted, false otherwise.
-  /// Shows a dialog to open Settings if permission is permanently denied.
-  Future<bool> _checkPhotoPermission() async {
-    Permission permission;
-    if (Platform.isIOS) {
-      permission = Permission.photos;
-    } else {
-      permission = Permission.photos;
-    }
-
-    var status = await permission.status;
-
-    // Already granted or limited access - proceed
-    if (status.isGranted || status.isLimited) {
-      return true;
-    }
-
-    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
-    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
-    // Always try to request first if not permanently denied
-    if (!status.isPermanentlyDenied && !status.isRestricted) {
-      status = await permission.request();
-      
-      if (status.isGranted || status.isLimited) {
-        return true;
-      }
-    }
-
-    // Permission denied or permanently denied - show dialog to open Settings
-    if (!mounted) return false;
-    
-    final shouldOpenSettings = await DialogUtils.openConfirm(
-      context,
-      title: 'Fotoğraf İzni Gerekli',
-      message: 'Fotoğraf göndermek için galeri erişim izni gereklidir.\n\n'
-          'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
-      confirmText: 'Ayarlara Git',
-      cancelText: 'İptal',
-    );
-
-    if (shouldOpenSettings) {
-      await openAppSettings();
-    }
-    return false;
-  }
-
   /// Check and request camera permission.
   /// Returns true if permission is granted, false otherwise.
   /// Shows a dialog to open Settings if permission is permanently denied.
@@ -579,8 +549,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Fotoğraf seçtirir: kameradan tek, galeriden en fazla [limit] tane.
   /// Kamerayla çekilen fotoğraf göndermeden önce kırpılıp döndürülebilir
-  /// ([showPhotoEditPage]). İzin yoksa ya da vazgeçilirse boş liste döner.
-  /// Masaüstünde izin sorulmaz (galeri dosya seçicidir).
+  /// ([showPhotoEditPage]). Kamera izni yoksa ya da vazgeçilirse boş liste
+  /// döner. Galeri için izin sorulmaz: sistemin fotoğraf seçicisi (iOS'ta
+  /// PHPicker, Android'de Photo Picker, masaüstünde dosya seçici) izin
+  /// istemez; masaüstünde kamera izni de sorulmaz.
   Future<List<XFile>> _pickImages(ImageSource source, {required int limit}) async {
     if (source == ImageSource.camera) {
       if (!_isDesktopPlatform && !await _checkCameraPermission()) {
@@ -595,9 +567,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return edited == null ? const [] : [edited];
     }
 
-    if (!_isDesktopPlatform && !await _checkPhotoPermission()) {
-      return const [];
-    }
     // Çoklu seçicinin sınırı en az 2 olabilir.
     if (limit < 2) {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
@@ -1194,10 +1163,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _markChatAsRead();
     }
     // Odaklı düzende en yeni mesaj ekranda değilse; normal düzende kullanıcı
-    // biraz yukarı kaydırınca.
+    // biraz yukarı kaydırınca ya da en yenide değilken okunmamış mesaj
+    // geldiyse (yeni mesaj görünür alanın altında kalır).
     _showJumpToLatest.value = focusLayout
         ? !atLatest
-        : metrics.pixels > metrics.minScrollExtent + _jumpButtonThreshold;
+        : metrics.pixels > metrics.minScrollExtent + _jumpButtonThreshold ||
+            (!atLatest && _unreadCount.value > 0);
     return false;
   }
 
@@ -1262,7 +1233,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// düzende yeni mesajlar görünür alanın altına eklendiği için liste onları
   /// gösterecek kadar kayar. Kullanıcı eski mesajlardaysa okundu işareti en
   /// yeniye inince konur; karşı taraftan gelenler "En yeniye git"
-  /// rozetindeki sayıya eklenir.
+  /// rozetindeki sayıya eklenir ve düğme (normal düzende de) görünür.
   void _noteNewMessages(List<MessageData> items, {required bool focusLayout}) {
     final bool firstList = !_messagesShown;
     _messagesShown = true;
@@ -1299,6 +1270,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       } else if (incoming > 0) {
         _markReadPending = true;
         _unreadCount.value += incoming;
+        _showJumpToLatest.value = true;
       }
     });
   }
@@ -1357,8 +1329,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   ///
   /// Fotoğraf öğün kaydından (Öğün Fotoğrafları, Görseller sekmesi, "Planım")
   /// ve Storage'dan kalkar; sohbetteki mesaj "fotoğraf silindi" notuna döner
-  /// (bkz. [MealManager.deleteChatMealPhoto]). Öğünün son fotoğrafı silindiyse
-  /// öğün yüklenmemiş sayılır; hatırlatmalar buna göre yeniden kurulur.
+  /// (bkz. [MealManager.deleteChatMealPhoto]). Yüklemeyle iptal olan o günkü
+  /// öğün hatırlatması fotoğraf silinince geri kurulmaz.
   Future<void> _confirmAndDeleteMealPhoto(MessageData message) async {
     final String? imageUrl = message.imageUrl;
     if (imageUrl == null) return;
@@ -1399,7 +1371,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       messenger.showSnackBar(
         const SnackBar(content: Text(_photoDeletedText)),
       );
-      _rescheduleMealReminders();
     } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -1413,14 +1384,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: _deletePhotoErrorText,
       );
     }
-  }
-
-  /// Öğün hatırlatmalarını günün güncel durumuna göre yeniden kurar: silinen
-  /// fotoğraf öğünün son fotoğrafıysa o öğünün hatırlatması geri gelir.
-  void _rescheduleMealReminders() {
-    final MealReminderService reminders = MealReminderService();
-    if (!reminders.isSupported) return;
-    reminders.scheduleMealReminders(_currentUid);
   }
 
   /// Toggle the current viewer's reaction on [message].

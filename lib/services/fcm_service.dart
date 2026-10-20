@@ -74,6 +74,10 @@ class FcmService {
   static const bool allowAnnouncementNotificationsWhenLoggedOut = false;
 
   /// Check if FCM is supported on this platform (not on Windows)
+  ///
+  /// FCM jetonu yalnızca burada desteklenen platformlarda (Android, iOS,
+  /// macOS) okunur, yazılır ve silinir; Windows ve Linux'ta kullanıcı
+  /// kaydındaki jetona hiç dokunulmaz.
   static bool get isSupported {
     return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
   }
@@ -98,6 +102,10 @@ class FcmService {
   /// danışanın bildirimine basılınca); üstteki kapanınca alttakinin bildirim
   /// bastırması geri gelir.
   final List<String> _openChatIds = [];
+
+  /// [_openChatIds] ile aynı sırada, her açık sohbetin mesaja gitme işlevi
+  /// (bkz. [openChat]).
+  final List<ValueChanged<String>?> _openChatFocusHandlers = [];
 
   /// Uygulama ön planda mı. Arka plandayken hiçbir sohbetin bildirimi
   /// bastırılmaz.
@@ -403,9 +411,7 @@ class FcmService {
             navigator.push(AdminChatListPage.route());
           }
         } else {
-          navigator.push(MaterialPageRoute(
-            builder: (_) => ChatPage(focusMessageId: focusMessageId),
-          ));
+          _openClientChat(navigator, user.uid, focusMessageId);
         }
         break;
 
@@ -452,12 +458,33 @@ class FcmService {
       });
       if (!chatListKept) navigator.push(AdminChatListPage.route());
     }
-    navigator.push(MaterialPageRoute(
-      builder: (_) => ChatPage(
-        overrideChatId: chatId,
-        focusMessageId: focusMessageId,
-      ),
+    navigator.push(ChatPage.route(
+      overrideChatId: chatId,
+      focusMessageId: focusMessageId,
     ));
+  }
+
+  /// Danışana kendi sohbetini açar. Sohbet zaten açıksa ikinci bir sohbet
+  /// sayfası açılmaz: sohbetin üstündeki sayfalar kapanır, sohbet bildirimdeki
+  /// mesaja gider. Diyaloglar kapatılmaz: kapatılan bir yükleme göstergesinin
+  /// sahibi, sonra onu kapatırken alttaki sayfayı (ör. sohbeti) kapatırdı.
+  void _openClientChat(
+    NavigatorState navigator,
+    String chatId,
+    String? focusMessageId,
+  ) {
+    final int openIndex = _openChatIds.lastIndexOf(chatId);
+    if (openIndex < 0) {
+      navigator.push(ChatPage.route(focusMessageId: focusMessageId));
+      return;
+    }
+    navigator.popUntil((route) =>
+        route.settings.name == ChatPage.routeName ||
+        route.isFirst ||
+        route is RawDialogRoute);
+    if (focusMessageId != null) {
+      _openChatFocusHandlers[openIndex]?.call(focusMessageId);
+    }
   }
 
   /// Try opening pending message after first frame
@@ -472,6 +499,7 @@ class FcmService {
 
   /// Save FCM token to Firestore for current user.
   /// Uses a single token per user (overwrites previous token).
+  /// Kayıttaki jeton zaten bu cihazınkiyse yazılmaz.
   Future<void> saveFcmToken() async {
     if (!isSupported) return;
     
@@ -486,33 +514,44 @@ class FcmService {
         return;
       }
 
-      final userDoc = _firestore.collection('users').doc(user.uid);
-      await userDoc.set({
-        'fcmToken': token,
-      }, SetOptions(merge: true));
+      await _saveTokenIfChanged(user.uid, token);
 
       _listenForTokenRefresh();
     } catch (e) {
     }
   }
 
+  /// [token]'ı kullanıcının kaydına yazar; kayıtta zaten o varsa yazmaz.
+  Future<void> _saveTokenIfChanged(String uid, String token) async {
+    final userDoc = _firestore.collection('users').doc(uid);
+    final snapshot = await userDoc.get();
+    if (snapshot.data()?['fcmToken'] == token) return;
+
+    await userDoc.set({
+      'fcmToken': token,
+    }, SetOptions(merge: true));
+  }
+
   /// Keeps the stored token in sync when FCM rotates it. Idempotent: only the
   /// first call subscribes.
   void _listenForTokenRefresh() {
-    if (_tokenRefreshSub != null) return;
+    if (!isSupported || _tokenRefreshSub != null) return;
 
     _tokenRefreshSub = _messaging.onTokenRefresh.listen((newToken) async {
       final currentUser = _auth.currentUser;
       if (currentUser == null) return;
 
-      await _firestore.collection('users').doc(currentUser.uid).set({
-        'fcmToken': newToken,
-      }, SetOptions(merge: true));
+      try {
+        await _saveTokenIfChanged(currentUser.uid, newToken);
+      } catch (e) {
+      }
     });
   }
 
   /// Remove FCM token from Firestore for current user.
   /// Call this on logout to stop receiving notifications on this device.
+  /// Kayıttaki jeton bu cihazın değilse (kullanıcı sonra başka bir cihazdan
+  /// girdi) silinmez: bu cihazdan çıkmak o cihazın bildirimlerini kesmez.
   Future<void> removeFcmToken() async {
     if (!isSupported) return;
     
@@ -522,10 +561,15 @@ class FcmService {
     }
 
     try {
+      final token = await _messaging.getToken();
+      if (token == null) return;
+
       final userDoc = _firestore.collection('users').doc(user.uid);
-      await userDoc.set({
-        'fcmToken': FieldValue.delete(),
-      }, SetOptions(merge: true));
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(userDoc);
+        if (snapshot.data()?['fcmToken'] != token) return;
+        transaction.update(userDoc, {'fcmToken': FieldValue.delete()});
+      });
     } catch (e) {
     }
   }
@@ -534,16 +578,20 @@ class FcmService {
   static bool isAdmin(String uid) => _adminUids.contains(uid);
 
   /// Bir sohbet sayfası açıldı: o sohbetin uygulama içi bildirimleri, sayfa
-  /// en üstte kaldıkça bastırılır.
-  void openChat(String chatId) {
+  /// en üstte kaldıkça bastırılır. [onFocusMessage], sohbet açıkken basılan
+  /// bildirimin mesajına gider (bkz. [_openClientChat]).
+  void openChat(String chatId, {ValueChanged<String>? onFocusMessage}) {
     _openChatIds.add(chatId);
+    _openChatFocusHandlers.add(onFocusMessage);
   }
 
   /// Sohbet sayfası kapandı. Yalnızca o sayfanın kaydı düşer; altta açık
   /// başka bir sohbet varsa onun bastırması sürer.
   void closeChat(String chatId) {
     final int index = _openChatIds.lastIndexOf(chatId);
-    if (index >= 0) _openChatIds.removeAt(index);
+    if (index < 0) return;
+    _openChatIds.removeAt(index);
+    _openChatFocusHandlers.removeAt(index);
   }
 
   /// Uygulama ön plana geldi / arka plana gitti.

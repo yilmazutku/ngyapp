@@ -107,11 +107,22 @@ class MealImageCard extends StatelessWidget {
   static const double _labelFontSize = 12;
   static const double _timeIconSize = 12;
   static const double _timeFontSize = 11;
+  static const double _timeIconGap = 2;
   static const double _highlightBorderWidth = 3;
 
   /// Kartın ve ayrıntı diyaloğunun ortak Hero etiketi (büyütme animasyonu).
   static String heroTagFor(MealModel meal) =>
       '${meal.imageUrl}_${meal.timestamp.millisecondsSinceEpoch}';
+
+  static WidgetSpan _iconSpan(
+          IconData icon, double size, Color? color, double gap) =>
+      WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: Padding(
+          padding: EdgeInsets.only(right: gap),
+          child: Icon(icon, size: size, color: color),
+        ),
+      );
 
   /// Orijinal indirildiğinde küçük görseli üretip kaydeden geri çağrı.
   /// Sağlayıcı build sırasında alınır; geri çağrı sonradan, context'e
@@ -230,52 +241,56 @@ class MealImageCard extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.all(_cardPadding),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Flexible(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          mealTypeIcon(meal.mealType),
-                          size: _iconSize,
+              // Önce saat yerleşir, öğün adı kalan yere sığdığı kadar yazılır.
+              // İkisi de tek satırlık metin (ikon metnin içinde): çok dar
+              // kartta kısalır, satır taşmaz.
+              child: LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Text.rich(
+                        TextSpan(children: [
+                          _iconSpan(
+                            mealTypeIcon(meal.mealType),
+                            _iconSize,
+                            typeColor,
+                            _spacing,
+                          ),
+                          TextSpan(text: meal.mealType.displayLabel),
+                        ]),
+                        style: TextStyle(
+                          fontSize: _labelFontSize,
+                          fontWeight: FontWeight.bold,
                           color: typeColor,
                         ),
-                        const SizedBox(width: _spacing),
-                        Flexible(
-                          child: Text(
-                            meal.mealType.displayLabel,
-                            style: TextStyle(
-                              fontSize: _labelFontSize,
-                              fontWeight: FontWeight.bold,
-                              color: typeColor,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.access_time,
-                        size: _timeIconSize,
-                        color: Colors.grey[600],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(width: 2),
-                      Text(
-                        timeStr,
+                    ),
+                    ConstrainedBox(
+                      constraints:
+                          BoxConstraints(maxWidth: constraints.maxWidth),
+                      child: Text.rich(
+                        TextSpan(children: [
+                          _iconSpan(
+                            Icons.access_time,
+                            _timeIconSize,
+                            Colors.grey[600],
+                            _timeIconGap,
+                          ),
+                          TextSpan(text: timeStr),
+                        ]),
                         style: TextStyle(
                           fontSize: _timeFontSize,
                           color: Colors.grey[600],
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ],

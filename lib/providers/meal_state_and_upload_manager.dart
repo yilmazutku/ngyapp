@@ -167,9 +167,8 @@ static const MEAL_RANGE_DAYS=7;
   /// toplu hâlde çeker.
   ///
   /// Öğünler `users/{userId}/meals/{yyyy-MM-dd}/mealEntries` altında tutulur.
-  /// Danışan fotoğrafı ister "Planım" sayfasından ister sohbetten yüklesin
-  /// [uploadMealImg] hep bu dokümanı yazdığı için iki yol da bu tek kaynaktan
-  /// okunur.
+  /// Danışan fotoğrafı yalnızca sohbetten yükler; [uploadMealImg] bu dokümanı
+  /// yazar, buradan okunur.
   ///
   /// Dönen map yalnızca o gün en az bir fotoğrafı olan danışanları içerir;
   /// listelerdeki öğünler saatine göre eskiden yeniye sıralıdır.
@@ -278,7 +277,8 @@ Future<int> mealImageSlotsLeft({
 /// Sohbetten gönderilen öğün fotoğrafını ([PendingUpload]) öğün kaydına
 /// ekler ve sohbete yazar; fotoğraf gönderildiği anın gününe ve saatine
 /// kaydedilir ([PendingUpload.createdAt]), yükleme gecikse de. O gün bugünse
-/// öğünün "yüklediniz mi?" hatırlatması iptal olur. Sohbet ekranı ve
+/// öğünün "yüklediniz mi?" hatırlatması iptal olur; fotoğraf sonradan
+/// silinse de o gün geri kurulmaz (bkz. [mealStateFields]). Sohbet ekranı ve
 /// uygulama açılışında geri yüklenen sıra (bkz.
 /// [ChatManager.restorePendingUploads]) aynı yolu kullanır.
 ///
@@ -414,7 +414,7 @@ Future<String?> uploadMealImg({
     Object? chatPostError;
     final Future<void> writes = Future.wait([
       mealDocRef.set(mergedMealModel.toMap()),
-      updateMealState(userId, referenceDate, meal, true),
+      updateMealState(userId, referenceDate, meal, true, photoUploaded: true),
       if (alsoPostToChat)
         _postToChat(userId, meal, uploaded, chatManager)
             .catchError((Object e) {
@@ -438,7 +438,8 @@ Future<String?> uploadMealImg({
 }
 
 /// Deletes a single image from a meal entry.
-/// If no images remain, the meal is marked as unchecked.
+/// If no images remain, the meal is marked as unchecked. Öğünün o günkü
+/// hatırlatma iptali ([mealStateFields]) kalır: hatırlatma geri kurulmaz.
 ///
 /// Fotoğraf sohbete de düşmüşse o mesaj "fotoğraf silindi" notuna çevrilir
 /// ([_markChatPhotoDeleted]). Silme nereden yapılırsa yapılsın (sohbet,
@@ -583,7 +584,9 @@ Future<void> deleteChatMealPhoto({
   }
 }
 
-Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isChecked) async {
+/// [photoUploaded]: bkz. [mealStateFields].
+Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isChecked,
+    {bool photoUploaded = false}) async {
     try {
     final currentDate = DateFormat('yyyy-MM-dd').format(date);
     final dayDocRef = FirebaseFirestore.instance
@@ -592,14 +595,28 @@ Future<void> updateMealState(String userId, DateTime date, Meals meal, bool isCh
         .collection('meals')
         .doc(currentDate);
 
-    await dayDocRef.set({
-      'meals': {
-        meal.name: isChecked, // mark this meal as "checked" for today
-      },
-    }, SetOptions(merge: true));
+    await dayDocRef.set(
+      mealStateFields(meal, isChecked, photoUploaded: photoUploaded),
+      SetOptions(merge: true),
+    );
   } catch (e) {
   }
 }
+
+/// Gün dokümanına (`users/{uid}/meals/{yyyy-MM-dd}`, birleştirerek) yazılan
+/// öğün durumu: `meals.<öğün>` işareti; fotoğraf yüklendiyse ([photoUploaded])
+/// ayrıca öğünün o günkü hatırlatmasını kapatan işaret
+/// ([MealReminderService.REMINDER_CANCELLED_FIELD]). Bu işareti hiçbir yazım
+/// geri almaz: fotoğraf silinse de hatırlatma o gün yeniden kurulmaz.
+static Map<String, dynamic> mealStateFields(Meals meal, bool isChecked,
+        {bool photoUploaded = false}) =>
+    {
+      'meals': {
+        meal.name: isChecked, // mark this meal as "checked" for today
+      },
+      if (photoUploaded)
+        MealReminderService.REMINDER_CANCELLED_FIELD: {meal.name: true},
+    };
 
 
   /// Öğün fotoğraflarının Storage'daki klasörü (bkz. [uploadMealImg],

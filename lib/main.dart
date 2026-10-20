@@ -510,10 +510,7 @@ class _HomePageState extends State<HomePage> {
     if (isAdmin) {
       Navigator.push(context, AdminChatListPage.route());
     } else {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const ChatPage()),
-      );
+      Navigator.push(context, ChatPage.route());
     }
   }
 

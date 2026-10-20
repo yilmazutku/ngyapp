@@ -37,9 +37,8 @@ import 'chat_page_new.dart';
 /// yüklememiş danışan da listede kalır; kartının altı boş görünür.
 ///
 /// Fotoğrafların kaynağı tek: `users/{userId}/meals/{yyyy-MM-dd}/mealEntries`.
-/// Danışan fotoğrafı ister sohbetten ister "Planım" sayfasından yüklesin aynı
-/// öğün dokümanına yazıldığı için iki yol da buradan okunur
-/// ([MealManager.fetchMealsOfUsersForDate]).
+/// Öğün fotoğrafları yalnızca sohbetten yüklenir ve öğün dokümanına yazılır;
+/// sayfa buradan okur ([MealManager.fetchMealsOfUsersForDate]).
 ///
 /// Düzen: her danışan bir kart; kartın içinde o gün yüklediği fotoğraflar
 /// yatay bir şerit hâlinde, her fotoğrafın altında öğün adı ve yükleme saati
@@ -160,8 +159,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   static final DateTime _firstSelectableDay = DateTime(2023, 1, 1);
 
   static const String _sourceHint =
-      'Aktif/Haftalık paketi olan danışanların sohbetten ve "Planım" '
-      'sayfasından yüklediği öğün fotoğrafları';
+      'Aktif/Haftalık paketi olan danışanların sohbetten yüklediği öğün '
+      'fotoğrafları';
 
   /// Fotoğraf kartının genişliği; ekran genişliğine göre bu aralıkta değişir.
   static const double _minPhotoWidth = 150.0;
@@ -177,7 +176,6 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// Şeridin kart dışında kalan dikey boşluğu (üst boşluk + kaydırma çubuğu).
   static const double _stripPadding = 30.0;
 
-  static const double _searchFieldMaxWidth = 320.0;
   static const double _gap = 12.0;
 
   /// Sayfanın dikey kaydırma konumu; [Scrollbar] ile paylaşılır.
@@ -767,8 +765,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   /// yükleme diyaloğu eşliğinde aranır.
   ///
   /// Öğün fotoğrafı sohbete yüklenirken mesaja aynı indirme adresi yazıldığı
-  /// için eşleme adres üzerinden yapılır. Mesaj yoksa (ör. "Planım"
-  /// sayfasından yüklenmiş, sohbete düşmemiş eski bir kayıt) ya da arama
+  /// için eşleme adres üzerinden yapılır. Mesaj yoksa (sohbete düşmemiş eski bir kayıt) ya da arama
   /// başarısız olursa kullanıcıya diyalog gösterilip null dönülür; çağıran
   /// yalnızca sonucu kontrol eder.
   Future<MessageData?> _findChatMessage(
@@ -856,15 +853,11 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       return;
     }
 
-    await navigator.push(
-      MaterialPageRoute(
-        builder: (_) => ChatPage(
-          overrideChatId: group.user.userId,
-          focusMessageId: message.id,
-          userDisplayName: group.displayName,
-        ),
-      ),
-    );
+    await navigator.push(ChatPage.route(
+      overrideChatId: group.user.userId,
+      focusMessageId: message.id,
+      userDisplayName: group.displayName,
+    ));
     if (!mounted) return;
     await _refreshReactionsOf(group.user.userId);
   }
@@ -1236,49 +1229,36 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   Widget _buildFilters(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          SearchField(
-            controller: _searchController,
-            label: _searchHint,
-            maxWidth: _searchFieldMaxWidth,
-            onChanged: (value) => setState(() {
-              _searchQuery = value;
+      child: MealPhotoFiltersLayout(
+        searchController: _searchController,
+        searchLabel: _searchHint,
+        onSearchChanged: (value) => setState(() {
+          _searchQuery = value;
+          _applyFilters();
+        }),
+        filters: [
+          FilterChipGroup<Meals>(
+            title: _mealFilterTitle,
+            titleIcon: Icons.restaurant_menu,
+            selectedValue: _mealFilter,
+            options: {
+              for (final Meals meal in _mealFilterOptions)
+                meal: meal.displayLabel,
+            },
+            onSelected: (meal) => setState(() {
+              _mealFilter = meal;
               _applyFilters();
             }),
           ),
-          const SizedBox(width: 24),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                FilterChipGroup<Meals>(
-                  title: _mealFilterTitle,
-                  titleIcon: Icons.restaurant_menu,
-                  selectedValue: _mealFilter,
-                  options: {
-                    for (final Meals meal in _mealFilterOptions)
-                      meal: meal.displayLabel,
-                  },
-                  onSelected: (meal) => setState(() {
-                    _mealFilter = meal;
-                    _applyFilters();
-                  }),
-                ),
-                const SizedBox(height: 8),
-                FilterChipGroup<bool>(
-                  title: _reactionFilterTitle,
-                  titleIcon: Icons.add_reaction_outlined,
-                  selectedValue: _unreactedOnly ? true : null,
-                  options: const {true: _unreactedLabel},
-                  onSelected: (value) => setState(() {
-                    _unreactedOnly = value == true;
-                    _applyFilters();
-                  }),
-                ),
-              ],
-            ),
+          FilterChipGroup<bool>(
+            title: _reactionFilterTitle,
+            titleIcon: Icons.add_reaction_outlined,
+            selectedValue: _unreactedOnly ? true : null,
+            options: const {true: _unreactedLabel},
+            onSelected: (value) => setState(() {
+              _unreactedOnly = value == true;
+              _applyFilters();
+            }),
           ),
         ],
       ),
@@ -1355,6 +1335,79 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
               );
             },
           ),
+        );
+      },
+    );
+  }
+}
+
+/// Arama kutusu ve filtre gruplarının yerleşimi. Geniş ekranda arama solda,
+/// filtreler sağda; dar ekranda (telefon) yan yana sığmazlar: tam genişlikte
+/// arama, altında filtreler alt alta (seçenekleri yatay kayar).
+class MealPhotoFiltersLayout extends StatelessWidget {
+  /// Bu genişliğin altında alanlar alt alta dizilir.
+  static const double narrowBreakpoint = 600.0;
+
+  static const double _searchGap = 24.0;
+  static const double _stackedSearchGap = 12.0;
+  static const double _filterGap = 8.0;
+
+  final TextEditingController searchController;
+  final String searchLabel;
+  final ValueChanged<String> onSearchChanged;
+
+  /// Filtre grupları; üstten alta bu sırayla dizilir.
+  final List<Widget> filters;
+
+  const MealPhotoFiltersLayout({
+    super.key,
+    required this.searchController,
+    required this.searchLabel,
+    required this.onSearchChanged,
+    required this.filters,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool narrow = constraints.maxWidth < narrowBreakpoint;
+        final Widget search = SearchField(
+          controller: searchController,
+          label: searchLabel,
+          maxWidth: narrow ? double.infinity : SearchField.defaultMaxWidth,
+          onChanged: onSearchChanged,
+        );
+        final List<Widget> filterChildren = [
+          for (int i = 0; i < filters.length; i++) ...[
+            if (i > 0) const SizedBox(height: _filterGap),
+            filters[i],
+          ],
+        ];
+
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              search,
+              const SizedBox(height: _stackedSearchGap),
+              ...filterChildren,
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            search,
+            const SizedBox(width: _searchGap),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: filterChildren,
+              ),
+            ),
+          ],
         );
       },
     );

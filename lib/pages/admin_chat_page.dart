@@ -169,13 +169,10 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   void _openChat(String chatId) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => ChatPage(
-          overrideChatId: chatId,
-          userDisplayName: _usersById.containsKey(chatId)
-              ? _displayNameOf(chatId)
-              : null,
-        ),
+      ChatPage.route(
+        overrideChatId: chatId,
+        userDisplayName:
+            _usersById.containsKey(chatId) ? _displayNameOf(chatId) : null,
       ),
     );
   }
