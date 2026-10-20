@@ -45,7 +45,7 @@ const int kFirstFullHour = kStartMinute == 0 ? kStartHour : kStartHour + 1;
 // 900  → 1.30 px/min, less scrolling, two lines only from ~21 min
 // 1200 → 1.74 px/min, current
 // 1980 → 2.87 px/min, large cards, a lot of scrolling
-const double kTotalGridHeight = 1200;
+const double kTotalGridHeight = 1600;
 
 const double kTimeColumnWidth = 50.0; // Width of the time labels column
 const double kDayHeaderHeight = 54.0; // Height for day title + add button
@@ -86,7 +86,7 @@ const double kCardMinFontSize = 7.5;
 
 const String kPostponedMark = '(E)';
 const String kBurnedMark = '(Y)';
-const String kPostponedMarkMeaning = 'Ertelenmiş randevunun ilk tarihi';
+const String kPostponedMarkMeaning = 'Ertelenmiş randevu';
 const String kBurnedMarkMeaning = 'Yakılmış randevu';
 
 // Hoisted formatters (avoid re-creating in every build)

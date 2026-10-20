@@ -111,7 +111,7 @@ class NotificationConstants {
   /// Use {mealLabel} as placeholder for the meal name.
   /// Example: "Kahvaltı öğününüzü yüklediniz mi? Fotoğraf eklemeyi unutmayın!"
   static const String mealReminderBodyTemplate = 
-      '{mealLabel} öğününüzü yüklediniz mi? Fotoğraf eklemeyi unutmayın!';
+      '{mealLabel} öğününüzü yaptınız mı? Fotoğraf eklemeyi unutmayın!';
   
   /// Generates the meal reminder body with the actual meal label.
   static String getMealReminderBody(String mealLabel) {
