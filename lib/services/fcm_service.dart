@@ -398,16 +398,9 @@ class FcmService {
         if (isAdmin) {
           final chatId = (data['chatId'] ?? '').toString();
           if (chatId.isNotEmpty) {
-            navigator.push(MaterialPageRoute(
-              builder: (_) => ChatPage(
-                overrideChatId: chatId,
-                focusMessageId: focusMessageId,
-              ),
-            ));
+            _openAdminChat(navigator, chatId, focusMessageId);
           } else {
-            navigator.push(MaterialPageRoute(
-              builder: (_) => const AdminChatListPage(),
-            ));
+            navigator.push(AdminChatListPage.route());
           }
         } else {
           navigator.push(MaterialPageRoute(
@@ -422,16 +415,9 @@ class FcmService {
 
         final chatId = (data['chatId'] ?? '').toString();
         if (chatId.isNotEmpty) {
-          navigator.push(MaterialPageRoute(
-            builder: (_) => ChatPage(
-              overrideChatId: chatId,
-              focusMessageId: focusMessageId,
-            ),
-          ));
+          _openAdminChat(navigator, chatId, focusMessageId);
         } else {
-          navigator.push(MaterialPageRoute(
-            builder: (_) => const AdminChatListPage(),
-          ));
+          navigator.push(AdminChatListPage.route());
         }
         break;
 
@@ -443,6 +429,35 @@ class FcmService {
         ));
         break;
     }
+  }
+
+  /// Admin'e bildirimdeki sohbeti açar. Admin o an bir sohbetteyse yeni
+  /// sohbet açık sohbetin üstüne açılmaz: açık sohbet (ve üstündekiler)
+  /// kapanır, yeni sohbet sohbet listesinin üstüne açılır; geri tuşu önceki
+  /// sohbete değil sohbet listesine döner. Liste yığında yoksa (ör. sohbete
+  /// Öğün Fotoğrafları'ndan gelinmişti) ana sayfanın üstüne liste açılır.
+  void _openAdminChat(
+    NavigatorState navigator,
+    String chatId,
+    String? focusMessageId,
+  ) {
+    if (_openChatIds.isNotEmpty) {
+      bool chatListKept = false;
+      navigator.popUntil((route) {
+        if (route.settings.name == AdminChatListPage.routeName) {
+          chatListKept = true;
+          return true;
+        }
+        return route.isFirst;
+      });
+      if (!chatListKept) navigator.push(AdminChatListPage.route());
+    }
+    navigator.push(MaterialPageRoute(
+      builder: (_) => ChatPage(
+        overrideChatId: chatId,
+        focusMessageId: focusMessageId,
+      ),
+    ));
   }
 
   /// Try opening pending message after first frame

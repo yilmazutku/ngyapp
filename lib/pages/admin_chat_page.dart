@@ -43,6 +43,16 @@ import '../widgets/search_field.dart';
 class AdminChatListPage extends StatefulWidget {
   const AdminChatListPage({super.key});
 
+  /// Sayfanın rota adı: bildirimden açılan sohbet, gezinti yığınında bu
+  /// sayfayı arar (bkz. [FcmService]).
+  static const String routeName = '/adminChats';
+
+  /// Sayfayı adıyla açan rota; sayfa her yerden bununla açılır.
+  static Route<void> route() => MaterialPageRoute<void>(
+        settings: const RouteSettings(name: routeName),
+        builder: (_) => const AdminChatListPage(),
+      );
+
   @override
   State<AdminChatListPage> createState() => _AdminChatListPageState();
 }
@@ -55,7 +65,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
   static const String _unreadOnlyLabel = 'Okunmamışlar';
   static const String _noMatchText = 'Aramaya uyan sohbet yok.';
   static const String _noUnreadText = 'Okunmamış sohbet yok.';
-  static const String _otherCustomersTitle = 'Listede olmayan danışanlar';
+  static const String _otherCustomersTitle = 'Sohbeti olmayan danışanlar';
   static const String _openChatLabel = 'Sohbeti aç';
 
   /// Flag to ignore the first purely-cached snapshot to avoid showing stale data
@@ -906,7 +916,7 @@ class _InitialsAvatar extends StatelessWidget {
   }
 }
 
-/// Listedeki bölüm başlığı ("Listede olmayan danışanlar").
+/// Listedeki bölüm başlığı ("Sohbeti olmayan danışanlar").
 class _SectionTitle extends StatelessWidget {
   final String text;
 

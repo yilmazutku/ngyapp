@@ -96,6 +96,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   // static const String _mockLabel = 'Test Verisi';
   static const String _searchHint = 'Danışan ara (ad soyad / e-posta)';
   static const String _mealFilterTitle = 'Öğün';
+  static const String _reactionFilterTitle = 'İfade';
+  static const String _unreactedLabel = 'İfade bırakılmayanlar';
+  static const String _noUnreactedText = 'İfade bırakılmamış fotoğraf yok.';
   static const String _loadingText = 'Fotoğraflar yükleniyor...';
   static const String _loadErrorText =
       'Fotoğraflar yüklenemedi. Lütfen tekrar deneyin.';
@@ -229,6 +232,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   String _searchQuery = '';
   Meals? _mealFilter;
+
+  /// Yalnızca hiç ifade bırakılmamış fotoğraflar gösterilsin mi.
+  bool _unreactedOnly = false;
 
   /// Sistemde duran (silinmemiş) test verisi kayıtları. Boş değilse sayfanın
   /// üstünde uyarı şeridi çıkar: test verisi danışanların üstünde unutulmasın.
@@ -479,14 +485,21 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     });
   }
 
-  /// Kart rozetinin tepkilerini yazar; tepki yoksa rozet kalkar.
+  /// Kart rozetinin tepkilerini yazar; tepki yoksa rozet kalkar. "İfade
+  /// bırakılmayanlar" seçiliyse liste de tazelenir: ifade bırakılan fotoğraf
+  /// listeden çıkar.
   void _setReactions(String imageUrl, Map<String, String> reactions) {
     if (reactions.isEmpty) {
       _reactionsByImageUrl.remove(imageUrl);
     } else {
       _reactionsByImageUrl[imageUrl] = reactions;
     }
+    if (_unreactedOnly) _applyFilters();
   }
+
+  /// Fotoğrafa hiç ifade bırakılmamış mı (bkz. [_unreactedOnly]).
+  bool _isUnreacted(MealModel photo) =>
+      _reactionsByImageUrl[photo.imageUrl]?.isEmpty ?? true;
 
   /// Fotoğrafın sohbette mesajı var mı: true/false, henüz bilinmiyorsa
   /// (aranmadı ya da okunamadı) null.
@@ -585,14 +598,16 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     return filter.isSnack ? type.isSnack : type == filter;
   }
 
-  /// Arama ve öğün filtresini uygulayıp [_visibleGroups] sonucunu tazeler.
+  /// Arama, öğün ve ifade filtresini uygulayıp [_visibleGroups] sonucunu
+  /// tazeler.
   ///
   /// Sonuç saklanır: liste her yeniden çizimde değil, yalnızca girdiler
-  /// (yükleme, arama, öğün filtresi) değişince hesaplanır.
+  /// (yükleme, arama, filtreler, ifade filtresi açıkken tepkiler) değişince
+  /// hesaplanır.
   ///
-  /// Arama danışanı listeden çıkarır; öğün filtresi ise danışanı listede
-  /// bırakıp yalnızca fotoğraflarını süzer — böylece "bu öğünü kim yüklememiş"
-  /// de görülebilir.
+  /// Arama danışanı listeden çıkarır; öğün ve ifade filtresi ise danışanı
+  /// listede bırakıp yalnızca fotoğraflarını süzer — böylece "bu öğünü kim
+  /// yüklememiş" de görülebilir.
   void _applyFilters() {
     final List<String> queryWords = searchWordsOf(_searchQuery);
     final List<_ClientPhotoGroup> visible = [];
@@ -603,7 +618,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         continue;
       }
 
-      if (_mealFilter == null) {
+      if (_mealFilter == null && !_unreactedOnly) {
         visible.add(group);
         continue;
       }
@@ -612,13 +627,38 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
         _ClientPhotoGroup(
           group.user,
           group.photos
-              .where((photo) => _matchesMealFilter(photo.mealType))
+              .where((photo) =>
+                  _matchesMealFilter(photo.mealType) &&
+                  (!_unreactedOnly || _isUnreacted(photo)))
               .toList(),
         ),
       );
     }
 
     _visibleGroups = visible;
+  }
+
+  /// Danışanın şeridi boşken yazan not: filtre yoksa günün notu; ifade
+  /// filtresi açıkken fotoğrafları varsa hepsine ifade bırakılmıştır.
+  String _emptyTextFor(_ClientPhotoGroup visibleGroup) {
+    final Meals? mealFilter = _mealFilter;
+    if (_unreactedOnly && _hasFilteredPhotos(visibleGroup.user.userId)) {
+      return _noUnreactedText;
+    }
+    if (mealFilter == null) {
+      return _isToday ? _emptyTodayText : _emptyOtherDayText;
+    }
+    return '"${mealFilter.displayLabel}" öğünü için fotoğraf yüklenmemiş.';
+  }
+
+  /// Danışanın, öğün filtresine uyan (ifade filtresinden önceki) fotoğrafı
+  /// var mı.
+  bool _hasFilteredPhotos(String userId) {
+    for (final _ClientPhotoGroup group in _groups) {
+      if (group.user.userId != userId) continue;
+      return group.photos.any((photo) => _matchesMealFilter(photo.mealType));
+    }
+    return false;
   }
 
   ScrollController _stripControllerFor(String userId) =>
@@ -1192,7 +1232,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     );
   }
 
-  /// Danışan araması + öğün türü filtresi.
+  /// Danışan araması + öğün türü ve ifade filtresi.
   Widget _buildFilters(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -1210,18 +1250,34 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           ),
           const SizedBox(width: 24),
           Expanded(
-            child: FilterChipGroup<Meals>(
-              title: _mealFilterTitle,
-              titleIcon: Icons.restaurant_menu,
-              selectedValue: _mealFilter,
-              options: {
-                for (final Meals meal in _mealFilterOptions)
-                  meal: meal.displayLabel,
-              },
-              onSelected: (meal) => setState(() {
-                _mealFilter = meal;
-                _applyFilters();
-              }),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FilterChipGroup<Meals>(
+                  title: _mealFilterTitle,
+                  titleIcon: Icons.restaurant_menu,
+                  selectedValue: _mealFilter,
+                  options: {
+                    for (final Meals meal in _mealFilterOptions)
+                      meal: meal.displayLabel,
+                  },
+                  onSelected: (meal) => setState(() {
+                    _mealFilter = meal;
+                    _applyFilters();
+                  }),
+                ),
+                const SizedBox(height: 8),
+                FilterChipGroup<bool>(
+                  title: _reactionFilterTitle,
+                  titleIcon: Icons.add_reaction_outlined,
+                  selectedValue: _unreactedOnly ? true : null,
+                  options: const {true: _unreactedLabel},
+                  onSelected: (value) => setState(() {
+                    _unreactedOnly = value == true;
+                    _applyFilters();
+                  }),
+                ),
+              ],
             ),
           ),
         ],
@@ -1295,10 +1351,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
                 photoWidth: photoWidth,
                 stripHeight: stripHeight,
                 isLoadingPhotos: _photosLoading,
-                emptyText: _mealFilter == null
-                    ? (_isToday ? _emptyTodayText : _emptyOtherDayText)
-                    : '"${_mealFilter!.displayLabel}" öğünü için fotoğraf '
-                        'yüklenmemiş.',
+                emptyText: _emptyTextFor(group),
               );
             },
           ),
@@ -1707,7 +1760,7 @@ class _SummaryChip extends StatelessWidget {
 /// Büyük görsel diyaloğunun altındaki satır: fotoğrafın sohbetteki mesajına
 /// hızlı ifade (bırakanın mevcut ifadesi işaretli) ve "Sohbette göster".
 /// Mesaj aranırken gösterge, mesaj yoksa kısa bir not görünür.
-class _PhotoChatActions extends StatefulWidget {
+class _PhotoChatActions extends StatelessWidget {
   final Future<MessageData?> messageFuture;
   final String myUid;
   final String goToChatLabel;
@@ -1739,43 +1792,11 @@ class _PhotoChatActions extends StatefulWidget {
   });
 
   @override
-  State<_PhotoChatActions> createState() => _PhotoChatActionsState();
-}
-
-class _PhotoChatActionsState extends State<_PhotoChatActions> {
-  /// Bu diyalogda bırakılan son ifadeden sonraki tepkiler; null ise
-  /// mesajdaki tepkiler geçerli.
-  Map<String, String>? _reactions;
-  bool _saving = false;
-  bool _failed = false;
-
-  Future<void> _react(MessageData message, String emoji) async {
-    setState(() {
-      _saving = true;
-      _failed = false;
-    });
-    try {
-      final Map<String, String> updated = await widget.onReact(message, emoji);
-      if (!mounted) return;
-      setState(() {
-        _reactions = updated;
-        _saving = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _failed = true;
-      });
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
 
     return FutureBuilder<MessageData?>(
-      future: widget.messageFuture,
+      future: messageFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(
@@ -1790,43 +1811,27 @@ class _PhotoChatActionsState extends State<_PhotoChatActions> {
         final MessageData? message = snapshot.data;
         if (message == null) {
           return Text(
-            snapshot.hasError ? widget.lookupErrorText : widget.noMessageText,
+            snapshot.hasError ? lookupErrorText : noMessageText,
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           );
         }
 
-        final Map<String, String> reactions =
-            _reactions ?? widget.reactionsOf(message);
         return Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
           spacing: 12,
           runSpacing: 8,
           children: [
-            IgnorePointer(
-              ignoring: _saving,
-              child: QuickReactionRow(
-                currentEmoji: reactions[widget.myUid],
-                onSelected: (emoji) => _react(message, emoji),
-                onShowAll: () async {
-                  final String? emoji = await showAllReactionsSheet(
-                    context,
-                    currentEmoji: reactions[widget.myUid],
-                  );
-                  if (emoji != null && mounted) _react(message, emoji);
-                },
-              ),
+            LiveReactionRow(
+              currentEmoji: reactionsOf(message)[myUid],
+              errorText: errorText,
+              onReact: (emoji, _) => onReact(message, emoji),
             ),
             FilledButton.icon(
               icon: const Icon(Icons.chat_bubble_outline),
-              label: Text(widget.goToChatLabel),
-              onPressed: () => widget.onGoToChat(message),
+              label: Text(goToChatLabel),
+              onPressed: () => onGoToChat(message),
             ),
-            if (_failed)
-              Text(
-                widget.errorText,
-                style: TextStyle(color: theme.colorScheme.error),
-              ),
           ],
         );
       },

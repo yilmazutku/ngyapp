@@ -51,6 +51,9 @@ class MealUploadPage extends StatefulWidget {
 
 class _MealUploadPageState extends State<MealUploadPage>
     with WidgetsBindingObserver {
+  static const String _deletingImageText = 'Görsel siliniyor...';
+  static const String _imageDeletedText = 'Silindi!';
+
   Map<Meals, bool> checkedStates = {
     for (var meal in Meals.dietValues) meal: false,
   };
@@ -1236,7 +1239,8 @@ class _MealUploadPageState extends State<MealUploadPage>
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            final mealsWithImages = Meals.dietValues
+            // "Diğer" olarak yüklenenler de en sonda listelenir.
+            final mealsWithImages = Meals.values
                 .where((m) => (_mealImages[m] ?? []).isNotEmpty)
                 .toList();
 
@@ -1358,52 +1362,16 @@ class _MealUploadPageState extends State<MealUploadPage>
                                                       cancelText: 'İptal',
                                                     );
                                                     if (!confirmed) return;
-                                                    if (!mounted) return;
-
-                                                    try {
-                                                      final mealManager =
-                                                          Provider.of<MealManager>(
-                                                              context,
-                                                              listen:
-                                                                  false);
-                                                      await mealManager
-                                                          .deleteMealImage(
-                                                        userId:
-                                                            widget.userId,
-                                                        meal: meal,
-                                                        imageUrlToDelete:
-                                                            url,
-                                                        overrideDate: kDebugMode
-                                                            ? _debugSelectedDate
-                                                            : null,
-                                                      );
-                                                      await _refreshMealImages();
-                                                      if (!mounted) return;
-
-                                                      final imgs =
-                                                          _mealImages[
-                                                                  meal] ??
-                                                              [];
-                                                      if (imgs.isEmpty) {
-                                                        setState(() {
-                                                          checkedStates[
-                                                              meal] = false;
-                                                        });
-                                                      }
-                                                      setSheetState(() {});
-                                                    } catch (e) {
-                                                      // Guarded on ctx, the
-                                                      // sheet's own context.
-                                                      if (ctx.mounted) {
-                                                        await DialogUtils
-                                                            .openError(
-                                                          ctx,
-                                                          title: 'Hata',
-                                                          message:
-                                                              'Görsel silinirken bir hata oluştu.',
-                                                        );
-                                                      }
+                                                    if (!mounted ||
+                                                        !ctx.mounted) {
+                                                      return;
                                                     }
+                                                    await _deleteSheetImage(
+                                                      ctx,
+                                                      meal,
+                                                      url,
+                                                      setSheetState,
+                                                    );
                                                   },
                                                   child: Container(
                                                     decoration:
@@ -1443,6 +1411,56 @@ class _MealUploadPageState extends State<MealUploadPage>
         );
       },
     );
+  }
+
+  /// "Yüklediklerim" penceresinden bir görseli siler: silinirken ilerleme
+  /// çubuğu, bitince "Silindi!" görünür ve gösterge 1 sn sonra kapanır
+  /// ([DialogUtils.openLoadingUntilDone]). Öğünün son görseli silindiyse öğün
+  /// yüklenmemiş sayılır. Diyaloglar pencerenin kendi context'iyle ([ctx])
+  /// açılır.
+  Future<void> _deleteSheetImage(
+    BuildContext ctx,
+    Meals meal,
+    String url,
+    StateSetter setSheetState,
+  ) async {
+    final MealManager mealManager =
+        Provider.of<MealManager>(context, listen: false);
+
+    Future<void> deleteAndRefresh() async {
+      await mealManager.deleteMealImage(
+        userId: widget.userId,
+        meal: meal,
+        imageUrlToDelete: url,
+        overrideDate: kDebugMode ? _debugSelectedDate : null,
+      );
+      await _refreshMealImages();
+    }
+
+    final Future<void> deletion = deleteAndRefresh();
+    await DialogUtils.openLoadingUntilDone(
+      ctx,
+      message: _deletingImageText,
+      doneMessage: _imageDeletedText,
+      task: deletion,
+    );
+
+    try {
+      await deletion;
+      if (!mounted) return;
+      if ((_mealImages[meal] ?? []).isEmpty && checkedStates.containsKey(meal)) {
+        setState(() => checkedStates[meal] = false);
+      }
+      if (ctx.mounted) setSheetState(() {});
+    } catch (e) {
+      if (ctx.mounted) {
+        await DialogUtils.openError(
+          ctx,
+          title: 'Hata',
+          message: 'Görsel silinirken bir hata oluştu.',
+        );
+      }
+    }
   }
 
   /// Shows a full-screen preview of a meal image.

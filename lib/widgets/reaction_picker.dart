@@ -281,6 +281,95 @@ class QuickReactionRow extends StatelessWidget {
   }
 }
 
+/// [QuickReactionRow]'un ifadeyi hemen kaydeden hâli: seçilen ifade
+/// [onReact] ile kaydedilir, kaydedilirken satır dokunulmaz olur, kaydedilince
+/// seçili ifade güncellenir (aynı ifadeye basmak onu kaldırır); kaydedilemezse
+/// altında [errorText] görünür. Öğün Fotoğrafları'ndaki büyük görsel
+/// diyaloğu ve sohbetteki tam ekran fotoğraf bunu kullanır.
+class LiveReactionRow extends StatefulWidget {
+  /// Bakanın şu anki ifadesi.
+  final String? currentEmoji;
+
+  /// [emoji]'yi kaydeder; [currentEmoji] o anki ifadedir (aynıysa kaldırılır).
+  final Future<void> Function(String emoji, String? currentEmoji) onReact;
+
+  final String errorText;
+
+  /// Hata yazısının rengi verilmezse temanın hata rengi kullanılır.
+  final Color? errorColor;
+
+  const LiveReactionRow({
+    super.key,
+    required this.currentEmoji,
+    required this.onReact,
+    required this.errorText,
+    this.errorColor,
+  });
+
+  @override
+  State<LiveReactionRow> createState() => _LiveReactionRowState();
+}
+
+class _LiveReactionRowState extends State<LiveReactionRow> {
+  late String? _current = widget.currentEmoji;
+  bool _saving = false;
+  bool _failed = false;
+
+  Future<void> _react(String emoji) async {
+    final String? current = _current;
+    setState(() {
+      _saving = true;
+      _failed = false;
+    });
+    try {
+      await widget.onReact(emoji, current);
+      if (!mounted) return;
+      setState(() {
+        _current = emoji == current ? null : emoji;
+        _saving = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _failed = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        IgnorePointer(
+          ignoring: _saving,
+          child: QuickReactionRow(
+            currentEmoji: _current,
+            onSelected: _react,
+            onShowAll: () async {
+              final String? emoji =
+                  await showAllReactionsSheet(context, currentEmoji: _current);
+              if (emoji != null && mounted) _react(emoji);
+            },
+          ),
+        ),
+        if (_failed)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              widget.errorText,
+              style: TextStyle(
+                color: widget.errorColor ?? Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// Glyph size used inside the quick pill. Smaller than the sheet's so six
 /// reactions plus the "…" button still fit across a narrow phone without the
 /// pill having to scroll (see [kReactionPillSlotWidth]).
