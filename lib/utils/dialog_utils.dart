@@ -251,4 +251,140 @@ class DialogUtils {
       },
     );
   }
+
+  /// İş sürerken ilerleme çubuğu ve [message], iş bitince onay ikonu ve
+  /// [doneMessage] gösteren, [doneDuration] sonra kendiliğinden kapanan
+  /// diyalog. İş hata verirse diyalog hemen kapanır; hatayı çağıran,
+  /// [task]'ı bekleyerek yakalar ve kendi hata diyaloğunu gösterir. Diyalog
+  /// kapanınca döner.
+  static Future<void> openLoadingUntilDone(
+    BuildContext context, {
+    required String message,
+    required String doneMessage,
+    required Future<void> task,
+    Duration doneDuration = const Duration(seconds: 1),
+  }) async {
+    // Sonuç diyalog açılmadan önce dinlenir: iş hemen hata verse de hata
+    // yakalanmamış sayılmaz.
+    final ValueNotifier<bool?> succeeded = ValueNotifier<bool?>(null);
+    bool closed = false;
+    task.then<void>(
+      (_) {
+        if (!closed) succeeded.value = true;
+      },
+      onError: (Object e) {
+        if (!closed) succeeded.value = false;
+      },
+    );
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) => _LoadingUntilDoneDialog(
+          message: message,
+          doneMessage: doneMessage,
+          succeeded: succeeded,
+          doneDuration: doneDuration,
+        ),
+      );
+    } finally {
+      closed = true;
+      succeeded.dispose();
+    }
+  }
+}
+
+class _LoadingUntilDoneDialog extends StatefulWidget {
+  final String message;
+  final String doneMessage;
+
+  /// İş sürerken null, bitince true, hata verince false.
+  final ValueListenable<bool?> succeeded;
+  final Duration doneDuration;
+
+  const _LoadingUntilDoneDialog({
+    required this.message,
+    required this.doneMessage,
+    required this.succeeded,
+    required this.doneDuration,
+  });
+
+  @override
+  State<_LoadingUntilDoneDialog> createState() =>
+      _LoadingUntilDoneDialogState();
+}
+
+class _LoadingUntilDoneDialogState extends State<_LoadingUntilDoneDialog> {
+  static const double _doneIconSize = 40;
+  static const Duration _switchDuration = Duration(milliseconds: 200);
+
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.succeeded.addListener(_onResult);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onResult());
+  }
+
+  @override
+  void dispose() {
+    widget.succeeded.removeListener(_onResult);
+    super.dispose();
+  }
+
+  Future<void> _onResult() async {
+    final bool? succeeded = widget.succeeded.value;
+    if (!mounted || succeeded == null || _closing) return;
+    _closing = true;
+    final NavigatorState navigator = Navigator.of(context);
+    if (succeeded) {
+      setState(() {});
+      await Future<void>.delayed(widget.doneDuration);
+    }
+    if (mounted) navigator.pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool done = widget.succeeded.value == true;
+
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: AnimatedSwitcher(
+          duration: _switchDuration,
+          child: done
+              ? Column(
+                  key: const ValueKey<bool>(true),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.check_circle,
+                      color: Colors.green.shade600,
+                      size: _doneIconSize,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      widget.doneMessage,
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                )
+              : Column(
+                  key: const ValueKey<bool>(false),
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(widget.message),
+                    const SizedBox(height: 16),
+                    const LinearProgressIndicator(),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
 }

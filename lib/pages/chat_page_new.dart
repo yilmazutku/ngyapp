@@ -1,5 +1,6 @@
 // lib/pages/chat_page_new.dart
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:firebase_auth/firebase_auth.dart';
@@ -27,6 +28,7 @@ import 'package:ngy_app/widgets/full_screen_image_page.dart';
 import 'package:ngy_app/widgets/home_button.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
 import 'package:ngy_app/widgets/meal_thumbnail_image.dart';
+import 'package:ngy_app/widgets/photo_edit_page.dart';
 import 'package:ngy_app/widgets/reaction_badge.dart';
 import 'package:ngy_app/widgets/reaction_picker.dart';
 import 'package:ngy_app/pages/admin_meal_photos_page.dart';
@@ -142,12 +144,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const String _photoDeletedText = 'Fotoğraf silindi.';
   static const String _deletePhotoErrorText =
       'Fotoğraf silinemedi. Lütfen tekrar deneyin.';
-  static const String _copiedText = 'Mesaj kopyalandı.';
-  static const Duration _copiedFeedbackDuration = Duration(seconds: 1);
   static const String _youLabel = 'Siz';
   static const String _officeLabel = 'Diyetisyen';
   static const String _clientFallbackLabel = 'Danışan';
   static const String _chatMenuTooltip = 'Diğer işlemler';
+  static const String _viewerReactErrorText =
+      'İfade kaydedilemedi. Lütfen tekrar deneyin.';
   static const String _deleteChatLabel = 'Sohbeti Sil';
 
   /// Kullanıcı en yeni mesajdan bu kadar yukarı kaydırınca "En yeniye git"
@@ -204,6 +206,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Liste en üste bu kadar piksel kala eski mesajlar istenir.
   static const double _loadOlderThreshold = 400.0;
+
+  /// Kaydırma çubuğunun kalınlığı: parmakla tutulabilsin.
+  static const double _scrollbarThickness = 6.0;
 
   /// Uygulama ön planda mı; arka plandayken gelen mesajlar okunmuş sayılmaz.
   bool _appInForeground = true;
@@ -573,8 +578,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Fotoğraf seçtirir: kameradan tek, galeriden en fazla [limit] tane.
-  /// İzin yoksa ya da vazgeçilirse boş liste döner. Masaüstünde izin sorulmaz
-  /// (galeri dosya seçicidir).
+  /// Kamerayla çekilen fotoğraf göndermeden önce kırpılıp döndürülebilir
+  /// ([showPhotoEditPage]). İzin yoksa ya da vazgeçilirse boş liste döner.
+  /// Masaüstünde izin sorulmaz (galeri dosya seçicidir).
   Future<List<XFile>> _pickImages(ImageSource source, {required int limit}) async {
     if (source == ImageSource.camera) {
       if (!_isDesktopPlatform && !await _checkCameraPermission()) {
@@ -584,7 +590,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.rear,
       );
-      return image == null ? const [] : [image];
+      if (image == null || !mounted) return const [];
+      final XFile? edited = await showPhotoEditPage(context, image);
+      return edited == null ? const [] : [edited];
     }
 
     if (!_isDesktopPlatform && !await _checkPhotoPermission()) {
@@ -1422,12 +1430,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// party that a reaction was left on their message: the office is notified
   /// for a client's reaction, the client for the office's.
   Future<void> _handleToggleReaction(MessageData message, String emoji) async {
-    final chat = context.read<ChatManager>();
-    final current = message.reactions[_currentUid];
-
     try {
-      await chat.toggleReaction(_chatId, message.id, emoji, currentEmoji: current);
-      _refreshOlderMessage(message.id);
+      await _toggleReaction(message, emoji, message.reactions[_currentUid]);
     } catch (e) {
       if (!mounted) return;
       DialogUtils.openError(
@@ -1436,6 +1440,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: 'İfade kaydedilemedi. Lütfen tekrar deneyin.',
       );
     }
+  }
+
+  /// [message]'a [emoji] ifadesini bırakır; [currentEmoji] bakanın o anki
+  /// ifadesidir, aynıysa ifade kaldırılır. Hata çağırana iletilir.
+  Future<void> _toggleReaction(
+    MessageData message,
+    String emoji,
+    String? currentEmoji,
+  ) async {
+    await _chatManager.toggleReaction(
+      _chatId,
+      message.id,
+      emoji,
+      currentEmoji: currentEmoji,
+    );
+    _refreshOlderMessage(message.id);
   }
 
   /// Mesaj menüsünde (uzun basma / sağ tık) seçilen işlem.
@@ -1471,16 +1491,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     ];
   }
 
-  /// Mesajın metnini panoya kopyalar.
+  /// Mesajın metnini panoya kopyalar; ayrıca bilgi gösterilmez.
   void _copyMessage(MessageData message) {
     Clipboard.setData(
       ClipboardData(text: Meals.chatTextForDisplay(message.text ?? '')),
-    );
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(_copiedText),
-        duration: _copiedFeedbackDuration,
-      ),
     );
   }
 
@@ -1498,13 +1512,49 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Fotoğrafı tam ekranda açar: önce küçük görsel görünür, orijinal iner.
-  void _openPhoto(MessageData message) {
+  /// Altında admin danışanın fotoğrafına ifade bırakabilir; danışan kendi
+  /// öğün fotoğrafını silebilir (görüntüleyici kapanır, silme onayı sorulur).
+  Future<void> _openPhoto(MessageData message) async {
     final String? imageUrl = message.imageUrl;
     if (imageUrl == null) return;
 
     final Meals? meal = message.isMealPhoto ? message.photoMeal : null;
     final DateTime? sentAt = message.sentAt;
-    showFullScreenImage<void>(
+    final bool canReact = _isAdminUser && _canReactTo(message);
+    final bool canDelete =
+        _actionsFor(message).contains(MessageAction.deletePhoto);
+
+    WidgetBuilder? bottomBar;
+    if (canReact) {
+      bottomBar = (_) => Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Center(
+              child: LiveReactionRow(
+                currentEmoji: message.reactions[_currentUid],
+                errorText: _viewerReactErrorText,
+                onReact: (emoji, current) =>
+                    _toggleReaction(message, emoji, current),
+              ),
+            ),
+          );
+    } else if (canDelete) {
+      bottomBar = (viewerContext) => Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Center(
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(viewerContext).colorScheme.error,
+                ),
+                icon: Icon(MessageAction.deletePhoto.icon),
+                label: Text(MessageAction.deletePhoto.label),
+                onPressed: () => Navigator.of(viewerContext)
+                    .pop(MessageAction.deletePhoto),
+              ),
+            ),
+          );
+    }
+
+    final MessageAction? action = await showFullScreenImage<MessageAction>(
       context,
       imageUrl: imageUrl,
       thumbUrl: message.thumbUrl,
@@ -1512,7 +1562,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (meal != null) meal.displayLabel,
         if (sentAt != null) DateFormatter.formatLongDateTime(sentAt),
       ].join(' · '),
+      bottomBarBuilder: bottomBar,
     );
+    if (action == MessageAction.deletePhoto && mounted) {
+      await _confirmAndDeleteMealPhoto(message);
+    }
   }
 
   /// Admin: danışanın öğün fotoğrafını Öğün Fotoğrafları'nda, fotoğrafın
@@ -1547,6 +1601,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        centerTitle: true,
         // Başlığa dokununca sohbette yüklenen fotoğrafların galerisi açılır:
         // admin danışanın adına, danışan diyetisyenin adına dokunur.
         title: _opensGalleryFromTitle
@@ -1636,7 +1691,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   ),
                 ),
                 Positioned(
-                  right: 12,
+                  left: 0,
+                  right: 0,
                   bottom: 12,
                   child: _JumpToLatestButton(
                     visible: _showJumpToLatest,
@@ -1690,13 +1746,32 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final int edgeCount = historyEdge == null ? 0 : 1;
     final int pendingCount = pending.length;
 
+    // Her satır kendi anahtarıyla kurulur; yeni mesaj gelince satırlar
+    // listede yer değiştirir ama her biri kendi baloncuğunu korur. Anahtarsız
+    // listede baloncuklar yerlerindeki yeni mesaja dönüşüyor, sağdaki/soldaki
+    // hizası değiştiği için bütün sohbet yana kayıyordu.
+    final Map<Key, int> rowIndexByKey = {
+      for (int index = 0; index < rows.length; index++)
+        rows[index].key: index,
+    };
+    final Map<Key, int> pendingIndexByKey = {
+      for (int index = 0; index < pendingCount; index++)
+        _pendingKey(pending[index]): index,
+    };
+
     if (targetIndex < 0) {
       // Ters listede en altta (en yeni) bekleyen yüklemeler, sonra mesajlar.
-      return _trackLatest(
+      return _withScrollbar(_trackLatest(
         ListView.builder(
           controller: _scrollController,
           reverse: true, // Newest messages at bottom
           itemCount: pendingCount + rows.length + edgeCount,
+          findChildIndexCallback: (key) {
+            final int? row = rowIndexByKey[key];
+            if (row != null) return pendingCount + row;
+            final int? upload = pendingIndexByKey[key];
+            return upload == null ? null : pendingCount - 1 - upload;
+          },
           itemBuilder: (context, i) {
             if (i < pendingCount) {
               return _buildPendingBubble(
@@ -1712,12 +1787,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           },
         ),
         focusLayout: false,
-      );
+      ));
     }
 
     _scheduleFocusReveal();
 
-    return _trackLatest(
+    return _withScrollbar(_trackLatest(
       CustomScrollView(
         controller: _scrollController,
         reverse: true, // Newest messages at bottom
@@ -1731,6 +1806,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   ? _buildRow(rows, targetIndex - 1 - i)
                   : _buildPendingBubble(pending, i - targetIndex, items),
               childCount: targetIndex + pendingCount,
+              findChildIndexCallback: (key) {
+                final int? row = rowIndexByKey[key];
+                if (row != null) {
+                  return row < targetIndex ? targetIndex - 1 - row : null;
+                }
+                final int? upload = pendingIndexByKey[key];
+                return upload == null ? null : targetIndex + upload;
+              },
             ),
           ),
           // Hedef ve ondan eski mesajlar: sıfır noktasından yukarı doğru.
@@ -1741,13 +1824,36 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   ? _buildRow(rows, targetIndex + i)
                   : historyEdge!,
               childCount: rows.length - targetIndex + edgeCount,
+              findChildIndexCallback: (key) {
+                final int? row = rowIndexByKey[key];
+                return row == null || row < targetIndex
+                    ? null
+                    : row - targetIndex;
+              },
             ),
           ),
         ],
       ),
       focusLayout: true,
+    ));
+  }
+
+  /// Uzun sohbette sağda kaydırma çubuğu: üstüne basılı tutup sürükleyerek
+  /// sohbette hızlıca yukarı aşağı gidilir. Liste ile aynı kontrolcüyü
+  /// kullanır.
+  Widget _withScrollbar(Widget list) {
+    return Scrollbar(
+      controller: _scrollController,
+      interactive: true,
+      thickness: _scrollbarThickness,
+      radius: const Radius.circular(_scrollbarThickness),
+      child: list,
     );
   }
+
+  /// Bekleyen yükleme satırının anahtarı (mesaj satırlarınınkinden ayrı).
+  static Key _pendingKey(PendingUpload upload) =>
+      ValueKey<String>('pending:${upload.id}');
 
   /// Baloncukların genişlik sınırları; mesaj ve bekleyen yükleme baloncuğu
   /// aynı ölçüleri kullanır.
@@ -1768,22 +1874,37 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Albümdeki iki fotoğraf arasında en fazla bu kadar süre olabilir.
   static const Duration _albumGap = Duration(minutes: 2);
 
+  /// Albüm en az bu kadar fotoğrafla kurulur; daha azı tek tek görünür.
+  static const int _albumMinPhotos = 4;
+
   /// Mesajları liste satırlarına ayırır (en yeni başta): aynı kişinin arka
   /// arkaya ([_albumGap] içinde, aynı gün) gönderdiği aynı öğünün
-  /// fotoğrafları tek satırda (albüm) toplanır; diğer her mesaj kendi
-  /// satırındadır. Yanıt olan ya da fotoğrafı silinmiş mesaj albüme girmez.
+  /// fotoğrafları, 3'ten fazlaysa ([_albumMinPhotos]) tek satırda (albüm)
+  /// toplanır; diğer her mesaj kendi satırındadır. Yanıt olan ya da
+  /// fotoğrafı silinmiş mesaj albüme girmez.
   static List<_ChatRow> _groupIntoRows(List<MessageData> items) {
     final List<_ChatRow> rows = [];
     List<MessageData> group = [];
+
+    void flush() {
+      if (group.length >= _albumMinPhotos) {
+        rows.add(_ChatRow(group));
+      } else {
+        for (final MessageData message in group) {
+          rows.add(_ChatRow([message]));
+        }
+      }
+    }
+
     for (final MessageData message in items) {
       if (group.isNotEmpty && _joinsAlbum(group, message)) {
         group.add(message);
         continue;
       }
-      if (group.isNotEmpty) rows.add(_ChatRow(group));
+      flush();
       group = [message];
     }
-    if (group.isNotEmpty) rows.add(_ChatRow(group));
+    flush();
     return rows;
   }
 
@@ -1832,9 +1953,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       onDiscard: () => chat.discardUpload(upload),
       onRetry: () => chat.retryUpload(upload),
     );
-    if (!showToday) return bubble;
+    if (!showToday) {
+      return KeyedSubtree(key: _pendingKey(upload), child: bubble);
+    }
 
     return Column(
+      key: _pendingKey(upload),
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1908,8 +2032,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
 
     final String? dayLabel = _dayLabelAbove(rows, index);
-    if (dayLabel == null) return body;
+    if (dayLabel == null) return KeyedSubtree(key: row.key, child: body);
     return Column(
+      key: row.key,
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1942,13 +2067,26 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Open the gallery listing every photo uploaded in this chat. Galeride bir
-  /// fotoğraf için "Sohbette göster" seçilirse sohbet o mesaja gider.
+  /// Galeri penceresinin ekran yüksekliğine oranı; üstte kalan şeride
+  /// basılınca pencere kapanır.
+  static const double _gallerySheetHeightFactor = 0.9;
+
+  /// Open the gallery listing every photo uploaded in this chat. Galeri
+  /// alttan açılan bir pencerededir: dışına basılınca ya da aşağı
+  /// çekilince aşağı kayarak kapanır. Galeride bir fotoğraf için "Sohbette
+  /// göster" seçilirse sohbet o mesaja gider.
   Future<void> _openUserMediaGallery() async {
-    final String? messageId = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => UserMediaGalleryPage(
+    final String? messageId = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      clipBehavior: Clip.antiAlias,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => FractionallySizedBox(
+        heightFactor: _gallerySheetHeightFactor,
+        child: UserMediaGalleryPage(
           userId: _chatId,
           onDeletePhoto: _isAdminUser ? null : _confirmAndDeleteMealPhoto,
         ),
@@ -2028,15 +2166,22 @@ class _BubbleMetrics {
   static const double _imageWidthFactor = 0.65;
   static const double _legacyImageHeightFactor = 0.25;
 
+  /// Fotoğrafın sohbette kapladığı alan bu orana küçültülür (%25 daha az
+  /// yer); en ve boy aynı oranda (alanın karekökü) küçülür, oran bozulmaz.
+  static const double _photoAreaFactor = 0.75;
+  static final double _photoSideFactor = math.sqrt(_photoAreaFactor);
+
   factory _BubbleMetrics.of(Size screen) {
     final double imageWidth =
-        (screen.width * _imageWidthFactor).clamp(0.0, _maxImageWidth);
+        (screen.width * _imageWidthFactor).clamp(0.0, _maxImageWidth) *
+            _photoSideFactor;
     return _BubbleMetrics(
       textMaxWidth:
           (screen.width * _textWidthFactor).clamp(0.0, _maxTextBubbleWidth),
       imageWidth: imageWidth,
       legacyImageHeight:
-          (screen.height * _legacyImageHeightFactor).clamp(0.0, imageWidth),
+          (screen.height * _legacyImageHeightFactor * _photoSideFactor)
+              .clamp(0.0, imageWidth),
     );
   }
 
@@ -2063,6 +2208,10 @@ class _ChatRow {
   MessageData get newest => messages.first;
   MessageData get oldest => messages.last;
   bool get isAlbum => messages.length > 1;
+
+  /// Listedeki anahtarı: en eski mesajın kimliği. Albüme yeni fotoğraf
+  /// eklense de (en yeni değişir) aynı kalır.
+  Key get key => ValueKey<String>('row:${oldest.id}');
 
   bool contains(String messageId) =>
       messages.any((message) => message.id == messageId);
@@ -2134,6 +2283,8 @@ class _AlbumBubble extends StatelessWidget {
         ),
     ];
 
+    // Yalnızca vurgu rengi canlandırılır; hiza canlandırılmaz (bkz.
+    // [_MessageBubble.build]).
     return AnimatedContainer(
       duration: _MessageBubble._highlightFadeDuration,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -2143,33 +2294,35 @@ class _AlbumBubble extends StatelessWidget {
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        width: width + _padding * 2,
-        padding: const EdgeInsets.all(_padding),
-        decoration: BoxDecoration(
-          color: isMe
-              ? _MessageBubble.myBubbleColor
-              : _MessageBubble._otherBubbleColor,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _MealPhotoLabel(
-              meal: newest.photoMeal,
-              text: Meals.chatTextForDisplay(newest.text ?? ''),
-            ),
-            ...gridRows,
-            Padding(
-              padding: const EdgeInsets.fromLTRB(0, 4, 6, 2),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: _MessageTime(message: timeOf),
+      child: Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          width: width + _padding * 2,
+          padding: const EdgeInsets.all(_padding),
+          decoration: BoxDecoration(
+            color: isMe
+                ? _MessageBubble.myBubbleColor
+                : _MessageBubble._otherBubbleColor,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _MealPhotoLabel(
+                meal: newest.photoMeal,
+                text: Meals.chatTextForDisplay(newest.text ?? ''),
               ),
-            ),
-          ],
+              ...gridRows,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 4, 6, 2),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _MessageTime(message: timeOf, isMe: isMe),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2331,7 +2484,7 @@ class _MessageBubble extends StatelessWidget {
   });
 
   /// Kendi mesajlarının baloncuk rengi (bekleyen yüklemeler de bu renkte).
-  static const Color myBubbleColor = Color(0xFFBBDEFB);
+  static const Color myBubbleColor = Color(0xFFDCF8C6);
   static const Color _otherBubbleColor = Color(0xFFE0E0E0);
 
   /// Fotoğraflı baloncuğun iç boşluğu.
@@ -2410,7 +2563,7 @@ class _MessageBubble extends StatelessWidget {
               ),
               child: Align(
                 alignment: Alignment.centerRight,
-                child: _MessageTime(message: message),
+                child: _MessageTime(message: message, isMe: isMe),
               ),
             ),
           ],
@@ -2434,6 +2587,8 @@ class _MessageBubble extends StatelessWidget {
             child: content,
           );
 
+    // Yalnızca vurgu rengi canlandırılır. Hiza canlandırılmaz: gönderen
+    // tarafı değişen bir satır (ör. silinip yeniden kurulan) yana kaymaz.
     return AnimatedContainer(
       duration: _highlightFadeDuration,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -2443,16 +2598,18 @@ class _MessageBubble extends StatelessWidget {
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: align,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          body,
-          // Reactions left on this message (shown to everyone in the chat).
-          if (message.reactions.isNotEmpty)
-            ReactionBadge(reactions: message.reactions),
-        ],
+      child: Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: align,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            body,
+            // Reactions left on this message (shown to everyone in the chat).
+            if (message.reactions.isNotEmpty)
+              ReactionBadge(reactions: message.reactions),
+          ],
+        ),
       ),
     );
   }
@@ -2596,26 +2753,39 @@ class _MealPhotoLabel extends StatelessWidget {
   }
 }
 
-/// Baloncuğun sağ altındaki saat ("14:05"). Mesaj henüz sunucuya
-/// ulaşmadıysa yanında saat ikonu görünür.
+/// Baloncuğun sağ altındaki saat ("14:05"). Kendi mesajında, mesaj henüz
+/// sunucuya ulaşmadıysa yanında saat ikonu, ulaştıysa (gönderildiyse) çift
+/// tik görünür. Tik okundu bilgisi değildir: yalnızca gönderimin başarılı
+/// olduğunu gösterir.
 class _MessageTime extends StatelessWidget {
   final MessageData message;
 
-  const _MessageTime({required this.message});
+  /// Bakanın kendi mesajı mı: gönderim durumu yalnızca onda görünür.
+  final bool isMe;
+
+  const _MessageTime({required this.message, required this.isMe});
 
   static const TextStyle _style = TextStyle(fontSize: 11, color: Colors.black54);
+  static const double _pendingIconSize = 12;
+  static const double _sentIconSize = 15;
 
   @override
   Widget build(BuildContext context) {
     final DateTime? sentAt = message.sentAt;
+    final bool sending = message.createdAt == null;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(sentAt == null ? '' : DateFormatter.formatTime(sentAt),
             style: _style),
-        if (message.createdAt == null) ...[
+        if (sending) ...[
           const SizedBox(width: 3),
-          const Icon(Icons.schedule, size: 12, color: Colors.black45),
+          const Icon(Icons.schedule,
+              size: _pendingIconSize, color: Colors.black45),
+        ] else if (isMe) ...[
+          const SizedBox(width: 3),
+          const Icon(Icons.done_all,
+              size: _sentIconSize, color: Colors.black45),
         ],
       ],
     );
@@ -2657,9 +2827,9 @@ class _DeletedPhotoNote extends StatelessWidget {
   }
 }
 
-/// En yeni mesaja dönüş düğmesi. Kullanıcı eski mesajlara kaydırınca (ya da
-/// sohbet eski bir mesajda açıldıysa) görünür; bu arada gelen okunmamış
-/// mesajların sayısı rozette yazar.
+/// En yeni mesaja dönüş düğmesi, listenin altında ortada. Kullanıcı eski
+/// mesajlara kaydırınca (ya da sohbet eski bir mesajda açıldıysa) görünür; bu
+/// arada gelen okunmamış mesajların sayısı rozette yazar.
 class _JumpToLatestButton extends StatelessWidget {
   final ValueListenable<bool> visible;
   final ValueListenable<int> unreadCount;
@@ -2673,6 +2843,10 @@ class _JumpToLatestButton extends StatelessWidget {
 
   static const String _tooltip = 'En yeniye git';
 
+  /// Küçük düğmenin (40) %30 büyüğü.
+  static const double _size = 52;
+  static const double _iconSize = 31;
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
@@ -2680,16 +2854,24 @@ class _JumpToLatestButton extends StatelessWidget {
       builder: (context, isVisible, _) {
         if (!isVisible) return const SizedBox.shrink();
 
-        return ValueListenableBuilder<int>(
-          valueListenable: unreadCount,
-          builder: (context, count, _) => Badge(
-            isLabelVisible: count > 0,
-            label: Text('$count'),
-            child: FloatingActionButton.small(
-              heroTag: null,
-              tooltip: _tooltip,
-              onPressed: onPressed,
-              child: const Icon(Icons.keyboard_double_arrow_down),
+        return Center(
+          child: ValueListenableBuilder<int>(
+            valueListenable: unreadCount,
+            builder: (context, count, _) => Badge(
+              isLabelVisible: count > 0,
+              label: Text('$count'),
+              child: SizedBox.square(
+                dimension: _size,
+                child: FloatingActionButton(
+                  heroTag: null,
+                  tooltip: _tooltip,
+                  onPressed: onPressed,
+                  child: const Icon(
+                    Icons.keyboard_double_arrow_down,
+                    size: _iconSize,
+                  ),
+                ),
+              ),
             ),
           ),
         );
@@ -2734,6 +2916,9 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
   static const String _sendTooltip = 'Gönder';
   static const String _attachTooltip = 'Ekler';
   static const String _mealUploadLabel = 'Öğün Yükle';
+
+  /// Ek menüsü ve "+" düğmesinin ortak dokunma bölgesi.
+  static const Object _menuTapRegion = _ChatInputRow;
 
   bool _isMenuOpen = false;
   late final AnimationController _animationController;
@@ -2794,13 +2979,16 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
     });
   }
 
+  void _closeMenu() {
+    if (!_isMenuOpen) return;
+    setState(() {
+      _isMenuOpen = false;
+      _animationController.reverse();
+    });
+  }
+
   void _closeMenuAndRun(VoidCallback action) {
-    if (_isMenuOpen) {
-      setState(() {
-        _isMenuOpen = false;
-        _animationController.reverse();
-      });
-    }
+    _closeMenu();
     action();
   }
 
@@ -2816,28 +3004,34 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Expandable attachment menu
+            // Ek menüsü. Ekranda başka bir yere (menü ve "+" dışına)
+            // basılınca aşağı kayarak kapanır.
             AnimatedSize(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeInOut,
+              alignment: Alignment.topCenter,
               child: _isMenuOpen && onMealUpload != null
-                  ? Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _AttachmentOption(
-                            icon: Icons.restaurant_rounded,
-                            label: _mealUploadLabel,
-                            color: Colors.orange,
-                            onTap: () => _closeMenuAndRun(onMealUpload),
-                          ),
-                        ],
+                  ? TapRegion(
+                      groupId: _menuTapRegion,
+                      onTapOutside: (_) => _closeMenu(),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _AttachmentOption(
+                              icon: Icons.restaurant_rounded,
+                              label: _mealUploadLabel,
+                              color: Colors.orange,
+                              onTap: () => _closeMenuAndRun(onMealUpload),
+                            ),
+                          ],
+                        ),
                       ),
                     )
                   : const SizedBox.shrink(),
@@ -2863,16 +3057,21 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
               children: [
                 // Plus button to toggle menu (yalnızca danışanda).
                 if (onMealUpload != null) ...[
-                  RotationTransition(
-                    turns: _rotationAnimation,
-                    child: IconButton(
-                      icon: Icon(
-                        Icons.add_circle_rounded,
-                        color: _isMenuOpen ? colorScheme.primary : null,
-                        size: 28,
+                  // Menüyle aynı bölge: "+"ya basmak menüyü dışarıdan
+                  // kapatmaz, açıp kapatır.
+                  TapRegion(
+                    groupId: _menuTapRegion,
+                    child: RotationTransition(
+                      turns: _rotationAnimation,
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.add_circle_rounded,
+                          color: _isMenuOpen ? colorScheme.primary : null,
+                          size: 28,
+                        ),
+                        onPressed: _toggleMenu,
+                        tooltip: _attachTooltip,
                       ),
-                      onPressed: _toggleMenu,
-                      tooltip: _attachTooltip,
                     ),
                   ),
                   const SizedBox(width: 4),

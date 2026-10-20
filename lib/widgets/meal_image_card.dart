@@ -302,8 +302,8 @@ class _MealReactionBadge extends StatelessWidget {
 
   const _MealReactionBadge({required this.reactions});
 
-  static const double _emojiSize = 12;
-  static const double _countSize = 11;
+  static const double _emojiSize = 18;
+  static const double _countSize = 16.5;
 
   @override
   Widget build(BuildContext context) {
@@ -311,10 +311,10 @@ class _MealReactionBadge extends StatelessWidget {
     if (counts.isEmpty) return const SizedBox.shrink();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
         color: Colors.black54,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(15),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -323,7 +323,7 @@ class _MealReactionBadge extends StatelessWidget {
             Text(entry.key, style: const TextStyle(fontSize: _emojiSize)),
             if (entry.value > 1)
               Padding(
-                padding: const EdgeInsets.only(left: 2),
+                padding: const EdgeInsets.only(left: 3),
                 child: Text(
                   '${entry.value}',
                   style: const TextStyle(

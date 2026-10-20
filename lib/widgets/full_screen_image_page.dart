@@ -76,6 +76,14 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
   static const String _closeTooltip = 'Kapat';
   static const String _loadErrorText = 'Görsel yüklenemedi';
 
+  /// Başlık (öğün ve saat) fotoğrafın üstünde dikkat çeksin diye kalın ve
+  /// koyu zeminde.
+  static const TextStyle _titleStyle = TextStyle(
+    color: Colors.white,
+    fontSize: 15,
+    fontWeight: FontWeight.bold,
+  );
+
   final TransformationController _transformation = TransformationController();
   late final AnimationController _springBack;
   Animation<double>? _springBackAnimation;
@@ -183,12 +191,17 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
               if (bottomBarBuilder != null)
                 Align(
                   alignment: Alignment.bottomCenter,
-                  child: Container(
-                    width: double.infinity,
-                    color: Colors.black54,
-                    child: SafeArea(
-                      top: false,
-                      child: bottomBarBuilder(context),
+                  // Çubuk koyu zeminde: içindeki düğmeler ve yazılar koyu
+                  // temayla çizilir.
+                  child: Theme(
+                    data: ThemeData.dark(useMaterial3: true),
+                    child: Container(
+                      width: double.infinity,
+                      color: Colors.black54,
+                      child: SafeArea(
+                        top: false,
+                        child: Builder(builder: bottomBarBuilder),
+                      ),
                     ),
                   ),
                 ),
@@ -224,16 +237,16 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
                 Flexible(
                   child: Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(16),
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(18),
                     ),
                     child: Text(
                       title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white),
+                      style: _titleStyle,
                     ),
                   ),
                 ),

@@ -508,10 +508,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _navigateToChat(BuildContext context, String userId, bool isAdmin) async {
     if (!context.mounted) return;
     if (isAdmin) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const AdminChatListPage()),
-      );
+      Navigator.push(context, AdminChatListPage.route());
     } else {
       Navigator.push(
         context,

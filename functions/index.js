@@ -463,6 +463,45 @@ function buildAdminReactionBody(message, emoji) {
 }
 
 /**
+ * Map field on a message document recording who has already been notified
+ * about: `reactionNotified.<reactorUid> = true`. Written by the reaction
+ * functions below (the app never writes it), so a reactor's later changes —
+ * including removing the reaction and leaving another one — never send a
+ * second notification for the same message.
+ */
+const REACTION_NOTIFIED_FIELD = 'reactionNotified';
+
+/**
+ * Whether [reactorUid] was already notified about on this message.
+ * @param {Object} message Message document data.
+ * @param {string} reactorUid UID of the person who reacted.
+ * @return {boolean} True if a notification was already sent.
+ */
+function reactionAlreadyNotified(message, reactorUid) {
+  const notified = message[REACTION_NOTIFIED_FIELD];
+  return !!(notified && typeof notified === 'object' && notified[reactorUid]);
+}
+
+/**
+ * Marks [reactorUid]'s reaction on the message as notified (see
+ * REACTION_NOTIFIED_FIELD). Returns false if it already was (e.g. a
+ * concurrent invocation won the race), in which case nothing is sent.
+ * @param {DocumentReference} messageRef The message document.
+ * @param {string} reactorUid UID of the person who reacted.
+ * @return {Promise<boolean>} True if this call claimed the notification.
+ */
+async function claimReactionNotification(messageRef, reactorUid) {
+  return admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(messageRef);
+    if (!snap.exists || reactionAlreadyNotified(snap.data(), reactorUid)) {
+      return false;
+    }
+    tx.update(messageRef, {[`${REACTION_NOTIFIED_FIELD}.${reactorUid}`]: true});
+    return true;
+  });
+}
+
+/**
  * Sends a push notification to the user when an admin leaves (or changes) a
  * reaction on one of the user's messages.
  *
@@ -471,7 +510,10 @@ function buildAdminReactionBody(message, emoji) {
  * creation is handled by the functions above) and only notifies when a *new*
  * reaction authored by an admin appears on a message the user sent. Changing
  * an existing reaction (e.g. correcting 👍 to ❤️) or removing it does not
- * notify, so a correction never sends the user a second notification.
+ * notify, and each admin notifies at most once per message (see
+ * REACTION_NOTIFIED_FIELD), so a correction — even one made by removing the
+ * reaction and leaving a new one — never sends the user a second
+ * notification.
  *
  * Path: chats/{chatId}/messages/{messageId}. In our model chatId == user UID
  * (the receiver of the notification).
@@ -501,15 +543,21 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
 
       // Find a newly added reaction authored by an admin.
       let emoji = null;
+      let reactorUid = null;
       for (const [uid, value] of Object.entries(afterReactions)) {
         if (!ADMIN_UIDS.has(uid)) continue; // only admin reactions notify
         if (beforeReactions[uid]) continue; // had one: unchanged or changed
+        if (reactionAlreadyNotified(after, uid)) continue; // re-added
         emoji = value; // newly added
+        reactorUid = uid;
       }
 
       // Nothing new from an admin (e.g. a change, a removal, or a non-admin
       // reaction).
       if (!emoji) return;
+      if (!await claimReactionNotification(event.data.after.ref, reactorUid)) {
+        return;
+      }
 
       const userDoc = await admin.firestore()
           .collection('users')
@@ -569,7 +617,8 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
  * Mirror of notifyUserOnAdminReaction: same message-update trigger and same
  * "newly added reaction" detection, but the reactor must be the chat's own
  * user and the reacted-to message must have been sent by an admin. Changing or
- * removing a reaction does not notify.
+ * removing a reaction does not notify, and the user notifies at most once per
+ * message (see REACTION_NOTIFIED_FIELD).
  *
  * Path: chats/{chatId}/messages/{messageId}. In our model chatId == user UID
  * (the reactor).
@@ -603,6 +652,11 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
       if (!emoji) return; // no reaction, or it was removed
       // Had one already: unchanged, or changed (a correction does not notify).
       if (beforeReactions[chatId]) return;
+      // Removed and left again: already notified for this message.
+      if (reactionAlreadyNotified(after, chatId)) return;
+      if (!await claimReactionNotification(event.data.after.ref, chatId)) {
+        return;
+      }
 
       // Collect admin tokens (single token per admin)
       const tokens = [];
