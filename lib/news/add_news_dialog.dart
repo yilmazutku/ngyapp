@@ -169,7 +169,7 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
       loading?.close();
 
       if (mounted) {
-        Navigator.of(context).pop();
+        DialogUtils.closeOwnRoute(context);
         widget.onSaved?.call();
         
         ScaffoldMessenger.of(context).showSnackBar(

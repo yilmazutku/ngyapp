@@ -247,7 +247,7 @@ class _DetailsTabState extends State<DetailsTab>
 
       // Leave the now-invalid summary page and tell the caller which user was
       // removed so the list can drop the row.
-      if (mounted) Navigator.of(context).pop(user.userId);
+      if (mounted) DialogUtils.closeOwnRoute(context, user.userId);
     } catch (e) {
       loading?.close();
       if (mounted) {

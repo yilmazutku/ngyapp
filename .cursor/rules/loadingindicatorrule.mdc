@@ -20,6 +20,10 @@ alwaysApply: true
     close() removes only the loading dialog, needs no context or mounted check
     and is safe to call more than once.
 
+  - If the page (or dialog) closes itself when the work is done, use
+      DialogUtils.closeOwnRoute(context);            // or (context, result)
+    instead of Navigator.pop: for the same reason it removes only its own route.
+
   - Wrap async work in try / catch / finally:
     - In try: perform the operation.
     - On success:

@@ -346,6 +346,16 @@ class DialogUtils {
     return LoadingDialog._(navigator, route);
   }
 
+  /// [context]'in kendi sayfasını ya da diyaloğunu [result] ile kapatır (bkz.
+  /// [_closeRoute]): iş bitince sayfa kendini kapatırken, bu arada
+  /// bildirimden üstüne açılan sayfa kapanmaz.
+  static void closeOwnRoute(BuildContext context, [Object? result]) {
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
+    final NavigatorState? navigator = route?.navigator;
+    if (route == null || navigator == null) return;
+    _closeRoute(navigator, route, result);
+  }
+
   /// İş sürerken ilerleme çubuğu ve [message], iş bitince onay ikonu ve
   /// [doneMessage] gösteren, [doneDuration] sonra kendiliğinden kapanan
   /// diyalog. İş hata verirse diyalog hemen kapanır; hatayı çağıran,
@@ -404,24 +414,28 @@ class LoadingDialog {
   /// Diyalog hâlâ açık mı.
   bool get isOpen => !_closed && _route.isActive;
 
-  /// Yalnızca bu diyaloğu kapatır (bkz. [_closeDialogRoute]). `BuildContext`
+  /// Yalnızca bu diyaloğu kapatır (bkz. [_closeRoute]). `BuildContext`
   /// istemez: sayfa kapanmış olsa da (ör. `finally` içinde) çağrılabilir;
   /// ikinci çağrı bir şey yapmaz.
   void close() {
     if (_closed) return;
     _closed = true;
-    _closeDialogRoute(_navigator, _route);
+    _closeRoute(_navigator, _route);
   }
 }
 
-/// [route]'u kapatır: en üstteyse `pop` edilir; üstüne başka bir sayfa
-/// açıldıysa (ör. bildirimden sohbet) o sayfa değil, yalnızca [route]
-/// kaldırılır; zaten kapandıysa bir şey yapılmaz.
-void _closeDialogRoute(NavigatorState navigator, Route<dynamic> route) {
+/// [route]'u [result] ile kapatır: en üstteyse `pop` edilir; üstüne başka
+/// bir sayfa açıldıysa (ör. bildirimden sohbet) o sayfa değil, yalnızca
+/// [route] kaldırılır; zaten kapandıysa bir şey yapılmaz.
+void _closeRoute(
+  NavigatorState navigator,
+  Route<dynamic> route, [
+  Object? result,
+]) {
   if (route.isCurrent) {
-    navigator.pop();
+    navigator.pop(result);
   } else if (route.isActive) {
-    navigator.removeRoute(route);
+    navigator.removeRoute(route, result);
   }
 }
 
@@ -475,7 +489,7 @@ class _LoadingUntilDoneDialogState extends State<_LoadingUntilDoneDialog> {
       await Future<void>.delayed(widget.doneDuration);
     }
     if (!mounted || route == null) return;
-    _closeDialogRoute(navigator, route);
+    _closeRoute(navigator, route);
   }
 
   @override

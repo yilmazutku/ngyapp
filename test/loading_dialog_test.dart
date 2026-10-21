@@ -188,4 +188,61 @@ void main() {
     await tester.pumpAndSettle();
     await expectOnlyDialogRemoved(tester);
   });
+
+  testWidgets(
+      'closeOwnRoute: sayfa kendini sonucuyla kapatır; üstüne açılan sayfa kalır',
+      (tester) async {
+    late BuildContext ownerContext;
+    late NavigatorState navigator;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        navigator = Navigator.of(context);
+        return const Text(homePage);
+      }),
+    ));
+    final Future<Object?> ownerResult = navigator.push<Object?>(
+      MaterialPageRoute<Object?>(builder: (context) {
+        ownerContext = context;
+        return const Text(ownerPage);
+      }),
+    );
+    await tester.pumpAndSettle();
+    navigator.push<void>(
+        MaterialPageRoute<void>(builder: (_) => const Text(topPage)));
+    await tester.pumpAndSettle();
+
+    DialogUtils.closeOwnRoute(ownerContext, 'u1');
+    await tester.pumpAndSettle();
+    expect(find.text(topPage), findsOneWidget);
+    expect(await ownerResult, 'u1');
+
+    navigator.pop();
+    await tester.pumpAndSettle();
+    expect(find.text(homePage), findsOneWidget);
+    expect(find.text(ownerPage), findsNothing);
+  });
+
+  testWidgets('closeOwnRoute: sayfa en üstteyse pop gibi kapanır',
+      (tester) async {
+    late BuildContext ownerContext;
+    late NavigatorState navigator;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        navigator = Navigator.of(context);
+        return const Text(homePage);
+      }),
+    ));
+    final Future<Object?> ownerResult = navigator.push<Object?>(
+      MaterialPageRoute<Object?>(builder: (context) {
+        ownerContext = context;
+        return const Text(ownerPage);
+      }),
+    );
+    await tester.pumpAndSettle();
+
+    DialogUtils.closeOwnRoute(ownerContext);
+    await tester.pumpAndSettle();
+    expect(find.text(homePage), findsOneWidget);
+    expect(await ownerResult, isNull);
+  });
 }

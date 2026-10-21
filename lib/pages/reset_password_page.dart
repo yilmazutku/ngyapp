@@ -116,7 +116,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
         );
         // Re-checked after the await: the widget may be gone by now.
         if (!mounted) return;
-        Navigator.of(context).pop();
+        DialogUtils.closeOwnRoute(context);
       }
     } catch (e) {
       loading?.close();

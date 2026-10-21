@@ -500,7 +500,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       // Return to the previous screen (the chat list or Öğün Fotoğrafları)
       // now that this chat no longer exists.
       if (mounted) {
-        Navigator.of(context).pop();
+        DialogUtils.closeOwnRoute(context);
       }
     } catch (e) {
       loading?.close();
