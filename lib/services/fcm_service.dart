@@ -11,6 +11,7 @@ import '../constants/app_constants.dart';
 import '../pages/admin_chat_page.dart';
 import '../pages/chat_page_new.dart';
 import '../news/news_list_page.dart';
+import 'notification_tap_gate.dart';
 import 'open_chats.dart';
 
 /// Background message handler - must be top-level function
@@ -92,8 +93,11 @@ class FcmService {
   // Global navigator key for notification tap navigation
   GlobalKey<NavigatorState>? _navigatorKey;
 
-  // Pending message to open (when app launched from notification)
-  RemoteMessage? _pendingMessage;
+  /// Bildirime basınca açılacak sayfa ancak ana sayfa açıkken ve güncelleme
+  /// ekranı engellemiyorken açılır; o zamana kadar bekletilir (bkz.
+  /// [NotificationTapGate]).
+  late final NotificationTapGate _tapGate =
+      NotificationTapGate(onOpen: _handleNotificationTap);
 
   // Overlay entry for in-app notification banner
   OverlayEntry? _currentBanner;
@@ -143,14 +147,16 @@ class FcmService {
     // Handle app launch from terminated state
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
-      _pendingMessage = initialMessage;
+      _tapGate.open(initialMessage.data);
     }
 
     // Listen to auth state changes to save token when user logs in
     _auth.authStateChanges().listen((user) {
       if (user != null) {
         saveFcmToken();
-        _tryOpenPendingMessage();
+      } else {
+        // Oturum kapandı: bekleyen bildirim açılmaz.
+        _tapGate.clearPending();
       }
     });
 
@@ -321,7 +327,7 @@ class FcmService {
             : Color(NotificationConstants.chatNotificationBannerAccentColor),
         onTap: () {
           _dismissCurrentBanner();
-          _handleNotificationTap(data);
+          _tapGate.open(data);
         },
         onDismiss: _dismissCurrentBanner,
       ),
@@ -360,25 +366,10 @@ class FcmService {
       }
     }
     
-    _pendingMessage = message;
-    _tryOpenPendingMessage();
+    _tapGate.open(message.data);
     
     // Clear badge when user taps a notification
     clearBadge();
-  }
-
-  /// Try to open pending message (navigate to appropriate page)
-  void _tryOpenPendingMessage() {
-    final navigator = _navigatorKey?.currentState;
-    final user = _auth.currentUser;
-    final message = _pendingMessage;
-
-    if (navigator == null || user == null || message == null) return;
-
-    // Clear pending message to prevent double-open
-    _pendingMessage = null;
-
-    _handleNotificationTap(message.data);
   }
 
   /// Handle notification tap navigation
@@ -468,15 +459,17 @@ class FcmService {
     );
   }
 
-  /// Try opening pending message after first frame
-  /// Call this in main() after runApp() using addPostFrameCallback
-  void tryOpenPendingMessageAfterFrame() {
-    if (!isSupported) return;
-    
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _tryOpenPendingMessage();
-    });
-  }
+  /// Ana sayfa ([page]) açıldı; ilk karesinden sonra çağrılır. Bekleyen
+  /// bildirim varsa şimdi açılır.
+  void markHomeReady(Object page) => _tapGate.homeShown(page);
+
+  /// Ana sayfa ([page]) kapandı.
+  void markHomeGone(Object page) => _tapGate.homeGone(page);
+
+  /// Güncelleme ekranı uygulamayı engelliyor mu (bkz. `AppUpdateGate`);
+  /// engel kalkınca bekleyen bildirim açılır.
+  void setUpdateBlocking(bool blocking) =>
+      _tapGate.setUpdateBlocking(blocking);
 
   /// Save FCM token to Firestore for current user.
   /// Uses a single token per user (overwrites previous token).

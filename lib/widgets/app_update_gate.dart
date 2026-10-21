@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../constants/app_constants.dart';
 import '../models/app_update_info.dart';
 import '../providers/app_update_provider.dart';
+import '../services/fcm_service.dart';
 import '../utils/dialog_utils.dart';
 
 /// Runs the "is there a newer version?" check once the first frame is on
@@ -53,6 +54,9 @@ class _AppUpdateGateState extends State<AppUpdateGate>
     super.initState();
     // Desktop: nothing to observe and nothing to check.
     if (!AppUpdateProvider.isSupported) return;
+    // İlk denetim bitene ve zorunlu güncelleme ekranı kalkana kadar bildirim
+    // sayfa açmaz: açsaydı sayfa güncelleme ekranının üstünde kalırdı.
+    FcmService().setUpdateBlocking(true);
     WidgetsBinding.instance.addObserver(this);
     // After the first frame: the app is already on screen and the auth stream
     // is already running, so nothing waits on this.
@@ -65,6 +69,10 @@ class _AppUpdateGateState extends State<AppUpdateGate>
     // symmetric with initState makes the desktop path obvious.
     if (AppUpdateProvider.isSupported) {
       WidgetsBinding.instance.removeObserver(this);
+      // Engel bu ekranla birlikte kalkar. Bekleyen bildirim ağaç kilitliyken
+      // (dispose sırasında) sayfa açmasın diye kareden sonra.
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => FcmService().setUpdateBlocking(false));
     }
     super.dispose();
   }
@@ -97,6 +105,7 @@ class _AppUpdateGateState extends State<AppUpdateGate>
       if (_blockingUpdate != null) {
         setState(() => _blockingUpdate = null);
       }
+      FcmService().setUpdateBlocking(false);
       if (info != null) {
         await _promptOptionalUpdate(info);
       }
