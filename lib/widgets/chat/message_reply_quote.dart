@@ -14,12 +14,21 @@ class MessageReplyQuote extends StatelessWidget {
   /// Verilirse alıntıya dokununca çağrılır (ör. yanıtlanan mesaja gitmek).
   final VoidCallback? onTap;
 
+  /// Baloncuğun içindeyken baloncuğun renklerine uyması için (bkz.
+  /// `ChatBubbleStyle`); verilmeyen renk temadan gelir.
+  final Color? background;
+  final Color? accentColor;
+  final Color? textColor;
+
   const MessageReplyQuote({
     super.key,
     required this.senderLabel,
     required this.text,
     this.imageUrl,
     this.onTap,
+    this.background,
+    this.accentColor,
+    this.textColor,
   });
 
   static const String _photoLabel = 'Fotoğraf';
@@ -29,12 +38,14 @@ class MessageReplyQuote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final Color accent = theme.colorScheme.primary;
+    final Color accent = accentColor ?? theme.colorScheme.primary;
+    final TextStyle? bodyStyle =
+        theme.textTheme.bodySmall?.copyWith(color: textColor);
     final String? image = imageUrl;
     final bool photoOnly = text.isEmpty && image != null;
 
     return Material(
-      color: Colors.black.withValues(alpha: 0.05),
+      color: background ?? Colors.black.withValues(alpha: 0.05),
       borderRadius: BorderRadius.circular(8),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -68,10 +79,11 @@ class MessageReplyQuote extends StatelessWidget {
                             Icon(
                               Icons.photo_outlined,
                               size: 14,
-                              color: theme.colorScheme.onSurfaceVariant,
+                              color: textColor ??
+                                  theme.colorScheme.onSurfaceVariant,
                             ),
                             const SizedBox(width: 4),
-                            Text(_photoLabel, style: theme.textTheme.bodySmall),
+                            Text(_photoLabel, style: bodyStyle),
                           ],
                         )
                       else
@@ -79,7 +91,7 @@ class MessageReplyQuote extends StatelessWidget {
                           text,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
+                          style: bodyStyle,
                         ),
                     ],
                   ),

@@ -20,6 +20,7 @@ import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/pending_upload.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
+import 'package:ngy_app/widgets/chat/chat_bubble_style.dart';
 import 'package:ngy_app/widgets/chat/chat_date_separator.dart';
 import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/chat/message_reply_quote.dart';
@@ -1959,7 +1960,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       key: ValueKey<String>(upload.id),
       upload: upload,
       photoSizeOf: _bubbleMetrics().photoSize,
-      bubbleColor: _MessageBubble.myBubbleColor,
       onDiscard: () => chat.discardUpload(upload),
       onRetry: () => chat.retryUpload(upload),
     );
@@ -2310,9 +2310,7 @@ class _AlbumBubble extends StatelessWidget {
           width: width + _padding * 2,
           padding: const EdgeInsets.all(_padding),
           decoration: BoxDecoration(
-            color: isMe
-                ? _MessageBubble.myBubbleColor
-                : _MessageBubble._otherBubbleColor,
+            color: ChatBubbleStyle.of(isMe: isMe).background,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
@@ -2321,6 +2319,7 @@ class _AlbumBubble extends StatelessWidget {
             children: [
               _MealPhotoLabel(
                 meal: newest.photoMeal,
+                style: ChatBubbleStyle.of(isMe: isMe),
                 text: Meals.chatTextForDisplay(newest.text ?? ''),
               ),
               ...gridRows,
@@ -2493,10 +2492,6 @@ class _MessageBubble extends StatelessWidget {
     required this.onReplyTap,
   });
 
-  /// Kendi mesajlarının baloncuk rengi (bekleyen yüklemeler de bu renkte).
-  static const Color myBubbleColor = Color(0xFFDCF8C6);
-  static const Color _otherBubbleColor = Color(0xFFE0E0E0);
-
   /// Fotoğraflı baloncuğun iç boşluğu.
   static const double _photoPadding = 4;
 
@@ -2507,7 +2502,7 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color bubbleColor = isMe ? myBubbleColor : _otherBubbleColor;
+    final ChatBubbleStyle style = ChatBubbleStyle.of(isMe: isMe);
     final CrossAxisAlignment align =
         isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     // Uygulamanın yazdığı öğün açıklamaları eski mesajlarda da güncel adla
@@ -2528,7 +2523,7 @@ class _MessageBubble extends StatelessWidget {
           ? const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
           : const EdgeInsets.all(_photoPadding),
       decoration: BoxDecoration(
-        color: bubbleColor,
+        color: style.background,
         borderRadius: BorderRadius.circular(12),
       ),
       // Metin baloncuğunun genişliği içeriğe göre (kısa mesajın baloncuğu
@@ -2548,12 +2543,17 @@ class _MessageBubble extends StatelessWidget {
                   text: reply.text,
                   imageUrl: reply.imageUrl,
                   onTap: () => onReplyTap(reply.messageId),
+                  background: style.quoteBackground,
+                  accentColor: style.quoteAccent,
+                  textColor: style.quoteText,
                 ),
               ),
-            if (isMealPhoto) _MealPhotoLabel(meal: message.photoMeal, text: text),
+            if (isMealPhoto)
+              _MealPhotoLabel(
+                  meal: message.photoMeal, text: text, style: style),
             if (imageUrl != null) _buildPhoto(imageUrl),
             if (message.photoDeleted)
-              _DeletedPhotoNote(text: text)
+              _DeletedPhotoNote(text: text, style: style)
             else if (text.isNotEmpty && !isMealPhoto)
               Padding(
                 padding: EdgeInsets.fromLTRB(
@@ -2562,7 +2562,10 @@ class _MessageBubble extends StatelessWidget {
                   imageUrl == null ? 0 : 6,
                   0,
                 ),
-                child: Text(text, style: const TextStyle(fontSize: 15)),
+                child: Text(
+                  text,
+                  style: TextStyle(fontSize: 15, color: style.text),
+                ),
               ),
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -2732,12 +2735,20 @@ class _MealPhotoLabel extends StatelessWidget {
   /// Öğün çözülemezse gösterilen açıklama ("Öğün: Öğle").
   final String text;
 
-  const _MealPhotoLabel({required this.meal, required this.text});
+  final ChatBubbleStyle style;
+
+  const _MealPhotoLabel({
+    required this.meal,
+    required this.text,
+    required this.style,
+  });
 
   @override
   Widget build(BuildContext context) {
     final Meals? meal = this.meal;
-    final Color color = meal == null ? Colors.black54 : mealTypeColor(meal);
+    final Color color = meal == null
+        ? style.secondaryText
+        : style.mealLabel(mealTypeColor(meal));
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(6, 2, 6, 6),
@@ -2775,7 +2786,7 @@ class _MessageTime extends StatelessWidget {
 
   const _MessageTime({required this.message, required this.isMe});
 
-  static const TextStyle _style = TextStyle(fontSize: 11, color: Colors.black54);
+  static const double _fontSize = 11;
   static const double _pendingIconSize = 12;
   static const double _sentIconSize = 15;
 
@@ -2783,19 +2794,18 @@ class _MessageTime extends StatelessWidget {
   Widget build(BuildContext context) {
     final DateTime? sentAt = message.sentAt;
     final bool sending = message.createdAt == null;
+    final Color color = ChatBubbleStyle.of(isMe: isMe).secondaryText;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(sentAt == null ? '' : DateFormatter.formatTime(sentAt),
-            style: _style),
+            style: TextStyle(fontSize: _fontSize, color: color)),
         if (sending) ...[
           const SizedBox(width: 3),
-          const Icon(Icons.schedule,
-              size: _pendingIconSize, color: Colors.black45),
+          Icon(Icons.schedule, size: _pendingIconSize, color: color),
         ] else if (isMe) ...[
           const SizedBox(width: 3),
-          const Icon(Icons.done_all,
-              size: _sentIconSize, color: Colors.black45),
+          Icon(Icons.done_all, size: _sentIconSize, color: color),
         ],
       ],
     );
@@ -2807,7 +2817,9 @@ class _MessageTime extends StatelessWidget {
 class _DeletedPhotoNote extends StatelessWidget {
   final String text;
 
-  const _DeletedPhotoNote({required this.text});
+  final ChatBubbleStyle style;
+
+  const _DeletedPhotoNote({required this.text, required this.style});
 
   static const double _iconSize = 16;
 
@@ -2816,19 +2828,19 @@ class _DeletedPhotoNote extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
+        Icon(
           Icons.hide_image_outlined,
           size: _iconSize,
-          color: Colors.black45,
+          color: style.secondaryText,
         ),
         const SizedBox(width: 6),
         Flexible(
           child: Text(
             text,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               fontStyle: FontStyle.italic,
-              color: Colors.black54,
+              color: style.secondaryText,
             ),
           ),
         ),
