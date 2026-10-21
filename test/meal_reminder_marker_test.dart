@@ -40,23 +40,27 @@ void main() {
     });
   });
 
-  group('Fotoğraf yüklenince hatırlatma o gün kalıcı olarak kapanır', () {
-    test('yükleme işareti yazar; son fotoğrafın silinmesi onu geri almaz', () {
-      // Yükleme (MealManager.uploadMealImg).
+  // Gün dokümanına yazılan alanların (MealManager.mealStateFields) birleşince
+  // hatırlatmayı nasıl etkilediği. Sohbetten yükleme photoUploaded: true ile,
+  // silme photoUploaded vermeden yazar.
+  group('mealStateFields ile mealsWithoutReminder birlikte', () {
+    test('yükleme işareti, son fotoğrafın silinme yazımıyla geri alınmaz', () {
+      // Sohbetten yükleme.
       Map<String, dynamic> day = _merge(
         {},
         MealManager.mealStateFields(Meals.lunch, true, photoUploaded: true),
       );
       expect(MealReminderService.mealsWithoutReminder(day), {Meals.lunch});
 
-      // Öğünün son fotoğrafı silindi (MealManager.deleteMealImage): öğün
-      // işaretsiz olur ama hatırlatma geri gelmez.
+      // Öğünün son fotoğrafı silindi: öğün işaretsiz olur ama hatırlatma geri
+      // gelmez.
       day = _merge(day, MealManager.mealStateFields(Meals.lunch, false));
       expect(day['meals'], {'lunch': false});
       expect(MealReminderService.mealsWithoutReminder(day), {Meals.lunch});
     });
 
-    test('elle işaretleme kalıcı işaret yazmaz', () {
+    test('photoUploaded vermeyen yazım (elle işaretleme, test verisi) kalıcı '
+        'işaret yazmaz', () {
       Map<String, dynamic> day =
           _merge({}, MealManager.mealStateFields(Meals.dinner, true));
       day = _merge(day, MealManager.mealStateFields(Meals.dinner, false));

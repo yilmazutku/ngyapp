@@ -299,6 +299,7 @@ Future<bool> uploadChatMealPhoto(
       subscriptionId: userId,
       overrideDate: upload.createdAt,
       alsoPostToChat: true,
+      cancelsReminder: true,
       chatManager: chatManager,
       observer: upload,
     );
@@ -328,6 +329,11 @@ Future<bool> uploadChatMealPhoto(
 /// [observer] yüklemenin ilerlemesini izler ve iptal edebilir (bkz.
 /// [uploadImageWithThumbnail]); iptal edilirse kayıt yazılmaz ve
 /// [UploadCancelledException] fırlatılır.
+///
+/// [cancelsReminder] true ise öğünün o günkü hatırlatması kalıcı olarak
+/// kapanır (bkz. [mealStateFields]). Yalnızca danışanın sohbetten yüklemesi
+/// ([uploadChatMealPhoto]) verir; admin test verisi danışanın hatırlatmasını
+/// kapatmaz, test verisi silinince hatırlatma geri gelir.
 Future<String?> uploadMealImg({
   required String userId,
   required Meals meal,
@@ -335,6 +341,7 @@ Future<String?> uploadMealImg({
   required String subscriptionId,
   DateTime? overrideDate,
   bool alsoPostToChat = false,
+  bool cancelsReminder = false,
   ChatManager? chatManager,
   UploadObserver? observer,
 }) async {
@@ -414,7 +421,8 @@ Future<String?> uploadMealImg({
     Object? chatPostError;
     final Future<void> writes = Future.wait([
       mealDocRef.set(mergedMealModel.toMap()),
-      updateMealState(userId, referenceDate, meal, true, photoUploaded: true),
+      updateMealState(userId, referenceDate, meal, true,
+          photoUploaded: cancelsReminder),
       if (alsoPostToChat)
         _postToChat(userId, meal, uploaded, chatManager)
             .catchError((Object e) {

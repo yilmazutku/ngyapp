@@ -362,7 +362,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
 
     // Suppress in-app notifications for this chat while it is on top.
-    FcmService().openChat(_chatId, onFocusMessage: _focusOn);
+    FcmService().openChat(_chatId, onNotificationOpen: _openFromNotification);
 
     if (_focusActive) {
       // Ekran eski bir mesajda açılıyor: okundu işareti en yeniye inilince.
@@ -381,7 +381,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     // Resume in-app notifications for this chat (another chat page below
     // keeps its own suppression).
-    FcmService().closeChat(_chatId);
+    FcmService().closeChat(_chatId, onNotificationOpen: _openFromNotification);
     _messageController.dispose();
     _inputFocusNode.dispose();
     _replyTarget.dispose();
@@ -884,6 +884,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// yapılmaz: liste yerinde o mesaja odaklanır. Canlı akışın alt ucu
   /// sabitlenir ki yeni mesajlar gelince hedef listeden düşmesin.
   void _focusOn(String messageId) {
+    if (!mounted) return;
     _showJumpToLatest.value = false;
     final bool loaded =
         _liveMessages.any((message) => message.id == messageId) ||
@@ -1197,6 +1198,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// yeniden başlar), normal düzende en yeni mesaja kaydırır; okundu işareti
   /// orada konur.
   void _jumpToLatest() => _showLatest();
+
+  /// Sohbet açıkken bu sohbetin bildirimine basıldı (bkz.
+  /// [FcmService.openChat]): bildirim bir mesajı gösteriyorsa (ifade) o
+  /// mesaja, göstermiyorsa (yeni mesaj) en yeni mesaja gidilir.
+  void _openFromNotification(String? messageId) {
+    if (!mounted) return;
+    if (messageId == null) {
+      _showLatest();
+    } else {
+      _focusOn(messageId);
+    }
+  }
 
   /// Kullanıcının az önce gönderdiği mesaj ekranda görünsün: odaklı düzendeyse
   /// normal düzene geçilir, normal düzende en yeni mesaja kaydırılır.

@@ -171,6 +171,7 @@ class _MealThumbnailImageState extends State<MealThumbnailImage> {
     final Offset? down = _downPosition;
     _downPosition = null;
     if (down == null || (event.position - down).distance > kTouchSlop) return;
+    if (!mounted) return;
     setState(() => _attempt++);
   }
 

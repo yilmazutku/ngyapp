@@ -178,6 +178,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   static const double _gap = 12.0;
 
+  /// Üst alanın (başlık, uyarı, filtreler) sayfa yüksekliğine en fazla oranı.
+  static const double _maxTopAreaFraction = 0.5;
+
   /// Sayfanın dikey kaydırma konumu; [Scrollbar] ile paylaşılır.
   final ScrollController _pageScrollController = ScrollController();
 
@@ -1082,14 +1085,32 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildHeader(context, visible),
-          if (_testRuns.isNotEmpty) _buildTestDataWarning(context),
-          _buildFilters(context),
-          const Divider(height: 1),
-          Expanded(child: _buildBody(context, visible)),
-        ],
+      // Üst alan (başlık, uyarı, filtreler) sayfanın en fazla
+      // [_maxTopAreaFraction] kadarını kaplar, sığmazsa kendi içinde kayar:
+      // telefonda klavye açıkken de sonuç listesine yer kalır.
+      body: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: constraints.maxHeight * _maxTopAreaFraction,
+              ),
+              child: SingleChildScrollView(
+                primary: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildHeader(context, visible),
+                    if (_testRuns.isNotEmpty) _buildTestDataWarning(context),
+                    _buildFilters(context),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(child: _buildBody(context, visible)),
+          ],
+        ),
       ),
     );
   }
@@ -1385,28 +1406,27 @@ class MealPhotoFiltersLayout extends StatelessWidget {
           ],
         ];
 
-        if (narrow) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              search,
-              const SizedBox(height: _stackedSearchGap),
-              ...filterChildren,
-            ],
-          );
-        }
+        final Widget filtersColumn = Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: filterChildren,
+        );
 
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        // İki düzen de aynı Flex'tir ve arama hep ilk çocuktur: ekran
+        // döndürülünce ya da pencere eşiği geçince arama kutusu yeniden
+        // kurulmaz, odak ve klavye kaybolmaz.
+        return Flex(
+          direction: narrow ? Axis.vertical : Axis.horizontal,
+          mainAxisSize: narrow ? MainAxisSize.min : MainAxisSize.max,
+          crossAxisAlignment:
+              narrow ? CrossAxisAlignment.stretch : CrossAxisAlignment.end,
           children: [
             search,
-            const SizedBox(width: _searchGap),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: filterChildren,
-              ),
+            SizedBox(
+              width: narrow ? 0 : _searchGap,
+              height: narrow ? _stackedSearchGap : 0,
             ),
+            if (narrow) filtersColumn else Expanded(child: filtersColumn),
           ],
         );
       },

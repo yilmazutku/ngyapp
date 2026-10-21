@@ -144,4 +144,24 @@ void main() {
     expect(reactions.left, moreOrLessEquals(meals.left));
     expect(reactions.top, greaterThanOrEqualTo(meals.bottom));
   });
+
+  testWidgets('dar ve geniş düzen arasında geçince arama kutusu odağını korur',
+      (tester) async {
+    await _pumpAt(tester, 400);
+    await tester.tap(find.byType(TextField));
+    await tester.enterText(find.byType(TextField), 'ayşe');
+    await tester.pump();
+    final FocusNode? focused = FocusManager.instance.primaryFocus;
+    expect(focused, isNotNull);
+
+    tester.view.physicalSize = const Size(900, 800);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(FocusManager.instance.primaryFocus, same(focused));
+    expect(find.text('ayşe'), findsOneWidget);
+
+    tester.view.physicalSize = const Size(400, 800);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, same(focused));
+  });
 }

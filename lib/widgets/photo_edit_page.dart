@@ -124,10 +124,12 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       return;
     }
     if (image == null) {
-      // Vazgeç sorusu açıksa önce o kapanır.
-      final Route<dynamic>? route = ModalRoute.of(context);
+      // Sayfa bu arada kapatıldıysa (vazgeçildi, bildirime basıldı) başka
+      // rota kapatılmaz. Vazgeç sorusu açıksa önce o kapanır.
+      final ModalRoute<dynamic>? route = ModalRoute.of(context);
+      if (route == null || !route.isActive) return;
       Navigator.of(context)
-        ..popUntil((r) => r == route || r.isFirst)
+        ..popUntil((r) => r == route)
         ..pop(widget.photo);
       return;
     }
@@ -298,6 +300,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     final ui.Image? image = _image;
     if (image == null || _saving) return;
     final NavigatorState navigator = Navigator.of(context);
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
     if (!_changed) {
       navigator.pop(widget.photo);
       return;
@@ -305,8 +308,9 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
 
     setState(() => _saving = true);
     final XFile? edited = await _export(image);
-    if (!mounted) {
-      // Sayfa bu arada kapandıysa geçici dosya ortada kalmasın.
+    // Sayfa bu arada kapandıysa ya da kapanıyorsa (ör. bildirime basıldı)
+    // başka rota kapatılmaz; geçici dosya ortada kalmasın.
+    if (!mounted || route == null || !route.isCurrent) {
       if (edited != null) File(edited.path).delete().ignore();
       return;
     }
@@ -328,6 +332,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   Future<void> _confirmDiscard() async {
     if (_saving) return;
     final NavigatorState navigator = Navigator.of(context);
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
     final bool discard = await DialogUtils.openConfirm(
       context,
       title: _discardTitle,
@@ -335,7 +340,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       confirmText: _discardConfirmText,
       cancelText: _discardCancelText,
     );
-    if (!mounted || !discard) return;
+    if (!mounted || !discard || route == null || !route.isCurrent) return;
     navigator.pop();
   }
 

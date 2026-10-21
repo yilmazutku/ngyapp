@@ -103,9 +103,9 @@ class FcmService {
   /// bastırması geri gelir.
   final List<String> _openChatIds = [];
 
-  /// [_openChatIds] ile aynı sırada, her açık sohbetin mesaja gitme işlevi
-  /// (bkz. [openChat]).
-  final List<ValueChanged<String>?> _openChatFocusHandlers = [];
+  /// [_openChatIds] ile aynı sırada, her açık sohbetin bildirime basılınca
+  /// çalışan işlevi (bkz. [openChat]).
+  final List<ValueChanged<String?>?> _openChatNotificationHandlers = [];
 
   /// Uygulama ön planda mı. Arka plandayken hiçbir sohbetin bildirimi
   /// bastırılmaz.
@@ -464,9 +464,19 @@ class FcmService {
     ));
   }
 
+  /// Danışanın açık sohbetine dönülürken kapatılmadan bırakılan rota: sohbetin
+  /// kendisi, ilk sayfa, diyaloglar ve kapanmadan önce soru soran sayfalar.
+  static bool isClientChatPopBoundary(Route<dynamic> route) =>
+      route.settings.name == ChatPage.routeName ||
+      route.isFirst ||
+      route is RawDialogRoute ||
+      route.popDisposition == RoutePopDisposition.doNotPop;
+
   /// Danışana kendi sohbetini açar. Sohbet zaten açıksa ikinci bir sohbet
   /// sayfası açılmaz: sohbetin üstündeki sayfalar kapanır, sohbet bildirimdeki
-  /// mesaja gider. Diyaloglar kapatılmaz: kapatılan bir yükleme göstergesinin
+  /// mesaja (yeni mesaj bildiriminde en yeni mesaja) gider. Kapanmadan önce
+  /// soru soran sayfalar (ör. gönderilmemiş fotoğrafın düzenleme ekranı) ve
+  /// diyaloglar kapatılmaz: kapatılan bir yükleme göstergesinin
   /// sahibi, sonra onu kapatırken alttaki sayfayı (ör. sohbeti) kapatırdı.
   void _openClientChat(
     NavigatorState navigator,
@@ -478,13 +488,8 @@ class FcmService {
       navigator.push(ChatPage.route(focusMessageId: focusMessageId));
       return;
     }
-    navigator.popUntil((route) =>
-        route.settings.name == ChatPage.routeName ||
-        route.isFirst ||
-        route is RawDialogRoute);
-    if (focusMessageId != null) {
-      _openChatFocusHandlers[openIndex]?.call(focusMessageId);
-    }
+    navigator.popUntil(isClientChatPopBoundary);
+    _openChatNotificationHandlers[openIndex]?.call(focusMessageId);
   }
 
   /// Try opening pending message after first frame
@@ -509,23 +514,32 @@ class FcmService {
     }
 
     try {
+      _listenForTokenRefresh();
+
       final token = await _messaging.getToken();
       if (token == null) {
         return;
       }
 
       await _saveTokenIfChanged(user.uid, token);
-
-      _listenForTokenRefresh();
     } catch (e) {
     }
   }
 
-  /// [token]'ı kullanıcının kaydına yazar; kayıtta zaten o varsa yazmaz.
+  /// [token]'ı kullanıcının kaydına yazar; sunucudaki kayıtta zaten o varsa
+  /// yazmaz. Kayıt sunucudan okunamazsa (çevrimdışı) karşılaştırma yapılmaz,
+  /// jeton yine yazılır: yazma bağlantı gelince gider. Cihazdaki eski bir
+  /// kopyayla karşılaştırılsaydı, kayıt bu arada başka bir cihazınkine
+  /// dönmüşken yazma atlanabilirdi.
   Future<void> _saveTokenIfChanged(String uid, String token) async {
     final userDoc = _firestore.collection('users').doc(uid);
-    final snapshot = await userDoc.get();
-    if (snapshot.data()?['fcmToken'] == token) return;
+    try {
+      final snapshot =
+          await userDoc.get(const GetOptions(source: Source.server));
+      if (snapshot.data()?['fcmToken'] == token) return;
+    } catch (e) {
+      // Sunucuya ulaşılamadı: koşulsuz yazılır.
+    }
 
     await userDoc.set({
       'fcmToken': token,
@@ -578,20 +592,32 @@ class FcmService {
   static bool isAdmin(String uid) => _adminUids.contains(uid);
 
   /// Bir sohbet sayfası açıldı: o sohbetin uygulama içi bildirimleri, sayfa
-  /// en üstte kaldıkça bastırılır. [onFocusMessage], sohbet açıkken basılan
-  /// bildirimin mesajına gider (bkz. [_openClientChat]).
-  void openChat(String chatId, {ValueChanged<String>? onFocusMessage}) {
+  /// en üstte kaldıkça bastırılır. [onNotificationOpen], sohbet açıkken bu
+  /// sohbetin bildirimine basılınca bildirimin mesaj kimliğiyle (yoksa null)
+  /// çağrılır (bkz. [_openClientChat]).
+  void openChat(String chatId, {ValueChanged<String?>? onNotificationOpen}) {
     _openChatIds.add(chatId);
-    _openChatFocusHandlers.add(onFocusMessage);
+    _openChatNotificationHandlers.add(onNotificationOpen);
   }
 
   /// Sohbet sayfası kapandı. Yalnızca o sayfanın kaydı düşer; altta açık
-  /// başka bir sohbet varsa onun bastırması sürer.
-  void closeChat(String chatId) {
-    final int index = _openChatIds.lastIndexOf(chatId);
+  /// başka bir sohbet varsa onun bastırması sürer. Kayıt, sayfanın
+  /// [openChat]'e verdiği işlevle bulunur: aynı sohbetin eski sayfası yenisi
+  /// açıldıktan sonra kapanırsa (geri dönüş geçişi sürerken yeniden açılınca)
+  /// yenisinin kaydı silinmez.
+  void closeChat(String chatId, {ValueChanged<String?>? onNotificationOpen}) {
+    int index = -1;
+    for (int i = _openChatIds.length - 1; i >= 0; i--) {
+      if (_openChatIds[i] == chatId &&
+          _openChatNotificationHandlers[i] == onNotificationOpen) {
+        index = i;
+        break;
+      }
+    }
+    if (index < 0) index = _openChatIds.lastIndexOf(chatId);
     if (index < 0) return;
     _openChatIds.removeAt(index);
-    _openChatFocusHandlers.removeAt(index);
+    _openChatNotificationHandlers.removeAt(index);
   }
 
   /// Uygulama ön plana geldi / arka plana gitti.
