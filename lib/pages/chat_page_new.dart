@@ -236,6 +236,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// metin başka bir sohbetin kutusuna taşınmaz.
   final TextEditingController _messageController = TextEditingController();
 
+  /// Gönderilmemiş metinler, oturum ve sohbet başına (uygulama açık kaldıkça).
+  /// Sohbet sayfası kapanıp yeniden açılınca (ör. bildirimle başka sohbete
+  /// geçilirken alttaki sohbet kapatıldı) yazılan metin geri gelir.
+  static final Map<String, String> _drafts = {};
+
+  String get _draftKey => '$_currentUid/$_chatId';
+
+  /// Bildirim kaydı ([FcmService.openChat]) bir kez yapılır; sayfanın
+  /// rotası ancak [didChangeDependencies]'te alınabilir.
+  bool _openChatRegistered = false;
+
   /// Mesaj kutusunun odağı: "Yanıtla" seçilince klavye açılsın.
   final FocusNode _inputFocusNode = FocusNode();
 
@@ -343,6 +354,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Determine if current user is an admin
     _isAdminUser = ChatManager.isAdminUid(_currentUid);
 
+    _messageController.text = _drafts[_draftKey] ?? '';
+    _messageController.addListener(_saveDraft);
+
     _focusMessageId = widget.focusMessageId;
     _focusActive = _focusMessageId != null;
     // Odaklı açılışta ekran eski bir mesajdadır, en yeni mesaj görünmez.
@@ -361,9 +375,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }, onError: (Object e) {});
     }
 
-    // Suppress in-app notifications for this chat while it is on top.
-    FcmService().openChat(_chatId, onNotificationOpen: _openFromNotification);
-
     if (_focusActive) {
       // Ekran eski bir mesajda açılıyor: okundu işareti en yeniye inilince.
       _markReadPending = true;
@@ -372,6 +383,29 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     } else {
       // Okundu işareti ilk liste gelince konur (bkz. [_noteNewMessages]).
       _messagesStream = _chatManager.messagesStreamFor(_chatId);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_openChatRegistered) return;
+    _openChatRegistered = true;
+    // Suppress in-app notifications for this chat while it is on top.
+    FcmService().openChat(
+      _chatId,
+      route: ModalRoute.of(context),
+      onNotificationOpen: _openFromNotification,
+    );
+  }
+
+  /// Yazılan metni sohbetin taslağı olarak saklar; kutu boşalınca siler.
+  void _saveDraft() {
+    final String text = _messageController.text;
+    if (text.trim().isEmpty) {
+      _drafts.remove(_draftKey);
+    } else {
+      _drafts[_draftKey] = text;
     }
   }
 

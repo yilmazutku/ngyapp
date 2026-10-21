@@ -88,6 +88,13 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
 
   bool _saving = false;
 
+  /// Vazgeç sorusu açık mı (bkz. [_confirmDiscard]).
+  bool _confirmingDiscard = false;
+
+  /// Fotoğraf soru açıkken çözülemedi: vazgeçilmezse fotoğraf olduğu gibi
+  /// döner.
+  bool _loadFailed = false;
+
   @override
   void initState() {
     super.initState();
@@ -124,13 +131,15 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       return;
     }
     if (image == null) {
-      // Sayfa bu arada kapatıldıysa (vazgeçildi, bildirime basıldı) başka
-      // rota kapatılmaz. Vazgeç sorusu açıksa önce o kapanır.
+      // Sayfa bu arada kapatıldıysa (vazgeçildi, bildirime basıldı) bir şey
+      // yapılmaz. Vazgeç sorusu açıksa karar onun cevabından sonra verilir.
       final ModalRoute<dynamic>? route = ModalRoute.of(context);
       if (route == null || !route.isActive) return;
-      Navigator.of(context)
-        ..popUntil((r) => r == route)
-        ..pop(widget.photo);
+      if (_confirmingDiscard) {
+        _loadFailed = true;
+        return;
+      }
+      _finish(Navigator.of(context), route, widget.photo);
       return;
     }
     setState(() => _image = image);
@@ -309,17 +318,18 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     setState(() => _saving = true);
     final XFile? edited = await _export(image);
     // Sayfa bu arada kapandıysa ya da kapanıyorsa (ör. bildirime basıldı)
-    // başka rota kapatılmaz; geçici dosya ortada kalmasın.
-    if (!mounted || route == null || !route.isCurrent) {
+    // geçici dosya ortada kalmasın.
+    if (!mounted || route == null || !route.isActive) {
       if (edited != null) File(edited.path).delete().ignore();
       return;
     }
     if (edited != null) {
-      navigator.pop(edited);
+      _finish(navigator, route, edited);
       return;
     }
 
     setState(() => _saving = false);
+    if (!route.isCurrent) return;
     await DialogUtils.openError(
       context,
       title: _errorTitle,
@@ -330,9 +340,10 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   /// Vazgeçince çekilen fotoğraf atılır; bu yüzden hiçbir şey değiştirilmemiş
   /// olsa da sorulur. Fotoğraf yazılırken vazgeçilemez.
   Future<void> _confirmDiscard() async {
-    if (_saving) return;
+    if (_saving || _confirmingDiscard) return;
     final NavigatorState navigator = Navigator.of(context);
     final ModalRoute<dynamic>? route = ModalRoute.of(context);
+    _confirmingDiscard = true;
     final bool discard = await DialogUtils.openConfirm(
       context,
       title: _discardTitle,
@@ -340,8 +351,28 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       confirmText: _discardConfirmText,
       cancelText: _discardCancelText,
     );
-    if (!mounted || !discard || route == null || !route.isCurrent) return;
-    navigator.pop();
+    _confirmingDiscard = false;
+    if (!mounted || route == null || !route.isActive) return;
+    if (discard) {
+      _finish(navigator, route, null);
+    } else if (_loadFailed) {
+      _finish(navigator, route, widget.photo);
+    }
+  }
+
+  /// Sayfayı [result] ile kapatır. Üstünde başka bir sayfa ya da diyalog
+  /// açıldıysa (ör. bildirimden) yalnızca bu sayfa kaldırılır, üstteki
+  /// kapanmaz.
+  void _finish(
+    NavigatorState navigator,
+    ModalRoute<dynamic> route,
+    XFile? result,
+  ) {
+    if (route.isCurrent) {
+      navigator.pop(result);
+    } else {
+      navigator.removeRoute(route, result);
+    }
   }
 
   /// Döndürülmüş fotoğrafın kırpılan kısmını çizip geçici bir dosyaya yazar.

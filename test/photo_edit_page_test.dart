@@ -290,4 +290,63 @@ void main() {
     expect(read.topLeft, _blue);
     expect(read.bottomRight, _blue);
   });
+
+  testWidgets('fotoğraf yazılırken üste sayfa açılırsa düzenleme ekranı '
+      'sonuçla kaldırılır, üstteki sayfa kapanmaz', (tester) async {
+    final _Closing closing = await pumpEditor(tester);
+    await tester.tap(find.byTooltip('Sağa döndür'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Tamam'));
+    await tester.pump();
+
+    tester.state<NavigatorState>(find.byType(Navigator)).push(
+          MaterialPageRoute<void>(builder: (_) => const Text('haberler')),
+        );
+    await waitUntilClosed(tester, closing);
+
+    expect(closing.result, isNotNull);
+    expect(closing.result!.path, isNot(endsWith('source.png')));
+    expect(find.text('haberler'), findsOneWidget);
+    expect(find.byType(PhotoEditPage), findsNothing);
+  });
+
+  testWidgets('fotoğraf vazgeç sorusu açıkken çözülemezse soru cevaplanınca '
+      'karar verilir', (tester) async {
+    final File bad = File('${tempDir.path}/bad.jpg')
+      ..writeAsBytesSync(const [1, 2, 3, 4]);
+    final _Closing closing = _Closing();
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async {
+            closing.result = await showPhotoEditPage(context, XFile(bad.path));
+            closing.closed = true;
+          },
+          child: const Text('open'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Fotoğraftan vazgeç'), findsOneWidget);
+
+    // Fotoğraf bu arada çözülemedi: soru açık kalır, sayfa kapanmaz.
+    for (int i = 0; i < 10; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+    }
+    expect(find.text('Fotoğraftan vazgeç'), findsOneWidget);
+    expect(closing.closed, isFalse);
+
+    // Vazgeçilmedi: fotoğraf olduğu gibi döner.
+    await tester.tap(find.text('Düzenlemeye dön'));
+    await waitUntilClosed(tester, closing);
+    expect(closing.result!.path, endsWith('bad.jpg'));
+  });
 }

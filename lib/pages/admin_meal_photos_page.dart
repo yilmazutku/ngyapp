@@ -178,8 +178,10 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
   static const double _gap = 12.0;
 
-  /// Üst alanın (başlık, uyarı, filtreler) sayfa yüksekliğine en fazla oranı.
-  static const double _maxTopAreaFraction = 0.5;
+  /// Üst alanın (başlık, uyarı, filtreler) sayfa yüksekliğine en fazla oranı:
+  /// klavye kapalıyken ve açıkken.
+  static const double _maxTopAreaFraction = 0.75;
+  static const double _maxTopAreaFractionWithKeyboard = 0.5;
 
   /// Sayfanın dikey kaydırma konumu; [Scrollbar] ile paylaşılır.
   final ScrollController _pageScrollController = ScrollController();
@@ -1064,6 +1066,9 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   @override
   Widget build(BuildContext context) {
     final List<_ClientPhotoGroup> visible = _visibleGroups;
+    // Scaffold gövdesine klavye boşluğu aktarılmaz; sayfanın kendi
+    // context'inden okunur.
+    final bool keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return Scaffold(
       appBar: AppBarWithBack(
@@ -1085,15 +1090,19 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           ),
         ],
       ),
-      // Üst alan (başlık, uyarı, filtreler) sayfanın en fazla
-      // [_maxTopAreaFraction] kadarını kaplar, sığmazsa kendi içinde kayar:
-      // telefonda klavye açıkken de sonuç listesine yer kalır.
+      // Üst alan (başlık, uyarı, filtreler) sayfanın en fazla bir kısmını
+      // kaplar, sığmazsa kendi içinde kayar: telefonda klavye açıkken de sonuç
+      // listesine yer kalır. Klavye kapalıyken sınır gevşektir, filtreler
+      // telefonda da kaydırmadan görünür.
       body: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
             ConstrainedBox(
               constraints: BoxConstraints(
-                maxHeight: constraints.maxHeight * _maxTopAreaFraction,
+                maxHeight: constraints.maxHeight *
+                    (keyboardOpen
+                        ? _maxTopAreaFractionWithKeyboard
+                        : _maxTopAreaFraction),
               ),
               child: SingleChildScrollView(
                 primary: false,
