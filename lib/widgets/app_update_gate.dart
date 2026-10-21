@@ -105,9 +105,12 @@ class _AppUpdateGateState extends State<AppUpdateGate>
       if (_blockingUpdate != null) {
         setState(() => _blockingUpdate = null);
       }
-      FcmService().setUpdateBlocking(false);
-      if (info != null) {
-        await _promptOptionalUpdate(info);
+      try {
+        if (info != null) {
+          await _promptOptionalUpdate(info);
+        }
+      } finally {
+        if (mounted) FcmService().setUpdateBlocking(false);
       }
     } finally {
       _checkRunning = false;

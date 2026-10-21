@@ -134,10 +134,7 @@ class TimeslotManager extends ChangeNotifier {
   /// A slot is blocked if it falls within the appointment's duration [start, end).
   bool isSlotBlockedByAppointment(
       DateTime slotDateTime, AppointmentModel appointment) {
-    return BusySlot(
-      start: appointment.appointmentDateTime,
-      durationMinutes: appointment.durationMinutes,
-    ).blocks(slotDateTime);
+    return BusySlot.ofAppointment(appointment).blocks(slotDateTime);
   }
 
   /// A slot is blocked if it falls within the event's duration [start, end).
@@ -435,17 +432,58 @@ class TimeslotManager extends ChangeNotifier {
   }
 
   /// Gün aralığındaki dolu saatler (`busySlots` aynası); randevuların
-  /// [_fetchAppointmentsForDateRange] ile aynı tarih süzgeci.
+  /// [_fetchAppointmentsForDateRange] ile aynı tarih süzgeci. Ayna sunucuda
+  /// birkaç saniye geç güncellendiği için kullanıcının kendi randevuları
+  /// ayrıca okunur.
   Future<List<BusySlot>> _fetchBusySlotsForDateRange(
       DateTime startDate,
       DateTime endDate,
       ) async {
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    final List<List<BusySlot>> parts = await Future.wait([
+      _fetchMirroredBusySlots(startDate, endDate),
+      if (uid != null) _fetchOwnBusySlots(uid, startDate, endDate),
+    ]);
+    return [for (final List<BusySlot> part in parts) ...part];
+  }
+
+  /// Yayındaki kurallar `busySlots`'u henüz açmıyorsa (yeni sürüm kurallardan
+  /// önce yayımlandı) eski yoldan, tüm randevulardan okunur.
+  Future<List<BusySlot>> _fetchMirroredBusySlots(
+      DateTime startDate,
+      DateTime endDate,
+      ) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection(BusySlot.collection)
+          .where(BusySlot.startField, isGreaterThanOrEqualTo: startDate)
+          .where(BusySlot.startField, isLessThan: endDate)
+          .get();
+      return snapshot.docs.map(BusySlot.fromDocument).toList();
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      final appointments =
+          await _fetchAppointmentsForDateRange(startDate, endDate);
+      return appointments.map(BusySlot.ofAppointment).toList();
+    }
+  }
+
+  Future<List<BusySlot>> _fetchOwnBusySlots(
+      String uid,
+      DateTime startDate,
+      DateTime endDate,
+      ) async {
     final snapshot = await FirebaseFirestore.instance
-        .collection(BusySlot.collection)
+        .collection('users')
+        .doc(uid)
+        .collection('appointments')
         .where(BusySlot.startField, isGreaterThanOrEqualTo: startDate)
         .where(BusySlot.startField, isLessThan: endDate)
         .get();
-    return snapshot.docs.map(BusySlot.fromDocument).toList();
+    return snapshot.docs
+        .where((doc) => doc.data()[BusySlot.startField] is Timestamp)
+        .map(BusySlot.fromDocument)
+        .toList();
   }
 
   /// Internal helper: fetch appointments across all users for a date range.

@@ -399,6 +399,8 @@ Future<String?> uploadMealImg({
         subscriptionId: subscriptionId,
         image: uploaded,
         time: referenceDate,
+        cancelsReminder: cancelsReminder,
+        observer: observer,
       );
     } catch (e) {
       await uploaded.delete();
@@ -410,20 +412,25 @@ Future<String?> uploadMealImg({
     }
 
     // İşlem sürerken iptal edildiyse eklenen fotoğraf geri alınır.
+    // Geri alma başarısız olursa yükleme tamamlanır: fotoğraf sohbetsiz
+    // kalmasın.
     if (observer?.isCancelled ?? false) {
-      await _removeMealImage(mealDocRef, uploaded.url);
-      await uploaded.delete();
-      throw const UploadCancelledException();
+      bool rolledBack = false;
+      try {
+        await _removeMealImage(mealDocRef, uploaded.url, meal: meal);
+        rolledBack = true;
+      } catch (e) {
+      }
+      if (rolledBack) {
+        await uploaded.delete();
+        throw const UploadCancelledException();
+      }
     }
 
-    // The day's checklist and the chat: independent writes, so they are
-    // issued together instead of one after the other. Sohbet yazımının hatası
-    // ayrıca tutulur: öğün kaydı yine de tamamlanmış olur, yükleme
-    // "başarısız" sayılıp fotoğraf tekrar yüklenmesin.
+    // Sohbet yazımının hatası ayrıca tutulur: öğün kaydı yine de tamamlanmış
+    // olur, yükleme "başarısız" sayılıp fotoğraf tekrar yüklenmesin.
     Object? chatPostError;
     final Future<void> writes = Future.wait([
-      updateMealState(userId, referenceDate, meal, true,
-          photoUploaded: cancelsReminder),
       if (alsoPostToChat)
         _postToChat(userId, meal, uploaded, chatManager)
             .catchError((Object e) {
@@ -483,15 +490,20 @@ Future<void> deleteMealImage({
         .collection('mealEntries')
         .doc(meal.name);
 
-    // Delete the file from Storage
-    try {
-      await deleteFile(imageUrlToDelete);
-    } catch (e) {
-      if (!ignoreStorageFailure) rethrow;
-    }
+    // Storage silinemeyince kayıt kalsın diye önce dosya silinir; Storage
+    // hatası yok sayılacaksa önce kayıt: geçici bir kayıt hatası silinmiş
+    // dosyayı gösteren kayıt bırakmasın.
+    if (!ignoreStorageFailure) await deleteFile(imageUrlToDelete);
 
     final _RemovedMealImage? removed =
-        await _removeMealImage(mealDocRef, imageUrlToDelete);
+        await _removeMealImage(mealDocRef, imageUrlToDelete, meal: meal);
+
+    if (ignoreStorageFailure) {
+      try {
+        await deleteFile(imageUrlToDelete);
+      } catch (e) {
+      }
+    }
 
     // Küçük görsel yardımcı bir dosya: silinemezse yok sayılır.
     final String? thumbUrlToDelete = removed?.thumbUrl;
@@ -500,11 +512,6 @@ Future<void> deleteMealImage({
         await deleteFile(thumbUrlToDelete);
       } catch (e) {
       }
-    }
-
-    // No images left — uncheck
-    if (removed?.emptied ?? false) {
-      await updateMealState(userId, referenceDate, meal, false);
     }
 
     await _markChatPhotoDeleted(userId, imageUrlToDelete);
@@ -617,6 +624,7 @@ static MealModel? mealWithImageAdded(
   required String? thumbUrl,
   required DateTime time,
 }) {
+  if (current != null && current.imageUrls.contains(imageUrl)) return current;
   if (current != null && !current.canAddMoreImages) return null;
   return MealModel(
     mealId: current?.mealId ?? meal.name,
@@ -662,7 +670,8 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   static const String _mealPhotosFolder = 'mealPhotos';
 
   /// [image] fotoğrafını öğün kaydına bir işlem (transaction) içinde, kaydın
-  /// en güncel hâline ekler ([mealWithImageAdded]). Sınır bu arada dolduysa
+  /// en güncel hâline ekler ([mealWithImageAdded]); günün öğün işareti
+  /// ([mealStateFields]) aynı işlemle yazılır. Sınır bu arada dolduysa
   /// kayda dokunmaz ve false döner.
   Future<bool> _addMealImage(
     DocumentReference<Map<String, dynamic>> mealDocRef, {
@@ -670,10 +679,15 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
     required String subscriptionId,
     required UploadedImage image,
     required DateTime time,
+    required bool cancelsReminder,
+    UploadObserver? observer,
   }) =>
       FirebaseFirestore.instance.runTransaction<bool>((transaction) async {
         final DocumentSnapshot<Map<String, dynamic>> fresh =
             await transaction.get(mealDocRef);
+        if (observer?.isCancelled ?? false) {
+          throw const UploadCancelledException();
+        }
         final MealModel? merged = mealWithImageAdded(
           fresh.exists ? MealModel.fromDocument(fresh) : null,
           meal: meal,
@@ -684,17 +698,23 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
         );
         if (merged == null) return false;
         transaction.set(mealDocRef, merged.toMap());
+        transaction.set(
+          mealDocRef.parent.parent!,
+          mealStateFields(meal, true, photoUploaded: cancelsReminder),
+          SetOptions(merge: true),
+        );
         return true;
       });
 
   /// [imageUrl] fotoğrafını öğün kaydından bir işlem (transaction) içinde,
   /// kaydın en güncel hâlinden adresine göre çıkarır
-  /// ([mealWithImageRemovedAt]); fotoğraf kalmazsa kayıt silinir. Fotoğraf
-  /// kayıtta yoksa null.
+  /// ([mealWithImageRemovedAt]); fotoğraf kalmazsa kayıt silinir ve günün
+  /// öğün işareti aynı işlemle kalkar. Fotoğraf kayıtta yoksa null.
   Future<_RemovedMealImage?> _removeMealImage(
     DocumentReference<Map<String, dynamic>> mealDocRef,
-    String imageUrl,
-  ) =>
+    String imageUrl, {
+    required Meals meal,
+  }) =>
       FirebaseFirestore.instance
           .runTransaction<_RemovedMealImage?>((transaction) async {
         final DocumentSnapshot<Map<String, dynamic>> fresh =
@@ -707,6 +727,11 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
         final MealModel? remaining = mealWithImageRemovedAt(current, index);
         if (remaining == null) {
           transaction.delete(mealDocRef);
+          transaction.set(
+            mealDocRef.parent.parent!,
+            mealStateFields(meal, false),
+            SetOptions(merge: true),
+          );
         } else {
           transaction.set(mealDocRef, remaining.toMap());
         }

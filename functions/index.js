@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const logger = require('firebase-functions/logger');
 const {onDocumentCreated, onDocumentUpdated, onDocumentWritten} =
@@ -832,10 +833,10 @@ exports.markChatMessagesOfDeletedMealPhotos = onDocumentWritten(
 // =============================================================================
 // BUSY SLOTS
 // Danışanın saat seçicisi (TimeslotManager.getAvailableTimeSlotsForDate)
-// başka danışanların randevularını okumaz; yalnızca busySlots/{uid}_{id}
-// aynasını okur. Ayna, seçicinin kullandığı iki alandır: saat ve süre. Kimlik
-// danışanın UID'siyle başlar: admin'in test ve toplu randevu kimlikleri
-// danışanlar arasında tekrarlanabiliyor.
+// başka danışanların randevularını okumaz; yalnızca busySlots aynasını okur.
+// Ayna, seçicinin kullandığı iki alandır: saat ve süre. Kimlik, UID ve randevu
+// kimliğinin özetidir (sha256): admin'in test ve toplu randevu kimlikleri
+// danışanlar arasında tekrarlanabiliyor, UID ise danışanlara açılmaz.
 // =============================================================================
 
 const BUSY_SLOTS_COLLECTION = 'busySlots';
@@ -879,7 +880,9 @@ function sameBusySlot(a, b) {
  * @return {string} busySlots doküman kimliği.
  */
 function busySlotId(userId, appointmentId) {
-  return `${userId}_${appointmentId}`;
+  return crypto.createHash('sha256')
+      .update(`${userId}/${appointmentId}`)
+      .digest('hex');
 }
 
 /**

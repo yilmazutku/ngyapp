@@ -102,6 +102,21 @@ void main() {
 
       expect(_add(full, 'fazla', time: _evening), isNull);
     });
+
+    test('aynı adres ikinci kez eklenmez (işlem yeniden denenince), sınır dolu olsa da',
+        () {
+      final MealModel full = MealModel(
+        mealId: Meals.lunch.name,
+        mealType: Meals.lunch,
+        imageUrls: [
+          for (int i = 0; i < MealModel.maxImages; i++) 'u$i',
+        ],
+        timestamp: _noon,
+        isChecked: true,
+      );
+
+      expect(_add(full, 'u1', time: _evening)!.imageUrls, full.imageUrls);
+    });
   });
 
   group('MealManager.mealWithImageRemovedAt', () {

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'appointment_model.dart';
+
 /// Bir randevunun saat seçicide kapladığı aralık: `busySlots` aynasındaki
 /// doküman (functions/index.js, mirrorBusySlot). Aynada yalnızca saat ve süre
 /// var; randevunun kime ait olduğu, notu ya da paketi danışanlara açılmaz.
@@ -25,6 +27,11 @@ class BusySlot {
           _defaultDurationMinutes,
     );
   }
+
+  factory BusySlot.ofAppointment(AppointmentModel appointment) => BusySlot(
+        start: appointment.appointmentDateTime,
+        durationMinutes: appointment.durationMinutes,
+      );
 
   /// [slotDateTime] bu aralığa düşüyor mu: [start, start + süre).
   bool blocks(DateTime slotDateTime) =>
