@@ -196,6 +196,7 @@ async function run(rulesFile) {
   await check('I12b lists own subscriptions', true, () => u1().collection('subscriptions').get());
   await check('I12c planned payments query (home badge)', true, () => u1().collection('payments').where('status', '==', 'Planlandı').get());
   await check('I12d own appointments query', true, () => u1().collection('appointments').where('isDeleted', '==', null).orderBy('appointmentDateTime').get());
+  await check('I12d2 own appointments of a day (slot picker)', true, () => u1().collection('appointments').where('appointmentDateTime', '>=', slotStart).where('appointmentDateTime', '<', TS.fromDate(new Date('2026-10-23T00:00:00'))).get());
   await check('I12e own diet lists and Tanita PDFs', true, async () => {
     await u1().collection('dietLists').get();
     await u1().collection('measurements').doc('tanita').collection('pdfFiles').orderBy('uploadTime', 'desc').get();
