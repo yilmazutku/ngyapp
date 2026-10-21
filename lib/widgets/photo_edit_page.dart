@@ -8,9 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../utils/dialog_utils.dart';
+import '../utils/temp_photo_files.dart';
 
 /// Kameradan çekilen fotoğrafı göndermeden önce kırpma ve 90 derecelik
 /// döndürme ekranında açar (bkz. [PhotoEditPage]). Düzenlenen fotoğraf geçici
@@ -51,6 +51,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   static const String _errorTitle = 'Hata';
   static const String _exportErrorText =
       'Fotoğraf düzenlenemedi. Lütfen tekrar deneyin.';
+  static const String _discardTitle = 'Fotoğraftan vazgeç';
+  static const String _discardMessage =
+      'Fotoğraf gönderilmeyecek. Vazgeçmek istiyor musunuz?';
+  static const String _discardConfirmText = 'Vazgeç';
+  static const String _discardCancelText = 'Düzenlemeye dön';
 
   static const Rect _fullCrop = Rect.fromLTRB(0, 0, 1, 1);
 
@@ -58,8 +63,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   static const int _maxDecodeSide = 2560;
   static const int _jpegQuality = 92;
 
-  /// Fotoğrafın ekranda kenarlardan boşluğu; çerçevenin tutamaçları ekranın
-  /// kenarına yapışmasın.
+  /// Fotoğrafın ekranda kenarlardan en az boşluğu; çerçevenin tutamaçları
+  /// ekranın kenarına yapışmasın.
   static const double _imageMargin = 24;
 
   /// Tutamaçlar bu kadar uzaktan da yakalanır (parmak için).
@@ -82,6 +87,13 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   _CropDrag? _drag;
 
   bool _saving = false;
+
+  /// Vazgeç sorusu açık mı (bkz. [_confirmDiscard]).
+  bool _confirmingDiscard = false;
+
+  /// Fotoğraf soru açıkken çözülemedi: vazgeçilmezse fotoğraf olduğu gibi
+  /// döner.
+  bool _loadFailed = false;
 
   @override
   void initState() {
@@ -119,7 +131,15 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       return;
     }
     if (image == null) {
-      Navigator.of(context).pop(widget.photo);
+      // Sayfa bu arada kapatıldıysa (vazgeçildi, bildirime basıldı) bir şey
+      // yapılmaz. Vazgeç sorusu açıksa karar onun cevabından sonra verilir.
+      final ModalRoute<dynamic>? route = ModalRoute.of(context);
+      if (route == null || !route.isActive) return;
+      if (_confirmingDiscard) {
+        _loadFailed = true;
+        return;
+      }
+      _finish(Navigator.of(context), route, widget.photo);
       return;
     }
     setState(() => _image = image);
@@ -157,19 +177,45 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     });
   }
 
-  /// Fotoğrafın ekrandaki yeri: alana sığacak kadar büyük, ortada.
-  Rect _imageRectIn(Size area, ui.Image image) {
+  /// Sistem hareketlerinin (ör. Android'de kenardan kaydırınca geri) ekranın
+  /// kenarlarında kapladığı yer; SafeArea'nın bıraktığı boşluk düşülür.
+  EdgeInsets _gestureInsets() {
+    final EdgeInsets gestures = MediaQuery.systemGestureInsetsOf(context);
+    final EdgeInsets padding = MediaQuery.paddingOf(context);
+    return EdgeInsets.fromLTRB(
+      math.max(0.0, gestures.left - padding.left),
+      math.max(0.0, gestures.top - padding.top),
+      math.max(0.0, gestures.right - padding.right),
+      math.max(0.0, gestures.bottom - padding.bottom),
+    );
+  }
+
+  /// Fotoğrafın ekrandaki yeri: alana sığacak kadar büyük, ortada. Kenarları
+  /// [gestureInsets]'in dışında kalır; yoksa kenarı sürüklemek geri hareketi
+  /// sayılıp sayfayı kapatır.
+  Rect _imageRectIn(Size area, ui.Image image, EdgeInsets gestureInsets) {
     final Size rotated = _rotatedSize(image);
-    final double maxWidth = math.max(1.0, area.width - _imageMargin * 2);
-    final double maxHeight = math.max(1.0, area.height - _imageMargin * 2);
+    final Rect bounds = EdgeInsets.fromLTRB(
+      _marginFor(gestureInsets.left),
+      _marginFor(gestureInsets.top),
+      _marginFor(gestureInsets.right),
+      _marginFor(gestureInsets.bottom),
+    ).deflateRect(Offset.zero & area);
+    final double maxWidth = math.max(1.0, bounds.width);
+    final double maxHeight = math.max(1.0, bounds.height);
     final double scale =
         math.min(maxWidth / rotated.width, maxHeight / rotated.height);
     return Rect.fromCenter(
-      center: area.center(Offset.zero),
+      center: bounds.center,
       width: rotated.width * scale,
       height: rotated.height * scale,
     );
   }
+
+  /// Tutamağa kenarın biraz dışından dokunan parmak da sistem hareketinin
+  /// alanına girmez.
+  static double _marginFor(double gestureInset) =>
+      math.max(_imageMargin, gestureInset + _touchRadius / 2);
 
   Rect _cropRectIn(Rect imageRect) => Rect.fromLTRB(
         imageRect.left + _crop.left * imageRect.width,
@@ -263,6 +309,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     final ui.Image? image = _image;
     if (image == null || _saving) return;
     final NavigatorState navigator = Navigator.of(context);
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
     if (!_changed) {
       navigator.pop(widget.photo);
       return;
@@ -270,13 +317,19 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
 
     setState(() => _saving = true);
     final XFile? edited = await _export(image);
-    if (!mounted) return;
+    // Sayfa bu arada kapandıysa ya da kapanıyorsa (ör. bildirime basıldı)
+    // geçici dosya ortada kalmasın.
+    if (!mounted || route == null || !route.isActive) {
+      if (edited != null) File(edited.path).delete().ignore();
+      return;
+    }
     if (edited != null) {
-      navigator.pop(edited);
+      _finish(navigator, route, edited);
       return;
     }
 
     setState(() => _saving = false);
+    if (!route.isCurrent) return;
     await DialogUtils.openError(
       context,
       title: _errorTitle,
@@ -284,7 +337,46 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     );
   }
 
-  /// Döndürülmüş fotoğrafın kırpılan kısmını çizip geçici bir dosyaya yazar.
+  /// Vazgeçince çekilen fotoğraf atılır; bu yüzden hiçbir şey değiştirilmemiş
+  /// olsa da sorulur. Fotoğraf yazılırken vazgeçilemez.
+  Future<void> _confirmDiscard() async {
+    if (_saving || _confirmingDiscard) return;
+    final NavigatorState navigator = Navigator.of(context);
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
+    _confirmingDiscard = true;
+    final bool discard = await DialogUtils.openConfirm(
+      context,
+      title: _discardTitle,
+      message: _discardMessage,
+      confirmText: _discardConfirmText,
+      cancelText: _discardCancelText,
+    );
+    _confirmingDiscard = false;
+    if (!mounted || route == null || !route.isActive) return;
+    if (discard) {
+      _finish(navigator, route, null);
+    } else if (_loadFailed) {
+      _finish(navigator, route, widget.photo);
+    }
+  }
+
+  /// Sayfayı [result] ile kapatır. Üstünde başka bir sayfa ya da diyalog
+  /// açıldıysa (ör. bildirimden) yalnızca bu sayfa kaldırılır, üstteki
+  /// kapanmaz.
+  void _finish(
+    NavigatorState navigator,
+    ModalRoute<dynamic> route,
+    XFile? result,
+  ) {
+    if (route.isCurrent) {
+      navigator.pop(result);
+    } else {
+      navigator.removeRoute(route, result);
+    }
+  }
+
+  /// Döndürülmüş fotoğrafın kırpılan kısmını çizip düzenleme klasörüne
+  /// ([TempPhotoFiles.photoEditDirectory]) yazar.
   Future<XFile?> _export(ui.Image image) async {
     ui.Image? output;
     try {
@@ -316,7 +408,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         height,
       );
 
-      final Directory directory = await getTemporaryDirectory();
+      final Directory directory = await TempPhotoFiles.photoEditDirectory();
       final String path = p.join(
         directory.path,
         'photo_edit_${DateTime.now().microsecondsSinceEpoch}${encoded.extension}',
@@ -371,25 +463,33 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   @override
   Widget build(BuildContext context) {
     final ui.Image? image = _image;
+    final EdgeInsets gestureInsets = _gestureInsets();
 
-    return Theme(
-      data: ThemeData.dark(useMaterial3: true),
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildTopBar(),
-              Expanded(
-                child: image == null
-                    ? const Center(child: CircularProgressIndicator())
-                    : LayoutBuilder(
-                        builder: (context, constraints) =>
-                            _buildEditor(image, constraints.biggest),
-                      ),
-              ),
-              _buildBottomBar(image != null),
-            ],
+    return PopScope<XFile>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmDiscard();
+      },
+      child: Theme(
+        data: ThemeData.dark(useMaterial3: true),
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: Column(
+              children: [
+                _buildTopBar(),
+                Expanded(
+                  child: image == null
+                      ? const Center(child: CircularProgressIndicator())
+                      : LayoutBuilder(
+                          builder: (context, constraints) =>
+                              _buildEditor(
+                                  image, constraints.biggest, gestureInsets),
+                        ),
+                ),
+                _buildBottomBar(image != null),
+              ],
+            ),
           ),
         ),
       ),
@@ -404,7 +504,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
           IconButton(
             tooltip: _cancelTooltip,
             icon: const Icon(Icons.close),
-            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+            onPressed: _saving ? null : _confirmDiscard,
           ),
           const Spacer(),
           TextButton(
@@ -416,8 +516,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     );
   }
 
-  Widget _buildEditor(ui.Image image, Size area) {
-    final Rect imageRect = _imageRectIn(area, image);
+  Widget _buildEditor(ui.Image image, Size area, EdgeInsets gestureInsets) {
+    final Rect imageRect = _imageRectIn(area, image, gestureInsets);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,

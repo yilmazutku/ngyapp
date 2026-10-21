@@ -36,6 +36,12 @@ class MealReminderService {
   /// Base notification ID for meal reminders (each meal adds its index)
   static const int MEAL_NOTIFICATION_BASE_ID = 1000;
 
+  /// Gün dokümanında (`users/{uid}/meals/{yyyy-MM-dd}`) o gün fotoğrafı
+  /// yüklenmiş öğünlerin işareti: `reminderCancelled.<öğün>: true` (bkz.
+  /// `MealManager.mealStateFields`). Fotoğraf silinince geri alınmaz; öğünün
+  /// hatırlatması o gün hiçbir cihazda bir daha kurulmaz.
+  static const String REMINDER_CANCELLED_FIELD = 'reminderCancelled';
+
   bool _isInitialized = false;
 
   /// Check if local notifications are supported on this platform (not on Windows)
@@ -84,6 +90,7 @@ class MealReminderService {
   /// 2. Fetches the user's latest diet to get meal times
   /// 3. Fetches today's meal states to see what's already uploaded
   /// 4. Schedules notifications for 30 minutes after each unchecked meal
+  ///    whose photo was never uploaded today ([mealsWithoutReminder])
   /// 
   /// @param userId The user's ID
   Future<void> scheduleMealReminders(String userId) async {
@@ -107,8 +114,8 @@ class MealReminderService {
         return;
       }
 
-      // 3. Fetch today's meal states
-      final mealStates = await _fetchTodayMealStates(userId);
+      // 3. Fetch today's meals that get no reminder
+      final Set<Meals> skippedMeals = await _fetchTodaySkippedMeals(userId);
 
       // 4. Schedule reminders for unchecked meals
       final now = DateTime.now();
@@ -117,8 +124,11 @@ class MealReminderService {
         final meal = entry.key;
         final mealTime = entry.value;
 
-        // Skip if meal is already checked/uploaded
-        if (mealStates[meal] == true) {
+        // İşaretlenmiş ya da fotoğrafı yüklenmiş öğün: bu cihazda önceden
+        // kurulmuş hatırlatması da kalkar (fotoğraf başka cihazdan yüklenmiş
+        // olabilir).
+        if (skippedMeals.contains(meal)) {
+          await cancelMealReminder(meal);
           continue;
         }
 
@@ -218,12 +228,25 @@ class MealReminderService {
     return mealTimes;
   }
 
-  /// Fetch today's meal states (checked/unchecked) for a user.
-  Future<Map<Meals, bool>> _fetchTodayMealStates(String userId) async {
-    Map<Meals, bool> states = {
-      for (final meal in Meals.dietValues) meal: false,
-    };
+  /// Bugün hatırlatması kurulmayacak öğünler, gün dokümanının verisinden
+  /// ([dayData]): işaretlenmiş (`meals.<öğün>: true`) ya da o gün fotoğrafı
+  /// yüklenmiş ([REMINDER_CANCELLED_FIELD]) öğünler.
+  static Set<Meals> mealsWithoutReminder(Map<String, dynamic>? dayData) {
+    final Set<Meals> skipped = {};
+    for (final String field in const ['meals', REMINDER_CANCELLED_FIELD]) {
+      final Object? flags = dayData?[field];
+      if (flags is! Map) continue;
+      for (final MapEntry<dynamic, dynamic> entry in flags.entries) {
+        final Object? name = entry.key;
+        final Meals? meal = name is String ? Meals.fromName(name) : null;
+        if (meal != null && entry.value == true) skipped.add(meal);
+      }
+    }
+    return skipped;
+  }
 
+  /// Bugün hatırlatması kurulmayacak öğünler ([mealsWithoutReminder]).
+  Future<Set<Meals>> _fetchTodaySkippedMeals(String userId) async {
     try {
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final doc = await _firestore
@@ -232,24 +255,10 @@ class MealReminderService {
           .collection('meals')
           .doc(today)
           .get();
-
-      if (doc.exists) {
-        final data = doc.data();
-        final meals = data?['meals'] as Map<String, dynamic>?;
-
-        if (meals != null) {
-          for (final entry in meals.entries) {
-            final meal = Meals.fromName(entry.key);
-            if (meal != null) {
-              states[meal] = entry.value as bool? ?? false;
-            }
-          }
-        }
-      }
+      return mealsWithoutReminder(doc.data());
     } catch (e) {
+      return {};
     }
-
-    return states;
   }
 
   /// Schedule a local notification.

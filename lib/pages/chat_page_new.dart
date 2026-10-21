@@ -1,5 +1,5 @@
 // lib/pages/chat_page_new.dart
-import 'dart:io' show Platform;
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
@@ -37,8 +37,8 @@ import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
 import 'package:ngy_app/utils/menu_utils.dart';
+import 'package:ngy_app/utils/temp_photo_files.dart';
 import 'package:ngy_app/services/fcm_service.dart';
-import 'package:ngy_app/services/meal_reminder_service.dart';
 
 import '../constants/app_constants.dart';
 
@@ -93,6 +93,25 @@ class ChatPage extends StatefulWidget {
     this.focusMessageId,
     this.userDisplayName,
   });
+
+  /// Sayfanın rota adı: danışanın bildirimi, açık sohbetin üstündeki
+  /// sayfaları bu ada kadar kapatır (bkz. [FcmService]).
+  static const String routeName = '/chat';
+
+  /// Sayfayı adıyla açan rota; sohbet her yerden bununla açılır.
+  static Route<void> route({
+    String? overrideChatId,
+    String? focusMessageId,
+    String? userDisplayName,
+  }) =>
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: routeName),
+        builder: (_) => ChatPage(
+          overrideChatId: overrideChatId,
+          focusMessageId: focusMessageId,
+          userDisplayName: userDisplayName,
+        ),
+      );
 
   /// Sohbet silme onaylarında neyin silinip neyin kaldığı (bkz.
   /// [ChatManager.deleteChat]); sohbet sayfası ve Tüm Sohbetler listesi aynı
@@ -219,6 +238,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// metin başka bir sohbetin kutusuna taşınmaz.
   final TextEditingController _messageController = TextEditingController();
 
+  /// Gönderilmemiş metinler, oturum ve sohbet başına (uygulama açık kaldıkça).
+  /// Sohbet sayfası kapanıp yeniden açılınca (ör. bildirimle başka sohbete
+  /// geçilirken alttaki sohbet kapatıldı) yazılan metin geri gelir.
+  static final Map<String, String> _drafts = {};
+
+  String get _draftKey => '$_currentUid/$_chatId';
+
+  /// Bildirim kaydı ([FcmService.openChat]) bir kez yapılır; sayfanın
+  /// rotası ancak [didChangeDependencies]'te alınabilir.
+  bool _openChatRegistered = false;
+
   /// Mesaj kutusunun odağı: "Yanıtla" seçilince klavye açılsın.
   final FocusNode _inputFocusNode = FocusNode();
 
@@ -326,6 +356,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Determine if current user is an admin
     _isAdminUser = ChatManager.isAdminUid(_currentUid);
 
+    _messageController.text = _drafts[_draftKey] ?? '';
+    _messageController.addListener(_saveDraft);
+
     _focusMessageId = widget.focusMessageId;
     _focusActive = _focusMessageId != null;
     // Odaklı açılışta ekran eski bir mesajdadır, en yeni mesaj görünmez.
@@ -344,9 +377,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }, onError: (Object e) {});
     }
 
-    // Suppress in-app notifications for this chat while it is on top.
-    FcmService().openChat(_chatId);
-
     if (_focusActive) {
       // Ekran eski bir mesajda açılıyor: okundu işareti en yeniye inilince.
       _markReadPending = true;
@@ -359,12 +389,35 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_openChatRegistered) return;
+    _openChatRegistered = true;
+    // Suppress in-app notifications for this chat while it is on top.
+    FcmService().openChat(
+      _chatId,
+      route: ModalRoute.of(context),
+      onNotificationOpen: _openFromNotification,
+    );
+  }
+
+  /// Yazılan metni sohbetin taslağı olarak saklar; kutu boşalınca siler.
+  void _saveDraft() {
+    final String text = _messageController.text;
+    if (text.trim().isEmpty) {
+      _drafts.remove(_draftKey);
+    } else {
+      _drafts[_draftKey] = text;
+    }
+  }
+
+  @override
   void dispose() {
     // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
     // Resume in-app notifications for this chat (another chat page below
     // keeps its own suppression).
-    FcmService().closeChat(_chatId);
+    FcmService().closeChat(_chatId, onNotificationOpen: _openFromNotification);
     _messageController.dispose();
     _inputFocusNode.dispose();
     _replyTarget.dispose();
@@ -490,53 +543,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Check and request photo library permission.
-  /// Returns true if permission is granted, false otherwise.
-  /// Shows a dialog to open Settings if permission is permanently denied.
-  Future<bool> _checkPhotoPermission() async {
-    Permission permission;
-    if (Platform.isIOS) {
-      permission = Permission.photos;
-    } else {
-      permission = Permission.photos;
-    }
-
-    var status = await permission.status;
-
-    // Already granted or limited access - proceed
-    if (status.isGranted || status.isLimited) {
-      return true;
-    }
-
-    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
-    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
-    // Always try to request first if not permanently denied
-    if (!status.isPermanentlyDenied && !status.isRestricted) {
-      status = await permission.request();
-      
-      if (status.isGranted || status.isLimited) {
-        return true;
-      }
-    }
-
-    // Permission denied or permanently denied - show dialog to open Settings
-    if (!mounted) return false;
-    
-    final shouldOpenSettings = await DialogUtils.openConfirm(
-      context,
-      title: 'Fotoğraf İzni Gerekli',
-      message: 'Fotoğraf göndermek için galeri erişim izni gereklidir.\n\n'
-          'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
-      confirmText: 'Ayarlara Git',
-      cancelText: 'İptal',
-    );
-
-    if (shouldOpenSettings) {
-      await openAppSettings();
-    }
-    return false;
-  }
-
   /// Check and request camera permission.
   /// Returns true if permission is granted, false otherwise.
   /// Shows a dialog to open Settings if permission is permanently denied.
@@ -579,8 +585,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Fotoğraf seçtirir: kameradan tek, galeriden en fazla [limit] tane.
   /// Kamerayla çekilen fotoğraf göndermeden önce kırpılıp döndürülebilir
-  /// ([showPhotoEditPage]). İzin yoksa ya da vazgeçilirse boş liste döner.
-  /// Masaüstünde izin sorulmaz (galeri dosya seçicidir).
+  /// ([showPhotoEditPage]). Kamera izni yoksa ya da vazgeçilirse boş liste
+  /// döner. Galeri için izin sorulmaz: sistemin fotoğraf seçicisi (iOS'ta
+  /// PHPicker, Android'de Photo Picker, masaüstünde dosya seçici) izin
+  /// istemez; masaüstünde kamera izni de sorulmaz.
+  ///
+  /// Kameranın yazdığı dosya, düzenlenmiş kopyası gönderilecekse ya da
+  /// fotoğraftan vazgeçildiyse silinir ([TempPhotoFiles.delete]).
   Future<List<XFile>> _pickImages(ImageSource source, {required int limit}) async {
     if (source == ImageSource.camera) {
       if (!_isDesktopPlatform && !await _checkCameraPermission()) {
@@ -590,14 +601,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.rear,
       );
-      if (image == null || !mounted) return const [];
-      final XFile? edited = await showPhotoEditPage(context, image);
+      if (image == null) return const [];
+      XFile? edited;
+      if (mounted) edited = await showPhotoEditPage(context, image);
+      if (edited?.path != image.path) {
+        unawaited(TempPhotoFiles.delete(image.path));
+      }
       return edited == null ? const [] : [edited];
     }
 
-    if (!_isDesktopPlatform && !await _checkPhotoPermission()) {
-      return const [];
-    }
     // Çoklu seçicinin sınırı en az 2 olabilir.
     if (limit < 2) {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
@@ -915,6 +927,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// yapılmaz: liste yerinde o mesaja odaklanır. Canlı akışın alt ucu
   /// sabitlenir ki yeni mesajlar gelince hedef listeden düşmesin.
   void _focusOn(String messageId) {
+    if (!mounted) return;
     _showJumpToLatest.value = false;
     final bool loaded =
         _liveMessages.any((message) => message.id == messageId) ||
@@ -1194,10 +1207,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _markChatAsRead();
     }
     // Odaklı düzende en yeni mesaj ekranda değilse; normal düzende kullanıcı
-    // biraz yukarı kaydırınca.
+    // biraz yukarı kaydırınca ya da en yenide değilken okunmamış mesaj
+    // geldiyse (yeni mesaj görünür alanın altında kalır).
     _showJumpToLatest.value = focusLayout
         ? !atLatest
-        : metrics.pixels > metrics.minScrollExtent + _jumpButtonThreshold;
+        : metrics.pixels > metrics.minScrollExtent + _jumpButtonThreshold ||
+            (!atLatest && _unreadCount.value > 0);
     return false;
   }
 
@@ -1226,6 +1241,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// yeniden başlar), normal düzende en yeni mesaja kaydırır; okundu işareti
   /// orada konur.
   void _jumpToLatest() => _showLatest();
+
+  /// Sohbet açıkken bu sohbetin bildirimine basıldı (bkz.
+  /// [FcmService.openChat]): bildirim bir mesajı gösteriyorsa (ifade) o
+  /// mesaja, göstermiyorsa (yeni mesaj) en yeni mesaja gidilir.
+  void _openFromNotification(String? messageId) {
+    if (!mounted) return;
+    if (messageId == null) {
+      _showLatest();
+    } else {
+      _focusOn(messageId);
+    }
+  }
 
   /// Kullanıcının az önce gönderdiği mesaj ekranda görünsün: odaklı düzendeyse
   /// normal düzene geçilir, normal düzende en yeni mesaja kaydırılır.
@@ -1262,7 +1289,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// düzende yeni mesajlar görünür alanın altına eklendiği için liste onları
   /// gösterecek kadar kayar. Kullanıcı eski mesajlardaysa okundu işareti en
   /// yeniye inince konur; karşı taraftan gelenler "En yeniye git"
-  /// rozetindeki sayıya eklenir.
+  /// rozetindeki sayıya eklenir ve düğme (normal düzende de) görünür.
   void _noteNewMessages(List<MessageData> items, {required bool focusLayout}) {
     final bool firstList = !_messagesShown;
     _messagesShown = true;
@@ -1299,6 +1326,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       } else if (incoming > 0) {
         _markReadPending = true;
         _unreadCount.value += incoming;
+        _showJumpToLatest.value = true;
       }
     });
   }
@@ -1357,8 +1385,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   ///
   /// Fotoğraf öğün kaydından (Öğün Fotoğrafları, Görseller sekmesi, "Planım")
   /// ve Storage'dan kalkar; sohbetteki mesaj "fotoğraf silindi" notuna döner
-  /// (bkz. [MealManager.deleteChatMealPhoto]). Öğünün son fotoğrafı silindiyse
-  /// öğün yüklenmemiş sayılır; hatırlatmalar buna göre yeniden kurulur.
+  /// (bkz. [MealManager.deleteChatMealPhoto]). Yüklemeyle iptal olan o günkü
+  /// öğün hatırlatması fotoğraf silinince geri kurulmaz.
   Future<void> _confirmAndDeleteMealPhoto(MessageData message) async {
     final String? imageUrl = message.imageUrl;
     if (imageUrl == null) return;
@@ -1399,7 +1427,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       messenger.showSnackBar(
         const SnackBar(content: Text(_photoDeletedText)),
       );
-      _rescheduleMealReminders();
     } catch (e) {
       if (mounted && loadingOpen) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -1413,14 +1440,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         message: _deletePhotoErrorText,
       );
     }
-  }
-
-  /// Öğün hatırlatmalarını günün güncel durumuna göre yeniden kurar: silinen
-  /// fotoğraf öğünün son fotoğrafıysa o öğünün hatırlatması geri gelir.
-  void _rescheduleMealReminders() {
-    final MealReminderService reminders = MealReminderService();
-    if (!reminders.isSupported) return;
-    reminders.scheduleMealReminders(_currentUid);
   }
 
   /// Toggle the current viewer's reaction on [message].
@@ -1460,6 +1479,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Mesaj menüsünde (uzun basma / sağ tık) seçilen işlem.
   void _handleMessageAction(MessageData message, MessageAction action) {
+    if (!mounted) return;
     switch (action) {
       case MessageAction.reply:
         _replyTarget.value = message;
@@ -1840,14 +1860,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Uzun sohbette sağda kaydırma çubuğu: üstüne basılı tutup sürükleyerek
   /// sohbette hızlıca yukarı aşağı gidilir. Liste ile aynı kontrolcüyü
-  /// kullanır.
+  /// kullanır. Masaüstünde varsayılan kaydırma çubuğu kapatılır; yoksa iki
+  /// çubuk görünür.
   Widget _withScrollbar(Widget list) {
     return Scrollbar(
       controller: _scrollController,
       interactive: true,
       thickness: _scrollbarThickness,
       radius: const Radius.circular(_scrollbarThickness),
-      child: list,
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: list,
+      ),
     );
   }
 
@@ -2378,7 +2402,7 @@ class _AlbumBubble extends StatelessWidget {
       actions: actionsFor(message),
       currentEmoji: message.reactions[myUid],
     );
-    if (choice == null) return;
+    if (choice == null || !context.mounted) return;
 
     final String? emoji = choice.emoji;
     final MessageAction? action = choice.action;
@@ -2647,7 +2671,7 @@ class _MessageBubble extends StatelessWidget {
       actions: actions,
       currentEmoji: message.reactions[myUid],
     );
-    if (choice == null) return;
+    if (choice == null || !context.mounted) return;
 
     final String? emoji = choice.emoji;
     final MessageAction? action = choice.action;

@@ -1,10 +1,6 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,10 +17,9 @@ import '../utils/pdf_launcher.dart';
 import '../services/notification_service.dart';
 import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
-import '../widgets/chat_image_preview.dart';
 import '../widgets/diet_plan_view.dart';
 import '../widgets/full_screen_image_page.dart';
-import '../widgets/loading_overlay.dart';
+import '../widgets/meal_thumbnail_image.dart';
 import 'dart:async';
 
 /// Set to false to hide font size adjustment controls
@@ -54,6 +49,9 @@ class _MealUploadPageState extends State<MealUploadPage>
   static const String _deletingImageText = 'Görsel siliniyor...';
   static const String _imageDeletedText = 'Silindi!';
 
+  /// "Yüklediklerim" penceresindeki kare küçük görselin kenarı.
+  static const double _uploadThumbSize = 90;
+
   Map<Meals, bool> checkedStates = {
     for (var meal in Meals.dietValues) meal: false,
   };
@@ -71,11 +69,18 @@ class _MealUploadPageState extends State<MealUploadPage>
   /// Goal lines of the active diet, shown above the first meal.
   DietGoals _goals = const DietGoals.empty();
 
-  /// Today's uploaded images per meal type.
-  Map<Meals, List<String>> _mealImages = {};
+  /// Bugün yüklenen fotoğraflar, öğüne göre (adresleri ve küçük
+  /// görselleriyle). Açık "Yüklediklerim" penceresi de bunu dinler.
+  final ValueNotifier<Map<Meals, MealModel>> _mealImages =
+      ValueNotifier<Map<Meals, MealModel>>({});
 
-  bool _isUploading = false;
-  Timer? _uploadTimeoutTimer;
+  /// Fotoğraflar sohbetten yüklenip silinir; sayfa altta açık dururken de
+  /// güncel kalsın diye dinlenir (bkz. [_refreshTodayMeals]).
+  late final MealManager _mealManager;
+
+  /// Üst üste gelen [_refreshTodayMeals] çağrılarında yalnızca en son
+  /// başlayanın sonucu yazılır.
+  int _todayMealsRequest = 0;
 
   /// Gece yarısını geçtiğimizde sayfayı yeni güne çeviren zamanlayıcı.
   Timer? _dayRolloverTimer;
@@ -104,6 +109,8 @@ class _MealUploadPageState extends State<MealUploadPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _mealManager = Provider.of<MealManager>(context, listen: false)
+      ..addListener(_refreshTodayMeals);
     now = DateTime.now();
     _mealContentsFuture = _fetchMealStatesAndContents();
     _scheduleDayRolloverCheck();
@@ -146,7 +153,7 @@ class _MealUploadPageState extends State<MealUploadPage>
       checkedStates = {
         for (final meal in Meals.dietValues) meal: false,
       };
-      _mealImages = {};
+      _mealImages.value = {};
       _waterIntakeLiters = 0.0;
       _stepsController.text = '0';
       _mealContentsFuture = _fetchMealStatesAndContents();
@@ -251,21 +258,8 @@ class _MealUploadPageState extends State<MealUploadPage>
         _goals = diet?.goals ?? const DietGoals.empty();
       });
 
-      // Fetch meal states using provider
-      // Checked before the await so `context` is safe to read, and again after
-      // it so setState never runs on a disposed widget.
-      if (!mounted) return;
-      final mealManager = Provider.of<MealManager>(context, listen: false);
-      final fetchedStates =
-          await mealManager.fetchMealStates(widget.userId, date: now);
-
-      if (!mounted) return;
-      setState(() {
-        checkedStates = fetchedStates;
-      });
-
-      // Fetch today's uploaded images
-      await _refreshMealImages();
+      // Fetch today's meal states and uploaded images
+      await _refreshTodayMeals();
 
       // Fetch daily data using provider
       // Checked before the await so `context` is safe to read, and again after
@@ -285,262 +279,34 @@ class _MealUploadPageState extends State<MealUploadPage>
     }
   }
 
-  /// Fetches today's meal images from MealManager and updates [_mealImages].
-  Future<void> _refreshMealImages() async {
+  /// Bugünün öğün durumlarını ve yüklenen fotoğraflarını yeniden okur (diyet
+  /// içeriği değil). [MealManager] her yükleme ve silmeden sonra haber verir:
+  /// sohbetten silinen fotoğraf sayfadan ve açık "Yüklediklerim"
+  /// penceresinden hemen kalkar.
+  Future<void> _refreshTodayMeals() async {
+    final int request = ++_todayMealsRequest;
     try {
-      final mealManager = Provider.of<MealManager>(context, listen: false);
       final effectiveDate = kDebugMode ? _debugSelectedDate ?? now : now;
       final dateKey = DateFormat('yyyy-MM-dd').format(effectiveDate);
-      final meals = await mealManager.fetchMeals(
-        null,
-        userId: widget.userId,
-        showAllImages: true,
-        date: dateKey,
-      );
+      final (Map<Meals, bool> states, List<MealModel> meals) = await (
+        _mealManager.fetchMealStates(widget.userId, date: now),
+        _mealManager.fetchMeals(
+          null,
+          userId: widget.userId,
+          showAllImages: true,
+          date: dateKey,
+        ),
+      ).wait;
 
-      final map = <Meals, List<String>>{};
-      for (final m in meals) {
-        if (m.imageUrls.isNotEmpty) {
-          map[m.mealType] = m.imageUrls;
-        }
-      }
-
-      if (!mounted) return;
+      if (!mounted || request != _todayMealsRequest) return;
       setState(() {
-        _mealImages = map;
+        checkedStates = states;
+        _mealImages.value = {
+          for (final MealModel m in meals)
+            if (m.imageUrls.isNotEmpty) m.mealType: m,
+        };
       });
     } catch (e) {
-    }
-  }
-
-  /// Check and request photo library permission.
-  /// Returns true if permission is granted, false otherwise.
-  /// Shows a dialog to open Settings if permission is permanently denied.
-  Future<bool> _checkPhotoPermission() async {
-    // On iOS 14+, use photos permission; on Android, use storage or photos
-    Permission permission;
-    if (Platform.isIOS) {
-      permission = Permission.photos;
-    } else {
-      // Android 13+ uses photos, older versions use storage
-      permission = Permission.photos;
-    }
-
-    var status = await permission.status;
-
-    // Already granted or limited access - proceed
-    if (status.isGranted || status.isLimited) {
-      return true;
-    }
-
-    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
-    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
-    // Always try to request first if not permanently denied
-    if (!status.isPermanentlyDenied && !status.isRestricted) {
-      status = await permission.request();
-      
-      if (status.isGranted || status.isLimited) {
-        return true;
-      }
-    }
-
-    // Permission denied or permanently denied - show dialog to open Settings
-    if (!mounted) return false;
-    
-    final shouldOpenSettings = await DialogUtils.openConfirm(
-      context,
-      title: 'Fotoğraf İzni Gerekli',
-      message: 'Öğün fotoğrafı yükleyebilmek için fotoğraf galerisine erişim izni gereklidir.\n\n'
-          'Lütfen Ayarlar\'a giderek fotoğraf erişimine izin verin.',
-      confirmText: 'Ayarlara Git',
-      cancelText: 'İptal',
-    );
-
-    if (shouldOpenSettings) {
-      await openAppSettings();
-    }
-    return false;
-  }
-
-  /// Check and request camera permission.
-  /// Returns true if permission is granted, false otherwise.
-  /// Shows a dialog to open Settings if permission is permanently denied.
-  Future<bool> _checkCameraPermission() async {
-    var status = await Permission.camera.status;
-
-    // Already granted - proceed
-    if (status.isGranted) {
-      return true;
-    }
-
-    // On iOS, 'denied' means we can still request (user hasn't seen dialog yet)
-    // On iOS, 'permanentlyDenied' means user denied and we must go to settings
-    // Always try to request first if not permanently denied or restricted
-    if (!status.isPermanentlyDenied && !status.isRestricted) {
-      status = await Permission.camera.request();
-      
-      if (status.isGranted) {
-        return true;
-      }
-    }
-
-    // Permission denied or permanently denied - show dialog to open Settings
-    if (!mounted) return false;
-    
-    final shouldOpenSettings = await DialogUtils.openConfirm(
-      context,
-      title: 'Kamera İzni Gerekli',
-      message: 'Fotoğraf çekebilmek için kamera erişim izni gereklidir.\n\n'
-          'Lütfen Ayarlar\'a giderek kamera erişimine izin verin.',
-      confirmText: 'Ayarlara Git',
-      cancelText: 'İptal',
-    );
-
-    if (shouldOpenSettings) {
-      await openAppSettings();
-    }
-    return false;
-  }
-
-  /// Show dialog to choose image source (gallery or camera)
-  Future<ImageSource?> _chooseSource() async {
-    return showDialog<ImageSource>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Kaynak'),
-        content: const Text('Görsel kaynağını seçin.'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context, ImageSource.gallery);
-            },
-            child: const Text('Galeri'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context, ImageSource.camera);
-            },
-            child: const Text('Kamera'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Buton yoruma alındığı için şu an çağrılmıyor; fonksiyonalite olduğu gibi
-  // duruyor, buton geri açıldığında ignore kaldırılmalı.
-  // ignore: unused_element
-  Future<void> _uploadMealImage(Meals mealCategory) async {
-    // 1) Choose image source (gallery or camera)
-    final ImageSource? source = await _chooseSource();
-    if (source == null) {
-      return;
-    }
-
-    // 2) Check permission based on selected source
-    final hasPermission = source == ImageSource.camera
-        ? await _checkCameraPermission()
-        : await _checkPhotoPermission();
-    if (!hasPermission) {
-      return;
-    }
-
-    final ImagePicker picker = ImagePicker();
-
-    // 3) Pick/capture image
-    final XFile? image = await picker.pickImage(source: source);
-
-    if (image == null) {
-      // User cancelled image picking
-      return;
-    }
-
-    // Start upload with timeout
-    _uploadTimeoutTimer?.cancel();
-    setState(() {
-      _isUploading = true;
-    });
-    _uploadTimeoutTimer = Timer(kLoadingTimeout, () {
-      if (mounted && _isUploading) {
-        setState(() => _isUploading = false);
-      }
-    });
-
-    try {
-      // Re-checked after the await: the widget may be gone by now.
-      if (!mounted) return;
-      final mealManager = Provider.of<MealManager>(context, listen: false);
-
-      // Pre-check: see if the meal already has max images
-      final bool canAdd = await mealManager.canAddMealImage(
-        userId: widget.userId,
-        meal: mealCategory,
-        date: kDebugMode ? _debugSelectedDate ?? now : now,
-      );
-      if (!canAdd) {
-        if (!mounted) return;
-        _uploadTimeoutTimer?.cancel();
-        setState(() => _isUploading = false);
-        await DialogUtils.openInfo(
-          context,
-          title: MealModel.maxImagesReachedTitle,
-          message: MealModel.maxImagesReachedMessage,
-        );
-        return;
-      }
-
-      final downloadUrl = await mealManager.uploadMealImg(
-        userId: widget.userId,
-        meal: mealCategory,
-        image: image,
-        subscriptionId: widget.subscriptionId,
-        overrideDate: kDebugMode ? _debugSelectedDate : null,
-        alsoPostToChat: false,
-      );
-
-      if (!mounted) return;
-
-      _uploadTimeoutTimer?.cancel();
-      setState(() {
-        _isUploading = false;
-      });
-
-      if (downloadUrl != null) {
-        setState(() {
-          checkedStates[mealCategory] = true;
-        });
-
-        await _mealReminderService.cancelMealReminder(mealCategory);
-        await _refreshMealImages();
-        widget.onImageUploaded();
-
-        if (!mounted) return;
-        await DialogUtils.openInfo(
-          context,
-          title: 'Başarılı',
-          message: 'Öğün görseli başarıyla yüklendi.',
-        );
-      } else {
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message: 'Görsel yüklenirken bir hata oluştu.',
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Görsel yüklenirken bir hata oluştu.',
-      );
-    } finally {
-      _uploadTimeoutTimer?.cancel();
-      if (mounted) {
-        setState(() {
-          _isUploading = false;
-        });
-      }
     }
   }
 
@@ -606,53 +372,47 @@ class _MealUploadPageState extends State<MealUploadPage>
           // Keep any existing actions here
         ],
       ),
-      body: Stack(
-        children: [
-          FutureBuilder<void>(
-            future: _mealContentsFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              } else if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
-              } else {
-                return SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      children: [
-                        // Font size adjustment controls (for testing)
-                        if (IS_TESTING) _buildFontSizeControls(),
+      body: FutureBuilder<void>(
+        future: _mealContentsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          } else {
+            return SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    // Font size adjustment controls (for testing)
+                    if (IS_TESTING) _buildFontSizeControls(),
 
-                        // Debug-only date picker: lets us preview weekday vs
-                        // weekend menus and uploads on a chosen date.
-                        _buildDebugDateSelector(context),
+                    // Debug-only date picker: lets us preview weekday vs
+                    // weekend menus and uploads on a chosen date.
+                    _buildDebugDateSelector(context),
 
-                        // Combined Daily Tracking Card (Water + Steps)
-                        _buildDailyTrackingCard(),
-                        
-                        const SizedBox(height: 8),
+                    // Combined Daily Tracking Card (Water + Steps)
+                    _buildDailyTrackingCard(),
+                    
+                    const SizedBox(height: 8),
 
-                        _buildViewUploadsButton(),
+                    _buildViewUploadsButton(),
 
-                        const SizedBox(height: 8),
+                    const SizedBox(height: 8),
 
-                        // Diet-wide goal lines, above the first meal.
-                        if (_goals.hasAny) DietGoalsCard(goals: _goals),
+                    // Diet-wide goal lines, above the first meal.
+                    if (_goals.hasAny) DietGoalsCard(goals: _goals),
 
-                        // Meals Section with collapsible tiles (split into
-                        // weekday/weekend sections when the diet has both).
-                        _buildMealsArea(),
-                      ],
-                    ),
-                  ),
-                );
-              }
-            },
-          ),
-          if (_isUploading)
-            const LoadingOverlay(message: 'Görsel yükleniyor...'),
-        ],
+                    // Meals Section with collapsible tiles (split into
+                    // weekday/weekend sections when the diet has both).
+                    _buildMealsArea(),
+                  ],
+                ),
+              ),
+            );
+          }
+        },
       ),
     );
   }
@@ -988,7 +748,7 @@ class _MealUploadPageState extends State<MealUploadPage>
   /// Builds the meals area: a single interactive list for weekday-only diets,
   /// or two labelled sections (Hafta İçi + Hafta Sonu) when the diet defines a
   /// weekend menu. Only the section matching today is interactive (check-off +
-  /// photo upload); the other is shown read-only for reference.
+  /// upload status); the other is shown read-only for reference.
   Widget _buildMealsArea() {
     if (!_weekendMenu.hasContent) {
       return _buildMealsSection(
@@ -1083,7 +843,7 @@ class _MealUploadPageState extends State<MealUploadPage>
   }
 
   /// A single collapsible meal tile. When [interactive] is true it shows the
-  /// check-off and camera controls (today's menu); otherwise it is a read-only
+  /// check-off and upload status (today's menu); otherwise it is a read-only
   /// reference tile (the other day-type's menu).
   Widget _buildMealTile({
     required Meals mealCategory,
@@ -1096,7 +856,7 @@ class _MealUploadPageState extends State<MealUploadPage>
     // Whether a photo has actually been uploaded for this meal today. Drives
     // the "Yüklendi / Yüklü Değil" status, independently of the checkbox.
     final hasPhoto =
-        interactive && (_mealImages[mealCategory]?.isNotEmpty ?? false);
+        interactive && _mealImages.value.containsKey(mealCategory);
 
     return DietMealTile(
       mealCategory: mealCategory,
@@ -1121,37 +881,6 @@ class _MealUploadPageState extends State<MealUploadPage>
       // Tracking controls only for the active (today's) menu.
       trailing: interactive
           ? [
-              // "Yükle" butonu şimdilik kapalı: bu sayfadan fotoğraf
-              // yüklenmiyor. Geri açılırken aşağıdaki blok ve
-              // [_uploadMealImage] üzerindeki ignore birlikte kaldırılmalı.
-              // const SizedBox(width: 6),
-              // Upload button: "Yükle" label to the LEFT of the camera icon.
-              // InkWell(
-              //   onTap: () => _uploadMealImage(mealCategory),
-              //   borderRadius: BorderRadius.circular(6),
-              //   child: Padding(
-              //     padding: const EdgeInsets.all(4),
-              //     child: Row(
-              //       mainAxisSize: MainAxisSize.min,
-              //       children: [
-              //         Text(
-              //           'Yükle',
-              //           style: TextStyle(
-              //             fontSize: 12,
-              //             fontWeight: FontWeight.w600,
-              //             color: Colors.blue.shade600,
-              //           ),
-              //         ),
-              //         const SizedBox(width: 3),
-              //         Icon(
-              //           Icons.camera_alt_outlined,
-              //           size: 18,
-              //           color: Colors.blue.shade600,
-              //         ),
-              //       ],
-              //     ),
-              //   ),
-              // ),
               const SizedBox(width: 2),
               SizedBox(
                 width: 22,
@@ -1207,9 +936,7 @@ class _MealUploadPageState extends State<MealUploadPage>
   /// Full-width button that opens the day's uploaded photos, grouped by meal,
   /// in a bottom sheet. Hidden while nothing has been uploaded today.
   Widget _buildViewUploadsButton() {
-    final totalImages =
-        _mealImages.values.fold<int>(0, (sum, list) => sum + list.length);
-    if (totalImages == 0) return const SizedBox.shrink();
+    if (_mealImages.value.isEmpty) return const SizedBox.shrink();
 
     return SizedBox(
       width: double.infinity,
@@ -1237,12 +964,14 @@ class _MealUploadPageState extends State<MealUploadPage>
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
+        // Sayfanın listesini dinler: fotoğraf sohbetten ya da buradan
+        // silinince pencere de hemen güncellenir.
+        return ValueListenableBuilder<Map<Meals, MealModel>>(
+          valueListenable: _mealImages,
+          builder: (ctx, mealImages, child) {
             // "Diğer" olarak yüklenenler de en sonda listelenir.
-            final mealsWithImages = Meals.values
-                .where((m) => (_mealImages[m] ?? []).isNotEmpty)
-                .toList();
+            final mealsWithImages =
+                Meals.values.where(mealImages.containsKey).toList();
 
             return DraggableScrollableSheet(
               initialChildSize: 0.55,
@@ -1294,7 +1023,8 @@ class _MealUploadPageState extends State<MealUploadPage>
                           itemCount: mealsWithImages.length,
                           itemBuilder: (_, index) {
                             final meal = mealsWithImages[index];
-                            final images = _mealImages[meal]!;
+                            final MealModel mealModel = mealImages[meal]!;
+                            final images = mealModel.imageUrls;
 
                             return Card(
                               margin: const EdgeInsets.only(bottom: 10),
@@ -1318,7 +1048,7 @@ class _MealUploadPageState extends State<MealUploadPage>
                                     ),
                                     const SizedBox(height: 8),
                                     SizedBox(
-                                      height: 90,
+                                      height: _uploadThumbSize,
                                       child: ListView.separated(
                                         key: PageStorageKey(
                                             'sheet_imgs_${meal.name}'),
@@ -1328,21 +1058,26 @@ class _MealUploadPageState extends State<MealUploadPage>
                                             const SizedBox(width: 8),
                                         itemBuilder: (_, imgIdx) {
                                           final url = images[imgIdx];
+                                          final String? thumbUrl =
+                                              mealModel.thumbUrlAt(imgIdx);
                                           return Stack(
+                                            key: ValueKey<String>(url),
                                             children: [
                                               GestureDetector(
-                                                onTap: () =>
-                                                    _showFullImage(url, meal),
+                                                onTap: () => _showFullImage(
+                                                    url, thumbUrl, meal),
                                                 child: ClipRRect(
                                                   borderRadius:
                                                       BorderRadius.circular(
                                                           8),
-                                                  child: ChatImagePreview(
-                                                    imageUrl: url,
-                                                    width: 90,
-                                                    height: 90,
-                                                    borderRadius: 8,
-                                                    fit: BoxFit.cover,
+                                                  child: SizedBox.square(
+                                                    dimension:
+                                                        _uploadThumbSize,
+                                                    child: MealThumbnailImage(
+                                                      url: thumbUrl ?? url,
+                                                      isOriginal:
+                                                          thumbUrl == null,
+                                                    ),
                                                   ),
                                                 ),
                                               ),
@@ -1370,7 +1105,6 @@ class _MealUploadPageState extends State<MealUploadPage>
                                                       ctx,
                                                       meal,
                                                       url,
-                                                      setSheetState,
                                                     );
                                                   },
                                                   child: Container(
@@ -1415,26 +1149,29 @@ class _MealUploadPageState extends State<MealUploadPage>
 
   /// "Yüklediklerim" penceresinden bir görseli siler: silinirken ilerleme
   /// çubuğu, bitince "Silindi!" görünür ve gösterge 1 sn sonra kapanır
-  /// ([DialogUtils.openLoadingUntilDone]). Öğünün son görseli silindiyse öğün
-  /// yüklenmemiş sayılır. Diyaloglar pencerenin kendi context'iyle ([ctx])
-  /// açılır.
+  /// ([DialogUtils.openLoadingUntilDone]). Sohbetten silmeyle aynı yoldan
+  /// gider ([MealManager.deleteChatMealPhoto]): sohbetteki mesaj da
+  /// "fotoğraf silindi" olur, kayıttan zaten kalkmış fotoğraf silinmiş sayılır.
+  /// Öğünün son görseli silindiyse öğün yüklenmemiş sayılır; hatırlatması geri
+  /// kurulmaz. Diyaloglar pencerenin kendi context'iyle ([ctx]) açılır.
   Future<void> _deleteSheetImage(
     BuildContext ctx,
     Meals meal,
     String url,
-    StateSetter setSheetState,
   ) async {
-    final MealManager mealManager =
-        Provider.of<MealManager>(context, listen: false);
-
     Future<void> deleteAndRefresh() async {
-      await mealManager.deleteMealImage(
-        userId: widget.userId,
-        meal: meal,
-        imageUrlToDelete: url,
-        overrideDate: kDebugMode ? _debugSelectedDate : null,
-      );
-      await _refreshMealImages();
+      try {
+        await _mealManager.deleteChatMealPhoto(
+          userId: widget.userId,
+          imageUrl: url,
+          fallbackMeal: meal,
+          fallbackDate: kDebugMode ? _debugSelectedDate ?? now : now,
+        );
+      } finally {
+        // Silme yarıda kalsa da liste kaydın son hâlini gösterir; asılı
+        // kalmış bir kare kalkar.
+        await _refreshTodayMeals();
+      }
     }
 
     final Future<void> deletion = deleteAndRefresh();
@@ -1447,11 +1184,6 @@ class _MealUploadPageState extends State<MealUploadPage>
 
     try {
       await deletion;
-      if (!mounted) return;
-      if ((_mealImages[meal] ?? []).isEmpty && checkedStates.containsKey(meal)) {
-        setState(() => checkedStates[meal] = false);
-      }
-      if (ctx.mounted) setSheetState(() {});
     } catch (e) {
       if (ctx.mounted) {
         await DialogUtils.openError(
@@ -1466,10 +1198,11 @@ class _MealUploadPageState extends State<MealUploadPage>
   /// Shows a full-screen preview of a meal image.
   /// Fotoğrafı ortak tam ekran görüntüleyicide açar (sohbet ve Öğün
   /// Fotoğrafları ile aynı: yakınlaştırma, kaydırarak kapatma, Esc).
-  void _showFullImage(String url, Meals meal) {
+  void _showFullImage(String url, String? thumbUrl, Meals meal) {
     showFullScreenImage<void>(
       context,
       imageUrl: url,
+      thumbUrl: thumbUrl,
       title: meal.displayLabel,
     );
   }
@@ -1549,7 +1282,8 @@ class _MealUploadPageState extends State<MealUploadPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _dayRolloverTimer?.cancel();
-    _uploadTimeoutTimer?.cancel();
+    _mealManager.removeListener(_refreshTodayMeals);
+    _mealImages.dispose();
     _stepsFocusNode.removeListener(_handleStepsFocusChange);
     _stepsFocusNode.dispose();
     _stepsController.dispose();

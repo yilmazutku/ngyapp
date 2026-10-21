@@ -15,5 +15,11 @@
 - Firestore ve Storage güvenlik kuralları `firestore.rules` ve `storage.rules`'dadır ve Firebase Console'dakilerle aynı tutulur. Yazılan alan, koleksiyon ya da Storage yolu değişirse (ör. danışanın yeni bir yere dosya yüklemesi) kurallar da gözden geçirilir; kural değişince `tools/firestore_rules_test` içinde `npm install && npm test` ile emülatörde denenir (Java gerekir).
 - `flutter analyze` çalışırken `analysis_options.yaml`, `pubspec.lock` ve `lib/l10n/app_localizations.dart` (gen-l10n çıktısı) dosyalarını değiştirebiliyor; bunlar commit'e dahil edilmez.
 
+## Ürün kuralları
+- **Öğün fotoğrafları yalnızca sohbetten yüklenir**; sohbet dışında (Planım vb.) fotoğraf yükleme yolu yoktur. Her öğün fotoğrafının sohbette bir mesajı vardır; "sohbette mesajı olmayan fotoğraf" durumu için ayrıca uyarı ya da not gösterilmez.
+- Bir öğünün fotoğrafı bir kez yüklenince o günün hatırlatması kalıcı olarak iptal olur; fotoğraf sonradan (sohbetten ya da Planım'dan) silinse de hatırlatma yeniden kurulmaz.
+- Sohbetten silinen fotoğraf Planım'dan da hemen kalkar (aynı öğün kaydı); ekranlar eski durumu göstermez.
+- FCM token yalnızca Android, iOS ve macOS'ta okunur/yazılır; Windows'ta (ve Linux'ta) token'a hiç dokunulmaz. Girişte/açılışta cihazın token'ı kayıtlı olandan farklıysa güncellenir.
+
 ## Test
 - Sayfanın kendisi yerine aynı mantığın bir kopyasıyla (platform taklidiyle, `debugDefaultTargetPlatformOverride`) yazılan testlerde başka platformlar deneniyorsa **iOS da mutlaka denenir**; iOS listeden çıkarılmaz.

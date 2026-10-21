@@ -23,8 +23,9 @@ import 'package:ngy_app/widgets/home_button.dart';
 /// - Source: [ChatManager.userUploadedImagesStream] (messages the user sent
 ///   with an image). chatId == userId, so this is exactly the user's photos.
 /// - Each chat image is adapted to a [MealModel] and rendered with the shared
-///   [MealImageCard] so the layout matches the images tab (5 per row, tap to
-///   enlarge with meal type + upload date & time).
+///   [MealImageCard] so the layout matches the images tab (tap to enlarge with
+///   meal type + upload date & time). Sütun sayısı genişliğe göre değişir:
+///   telefonda 3, geniş ekranda 5 (bkz. [UserMediaGalleryGrid]).
 /// - Sorted oldest→newest so the most recent photo sits at the very bottom.
 /// - Bir fotoğrafa dokununca büyük görsel diyaloğu açılır; altındaki
 ///   "Sohbette göster" sayfayı fotoğrafın mesaj kimliğiyle kapatır, sohbet o
@@ -50,9 +51,6 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   static const String _ownTitle = 'Fotoğraflarım';
   static const String _emptyText = 'Bu kişi sohbette henüz fotoğraf yüklemedi.';
   static const String _ownEmptyText = 'Sohbette henüz fotoğraf yüklemediniz.';
-  static const int _columns = 5; // 5 photos per row (as requested)
-  static const double _gridGap = 6.0;
-  static const double _cardAspectRatio = 1.2; // matches MealImageCard's layout
   static const String _goToChatLabel = 'Sohbette göster';
 
   /// Owns the grid scroll position so the [Scrollbar] can attach to it
@@ -225,46 +223,19 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
             children: [
               _PhotoCountHeader(count: meals.length),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final cellWidth =
-                        (constraints.maxWidth - _gridGap * (_columns + 1)) /
-                            _columns;
-                    final double thumbSize = cellWidth.clamp(48.0, 400.0);
-                    // Floor the enlarged image height so tapping a small 5-per-row
-                    // thumbnail still opens a usefully large preview.
-                    final double dialogImageHeight =
-                        (thumbSize * kMealDialogMultiplier).clamp(240.0, 480.0);
-
-                    return Scrollbar(
-                      controller: _scrollController,
-                      thumbVisibility: true,
-                      child: GridView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.all(_gridGap),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: _columns,
-                          childAspectRatio: _cardAspectRatio,
-                          crossAxisSpacing: _gridGap,
-                          mainAxisSpacing: _gridGap,
-                        ),
-                        itemCount: meals.length,
-                        itemBuilder: (context, i) {
-                          final MessageData? message =
-                              messagesById[meals[i].mealId];
-                          return MealImageCard(
-                            meal: meals[i],
-                            dialogImageHeight: dialogImageHeight,
-                            onTap: () =>
-                                _openPhoto(meals[i], dialogImageHeight),
-                            onMenu: message == null
-                                ? null
-                                : (globalPosition) =>
-                                    _openPhotoMenu(message, globalPosition),
-                          );
-                        },
-                      ),
+                child: UserMediaGalleryGrid(
+                  controller: _scrollController,
+                  itemCount: meals.length,
+                  itemBuilder: (context, i, dialogImageHeight) {
+                    final MessageData? message = messagesById[meals[i].mealId];
+                    return MealImageCard(
+                      meal: meals[i],
+                      dialogImageHeight: dialogImageHeight,
+                      onTap: () => _openPhoto(meals[i], dialogImageHeight),
+                      onMenu: message == null
+                          ? null
+                          : (globalPosition) =>
+                              _openPhotoMenu(message, globalPosition),
                     );
                   },
                 ),
@@ -297,6 +268,73 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
 }
 
 enum _PhotoAction { goToChat, deletePhoto }
+
+/// Galerinin fotoğraf ızgarası. Sütun sayısı genişlikten çıkar: kart en az
+/// [_minCardWidth] genişlikte kalır (telefonda 3 sütun), geniş ekranda en
+/// fazla [_maxColumns]. Kart oranı, Öğün Fotoğrafları şeridindeki kartla
+/// aynı: görsel, altındaki öğün/saat satırından sonra da kareye yakın kalır.
+class UserMediaGalleryGrid extends StatelessWidget {
+  static const int _minColumns = 2;
+  static const int _maxColumns = 5;
+  static const double _minCardWidth = 110.0;
+  static const double _gridGap = 6.0;
+  static const double _cardAspectRatio = 0.85;
+
+  /// Izgaranın kaydırma konumu; [Scrollbar] ile paylaşılır.
+  final ScrollController controller;
+
+  final int itemCount;
+
+  /// Kartı kurar; [dialogImageHeight] karta dokununca açılan büyük görselin
+  /// yüksekliğidir (kart genişliğinden hesaplanır).
+  final Widget Function(
+    BuildContext context,
+    int index,
+    double dialogImageHeight,
+  ) itemBuilder;
+
+  const UserMediaGalleryGrid({
+    super.key,
+    required this.controller,
+    required this.itemCount,
+    required this.itemBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double width = constraints.maxWidth;
+        final int columns = ((width - _gridGap) / (_minCardWidth + _gridGap))
+            .floor()
+            .clamp(_minColumns, _maxColumns);
+        final double cellWidth =
+            (width - _gridGap * (columns + 1)) / columns;
+        // Küçük karta dokununca da büyük görsel kullanışlı boyda açılsın.
+        final double dialogImageHeight =
+            (cellWidth * kMealDialogMultiplier).clamp(240.0, 480.0);
+
+        return Scrollbar(
+          controller: controller,
+          thumbVisibility: true,
+          child: GridView.builder(
+            controller: controller,
+            padding: const EdgeInsets.all(_gridGap),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              childAspectRatio: _cardAspectRatio,
+              crossAxisSpacing: _gridGap,
+              mainAxisSpacing: _gridGap,
+            ),
+            itemCount: itemCount,
+            itemBuilder: (context, i) =>
+                itemBuilder(context, i, dialogImageHeight),
+          ),
+        );
+      },
+    );
+  }
+}
 
 /// Small header above the grid showing how many photos the user uploaded.
 class _PhotoCountHeader extends StatelessWidget {

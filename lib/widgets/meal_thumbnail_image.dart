@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 
 import '../services/meal_photo_loader.dart';
@@ -69,7 +70,7 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
   ImageStreamCompleter loadImage(
       MealThumbnailProvider key, ImageDecoderCallback decode) {
     return MultiFrameImageStreamCompleter(
-      codec: _loadCodec(decode),
+      codec: _loadCodec(key, decode),
       scale: 1.0,
       debugLabel: url,
       informationCollector: () => <DiagnosticsNode>[
@@ -78,7 +79,21 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
     );
   }
 
-  Future<ui.Codec> _loadCodec(ImageDecoderCallback decode) async {
+  Future<ui.Codec> _loadCodec(
+      MealThumbnailProvider key, ImageDecoderCallback decode) async {
+    try {
+      return await _fetchAndDecode(decode);
+    } catch (e) {
+      // NetworkImage'daki gibi: hatalı sonuç önbellekte kalırsa adres uygulama
+      // yeniden açılana kadar bozuk görünür. Önbellekten çıkarılır ki sonraki
+      // çözümleme yeniden denesin (önbellek anahtarı henüz eklememiş
+      // olabilir; bu yüzden mikro görevde).
+      scheduleMicrotask(() => PaintingBinding.instance.imageCache.evict(key));
+      rethrow;
+    }
+  }
+
+  Future<ui.Codec> _fetchAndDecode(ImageDecoderCallback decode) async {
     final Uint8List bytes = await MealPhotoLoader.instance.fetch(url);
 
     if (isOriginal && onOriginalLoaded != null) {
@@ -119,7 +134,13 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
 /// çizilir ve dönen bir gösterge çalıştırır; onlarca kartta bu, listenin
 /// kasmasının başlıca sebebiydi. `frameBuilder` yalnızca ilk kare çözüldüğünde
 /// bir kez çalışır.
-class MealThumbnailImage extends StatelessWidget {
+///
+/// Yüklenemeyen görselin yer tutucusuna dokununca görsel yeniden denenir.
+/// Dokunuş ham işaretçi olaylarından ([Listener]) okunur, dokunma
+/// algılayıcılarıyla yarışmaz: kartın ya da baloncuğun kendi dokunuşu (büyük
+/// görsel, tam ekran, sohbete gitme) her zamanki gibi çalışır, küçük görsel
+/// de arkada yeniden yüklenir.
+class MealThumbnailImage extends StatefulWidget {
   final String url;
   final bool isOriginal;
   final OriginalBytesCallback? onOriginalLoaded;
@@ -134,23 +155,51 @@ class MealThumbnailImage extends StatelessWidget {
   });
 
   @override
+  State<MealThumbnailImage> createState() => _MealThumbnailImageState();
+}
+
+class _MealThumbnailImageState extends State<MealThumbnailImage> {
+  /// [Image]'ın anahtarı; artınca görsel yeniden çözülür (hatalı sonuç
+  /// önbellekten çıkarılmış olduğu için yeniden indirilir).
+  int _attempt = 0;
+
+  /// Yer tutucuda basılan nokta; parmak kaydırmaya dönüştüyse (liste
+  /// kaydırılıyor) yeniden denenmez.
+  Offset? _downPosition;
+
+  void _onPointerUp(PointerUpEvent event) {
+    final Offset? down = _downPosition;
+    _downPosition = null;
+    if (down == null || (event.position - down).distance > kTouchSlop) return;
+    if (!mounted) return;
+    setState(() => _attempt++);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (url.isEmpty) return const _ThumbnailPlaceholder(icon: Icons.image);
+    if (widget.url.isEmpty) {
+      return const _ThumbnailPlaceholder(icon: Icons.image);
+    }
 
     return Image(
+      key: ValueKey<int>(_attempt),
       image: MealThumbnailProvider(
-        url: url,
-        isOriginal: isOriginal,
-        onOriginalLoaded: onOriginalLoaded,
+        url: widget.url,
+        isOriginal: widget.isOriginal,
+        onOriginalLoaded: widget.onOriginalLoaded,
       ),
-      fit: fit,
+      fit: widget.fit,
       gaplessPlayback: true,
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) =>
           frame == null
               ? const _ThumbnailPlaceholder(icon: Icons.image_outlined)
               : child,
-      errorBuilder: (context, error, stackTrace) =>
-          const _ThumbnailPlaceholder(icon: Icons.broken_image_outlined),
+      errorBuilder: (context, error, stackTrace) => Listener(
+        onPointerDown: (event) => _downPosition = event.position,
+        onPointerUp: _onPointerUp,
+        onPointerCancel: (event) => _downPosition = null,
+        child: const _ThumbnailPlaceholder(icon: Icons.broken_image_outlined),
+      ),
     );
   }
 }
