@@ -10,6 +10,7 @@ import '../models/user_model.dart';
 import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/event_provider.dart';
+import '../providers/timeslot_manager.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/edit_event_dialog.dart';
 import '../dialogs/overlap_warning_dialog.dart';
@@ -152,6 +153,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     _fetchAllAppointments();
     _fetchEvents();
+    // Danışanların saat seçicisinin okuduğu dolu saat aynası eski randevularla
+    // doldurulur; beklenmez.
+    Provider.of<TimeslotManager>(context, listen: false)
+        .backfillBusySlotsOnce();
   }
 
   @override

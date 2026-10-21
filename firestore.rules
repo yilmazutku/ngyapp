@@ -71,24 +71,95 @@ service cloud.firestore {
                'storagePath']);
     }
 
+    // Danışanın kendi kullanıcı dokümanında değiştirebildiği alanlar:
+    // bildirim jetonu (FcmService), KVKK onayı (UserProvider.saveKvkkConsent),
+    // Profilim'deki yaş ve bildirim tercihleri, hesap silme talebi (yalnızca
+    // açılır, geri alınamaz). Rol ve admin'in yönettiği diğer alanlar dokunulmaz
+    // kalır.
+    function isOwnUserDocChange(before, after) {
+      let changed = after.diff(before).affectedKeys();
+      return changed.hasOnly([
+               'fcmToken', 'kvkkVersion', 'kvkkAcceptedAt',
+               'explicitConsentAcceptedAt', 'age', 'mealNotificationsEnabled',
+               'announcementNotificationsEnabled', 'isUserRequestedRemoval'])
+          && (!changed.hasAny(['isUserRequestedRemoval'])
+              || after.isUserRequestedRemoval == true);
+    }
+
+    // Danışanın açtığı randevu (Randevularım, AppointmentModel.toMap): kendi
+    // adına ve "Planlandı". İptal ve değişiklik ofisten yapılır; "Planlandı"
+    // paket sayaçlarına dokunmaz (AppointmentManager.addAppointment).
+    function isOwnAppointmentRequest(userId, data) {
+      return data.keys().hasOnly([
+               'userId', 'subscriptionId', 'meetingType', 'appointmentType',
+               'appointmentDateTime', 'durationMinutes', 'status', 'notes',
+               'createDate', 'updateDate', 'createUser', 'updateUser',
+               'postponedDate', 'postponedBy', 'isDeleted'])
+          && data.userId == userId
+          && data.status == 'Planlandı'
+          && data.get('isDeleted', null) == null;
+    }
+
     // ── Admin: unrestricted access to everything ───────────
     match /{document=**} {
       allow read, write: if isAdmin();
     }
 
-    // ── Appointments (collectionGroup read for availability checks) ──
-    match /{path=**}/appointments/{appointmentId} {
+    // ── Busy slots (danışanın saat seçicisi) ───────────────
+    // Randevuların yalnızca saati ve süresi (functions/index.js,
+    // mirrorBusySlot): danışan hangi saatin dolu olduğunu görür; randevunun
+    // kime ait olduğunu, notunu ya da paketini görmez. Yalnızca sunucu yazar.
+    match /busySlots/{slotId} {
       allow read: if isAuth();
     }
 
     // ── Users ──────────────────────────────────────────────
+    // Danışan kendi dokümanını ve bütün alt koleksiyonlarını okur; yalnızca
+    // uygulamanın gerçekten yazdığı yerlere ve alanlara yazar. Dokümanı admin
+    // oluşturur; danışan oluşturamaz, silemez. Paketler, ödemeler, ölçümler,
+    // diyet listeleri ve tahliller admin'indir.
     match /users/{userId} {
       allow read:   if isOwner(userId);
       allow update: if isOwner(userId)
-                    && request.resource.data.role == resource.data.role;
+                    && isOwnUserDocChange(resource.data,
+                                          request.resource.data);
 
-      match /{path=**} {
-        allow read, write: if isOwner(userId);
+      match /{collection}/{document=**} {
+        allow read: if isOwner(userId);
+      }
+
+      // Günün öğün işaretleri ve hatırlatma iptali
+      // (MealManager.mealStateFields).
+      match /meals/{dateKey} {
+        allow create: if isOwner(userId)
+                      && request.resource.data.keys()
+                             .hasOnly(['meals', 'reminderCancelled']);
+        allow update: if isOwner(userId)
+                      && request.resource.data.diff(resource.data)
+                             .affectedKeys()
+                             .hasOnly(['meals', 'reminderCancelled']);
+
+        // Öğün fotoğrafları (MealManager.uploadMealImg, deleteMealImage,
+        // backfillThumbnail).
+        match /mealEntries/{mealName} {
+          allow create, update, delete: if isOwner(userId);
+        }
+      }
+
+      // Planım'daki su ve adım (DailyDataProvider).
+      match /dailyData/{dateKey} {
+        allow create: if isOwner(userId)
+                      && request.resource.data.keys()
+                             .hasOnly(['waterIntake', 'steps']);
+        allow update: if isOwner(userId)
+                      && request.resource.data.diff(resource.data)
+                             .affectedKeys().hasOnly(['waterIntake', 'steps']);
+      }
+
+      match /appointments/{appointmentId} {
+        allow create: if isOwner(userId)
+                      && isOwnAppointmentRequest(userId,
+                                                 request.resource.data);
       }
     }
 

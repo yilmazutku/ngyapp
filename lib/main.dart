@@ -112,11 +112,6 @@ void main() async {
 
   runApp(const MyApp());
 
-  // Try opening pending notification after first frame (only on supported platforms)
-  if (FcmService.isSupported) {
-    FcmService().tryOpenPendingMessageAfterFrame();
-  }
-
   // Schedule meal reminders if user is logged in
   _scheduleMealRemindersForCurrentUser();
 }
@@ -405,6 +400,23 @@ class _HomePageState extends State<HomePage> {
   /// Whether the home page shows items as a grid (squares) or a list.
   /// Toggled by the user via a button in the AppBar.
   bool _isGridView = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Bildirime basınca açılacak sayfa ancak ana sayfa (KVKK onayı geçerli
+    // kullanıcıya) açılınca açılır; ilk kareden sonra, çünkü kare çizilirken
+    // sayfa açılamaz.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) FcmService().markHomeReady(this);
+    });
+  }
+
+  @override
+  void dispose() {
+    FcmService().markHomeGone(this);
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {

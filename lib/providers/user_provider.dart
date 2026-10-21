@@ -14,7 +14,7 @@ class UserProvider extends ChangeNotifier {
   /// Base URL for the project's HTTPS Cloud Functions (default us-central1
   /// region). Callable functions are invoked over HTTP here instead of via the
   /// `cloud_functions` plugin, which has no Windows desktop support.
-  static const String _functionsBaseUrl =
+  static const String functionsBaseUrl =
       'https://us-central1-deneme2-bc96d.cloudfunctions.net';
 
   /// Fetches user details from Firestore based on the provided user ID
@@ -90,7 +90,7 @@ class UserProvider extends ChangeNotifier {
     http.Response response;
     try {
       response = await http.post(
-        Uri.parse('$_functionsBaseUrl/updateUserEmail'),
+        Uri.parse('$functionsBaseUrl/updateUserEmail'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $idToken',
@@ -159,7 +159,7 @@ class UserProvider extends ChangeNotifier {
     http.Response response;
     try {
       response = await http.post(
-        Uri.parse('$_functionsBaseUrl/deleteUserAccount'),
+        Uri.parse('$functionsBaseUrl/deleteUserAccount'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $idToken',
