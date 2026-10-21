@@ -322,12 +322,20 @@ Future<bool> uploadChatMealPhoto(
 /// Uploads a meal photo to Firebase Storage and appends it to the meal document.
 /// A meal type can have up to [MealModel.maxImages] images.
 ///
+/// Fotoğraf kayda bir işlem (transaction) içinde, kaydın en güncel hâline
+/// eklenir ([_addMealImage]): yükleme sürerken öğüne eklenen ya da öğünden
+/// silinen fotoğraflar kaybolmaz, geri gelmez. Sınır bu arada dolduysa
+/// yüklenen dosyalar silinir ve null döner. Kayıt okunamazsa ya da işlem
+/// başarısız olursa hata fırlatılır (yüklenen dosyalar silinir); sohbetin
+/// yükleme sırası yeniden dener.
+///
 /// [alsoPostToChat] true iken fotoğraf öğüne kaydedilip sohbete
 /// gönderilemezse [MealChatPostException] fırlatılır: fotoğraf öğünde durur,
 /// çağıran kullanıcıya sohbette görünmeyeceğini söyleyebilir.
 ///
 /// [observer] yüklemenin ilerlemesini izler ve iptal edebilir (bkz.
-/// [uploadImageWithThumbnail]); iptal edilirse kayıt yazılmaz ve
+/// [uploadImageWithThumbnail]); iptal edilirse kayıt yazılmaz (işlem
+/// sürerken iptal edildiyse eklenen fotoğraf geri alınır) ve
 /// [UploadCancelledException] fırlatılır.
 ///
 /// [cancelsReminder] true ise öğünün o günkü hatırlatması kalıcı olarak
@@ -356,18 +364,10 @@ Future<String?> uploadMealImg({
         .collection('mealEntries')
         .doc(meal.name);
 
-    MealModel? previousMealModel;
-
-    try {
-      final mealDoc = await mealDocRef.get();
-      if (mealDoc.exists) {
-        previousMealModel = MealModel.fromDocument(mealDoc);
-
-        if (!previousMealModel.canAddMoreImages) {
-          return null;
-        }
-      }
-    } catch (e) {
+    // Sınır doluysa hiç yüklenmez. Kayıt okunamazsa deneme başarısız olur.
+    if (!await canAddMealImage(
+        userId: userId, meal: meal, date: referenceDate)) {
+      return null;
     }
 
     final UploadedImage uploaded = await uploadImageWithThumbnail(
@@ -383,44 +383,45 @@ Future<String?> uploadMealImg({
       observer: observer,
     );
 
-    // Append the new URL to existing list (küçük görsel listesi de aynı
-    // sırayla büyür; eski kayıtta eksikse boş dizeyle hizalanır).
-    final existingUrls = previousMealModel?.imageUrls ?? [];
-    final updatedUrls = [...existingUrls, uploaded.url];
-    final existingThumbs = previousMealModel?.alignedThumbUrls() ?? <String>[];
-    final updatedThumbs = [...existingThumbs, uploaded.thumbUrl ?? ''];
-    final existingTimes =
-        previousMealModel?.alignedImageTimes() ?? <DateTime>[];
-    final updatedTimes = [...existingTimes, referenceDate];
-
-    final mergedMealModel = MealModel(
-      mealId: previousMealModel?.mealId ?? mealDocRef.id,
-      mealType: meal,
-      imageUrls: updatedUrls,
-      thumbUrls: updatedThumbs,
-      imageTimes: updatedTimes,
-      subscriptionId: subscriptionId,
-      timestamp: referenceDate,
-      description: previousMealModel?.description,
-      calories: previousMealModel?.calories,
-      notes: previousMealModel?.notes,
-      isChecked: true,
-    );
-
     // Yükleme bu arada iptal edildiyse kayıt yazılmaz.
     if (observer?.isCancelled ?? false) {
       await uploaded.delete();
       throw const UploadCancelledException();
     }
 
-    // Three different documents (meal entry, the day's checklist, the chat):
-    // independent writes, so they are issued together instead of one after the
-    // other. Sohbet yazımının hatası ayrıca tutulur: öğün kaydı yine de
-    // tamamlanmış olur, yükleme "başarısız" sayılıp fotoğraf tekrar
-    // yüklenmesin.
+    // Sohbet mesajı kayıttan sonra yazılır: kayda girmeyen fotoğraf sohbete
+    // düşmesin.
+    final bool added;
+    try {
+      added = await _addMealImage(
+        mealDocRef,
+        meal: meal,
+        subscriptionId: subscriptionId,
+        image: uploaded,
+        time: referenceDate,
+      );
+    } catch (e) {
+      await uploaded.delete();
+      rethrow;
+    }
+    if (!added) {
+      await uploaded.delete();
+      return null;
+    }
+
+    // İşlem sürerken iptal edildiyse eklenen fotoğraf geri alınır.
+    if (observer?.isCancelled ?? false) {
+      await _removeMealImage(mealDocRef, uploaded.url);
+      await uploaded.delete();
+      throw const UploadCancelledException();
+    }
+
+    // The day's checklist and the chat: independent writes, so they are
+    // issued together instead of one after the other. Sohbet yazımının hatası
+    // ayrıca tutulur: öğün kaydı yine de tamamlanmış olur, yükleme
+    // "başarısız" sayılıp fotoğraf tekrar yüklenmesin.
     Object? chatPostError;
     final Future<void> writes = Future.wait([
-      mealDocRef.set(mergedMealModel.toMap()),
       updateMealState(userId, referenceDate, meal, true,
           photoUploaded: cancelsReminder),
       if (alsoPostToChat)
@@ -455,6 +456,11 @@ Future<String?> uploadMealImg({
 /// "Planım" ve sohbet aynı sonucu gösterir. Öğün kaydı bulunamasa da dosya ve
 /// sohbet mesajı temizlenir.
 ///
+/// Fotoğraf kayıttan bir işlem (transaction) içinde, kaydın en güncel
+/// hâlinden adresine göre çıkarılır ([_removeMealImage]): bu sırada öğüne
+/// eklenen fotoğraflar kaybolmaz. İşlem bağlantı ister; çevrimdışıyken silme
+/// hata verir.
+///
 /// [ignoreStorageFailure] true iken Storage'daki dosya silinemese de (ör.
 /// dosya zaten yok) Firestore kaydı temizlenmeye devam eder. Test verisini
 /// temizleyen akış ve sohbetten silme bunu kullanır: kayıt sistemde asılı
@@ -477,13 +483,6 @@ Future<void> deleteMealImage({
         .collection('mealEntries')
         .doc(meal.name);
 
-    final mealDoc = await mealDocRef.get();
-    final MealModel? mealModel =
-        mealDoc.exists ? MealModel.fromDocument(mealDoc) : null;
-    final int index = mealModel?.imageUrls.indexOf(imageUrlToDelete) ?? -1;
-    final String? thumbUrlToDelete =
-        index >= 0 ? mealModel!.thumbUrlAt(index) : null;
-
     // Delete the file from Storage
     try {
       await deleteFile(imageUrlToDelete);
@@ -491,7 +490,11 @@ Future<void> deleteMealImage({
       if (!ignoreStorageFailure) rethrow;
     }
 
-    // Küçük görsel yardımcı bir dosya: silinemese de kayıt temizlenir.
+    final _RemovedMealImage? removed =
+        await _removeMealImage(mealDocRef, imageUrlToDelete);
+
+    // Küçük görsel yardımcı bir dosya: silinemezse yok sayılır.
+    final String? thumbUrlToDelete = removed?.thumbUrl;
     if (thumbUrlToDelete != null) {
       try {
         await deleteFile(thumbUrlToDelete);
@@ -499,34 +502,9 @@ Future<void> deleteMealImage({
       }
     }
 
-    if (mealModel != null && index >= 0) {
-      final updatedUrls = List<String>.from(mealModel.imageUrls)
-        ..removeAt(index);
-      final updatedThumbs = mealModel.alignedThumbUrls()..removeAt(index);
-      final updatedTimes = mealModel.alignedImageTimes()..removeAt(index);
-
-      if (updatedUrls.isEmpty) {
-        // No images left — remove the document and uncheck
-        await mealDocRef.delete();
-        await updateMealState(userId, referenceDate, meal, false);
-      } else {
-        await mealDocRef.set(
-          MealModel(
-            mealId: mealModel.mealId,
-            mealType: meal,
-            imageUrls: updatedUrls,
-            thumbUrls: updatedThumbs,
-            imageTimes: updatedTimes,
-            subscriptionId: mealModel.subscriptionId,
-            // Öğünün saati, kalan fotoğrafların en son yükleneni olur.
-            timestamp: updatedTimes.reduce((a, b) => a.isAfter(b) ? a : b),
-            description: mealModel.description,
-            calories: mealModel.calories,
-            notes: mealModel.notes,
-            isChecked: true,
-          ).toMap(),
-        );
-      }
+    // No images left — uncheck
+    if (removed?.emptied ?? false) {
+      await updateMealState(userId, referenceDate, meal, false);
     }
 
     await _markChatPhotoDeleted(userId, imageUrlToDelete);
@@ -626,10 +604,117 @@ static Map<String, dynamic> mealStateFields(Meals meal, bool isChecked,
         MealReminderService.REMINDER_CANCELLED_FIELD: {meal.name: true},
     };
 
+/// [current] öğün kaydına (yoksa yeni kayıt) bir fotoğraf ekler: adres,
+/// küçük görsel (yoksa boş dize) ve saat, listelerin sonuna aynı sırayla
+/// eklenir; eski kayıtta eksik küçük görsel ve saatler önce hizalanır.
+/// Öğünün saati yeni fotoğrafın saati olur. Sınır ([MealModel.maxImages])
+/// doluysa null.
+static MealModel? mealWithImageAdded(
+  MealModel? current, {
+  required Meals meal,
+  required String subscriptionId,
+  required String imageUrl,
+  required String? thumbUrl,
+  required DateTime time,
+}) {
+  if (current != null && !current.canAddMoreImages) return null;
+  return MealModel(
+    mealId: current?.mealId ?? meal.name,
+    mealType: meal,
+    imageUrls: [...?current?.imageUrls, imageUrl],
+    thumbUrls: [...?current?.alignedThumbUrls(), thumbUrl ?? ''],
+    imageTimes: [...?current?.alignedImageTimes(), time],
+    subscriptionId: subscriptionId,
+    timestamp: time,
+    description: current?.description,
+    calories: current?.calories,
+    notes: current?.notes,
+    isChecked: true,
+  );
+}
+
+/// [current] kaydından [index]. fotoğrafı çıkarır; küçük görsel ve saat
+/// listeleri aynı sırayla kısalır. Öğünün saati, kalan fotoğrafların en son
+/// yükleneni olur. Fotoğraf kalmazsa null.
+static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
+  final List<String> urls = List<String>.from(current.imageUrls)
+    ..removeAt(index);
+  if (urls.isEmpty) return null;
+  final List<DateTime> times = current.alignedImageTimes()..removeAt(index);
+  return MealModel(
+    mealId: current.mealId,
+    mealType: current.mealType,
+    imageUrls: urls,
+    thumbUrls: current.alignedThumbUrls()..removeAt(index),
+    imageTimes: times,
+    subscriptionId: current.subscriptionId,
+    timestamp: times.reduce((a, b) => a.isAfter(b) ? a : b),
+    description: current.description,
+    calories: current.calories,
+    notes: current.notes,
+    isChecked: true,
+  );
+}
+
 
   /// Öğün fotoğraflarının Storage'daki klasörü (bkz. [uploadMealImg],
   /// [mealPhotoLocation]).
   static const String _mealPhotosFolder = 'mealPhotos';
+
+  /// [image] fotoğrafını öğün kaydına bir işlem (transaction) içinde, kaydın
+  /// en güncel hâline ekler ([mealWithImageAdded]). Sınır bu arada dolduysa
+  /// kayda dokunmaz ve false döner.
+  Future<bool> _addMealImage(
+    DocumentReference<Map<String, dynamic>> mealDocRef, {
+    required Meals meal,
+    required String subscriptionId,
+    required UploadedImage image,
+    required DateTime time,
+  }) =>
+      FirebaseFirestore.instance.runTransaction<bool>((transaction) async {
+        final DocumentSnapshot<Map<String, dynamic>> fresh =
+            await transaction.get(mealDocRef);
+        final MealModel? merged = mealWithImageAdded(
+          fresh.exists ? MealModel.fromDocument(fresh) : null,
+          meal: meal,
+          subscriptionId: subscriptionId,
+          imageUrl: image.url,
+          thumbUrl: image.thumbUrl,
+          time: time,
+        );
+        if (merged == null) return false;
+        transaction.set(mealDocRef, merged.toMap());
+        return true;
+      });
+
+  /// [imageUrl] fotoğrafını öğün kaydından bir işlem (transaction) içinde,
+  /// kaydın en güncel hâlinden adresine göre çıkarır
+  /// ([mealWithImageRemovedAt]); fotoğraf kalmazsa kayıt silinir. Fotoğraf
+  /// kayıtta yoksa null.
+  Future<_RemovedMealImage?> _removeMealImage(
+    DocumentReference<Map<String, dynamic>> mealDocRef,
+    String imageUrl,
+  ) =>
+      FirebaseFirestore.instance
+          .runTransaction<_RemovedMealImage?>((transaction) async {
+        final DocumentSnapshot<Map<String, dynamic>> fresh =
+            await transaction.get(mealDocRef);
+        if (!fresh.exists) return null;
+        final MealModel current = MealModel.fromDocument(fresh);
+        final int index = current.imageUrls.indexOf(imageUrl);
+        if (index < 0) return null;
+
+        final MealModel? remaining = mealWithImageRemovedAt(current, index);
+        if (remaining == null) {
+          transaction.delete(mealDocRef);
+        } else {
+          transaction.set(mealDocRef, remaining.toMap());
+        }
+        return (
+          thumbUrl: current.thumbUrlAt(index),
+          emptied: remaining == null,
+        );
+      });
 
   /// Posts the meal image to the user's chat. Hata yutulmaz; çağıran
   /// ([uploadMealImg]) sohbete düşmeyen fotoğrafı kullanıcıya bildirir.
@@ -844,3 +929,7 @@ class MealChatPostException implements Exception {
   @override
   String toString() => 'MealChatPostException($downloadUrl): $cause';
 }
+
+/// Öğün kaydından çıkarılan fotoğrafın küçük görseli ve öğünde fotoğraf
+/// kalıp kalmadığı (bkz. [MealManager._removeMealImage]).
+typedef _RemovedMealImage = ({String? thumbUrl, bool emptied});
