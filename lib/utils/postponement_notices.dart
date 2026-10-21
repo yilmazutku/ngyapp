@@ -6,10 +6,9 @@ import 'dialog_utils.dart';
 /// The postponement-right side of deleting or un-postponing an appointment.
 ///
 /// `postponementsUsed` only counts user-originated postponements, so only
-/// appointments carrying that marker have a right behind them to talk about. Deleting
-/// such an appointment deliberately does **not** give the right back — the
-/// customer did ask for the postponement — but the admin is told, because an
-/// admin-side mistake can then only be corrected from the package editor.
+/// appointments carrying that marker have a right behind them to talk about.
+/// Deleting such an appointment asks the admin whether the right goes back to
+/// the customer ([askReturnRightOnDelete]).
 /// The right comes back automatically in two cases: the appointment goes back
 /// to "Planlandı", or its postponement source is switched away from the
 /// customer — each with its own notice below.
@@ -18,13 +17,18 @@ class PostponementNotices {
 
   static const String _title = 'Erteleme Hakkı';
 
-  /// Shown after deleting an appointment that had consumed a postponement
-  /// right.
-  static const String _rightKeptMessage =
-      'Danışan erteleme hakkı kullanılan bir randevuyu sildiniz. Bu randevuda '
-      'danışan erteleme hakkından düşülmüştü. Silme işlemi sizden kaynaklıysa '
-      'paket düzenleme ekranında "Kullanılan Erteleme Sayısı"nı 1 azaltarak '
-      'kalan erteleme hakkına 1 ekleyebilirsiniz.';
+  /// Silinecek randevu danışanın erteleme hakkını kullandıysa sorulur.
+  static const String _deleteChoiceMessage =
+      'Bu randevu danışan kaynaklı ertelendi ve danışanın erteleme hakkından '
+      'düşüldü. Randevu silinirken erteleme hakkı danışana geri verilsin mi?';
+  static const String _returnRightOption = 'Danışana Erteleme Hakkını Geri Ver';
+  static const String _keepRightOption = 'Geri Verme';
+  static const String _deleteConfirmText = 'Randevuyu Sil';
+
+  static const String _rightReturnedNote =
+      ' Erteleme hakkı danışana geri verildi.';
+  static const String _rightKeptNote =
+      ' Erteleme hakkı danışana geri verilmedi.';
 
   static const String _rightReturnedByRescheduleMessage =
       'Randevu tekrar planlandı durumuna alındı. Bu randevu için kullanılan '
@@ -52,18 +56,35 @@ class PostponementNotices {
       appointment.postponedBy == PostponeSource.user &&
       (appointment.subscriptionId?.isNotEmpty ?? false);
 
-  /// Tells the admin the right stayed spent after a delete.
-  /// Does nothing when the appointment never consumed one.
-  static Future<void> warnRightKept(
+  /// [appointment] silinmeden önce sorulur: randevu danışanın erteleme
+  /// hakkını kullandıysa hak geri verilsin mi (true) verilmesin mi (false);
+  /// randevu hak kullanmadıysa soru sorulmaz, false. Vazgeçilirse null:
+  /// randevu silinmez.
+  static Future<bool?> askReturnRightOnDelete(
     BuildContext context,
     AppointmentModel appointment,
   ) async {
-    if (!consumedRight(appointment)) return;
-    await DialogUtils.openAttentionInfo(
+    if (!consumedRight(appointment)) return false;
+    return DialogUtils.openAttentionChoice<bool>(
       context,
       title: _title,
-      message: _rightKeptMessage,
+      message: _deleteChoiceMessage,
+      options: const [
+        (true, _returnRightOption),
+        (false, _keepRightOption),
+      ],
+      confirmText: _deleteConfirmText,
     );
+  }
+
+  /// Silme başarı mesajının sonuna eklenen erteleme hakkı notu ([returned]:
+  /// hak gerçekten geri verildi mi); randevu hak kullanmadıysa boş.
+  static String deleteResultNote(
+    AppointmentModel appointment, {
+    required bool returned,
+  }) {
+    if (!consumedRight(appointment)) return '';
+    return returned ? _rightReturnedNote : _rightKeptNote;
   }
 
   /// Tells the admin the right was given back after the appointment went back

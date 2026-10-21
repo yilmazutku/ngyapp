@@ -96,9 +96,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
   /// Yükleme/temizleme sırasında ilerlemeyi canlı gösteren dialog mesajı.
   final ValueNotifier<String> _progressMessage = ValueNotifier<String>('');
 
-  /// İlerleme dialogu şu an açık mı (bkz. [_openProgress]).
-  bool _progressOpen = false;
-
   bool _isLoading = true;
   bool _isBusy = false;
   String? _errorText;
@@ -426,7 +423,6 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
     if (!confirmed || !mounted) return;
 
     // Context'e bağlı nesneler await'lerden önce alınır.
-    final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
     final mealManager = Provider.of<MealManager>(context, listen: false);
     final dietProvider = Provider.of<DietProvider>(context, listen: false);
     final mockProvider =
@@ -437,7 +433,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
       _results = const [];
     });
 
-    _openProgress('Hazırlanıyor...');
+    final LoadingDialog loading = _openProgress('Hazırlanıyor...');
     final List<_MockResult> results = [];
     String? runId;
 
@@ -546,7 +542,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
         }
       }
 
-      _closeProgress(navigator);
+      loading.close();
       await _reloadRuns();
 
       if (!mounted) return;
@@ -561,7 +557,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
             '(fotoğraflar + geçici diyetler) kaldırabilirsiniz.',
       );
     } catch (e) {
-      _closeProgress(navigator);
+      loading.close();
       await _reloadRuns();
       if (!mounted) return;
       setState(() => _results = results);
@@ -631,14 +627,13 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
     );
     if (!confirmed || !mounted) return;
 
-    final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
     final mealManager = Provider.of<MealManager>(context, listen: false);
     final dietProvider = Provider.of<DietProvider>(context, listen: false);
     final mockProvider =
         Provider.of<MockTestDataProvider>(context, listen: false);
 
     setState(() => _isBusy = true);
-    _openProgress('Test verileri siliniyor...');
+    final LoadingDialog loading = _openProgress('Test verileri siliniyor...');
 
     try {
       final MockCleanupResult result = await mockProvider.cleanup(
@@ -647,7 +642,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
         onProgress: (message) => _progressMessage.value = message,
       );
 
-      _closeProgress(navigator);
+      loading.close();
       await _reloadRuns();
 
       if (!mounted) return;
@@ -658,7 +653,7 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
         message: result.summary,
       );
     } catch (e) {
-      _closeProgress(navigator);
+      loading.close();
       await _reloadRuns();
       if (!mounted) return;
       await DialogUtils.openError(
@@ -673,24 +668,12 @@ class _AdminMockMealPhotosPageState extends State<AdminMockMealPhotosPage> {
     }
   }
 
-  /// İlerleme dialogunu açar.
-  ///
-  /// Dialog await edilmez; kullanıcı geri tuşuyla kapatırsa `whenComplete`
-  /// [_progressOpen] bayrağını düşürür, böylece [_closeProgress] yanlışlıkla
-  /// sayfayı kapatmaz.
-  void _openProgress(String message) {
+  /// İlerleme dialogunu [message] ile açar; dönen [LoadingDialog] ile
+  /// kapatılır.
+  LoadingDialog _openProgress(String message) {
     _progressMessage.value = message;
-    _progressOpen = true;
-    DialogUtils.openLoadingProgress(context,
-            messageListenable: _progressMessage)
-        .whenComplete(() => _progressOpen = false);
-  }
-
-  /// İlerleme dialogunu kapatır; zaten kapalıysa hiçbir şey yapmaz.
-  void _closeProgress(NavigatorState navigator) {
-    if (!_progressOpen) return;
-    _progressOpen = false;
-    if (navigator.mounted) navigator.pop();
+    return DialogUtils.openLoadingProgress(context,
+        messageListenable: _progressMessage);
   }
 
   String _extensionOfSelectedPhoto() {

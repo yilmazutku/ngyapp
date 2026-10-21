@@ -576,22 +576,14 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     // user record for its header.
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Danışan açılıyor...');
-      loadingOpen = true;
-    }
-
-    void closeLoading() {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading = DialogUtils.openLoading(context, message: 'Danışan açılıyor...');
     }
 
     try {
       final user = await userProvider.fetchUserDetails(userId: row.userId);
-      closeLoading();
+      loading?.close();
       if (!mounted) return;
 
       if (user == null) {
@@ -619,7 +611,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         });
       }
     } catch (e) {
-      closeLoading();
+      loading?.close();
       if (!mounted) return;
       await DialogUtils.openError(
         context,

@@ -919,14 +919,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
     final titleLabel = 'Ödemeler ${kMonthYearFormat.format(monthStart)}';
     setState(() => _isExporting = true);
 
-    bool loadingOpen = false;
-    void closeLoading() {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
-    }
-
+    LoadingDialog? loading;
     try {
       final targetPath =
           await PaymentExportUtil.promptForTargetPath(titleLabel: titleLabel);
@@ -935,8 +928,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
       }
 
       if (!mounted) return;
-      DialogUtils.openLoading(context, message: 'Excel dosyası hazırlanıyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'Excel dosyası hazırlanıyor...');
 
       await PaymentExportUtil.writePayments(
         targetPath: targetPath,
@@ -945,7 +937,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         titleLabel: titleLabel,
       );
 
-      closeLoading();
+      loading.close();
       if (!mounted) return;
       await DialogUtils.openInfo(
         context,
@@ -953,7 +945,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage>
         message: '${payments.length} ödeme dışa aktarıldı.\n\nDosya: $targetPath',
       );
     } catch (e) {
-      closeLoading();
+      loading?.close();
       if (!mounted) return;
       await DialogUtils.openError(
         context,

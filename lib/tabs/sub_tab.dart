@@ -803,22 +803,18 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
   }
 
   Future<void> _deleteSubscription(SubscriptionModel s) async {
+    LoadingDialog? loading;
     try {
       // Show loading dialog
-      bool loadingOpen = false;
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Paket siliniyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'Paket siliniyor...');
       }
       
       final subProvider = context.read<SubProvider>();
       final success = await subProvider.deleteSubscription(userId: s.userId, subscriptionId: s.subscriptionId);
 
       // Close loading dialog
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       
       if (success && mounted) {
         await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Paket silindi.');
@@ -826,6 +822,7 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
         // when provider calls notifyListeners() - no need to call it here
       }
     } catch (e) {
+      loading?.close();
       if (!mounted) return;
       await DialogUtils.openError(context, title: 'Hata', message: 'Paket silinirken bir hata oluştu: $e');
     }

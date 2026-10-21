@@ -82,10 +82,9 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
           ValueNotifier<String>('PDF yükleniyor (1/$total)...');
 
       // --- SHOW LOADING (do not await) ---
-      bool loadingOpen = false;
+      LoadingDialog? loading;
       if (mounted) {
-        DialogUtils.openLoadingProgress(context, messageListenable: progress);
-        loadingOpen = true;
+        loading = DialogUtils.openLoadingProgress(context, messageListenable: progress);
       }
 
       int success = 0;
@@ -123,10 +122,7 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         }
 
         // Close loading BEFORE showing info/error
-        if (mounted && loadingOpen) {
-          Navigator.of(context, rootNavigator: true).pop();
-          loadingOpen = false;
-        }
+        loading?.close();
 
         if (mounted) {
           setState(() { _pdfListFuture = _fetchTanitaPdfs(); });
@@ -146,10 +142,7 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
           }
         }
       } catch (e) {
-        if (mounted && loadingOpen) {
-          Navigator.of(context, rootNavigator: true).pop();
-          loadingOpen = false;
-        }
+        loading?.close();
         if (mounted) {
           await DialogUtils.openError(
             context,
@@ -158,6 +151,7 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
           );
         }
       } finally {
+        loading?.close();
         progress.dispose();
         if (mounted) setState(() { _busy = false; });
       }
@@ -184,10 +178,9 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
     if (confirmed != true) return;
     if (!mounted) return;
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Dosya siliniyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'Dosya siliniyor...');
     }
 
     try {
@@ -198,10 +191,7 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         storagePath: pdf.storagePath,
       );
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         setState(() { _pdfListFuture = _fetchTanitaPdfs(); });
@@ -212,10 +202,7 @@ class _TanitaExplorerPageState extends State<TanitaExplorerPage> {
         );
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         await DialogUtils.openError(
           context,

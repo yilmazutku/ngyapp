@@ -109,6 +109,82 @@ class DialogUtils {
     return result == true;
   }
 
+  /// [openAttentionInfo] ile aynı kırmızı, kalın uyarı; altında yöneticinin
+  /// birini seçmesi gereken kutucuklar ([options]: değer ve etiket). Seçim
+  /// yapılmadan [confirmText] çalışmaz. Seçilen değeri, vazgeçilirse null
+  /// döner.
+  static Future<T?> openAttentionChoice<T>(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required List<(T, String)> options,
+    String confirmText = 'Tamam',
+    String cancelText = 'İptal',
+  }) {
+    T? selected;
+    return showDialog<T>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocalState) {
+          final ColorScheme colors = Theme.of(context).colorScheme;
+          return AlertDialog(
+            title: Text(
+              _upperTr(title),
+              style: _attentionTitleStyle(context),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '$_attentionLeadIn${_upperTr(message)}',
+                    style: _attentionMessageStyle(context),
+                  ),
+                  for (final (T value, String label) in options)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: CheckboxListTile(
+                        value: selected == value,
+                        onChanged: (bool? checked) => setLocalState(
+                            () => selected = checked == true ? value : null),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        shape: RoundedRectangleBorder(
+                          side: BorderSide(
+                            color: selected == value
+                                ? colors.primary
+                                : colors.outline,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        title: Text(
+                          label,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(cancelText),
+              ),
+              FilledButton(
+                onPressed: selected == null
+                    ? null
+                    : () => Navigator.pop(context, selected),
+                child: Text(confirmText),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   /// Shows a confirmation dialog with a message and an OK button
   /// Closes the current route, then shows an info dialog on a context that
   /// survives that pop.
@@ -202,54 +278,82 @@ class DialogUtils {
 
   /// Shows a loading dialog with a message
   /// Prevents user interaction during loading operations
-  static Future<void> openLoading(
+  ///
+  /// Await edilmez; dönen [LoadingDialog]'un [LoadingDialog.close]'u ile
+  /// kapatılır.
+  static LoadingDialog openLoading(
     BuildContext context, {
     required String message,
   }) {
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: Row(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(width: 20),
-              Text(message),
-            ],
-          ),
-        );
-      },
+    return _pushLoading(
+      context,
+      AlertDialog(
+        content: Row(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 20),
+            Text(message),
+          ],
+        ),
+      ),
     );
   }
 
   /// Shows a non-dismissible loading dialog whose message updates live via
   /// [messageListenable]. Useful for multi-step / bulk operations that want to
   /// surface progress (e.g. "Yükleniyor (2/5)...").
-  static Future<void> openLoadingProgress(
+  ///
+  /// [openLoading] gibi dönen [LoadingDialog] ile kapatılır.
+  static LoadingDialog openLoadingProgress(
     BuildContext context, {
     required ValueListenable<String> messageListenable,
   }) {
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: Row(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(width: 20),
-              Expanded(
-                child: ValueListenableBuilder<String>(
-                  valueListenable: messageListenable,
-                  builder: (_, message, __) => Text(message),
-                ),
+    return _pushLoading(
+      context,
+      AlertDialog(
+        content: Row(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 20),
+            Expanded(
+              child: ValueListenableBuilder<String>(
+                valueListenable: messageListenable,
+                builder: (_, message, __) => Text(message),
               ),
-            ],
-          ),
-        );
-      },
+            ),
+          ],
+        ),
+      ),
     );
+  }
+
+  /// [dialog]'u `showDialog` gibi (kök navigator, aynı temalar ve arka plan)
+  /// hemen açar; geri tuşu ve arka plana dokunmak diyaloğu kapatmaz. Rota
+  /// tutulur ki diyalog, üstüne açılan sayfaya dokunmadan kapatılabilsin.
+  static LoadingDialog _pushLoading(BuildContext context, Widget dialog) {
+    final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
+    final DialogRoute<void> route = DialogRoute<void>(
+      context: context,
+      builder: (_) => PopScope(canPop: false, child: dialog),
+      barrierColor: DialogTheme.of(context).barrierColor ??
+          Theme.of(context).dialogTheme.barrierColor ??
+          Colors.black54,
+      barrierDismissible: false,
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
+      traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
+    );
+    navigator.push(route);
+    return LoadingDialog._(navigator, route);
+  }
+
+  /// [context]'in kendi sayfasını ya da diyaloğunu [result] ile kapatır (bkz.
+  /// [_closeRoute]): iş bitince sayfa kendini kapatırken, bu arada
+  /// bildirimden üstüne açılan sayfa kapanmaz.
+  static void closeOwnRoute(BuildContext context, [Object? result]) {
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
+    final NavigatorState? navigator = route?.navigator;
+    if (route == null || navigator == null) return;
+    _closeRoute(navigator, route, result);
   }
 
   /// İş sürerken ilerleme çubuğu ve [message], iş bitince onay ikonu ve
@@ -291,6 +395,47 @@ class DialogUtils {
       closed = true;
       succeeded.dispose();
     }
+  }
+}
+
+/// [DialogUtils.openLoading] ve [DialogUtils.openLoadingProgress]'in açtığı
+/// yükleme diyaloğu.
+///
+/// Diyalog `Navigator.pop` ile değil [close] ile kapatılır: diyalog açıkken
+/// üstüne bir sayfa açılırsa (ör. bildirime basılıp sohbet) `pop` o sayfayı
+/// kapatır, diyalog da ekranda asılı kalırdı.
+class LoadingDialog {
+  LoadingDialog._(this._navigator, this._route);
+
+  final NavigatorState _navigator;
+  final Route<void> _route;
+  bool _closed = false;
+
+  /// Diyalog hâlâ açık mı.
+  bool get isOpen => !_closed && _route.isActive;
+
+  /// Yalnızca bu diyaloğu kapatır (bkz. [_closeRoute]). `BuildContext`
+  /// istemez: sayfa kapanmış olsa da (ör. `finally` içinde) çağrılabilir;
+  /// ikinci çağrı bir şey yapmaz.
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _closeRoute(_navigator, _route);
+  }
+}
+
+/// [route]'u [result] ile kapatır: en üstteyse `pop` edilir; üstüne başka
+/// bir sayfa açıldıysa (ör. bildirimden sohbet) o sayfa değil, yalnızca
+/// [route] kaldırılır; zaten kapandıysa bir şey yapılmaz.
+void _closeRoute(
+  NavigatorState navigator,
+  Route<dynamic> route, [
+  Object? result,
+]) {
+  if (route.isCurrent) {
+    navigator.pop(result);
+  } else if (route.isActive) {
+    navigator.removeRoute(route, result);
   }
 }
 
@@ -344,13 +489,7 @@ class _LoadingUntilDoneDialogState extends State<_LoadingUntilDoneDialog> {
       await Future<void>.delayed(widget.doneDuration);
     }
     if (!mounted || route == null) return;
-    // Üstüne başka bir sayfa açıldıysa (ör. bildirimden sohbet) o sayfa
-    // değil, yalnızca diyalog kaldırılır.
-    if (route.isCurrent) {
-      navigator.pop();
-    } else if (route.isActive) {
-      navigator.removeRoute(route);
-    }
+    _closeRoute(navigator, route);
   }
 
   @override

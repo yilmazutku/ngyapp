@@ -483,19 +483,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (!mounted) return;
     final chat = context.read<ChatManager>();
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Sohbet siliniyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'Sohbet siliniyor...');
     }
 
     try {
       await chat.deleteChat(_chatId);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Sohbet silindi.');
@@ -504,13 +500,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       // Return to the previous screen (the chat list or Öğün Fotoğrafları)
       // now that this chat no longer exists.
       if (mounted) {
-        Navigator.of(context).pop();
+        DialogUtils.closeOwnRoute(context);
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (!mounted) return;
       await DialogUtils.openError(
@@ -1404,10 +1397,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
     if (!confirmed) return;
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: _deletingPhotoText);
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: _deletingPhotoText);
     }
 
     try {
@@ -1419,19 +1411,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
       _refreshOlderMessage(message.id);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       messenger.showSnackBar(
         const SnackBar(content: Text(_photoDeletedText)),
       );
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (!mounted) return;
       await DialogUtils.openError(

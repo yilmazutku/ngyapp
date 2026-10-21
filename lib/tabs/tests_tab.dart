@@ -80,10 +80,9 @@ class _TestsTabState extends State<TestsTab> {
       final progress = ValueNotifier<String>('Dosyalar yükleniyor (1/$total)...');
 
       // --- SHOW LOADING (do not await) ---
-      bool loadingOpen = false;
+      LoadingDialog? loading;
       if (mounted) {
-        DialogUtils.openLoadingProgress(context, messageListenable: progress);
-        loadingOpen = true;
+        loading = DialogUtils.openLoadingProgress(context, messageListenable: progress);
       }
 
       int success = 0;
@@ -121,10 +120,7 @@ class _TestsTabState extends State<TestsTab> {
         }
 
         // Close loading BEFORE showing info/error
-        if (mounted && loadingOpen) {
-          Navigator.of(context, rootNavigator: true).pop(); // close loading dialog
-          loadingOpen = false;
-        }
+        loading?.close();
 
         if (mounted) {
           setState(() { _filesFuture = _fetchFiles(); });
@@ -144,14 +140,12 @@ class _TestsTabState extends State<TestsTab> {
           }
         }
       } catch (e) {
-        if (mounted && loadingOpen) {
-          Navigator.of(context, rootNavigator: true).pop(); // close loading dialog
-          loadingOpen = false;
-        }
+        loading?.close();
         if (mounted) {
           await DialogUtils.openError(context, title: 'Hata', message: 'Dosya yükleme hatası: $e');
         }
       } finally {
+        loading?.close();
         progress.dispose();
         if (mounted) setState(() { _busy = false; });
       }

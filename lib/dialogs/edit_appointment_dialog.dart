@@ -393,19 +393,23 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
     );
     if (!confirmed) return;
     if (!mounted) return;
+    final bool? returnRight = await PostponementNotices.askReturnRightOnDelete(
+        context, widget.appointment);
+    if (returnRight == null || !mounted) return;
 
     startLoading();
     try {
       final appointmentManager =
           Provider.of<AppointmentManager>(context, listen: false);
-      final deleted = await appointmentManager.deleteAppointment(
+      final result = await appointmentManager.deleteAppointment(
         widget.appointment.appointmentId,
         widget.appointment.userId,
         deletedBy: 'admin',
+        returnPostponementRight: returnRight,
       );
 
       if (!mounted) return;
-      if (!deleted) {
+      if (!result.deleted) {
         await DialogUtils.openError(
           context,
           title: 'Hata',
@@ -419,11 +423,9 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
-        message: 'Randevu silindi.',
+        message: 'Randevu silindi.'
+            '${PostponementNotices.deleteResultNote(widget.appointment, returned: result.rightReturned)}',
       );
-      if (!mounted) return;
-      // Deleting does not give a spent postponement right back either.
-      await PostponementNotices.warnRightKept(context, widget.appointment);
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {

@@ -301,28 +301,21 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     if (!mounted) return;
     final chatManager = Provider.of<ChatManager>(context, listen: false);
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Sohbet siliniyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'Sohbet siliniyor...');
     }
 
     try {
       await chatManager.deleteChat(chatId);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Sohbet silindi.');
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (!mounted) return;
       await DialogUtils.openError(
@@ -359,10 +352,9 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
     final chatManager = Provider.of<ChatManager>(context, listen: false);
 
     final progress = ValueNotifier<String>('Sohbetler siliniyor... (0/${ids.length})');
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoadingProgress(context, messageListenable: progress);
-      loadingOpen = true;
+      loading = DialogUtils.openLoadingProgress(context, messageListenable: progress);
     }
 
     int deleted = 0;
@@ -380,10 +372,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
         progress.value = 'Sohbetler siliniyor... (${i + 1}/${ids.length})';
       }
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         if (failed.isEmpty) {
@@ -402,10 +391,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
         }
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         await DialogUtils.openError(
@@ -415,6 +401,7 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
         );
       }
     } finally {
+      loading?.close();
       progress.dispose();
       if (mounted) {
         _exitSelectionMode();
