@@ -338,11 +338,19 @@ class _LoadingUntilDoneDialogState extends State<_LoadingUntilDoneDialog> {
     if (!mounted || succeeded == null || _closing) return;
     _closing = true;
     final NavigatorState navigator = Navigator.of(context);
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
     if (succeeded) {
       setState(() {});
       await Future<void>.delayed(widget.doneDuration);
     }
-    if (mounted) navigator.pop();
+    if (!mounted || route == null) return;
+    // Üstüne başka bir sayfa açıldıysa (ör. bildirimden sohbet) o sayfa
+    // değil, yalnızca diyalog kaldırılır.
+    if (route.isCurrent) {
+      navigator.pop();
+    } else if (route.isActive) {
+      navigator.removeRoute(route);
+    }
   }
 
   @override

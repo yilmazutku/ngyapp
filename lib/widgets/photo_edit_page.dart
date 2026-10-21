@@ -8,9 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../utils/dialog_utils.dart';
+import '../utils/temp_photo_files.dart';
 
 /// Kameradan çekilen fotoğrafı göndermeden önce kırpma ve 90 derecelik
 /// döndürme ekranında açar (bkz. [PhotoEditPage]). Düzenlenen fotoğraf geçici
@@ -375,7 +375,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     }
   }
 
-  /// Döndürülmüş fotoğrafın kırpılan kısmını çizip geçici bir dosyaya yazar.
+  /// Döndürülmüş fotoğrafın kırpılan kısmını çizip düzenleme klasörüne
+  /// ([TempPhotoFiles.photoEditDirectory]) yazar.
   Future<XFile?> _export(ui.Image image) async {
     ui.Image? output;
     try {
@@ -407,7 +408,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         height,
       );
 
-      final Directory directory = await getTemporaryDirectory();
+      final Directory directory = await TempPhotoFiles.photoEditDirectory();
       final String path = p.join(
         directory.path,
         'photo_edit_${DateTime.now().microsecondsSinceEpoch}${encoded.extension}',

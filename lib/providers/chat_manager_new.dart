@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/meal_model.dart';
 import '../models/pending_upload.dart';
 import '../utils/storage_upload.dart';
+import '../utils/temp_photo_files.dart';
 
 /// Data Transfer Object representing a chat message from Firestore.
 /// 
@@ -366,6 +367,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     upload.cancel();
     _forgetUpload(upload);
     _removePendingUpload(upload);
+    _deleteUploadFile(upload);
   }
 
   void _removePendingUpload(PendingUpload upload) {
@@ -374,6 +376,20 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     _pendingUploads[upload.chatId] =
         current.where((item) => item != upload).toList();
     notifyListeners();
+  }
+
+  /// Yüklenen ya da vazgeçilen fotoğrafın cihazdaki geçici kopyasını siler
+  /// (bkz. [TempPhotoFiles.delete]); sıradaki başka bir fotoğraf aynı
+  /// dosyayı kullanıyorsa silinmez. Baloncuğu sıradan önce kaldırılır:
+  /// sonraki kare dosyayı göstermez. Yüklenemeyen fotoğrafın dosyası
+  /// silinmez; yeniden denemesi ([PendingUpload.retryCopy]) ve açılışta geri
+  /// yüklenen sıra onu kullanır.
+  void _deleteUploadFile(PendingUpload upload) {
+    final String path = upload.image.path;
+    for (final List<PendingUpload> uploads in _pendingUploads.values) {
+      if (uploads.any((item) => item.image.path == path)) return;
+    }
+    unawaited(TempPhotoFiles.delete(path));
   }
 
   /// Sohbetin sırasını baştan sona tek tek işler.
@@ -420,6 +436,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
       } else {
         _forgetUpload(upload);
         _removePendingUpload(upload);
+        _deleteUploadFile(upload);
       }
     } on UploadFailure catch (e) {
       _markUploadFailed(upload, e.message, canRetry: e.canRetry);
@@ -534,6 +551,9 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   ///
   /// Dönen `restored` sıraya eklenen, `missing` dosyası cihazda artık
   /// bulunmadığı için gönderilemeyen fotoğraf sayısıdır.
+  ///
+  /// Düzenleme klasöründe sırada olmadığı hâlde kalmış eski fotoğraflar da
+  /// silinir (bkz. [TempPhotoFiles.deleteStalePhotoEdits]).
   Future<({int restored, int missing})> restorePendingUploads({
     required String userId,
     required Future<void> Function(PendingUpload upload) runner,
@@ -544,6 +564,12 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
 
     final Map<String, Map<String, dynamic>> entries =
         await _readPersistedUploads();
+    unawaited(TempPhotoFiles.deleteStalePhotoEdits(keep: [
+      for (final Map<String, dynamic> entry in entries.values)
+        if (entry['path'] is String) entry['path'] as String,
+      for (final List<PendingUpload> uploads in _pendingUploads.values)
+        for (final PendingUpload upload in uploads) upload.image.path,
+    ]));
     final Set<String> queuedKeys = {
       for (final PendingUpload upload in pendingUploadsOf(userId))
         upload.persistKey,

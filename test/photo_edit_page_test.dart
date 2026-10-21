@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:ngy_app/widgets/photo_edit_page.dart';
+import 'package:path/path.dart' as p;
 
 const Color _red = Color(0xFFFF0000);
 const Color _blue = Color(0xFF0000FF);
@@ -164,6 +165,8 @@ void main() {
       await tester.pump();
     });
     expect(result!.path, isNot(endsWith('source.png')));
+    // Düzenlenen fotoğraf kendi klasörüne yazılır (bkz. TempPhotoFiles).
+    expect(p.dirname(result.path), p.join(tempDir.path, 'photo_edit'));
 
     final read = await tester.runAsync(() => _read(result));
     expect(read!.width, 20);

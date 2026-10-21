@@ -1,4 +1,5 @@
 // lib/pages/chat_page_new.dart
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
@@ -36,6 +37,7 @@ import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
 import 'package:ngy_app/utils/menu_utils.dart';
+import 'package:ngy_app/utils/temp_photo_files.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 
 import '../constants/app_constants.dart';
@@ -587,6 +589,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// döner. Galeri için izin sorulmaz: sistemin fotoğraf seçicisi (iOS'ta
   /// PHPicker, Android'de Photo Picker, masaüstünde dosya seçici) izin
   /// istemez; masaüstünde kamera izni de sorulmaz.
+  ///
+  /// Kameranın yazdığı dosya, düzenlenmiş kopyası gönderilecekse ya da
+  /// fotoğraftan vazgeçildiyse silinir ([TempPhotoFiles.delete]).
   Future<List<XFile>> _pickImages(ImageSource source, {required int limit}) async {
     if (source == ImageSource.camera) {
       if (!_isDesktopPlatform && !await _checkCameraPermission()) {
@@ -596,8 +601,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.rear,
       );
-      if (image == null || !mounted) return const [];
-      final XFile? edited = await showPhotoEditPage(context, image);
+      if (image == null) return const [];
+      XFile? edited;
+      if (mounted) edited = await showPhotoEditPage(context, image);
+      if (edited?.path != image.path) {
+        unawaited(TempPhotoFiles.delete(image.path));
+      }
       return edited == null ? const [] : [edited];
     }
 
@@ -1851,14 +1860,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Uzun sohbette sağda kaydırma çubuğu: üstüne basılı tutup sürükleyerek
   /// sohbette hızlıca yukarı aşağı gidilir. Liste ile aynı kontrolcüyü
-  /// kullanır.
+  /// kullanır. Masaüstünde varsayılan kaydırma çubuğu kapatılır; yoksa iki
+  /// çubuk görünür.
   Widget _withScrollbar(Widget list) {
     return Scrollbar(
       controller: _scrollController,
       interactive: true,
       thickness: _scrollbarThickness,
       radius: const Radius.circular(_scrollbarThickness),
-      child: list,
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: list,
+      ),
     );
   }
 
