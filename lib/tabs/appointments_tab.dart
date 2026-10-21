@@ -921,12 +921,16 @@ class _AppointmentsTabState
   }
 
   Future<void> _deleteAppointment(AppointmentModel appointment) async {
+    final bool? returnRight =
+        await PostponementNotices.askReturnRightOnDelete(context, appointment);
+    if (returnRight == null || !mounted) return;
     try {
       final provider = Provider.of<AppointmentManager>(context, listen: false);
-      await provider.deleteAppointment(
+      final result = await provider.deleteAppointment(
         appointment.appointmentId,
         appointment.userId,
         deletedBy: 'admin',
+        returnPostponementRight: returnRight,
       );
 
       if (!mounted) return;
@@ -935,11 +939,9 @@ class _AppointmentsTabState
       await DialogUtils.openInfo(
         context,
         title: 'Başarılı',
-        message: 'Randevu başarıyla silindi.',
+        message: 'Randevu başarıyla silindi.'
+            '${PostponementNotices.deleteResultNote(appointment, returned: result.rightReturned)}',
       );
-      if (!mounted) return;
-      // A spent postponement right is not given back by a delete.
-      await PostponementNotices.warnRightKept(context, appointment);
     } catch (e) {
       if (!mounted) return;
       DialogUtils.openError(

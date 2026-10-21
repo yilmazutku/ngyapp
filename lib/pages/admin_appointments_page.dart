@@ -655,20 +655,26 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// Delete an appointment. Appointments are no longer cancelled — the record
   /// is either kept or removed for good.
   Future<void> _deleteAppointment(AppointmentModel appointment) async {
+    final bool? returnRight =
+        await PostponementNotices.askReturnRightOnDelete(context, appointment);
+    if (returnRight == null || !mounted) return;
     try {
       final appointmentManager = Provider.of<AppointmentManager>(context, listen: false);
-      final success = await appointmentManager.deleteAppointment(
+      final result = await appointmentManager.deleteAppointment(
         appointment.appointmentId,
         appointment.userId,
         deletedBy: 'Admin',
+        returnPostponementRight: returnRight,
       );
 
       if (!mounted) return;
-      if (success) {
-        await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Randevu başarıyla silindi.');
-        if (!mounted) return;
-        // A spent postponement right is not given back by a delete.
-        await PostponementNotices.warnRightKept(context, appointment);
+      if (result.deleted) {
+        await DialogUtils.openInfo(
+          context,
+          title: 'Başarılı',
+          message: 'Randevu başarıyla silindi.'
+              '${PostponementNotices.deleteResultNote(appointment, returned: result.rightReturned)}',
+        );
         if (!mounted) return;
         _fetchAllAppointments();
         setState(() {}); // ensure FutureBuilder re-runs if needed

@@ -221,10 +221,16 @@ class AppointmentManager extends ChangeNotifier {
   /// Removes an appointment and gives back the subscription meeting it had
   /// consumed. Both writes land in one batch, so the counters can never drift
   /// away from the appointments that are actually stored.
-  Future<bool> deleteAppointment(
+  ///
+  /// [returnPostponementRight] true ise ve randevu danışan kaynaklı
+  /// ertelendiyse danışanın erteleme hakkı (`postponementsUsed`, sıfırın
+  /// altına inmeden) aynı batch'te geri verilir. Sonuç: randevu bulunup
+  /// silindi mi, hak gerçekten geri verildi mi.
+  Future<({bool deleted, bool rightReturned})> deleteAppointment(
       String appointmentId,
       String userId, {
         required String deletedBy,
+        bool returnPostponementRight = false,
       }) async {
     try {
       final db = FirebaseFirestore.instance;
@@ -232,7 +238,7 @@ class AppointmentManager extends ChangeNotifier {
 
       final snap = await apptRef.get();
       if (!snap.exists) {
-        return false;
+        return (deleted: false, rightReturned: false);
       }
 
       final data = snap.data() as Map<String, dynamic>;
@@ -240,23 +246,44 @@ class AppointmentManager extends ChangeNotifier {
       // Tartım visits never incremented the counters, so they must not be
       // decremented here either.
       final String? counterField = _meetingCounterFieldOfDoc(data);
-      final bool touchesSub = counterField != null &&
-          await _subscriptionExists(userId, subId);
+      final bool wantsRightBack = returnPostponementRight &&
+          PostponeSource.fromValue(data['postponedBy'] as String?) ==
+              PostponeSource.user;
+
+      final DocumentSnapshot<Map<String, dynamic>>? subSnap =
+          (counterField != null || wantsRightBack) &&
+                  (subId?.isNotEmpty ?? false)
+              ? await _subRef(userId, subId!).get()
+              : null;
+      final bool subExists = subSnap?.exists ?? false;
+      final Object? usedRaw = subSnap?.data()?['postponementsUsed'];
+      final int postponementsUsed =
+          usedRaw is int ? usedRaw : int.tryParse('$usedRaw') ?? 0;
+      final bool returnsRight =
+          wantsRightBack && subExists && postponementsUsed > 0;
+
+      final Map<String, Object?> subUpdates = <String, Object?>{
+        if (counterField != null && subExists)
+          counterField: FieldValue.increment(-1),
+        if (returnsRight) ...<String, Object?>{
+          'postponementsUsed': FieldValue.increment(-1),
+          'updateDate': Timestamp.fromDate(DateTime.now()),
+          'updateUser': deletedBy,
+        },
+      };
 
       final batch = db.batch();
       batch.delete(apptRef);
-      if (touchesSub) {
-        batch.update(_subRef(userId, subId!), <String, Object?>{
-          counterField: FieldValue.increment(-1),
-        });
+      if (subUpdates.isNotEmpty) {
+        batch.update(_subRef(userId, subId!), subUpdates);
       }
       await batch.commit();
 
-      if (touchesSub) {
+      if (subUpdates.isNotEmpty) {
         subProvider.markChanged();
       }
 
-      return true;
+      return (deleted: true, rightReturned: returnsRight);
     } catch (e) {
       rethrow;
     }

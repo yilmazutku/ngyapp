@@ -109,6 +109,82 @@ class DialogUtils {
     return result == true;
   }
 
+  /// [openAttentionInfo] ile aynı kırmızı, kalın uyarı; altında yöneticinin
+  /// birini seçmesi gereken kutucuklar ([options]: değer ve etiket). Seçim
+  /// yapılmadan [confirmText] çalışmaz. Seçilen değeri, vazgeçilirse null
+  /// döner.
+  static Future<T?> openAttentionChoice<T>(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required List<(T, String)> options,
+    String confirmText = 'Tamam',
+    String cancelText = 'İptal',
+  }) {
+    T? selected;
+    return showDialog<T>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocalState) {
+          final ColorScheme colors = Theme.of(context).colorScheme;
+          return AlertDialog(
+            title: Text(
+              _upperTr(title),
+              style: _attentionTitleStyle(context),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '$_attentionLeadIn${_upperTr(message)}',
+                    style: _attentionMessageStyle(context),
+                  ),
+                  for (final (T value, String label) in options)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: CheckboxListTile(
+                        value: selected == value,
+                        onChanged: (bool? checked) => setLocalState(
+                            () => selected = checked == true ? value : null),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        shape: RoundedRectangleBorder(
+                          side: BorderSide(
+                            color: selected == value
+                                ? colors.primary
+                                : colors.outline,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        title: Text(
+                          label,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(cancelText),
+              ),
+              FilledButton(
+                onPressed: selected == null
+                    ? null
+                    : () => Navigator.pop(context, selected),
+                child: Text(confirmText),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   /// Shows a confirmation dialog with a message and an OK button
   /// Closes the current route, then shows an info dialog on a context that
   /// survives that pop.
