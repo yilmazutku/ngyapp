@@ -6,32 +6,34 @@ alwaysApply: true
 
   When implementing async operations with a loading dialog:
 
-  - Open loading without await and track with a boolean:
-      bool loadingOpen = false;
+  - Open loading without await and keep the returned handle:
+      LoadingDialog? loading;
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
       }
+    (DialogUtils.openLoadingProgress works the same way.)
 
-  - Always close the loading BEFORE showing info/error dialogs:
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+  - Always close the loading through the handle BEFORE showing info/error dialogs:
+      loading?.close();
+    Never close it with Navigator.pop: while the loading is open a notification
+    may push a page (e.g. a chat) on top, and pop would close that page instead.
+    close() removes only the loading dialog, needs no context or mounted check
+    and is safe to call more than once.
 
   - Wrap async work in try / catch / finally:
     - In try: perform the operation.
     - On success:
-        - close loading (if open)
+        - close loading (loading?.close())
         - show info dialog (DialogUtils.openInfo)
         - refresh data/state if needed.
     - On error:
-        - close loading (if open)
+        - close loading (loading?.close())
         - show error dialog (DialogUtils.openError)
     - In finally:
+        - close loading too if the try has early returns
         - reset local busy flags with setState if mounted.
 
   - Always use mounted checks before:
-    - opening/closing dialogs
+    - opening dialogs
     - calling setState
     - using context-dependent APIs.

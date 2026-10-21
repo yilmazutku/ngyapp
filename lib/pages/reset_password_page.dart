@@ -81,11 +81,10 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       _isLoading = true;
     });
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Kontrol ediliyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'Kontrol ediliyor...');
       }
 
       final querySnapshot = await FirebaseFirestore.instance
@@ -95,10 +94,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
           .get();
 
       if (querySnapshot.docs.isEmpty) {
-        if (mounted && loadingOpen) {
-          Navigator.of(context, rootNavigator: true).pop();
-          loadingOpen = false;
-        }
+        loading?.close();
         if (mounted) {
           await DialogUtils.openError(
             context,
@@ -111,10 +107,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         await DialogUtils.openInfo(
           context,
@@ -126,10 +119,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
         Navigator.of(context).pop();
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         await DialogUtils.openError(
           context,

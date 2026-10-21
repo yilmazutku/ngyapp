@@ -782,21 +782,17 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
     final MessageData? known = _chatMessageByImageUrl[photo.imageUrl];
     if (known != null) return known;
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted && _hasChatMessage(photo.imageUrl) == null) {
-      DialogUtils.openLoading(context, message: _chatLookupText);
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: _chatLookupText);
     }
 
     try {
-      final MessageData? message = loadingOpen
+      final MessageData? message = loading != null
           ? await _lookUpChatMessage(group.user.userId, photo.imageUrl)
           : null;
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return null;
 
       if (message == null) {
@@ -810,10 +806,7 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 
       return message;
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return null;
       await DialogUtils.openError(
         context,

@@ -129,11 +129,10 @@ class _ProfilePageState extends State<ProfilePage> {
     if (!secondConfirm) return;
     if (!mounted) return;
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
       }
 
       await FirebaseFirestore.instance
@@ -141,10 +140,7 @@ class _ProfilePageState extends State<ProfilePage> {
           .doc(widget.userId)
           .set({'isUserRequestedRemoval': true}, SetOptions(merge: true));
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       await FirebaseAuth.instance.signOut();
 
@@ -152,10 +148,7 @@ class _ProfilePageState extends State<ProfilePage> {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         DialogUtils.openError(
           context,
@@ -189,19 +182,15 @@ class _ProfilePageState extends State<ProfilePage> {
 
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
       }
 
       await userProvider.sendPasswordResetEmailToCurrentUser();
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         await DialogUtils.openInfo(
@@ -212,10 +201,7 @@ class _ProfilePageState extends State<ProfilePage> {
         );
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         await DialogUtils.openError(
           context,

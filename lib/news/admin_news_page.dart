@@ -85,27 +85,20 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
   }
 
   Future<void> _togglePublished(NewsModel news) async {
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Durum güncelleniyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'Durum güncelleniyor...');
       }
 
       final provider = Provider.of<NewsProvider>(context, listen: false);
       await provider.togglePublished(news.newsId, !news.isPublished);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       await _loadNews();
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         DialogUtils.openError(
           context,
@@ -128,20 +121,16 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
     if (!confirmed) return;
     if (!mounted) return;
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Siliniyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'Siliniyor...');
       }
 
       final provider = Provider.of<NewsProvider>(context, listen: false);
       await provider.deleteNews(news.newsId);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         DialogUtils.openInfo(
@@ -153,10 +142,7 @@ class _AdminNewsPageState extends State<AdminNewsPage> {
 
       await _loadNews();
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         DialogUtils.openError(
           context,

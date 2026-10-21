@@ -127,14 +127,13 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
       _isSaving = true;
     });
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(
+        loading = DialogUtils.openLoading(
           context,
           message: _isEditing ? 'Duyuru güncelleniyor...' : 'Duyuru ekleniyor...',
         );
-        loadingOpen = true;
       }
 
       final provider = Provider.of<NewsProvider>(context, listen: false);
@@ -167,10 +166,7 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
         );
       }
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         Navigator.of(context).pop();
@@ -184,10 +180,7 @@ class _AddNewsDialogState extends State<AddNewsDialog> {
         );
       }
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         DialogUtils.openError(
           context,

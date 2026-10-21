@@ -608,10 +608,9 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Renkler kaydediliyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'Renkler kaydediliyor...');
     }
     try {
       final overrides = <AppointmentColorSlot, String>{};
@@ -621,10 +620,7 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
       final provider =
           Provider.of<AppointmentColorsProvider>(context, listen: false);
       await provider.saveColors(overrides);
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return;
       setState(() {
         _saved = overrides;
@@ -635,10 +631,7 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
         message: 'Randevu renkleri güncellendi.',
       );
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -890,19 +883,15 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Renkler kaydediliyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'Renkler kaydediliyor...');
     }
     try {
       final provider =
           Provider.of<SummaryColorsProvider>(context, listen: false);
       await provider.saveColors(_draft);
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return;
       setState(() => _saved = Map<SummaryColorSlot, String?>.from(_draft));
       await DialogUtils.openInfo(
@@ -911,10 +900,7 @@ class _SummaryColorsSectionState extends State<_SummaryColorsSection> {
         message: 'Danışanlar Özet renkleri güncellendi.',
       );
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return;
       await DialogUtils.openError(
         context,
@@ -1227,20 +1213,16 @@ class _AppointmentDurationsSectionState
   Future<void> _save() async {
     if (!_allValid) return;
     setState(() => _saving = true);
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (mounted) {
-      DialogUtils.openLoading(context, message: 'Süreler kaydediliyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'Süreler kaydediliyor...');
     }
     try {
       final overrides = _currentOverrides();
       final provider =
           Provider.of<AppointmentDurationsProvider>(context, listen: false);
       await provider.saveDurations(overrides);
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return;
       setState(() => _saved = overrides);
       await DialogUtils.openInfo(
@@ -1249,10 +1231,7 @@ class _AppointmentDurationsSectionState
         message: 'Randevu süreleri güncellendi.',
       );
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (!mounted) return;
       await DialogUtils.openError(
         context,

@@ -260,19 +260,15 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Kullanıcı siliniyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'Kullanıcı siliniyor...');
       }
 
       await userProvider.deleteUserAccount(userId: user.userId);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (!mounted) return;
       setState(() {
@@ -286,10 +282,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         message: '"$fullName" kullanıcısı ve tüm verileri kalıcı olarak silindi.',
       );
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (mounted) {
         await DialogUtils.openError(

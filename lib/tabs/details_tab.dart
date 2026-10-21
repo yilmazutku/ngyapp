@@ -150,10 +150,9 @@ class _DetailsTabState extends State<DetailsTab>
 
     setState(() => _isLoading = true);
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     if (emailChanged && mounted) {
-      DialogUtils.openLoading(context, message: 'E-posta güncelleniyor...');
-      loadingOpen = true;
+      loading = DialogUtils.openLoading(context, message: 'E-posta güncelleniyor...');
     }
 
     try {
@@ -165,10 +164,7 @@ class _DetailsTabState extends State<DetailsTab>
 
       await userProvider.updateUserDetails(updatedUser);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (!mounted) return;
       setState(() {
@@ -185,10 +181,7 @@ class _DetailsTabState extends State<DetailsTab>
             : 'Kullanıcı bilgileri başarıyla güncellendi.',
       );
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         DialogUtils.openError(
           context,
@@ -234,19 +227,15 @@ class _DetailsTabState extends State<DetailsTab>
 
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
-    bool loadingOpen = false;
+    LoadingDialog? loading;
     try {
       if (mounted) {
-        DialogUtils.openLoading(context, message: 'Kullanıcı siliniyor...');
-        loadingOpen = true;
+        loading = DialogUtils.openLoading(context, message: 'Kullanıcı siliniyor...');
       }
 
       await userProvider.deleteUserAccount(userId: user.userId);
 
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
 
       if (!mounted) return;
       await DialogUtils.openInfo(
@@ -260,10 +249,7 @@ class _DetailsTabState extends State<DetailsTab>
       // removed so the list can drop the row.
       if (mounted) Navigator.of(context).pop(user.userId);
     } catch (e) {
-      if (mounted && loadingOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-        loadingOpen = false;
-      }
+      loading?.close();
       if (mounted) {
         await DialogUtils.openError(
           context,
