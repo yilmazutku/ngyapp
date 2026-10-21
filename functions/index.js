@@ -829,6 +829,166 @@ exports.markChatMessagesOfDeletedMealPhotos = onDocumentWritten(
     },
 );
 
+// =============================================================================
+// BUSY SLOTS
+// Danışanın saat seçicisi (TimeslotManager.getAvailableTimeSlotsForDate)
+// başka danışanların randevularını okumaz; yalnızca busySlots/{uid}_{id}
+// aynasını okur. Ayna, seçicinin kullandığı iki alandır: saat ve süre. Kimlik
+// danışanın UID'siyle başlar: admin'in test ve toplu randevu kimlikleri
+// danışanlar arasında tekrarlanabiliyor.
+// =============================================================================
+
+const BUSY_SLOTS_COLLECTION = 'busySlots';
+
+/** backfillBusySlots'ta aynı anda eşitlenen randevu sayısı. */
+const BUSY_SLOT_SYNC_CHUNK = 100;
+
+/**
+ * Bir randevunun busySlots aynası; saat seçicide yer kaplamıyorsa null.
+ * Seçici durumuna bakmaz (Ertelendi, Yapıldı da dolu sayılır); yalnızca saati
+ * olmayan kayıt yer kaplamaz. Süre yoksa uygulama 30 dakika sayar
+ * (AppointmentModel.fromDocument), burada boş bırakılır.
+ * @param {Object|undefined} data Randevu dokümanı.
+ * @return {Object|null} Ayna dokümanı.
+ */
+function busySlotOf(data) {
+  const start = data && data.appointmentDateTime;
+  if (!start || typeof start.toMillis !== 'function') return null;
+  const slot = {appointmentDateTime: start};
+  if (typeof data.durationMinutes === 'number') {
+    slot.durationMinutes = data.durationMinutes;
+  }
+  return slot;
+}
+
+/**
+ * @param {Object|null} a busySlotOf sonucu.
+ * @param {Object|null} b busySlotOf sonucu.
+ * @return {boolean} İkisi aynı aralık mı (ikisi de null ise de aynı).
+ */
+function sameBusySlot(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.appointmentDateTime.toMillis() ===
+      b.appointmentDateTime.toMillis() &&
+      a.durationMinutes === b.durationMinutes;
+}
+
+/**
+ * @param {string} userId Danışanın UID'si.
+ * @param {string} appointmentId Randevu kimliği.
+ * @return {string} busySlots doküman kimliği.
+ */
+function busySlotId(userId, appointmentId) {
+  return `${userId}_${appointmentId}`;
+}
+
+/**
+ * Aynayı randevunun şu anki hâline getirir; randevu silinmişse ya da yer
+ * kaplamıyorsa ayna silinir. Olaylar sırasız gelebildiği için randevu bir
+ * işlem içinde yeniden okunur: ayna her zaman randevunun son hâlini gösterir.
+ * @param {admin.firestore.Firestore} db Firestore.
+ * @param {string} userId Danışanın UID'si.
+ * @param {string} appointmentId Randevu kimliği.
+ * @return {Promise<void>}
+ */
+function syncBusySlot(db, userId, appointmentId) {
+  const sourceRef = db.collection('users').doc(userId)
+      .collection('appointments').doc(appointmentId);
+  const slotRef = db.collection(BUSY_SLOTS_COLLECTION)
+      .doc(busySlotId(userId, appointmentId));
+
+  return db.runTransaction(async (tx) => {
+    const source = await tx.get(sourceRef);
+    const slot = busySlotOf(source.exists ? source.data() : null);
+    if (slot) {
+      tx.set(slotRef, slot);
+    } else {
+      tx.delete(slotRef);
+    }
+  });
+}
+
+/**
+ * Randevu yazıldıkça aynayı günceller. Saati ve süresi değişmeyen yazım (ör.
+ * durum, not) aynaya dokunmaz.
+ *
+ * Path: users/{userId}/appointments/{appointmentId}
+ */
+exports.mirrorBusySlot = onDocumentWritten(
+    'users/{userId}/appointments/{appointmentId}',
+    async (event) => {
+      const before = event.data && event.data.before.data();
+      const after = event.data && event.data.after.data();
+      if (sameBusySlot(busySlotOf(before), busySlotOf(after))) return;
+
+      const {userId, appointmentId} = event.params;
+      await syncBusySlot(admin.firestore(), userId, appointmentId);
+    },
+);
+
+/**
+ * Ayna kurulmadan önceki randevular için busySlots'u doldurur; admin
+ * uygulaması Randevu Yönetimi açılınca oturumda bir kez çağırır. Tekrar
+ * çalıştırılabilir: yalnızca eksik ya da farklı ayna yeniden yazılır
+ * (syncBusySlot), randevusu kalmayan ayna silinir. Ayna randevulardan önce
+ * okunur: bu arada açılan bir randevunun aynası "randevusu yok" diye silinmez.
+ * @return {Promise<{written: number, deleted: number}>} Eşitlenen ve silinen.
+ */
+exports.backfillBusySlots = onCall(
+    {timeoutSeconds: 300},
+    async (request) => {
+      const callerUid = request.auth ? request.auth.uid : null;
+      if (!callerUid || !ADMIN_UIDS.has(callerUid)) {
+        throw new HttpsError(
+            'permission-denied',
+            'Bu işlem için yönetici yetkisi gereklidir.',
+        );
+      }
+
+      const db = admin.firestore();
+      const slotsSnapshot = await db.collection(BUSY_SLOTS_COLLECTION).get();
+      const appointmentsSnapshot =
+          await db.collectionGroup('appointments').get();
+
+      // Randevusu bulunamayan aynalar sonunda bunda kalır.
+      const existing = new Map(
+          slotsSnapshot.docs.map((doc) => [doc.id, doc.data()]));
+      const stale = [];
+      for (const doc of appointmentsSnapshot.docs) {
+        const userRef = doc.ref.parent.parent;
+        if (!userRef || userRef.parent.id !== 'users') continue;
+        const slot = busySlotOf(doc.data());
+        if (!slot) continue;
+
+        const id = busySlotId(userRef.id, doc.id);
+        if (!sameBusySlot(busySlotOf(existing.get(id)), slot)) {
+          stale.push({userId: userRef.id, appointmentId: doc.id});
+        }
+        existing.delete(id);
+      }
+
+      for (let i = 0; i < stale.length; i += BUSY_SLOT_SYNC_CHUNK) {
+        await Promise.all(stale.slice(i, i + BUSY_SLOT_SYNC_CHUNK).map(
+            ({userId, appointmentId}) =>
+              syncBusySlot(db, userId, appointmentId)));
+      }
+
+      const orphanIds = [...existing.keys()];
+      // Firestore batches have a limit of 500 operations
+      for (let i = 0; i < orphanIds.length; i += 400) {
+        const batch = db.batch();
+        for (const id of orphanIds.slice(i, i + 400)) {
+          batch.delete(db.collection(BUSY_SLOTS_COLLECTION).doc(id));
+        }
+        await batch.commit();
+      }
+
+      const result = {written: stale.length, deleted: orphanIds.length};
+      logger.info('Backfilled busy slots', result);
+      return result;
+    },
+);
+
 /**
  * Build Android notification config for news/announcements.
  * @param {string} title Notification title.

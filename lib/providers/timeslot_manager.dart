@@ -1,14 +1,27 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../models/appointment_model.dart';
+import '../models/busy_slot.dart';
 import '../models/event_model.dart';
 import '../models/user_model.dart';
 import 'event_provider.dart';
+import 'user_provider.dart';
 
 class TimeslotManager extends ChangeNotifier {
   TimeslotManager();
+
+  /// `busySlots` aynasını eski randevularla dolduran admin işlevi (bkz.
+  /// functions/index.js).
+  static const String _backfillBusySlotsFunction = 'backfillBusySlots';
+
+  /// [backfillBusySlotsOnce] bu oturumda çağrıldı mı.
+  bool _busySlotsBackfillRequested = false;
 
   // ---------------------- ADMIN TIME SLOTS ----------------------
 
@@ -63,18 +76,18 @@ class TimeslotManager extends ChangeNotifier {
       final endOfDay = startOfDay.add(const Duration(days: 1));
 
       // The three reads do not depend on each other, so they run concurrently
-      // instead of costing three sequential round trips.
+      // instead of costing three sequential round trips. Danışan başka
+      // danışanların randevularını okuyamaz; dolu saatler aynadan gelir.
       final adminSlotsFuture = getAdminTimeSlotsForDate(date);
-      final appointmentsFuture =
-          _fetchAppointmentsForDateRange(startOfDay, endOfDay);
+      final busySlotsFuture = _fetchBusySlotsForDateRange(startOfDay, endOfDay);
       final eventsFuture = _fetchEventsForDateRange(startOfDay, endOfDay);
 
       final adminTimeSlots = await adminSlotsFuture;
-      final dayAppointments = await appointmentsFuture;
+      final dayBusySlots = await busySlotsFuture;
       final dayEvents = await eventsFuture;
 
       final availableSlots = adminTimeSlots.where((time) {
-        if (!isTimeSlotAvailable(date, time, dayAppointments)) {
+        if (!isTimeSlotAvailable(date, time, dayBusySlots)) {
           return false;
         }
         final slotDt = DateTime(
@@ -96,7 +109,7 @@ class TimeslotManager extends ChangeNotifier {
   bool isTimeSlotAvailable(
       DateTime date,
       TimeOfDay time,
-      List<AppointmentModel>? dayAppointments,
+      List<BusySlot>? dayBusySlots,
       ) {
     final dateTimeWithHour = DateTime(
       date.year,
@@ -106,11 +119,11 @@ class TimeslotManager extends ChangeNotifier {
       time.minute,
     );
 
-    if (dayAppointments != null) {
+    if (dayBusySlots != null) {
       if (dateTimeWithHour.isBefore(DateTime.now())) return false;
 
-      for (var appointment in dayAppointments) {
-        if (isSlotBlockedByAppointment(dateTimeWithHour, appointment)) {
+      for (final busySlot in dayBusySlots) {
+        if (busySlot.blocks(dateTimeWithHour)) {
           return false;
         }
       }
@@ -121,11 +134,10 @@ class TimeslotManager extends ChangeNotifier {
   /// A slot is blocked if it falls within the appointment's duration [start, end).
   bool isSlotBlockedByAppointment(
       DateTime slotDateTime, AppointmentModel appointment) {
-    final apptStart = appointment.appointmentDateTime;
-    final apptEnd =
-        apptStart.add(Duration(minutes: appointment.durationMinutes));
-
-    return !slotDateTime.isBefore(apptStart) && slotDateTime.isBefore(apptEnd);
+    return BusySlot(
+      start: appointment.appointmentDateTime,
+      durationMinutes: appointment.durationMinutes,
+    ).blocks(slotDateTime);
   }
 
   /// A slot is blocked if it falls within the event's duration [start, end).
@@ -350,6 +362,31 @@ class TimeslotManager extends ChangeNotifier {
     }
   }
 
+  /// `busySlots` aynası randevu yazıldıkça sunucuda güncellenir; ayna
+  /// kurulmadan önceki randevular için admin uygulaması (Randevu Yönetimi)
+  /// [_backfillBusySlotsFunction]'ı her oturumda bir kez çağırır. Sonuç
+  /// beklenmez, hata yutulur; işlev yalnızca eksik ya da farklı aynayı yazar.
+  Future<void> backfillBusySlotsOnce() async {
+    if (_busySlotsBackfillRequested) return;
+    _busySlotsBackfillRequested = true;
+    try {
+      final String? idToken =
+          await FirebaseAuth.instance.currentUser?.getIdToken();
+      if (idToken == null) return;
+      await http.post(
+        Uri.parse(
+            '${UserProvider.functionsBaseUrl}/$_backfillBusySlotsFunction'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({'data': <String, dynamic>{}}),
+      );
+    } catch (e) {
+      // Yalnızca eski randevular için; ayna yeni yazımlarla zaten güncel.
+    }
+  }
+
   // ---------------------- PRIVATE HELPERS ----------------------
 
   /// "HH:mm" key a date-time falls on; the format slots are stored in.
@@ -397,7 +434,22 @@ class TimeslotManager extends ChangeNotifier {
     return result;
   }
 
+  /// Gün aralığındaki dolu saatler (`busySlots` aynası); randevuların
+  /// [_fetchAppointmentsForDateRange] ile aynı tarih süzgeci.
+  Future<List<BusySlot>> _fetchBusySlotsForDateRange(
+      DateTime startDate,
+      DateTime endDate,
+      ) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection(BusySlot.collection)
+        .where(BusySlot.startField, isGreaterThanOrEqualTo: startDate)
+        .where(BusySlot.startField, isLessThan: endDate)
+        .get();
+    return snapshot.docs.map(BusySlot.fromDocument).toList();
+  }
+
   /// Internal helper: fetch appointments across all users for a date range.
+  /// Yalnızca admin okuyabilir; danışan tarafı [_fetchBusySlotsForDateRange].
   Future<List<AppointmentModel>> _fetchAppointmentsForDateRange(
       DateTime startDate,
       DateTime endDate,
