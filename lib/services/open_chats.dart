@@ -107,7 +107,12 @@ class OpenChats {
   /// sohbet bildirimin mesajına (yoksa en yeni mesaja) gider. Değilse sohbet
   /// ([newRoute]) en üste açılır ve altında yalnızca şu an görünen sohbet
   /// kalır; daha alttaki sohbetler (bildirimin sohbeti alttaysa onun eski
-  /// sayfası da) kapatılır.
+  /// sayfası da), açtıkları sayfalarla (ör. Öğün Fotoğrafları) birlikte
+  /// kapatılır.
+  ///
+  /// En üstte bir diyalog (ör. yükleme göstergesi) ya da kapanmadan soru soran
+  /// bir sayfa varsa hiçbir şey yapılmaz: diyaloğun sahibi sonra onu
+  /// kapatırken yeni sohbeti kapatırdı.
   void showAdminChat(
     NavigatorState navigator,
     String chatId,
@@ -120,14 +125,40 @@ class OpenChats {
       return;
     }
 
+    final Route<dynamic>? top = _topRoute(navigator);
+    if (top != null && !top.isFirst && keepsRoute(top)) return;
+
     final int keep = maxStackedChats - 1;
     final List<OpenChat> older =
         active.sublist(0, math.max(0, active.length - keep));
+    final Route<dynamic>? kept = active.isEmpty ? null : active.last.route;
     for (final OpenChat chat in older) {
       final Route<dynamic>? route = chat.route;
-      if (route != null) navigator.removeRoute(route);
+      if (route == null) continue;
+      if (kept == null) {
+        if (route.isActive) navigator.removeRoute(route);
+        continue;
+      }
+      // Kalan sohbetin altından, kapatılan sohbete kadar (onun açtığı
+      // sayfalar dahil) her şey kalkar.
+      for (int i = 0; i < _maxRemovedRoutes && route.isActive; i++) {
+        navigator.removeRouteBelow(kept);
+      }
     }
     navigator.push(newRoute());
+  }
+
+  /// Bir bildirimle kaldırılan rota sayısının üst sınırı (emniyet payı).
+  static const int _maxRemovedRoutes = 50;
+
+  /// Yığının en üstündeki rota; hiçbir rota kapatılmaz.
+  static Route<dynamic>? _topRoute(NavigatorState navigator) {
+    Route<dynamic>? top;
+    navigator.popUntil((route) {
+      top = route;
+      return true;
+    });
+    return top;
   }
 
   /// [chat]'in üstündeki sayfaları kapatır (bkz. [keepsRoute]) ve sohbeti

@@ -541,7 +541,12 @@ class FcmService {
   /// Remove FCM token from Firestore for current user.
   /// Call this on logout to stop receiving notifications on this device.
   /// Kayıttaki jeton bu cihazın değilse (kullanıcı sonra başka bir cihazdan
-  /// girdi) silinmez: bu cihazdan çıkmak o cihazın bildirimlerini kesmez.
+  /// girdi) silinmez: bu cihazdan çıkmak o cihazın bildirimlerini kesmez. Bu
+  /// cihazın jetonu yoksa kayda dokunulmaz (kayıttaki başka bir cihazınkidir).
+  /// Kayıt okunamazsa (ör. çevrimdışı) jeton koşulsuz silinir; silinmeseydi
+  /// oturum kapandıktan sonra da bu cihaza (ve cihazda sonra giren hesaba) bu
+  /// kullanıcının bildirimleri gelirdi. Çıkış bu yazmayı en fazla
+  /// [_logoutWriteTimeout] bekler; çevrimdışıyken donmaz.
   Future<void> removeFcmToken() async {
     if (!isSupported) return;
     
@@ -550,29 +555,35 @@ class FcmService {
       return;
     }
 
+    final String? token;
+    try {
+      token = await _messaging.getToken();
+    } catch (e) {
+      return;
+    }
+    if (token == null) return;
+
     final userDoc = _firestore.collection('users').doc(user.uid);
     try {
-      final token = await _messaging.getToken();
-      if (token != null) {
-        await _firestore.runTransaction((transaction) async {
-          final snapshot = await transaction.get(userDoc);
-          if (snapshot.data()?['fcmToken'] != token) return;
-          transaction.update(userDoc, {'fcmToken': FieldValue.delete()});
-        });
-        return;
-      }
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(userDoc);
+        if (snapshot.data()?['fcmToken'] != token) return;
+        transaction.update(userDoc, {'fcmToken': FieldValue.delete()});
+      }).timeout(_logoutWriteTimeout);
+      return;
     } catch (e) {
-      // Bu cihazın jetonu ya da kayıt okunamadı (ör. çevrimdışı): aşağıda
-      // koşulsuz silinir. Silinmeseydi oturum kapandıktan sonra da bu cihaza
-      // (ve cihazda sonra giren hesaba) bu kullanıcının bildirimleri gelirdi.
+      // Kayıt okunamadı: aşağıda koşulsuz silinir.
     }
     try {
       await userDoc.set({
         'fcmToken': FieldValue.delete(),
-      }, SetOptions(merge: true));
+      }, SetOptions(merge: true)).timeout(_logoutWriteTimeout);
     } catch (e) {
     }
   }
+
+  /// Çıkışta jeton silme yazımının en fazla bekleneceği süre.
+  static const Duration _logoutWriteTimeout = Duration(seconds: 5);
 
   /// Check if a user is an admin
   static bool isAdmin(String uid) => _adminUids.contains(uid);

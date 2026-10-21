@@ -155,6 +155,43 @@ void main() {
       expectShowing('sohbet listesi');
     });
 
+    testWidgets('kapatılan sohbetin açtığı sayfalar da kalkar', (tester) async {
+      await pumpChatList(tester);
+      await openFromList(tester, 'a');
+      // a'dan Öğün Fotoğrafları, oradan başka bir danışanın sohbeti.
+      navigator().push(MaterialPageRoute<void>(
+        builder: (_) => const Text('öğün fotoğrafları'),
+      ));
+      await tester.pumpAndSettle();
+      await openFromList(tester, 'x');
+
+      await adminNotification(tester, 'b');
+      expectShowing('sohbet b');
+      expect(openChats.length, 2);
+      await back(tester);
+      expectShowing('sohbet x');
+      await back(tester);
+      expectShowing('sohbet listesi');
+      expect(find.text('öğün fotoğrafları'), findsNothing);
+    });
+
+    testWidgets('üstte yükleme diyaloğu varken bildirim sohbet açmaz',
+        (tester) async {
+      await pumpChatList(tester);
+      await openFromList(tester, 'a');
+      showDialog<void>(
+        context: navigatorKey.currentContext!,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(content: Text('siliniyor')),
+      );
+      await tester.pumpAndSettle();
+
+      await adminNotification(tester, 'b');
+      expectShowing('siliniyor');
+      expect(find.text('sohbet b'), findsNothing);
+      expect(openChats.length, 1);
+    });
+
     testWidgets('görünen sohbetin bildirimi yeni sayfa açmaz, mesaja gider',
         (tester) async {
       await pumpChatList(tester);

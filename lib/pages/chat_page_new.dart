@@ -1470,6 +1470,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Mesaj menüsünde (uzun basma / sağ tık) seçilen işlem.
   void _handleMessageAction(MessageData message, MessageAction action) {
+    if (!mounted) return;
     switch (action) {
       case MessageAction.reply:
         _replyTarget.value = message;
@@ -2388,7 +2389,7 @@ class _AlbumBubble extends StatelessWidget {
       actions: actionsFor(message),
       currentEmoji: message.reactions[myUid],
     );
-    if (choice == null) return;
+    if (choice == null || !context.mounted) return;
 
     final String? emoji = choice.emoji;
     final MessageAction? action = choice.action;
@@ -2657,7 +2658,7 @@ class _MessageBubble extends StatelessWidget {
       actions: actions,
       currentEmoji: message.reactions[myUid],
     );
-    if (choice == null) return;
+    if (choice == null || !context.mounted) return;
 
     final String? emoji = choice.emoji;
     final MessageAction? action = choice.action;
