@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../models/meal_model.dart';
 import '../../models/pending_upload.dart';
 import '../meal_image_card.dart';
+import 'chat_bubble_style.dart';
 
 /// Sohbette yüklenmeyi bekleyen fotoğrafın baloncuğu (bkz. [PendingUpload]).
 ///
@@ -13,14 +14,14 @@ import '../meal_image_card.dart';
 /// ölçüde, bkz. [photoSizeOf]) gösterilir; üstünde ilerleme ve iptal,
 /// sıradaysa "Sırada", yüklenemediyse sebebi ile "Tekrar dene" / "Kaldır"
 /// görünür. Yükleme bitince baloncuk kalkar, yerine gerçek mesaj gelir.
-/// Ekran kilitlenmez: bu sırada yazışmaya devam edilebilir.
+/// Ekran kilitlenmez: bu sırada yazışmaya devam edilebilir. Baloncuk kendi
+/// mesajının renklerindedir ([ChatBubbleStyle.mine]).
 class PendingUploadBubble extends StatelessWidget {
   final PendingUpload upload;
 
   /// Fotoğrafın baloncuktaki ölçüsü, en/boy oranından; gönderilen mesajın
   /// baloncuğu da aynı ölçüyü kullanır, yükleme bitince boyut değişmez.
   final Size Function(double aspectRatio) photoSizeOf;
-  final Color bubbleColor;
   final VoidCallback onDiscard;
   final VoidCallback onRetry;
 
@@ -28,7 +29,6 @@ class PendingUploadBubble extends StatelessWidget {
     super.key,
     required this.upload,
     required this.photoSizeOf,
-    required this.bubbleColor,
     required this.onDiscard,
     required this.onRetry,
   });
@@ -41,6 +41,8 @@ class PendingUploadBubble extends StatelessWidget {
   static const String _discardLabel = 'Kaldır';
   static const String _autoRetryText =
       'Bağlantı gelince kendiliğinden yeniden denenecek.';
+
+  static const ChatBubbleStyle _style = ChatBubbleStyle.mine;
 
   /// Oranı henüz okunmamış fotoğrafın en/boy oranı.
   static const double _defaultAspectRatio = 4 / 3;
@@ -55,7 +57,7 @@ class PendingUploadBubble extends StatelessWidget {
         }
 
         final Meals meal = upload.meal;
-        final Color mealColor = mealTypeColor(meal);
+        final Color mealColor = _style.mealLabel(mealTypeColor(meal));
         return ValueListenableBuilder<double?>(
           valueListenable: upload.previewAspectRatio,
           builder: (context, aspectRatio, _) {
@@ -69,7 +71,7 @@ class PendingUploadBubble extends StatelessWidget {
                   width: photoSize.width + 12,
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: bubbleColor,
+                    color: _style.background,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
@@ -171,6 +173,8 @@ class PendingUploadBubble extends StatelessWidget {
 
   Widget _buildFooter(BuildContext context, PendingUploadStatus status) {
     final ThemeData theme = Theme.of(context);
+    final ButtonStyle buttonStyle =
+        TextButton.styleFrom(foregroundColor: _style.action);
 
     if (status == PendingUploadStatus.failed) {
       return Column(
@@ -185,16 +189,21 @@ class PendingUploadBubble extends StatelessWidget {
                       '$_autoRetryText'
                   : upload.errorText ?? PendingUpload.defaultErrorText,
               style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.error),
+                  ?.copyWith(color: _style.error ?? theme.colorScheme.error),
             ),
           ),
           Wrap(
             alignment: WrapAlignment.end,
             children: [
               TextButton(
-                  onPressed: onDiscard, child: const Text(_discardLabel)),
+                  style: buttonStyle,
+                  onPressed: onDiscard,
+                  child: const Text(_discardLabel)),
               if (upload.canRetry)
-                TextButton(onPressed: onRetry, child: const Text(_retryLabel)),
+                TextButton(
+                    style: buttonStyle,
+                    onPressed: onRetry,
+                    child: const Text(_retryLabel)),
             ],
           ),
         ],
@@ -210,11 +219,14 @@ class PendingUploadBubble extends StatelessWidget {
               status == PendingUploadStatus.waiting
                   ? _waitingText
                   : _uploadingText,
-              style: const TextStyle(fontSize: 11, color: Colors.black54),
+              style: TextStyle(fontSize: 11, color: _style.secondaryText),
             ),
           ),
         ),
-        TextButton(onPressed: onDiscard, child: const Text(_cancelLabel)),
+        TextButton(
+            style: buttonStyle,
+            onPressed: onDiscard,
+            child: const Text(_cancelLabel)),
       ],
     );
   }
