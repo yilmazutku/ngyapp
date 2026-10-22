@@ -120,8 +120,8 @@ abstract class UploadObserver {
   /// burada verilir: kayıt yazılınca görsel yeniden indirilmeden gösterilsin.
   void onUploaded(UploadedImage image);
 
-  /// Dosyalar yüklendi ve kayıtlar yazılmaya başlandı: bundan sonra iptal
-  /// edilemez; kayıt yerel önbellekte hemen görünür.
+  /// Dosyalar yüklendi ve kayıtlar yazıldı: yükleme tamamlandı, kayıt
+  /// görünür.
   void onSaving();
 }
 

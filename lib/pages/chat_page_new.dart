@@ -132,11 +132,6 @@ enum _ChatMenuAction { deleteChat }
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const String _uploadErrorTitle = 'Hata';
   static const String _photoLimitTitle = 'Fotoğraf Sınırı';
-  static const String _chatPostFailedTitle = 'Sohbete Gönderilemedi';
-  static const String _chatPostFailedText =
-      'Fotoğrafınız öğün kaydınıza eklendi ancak sohbete gönderilemedi. '
-      'Diyetisyeniniz fotoğrafı öğün kayıtlarınızda görebilir; tekrar '
-      'yüklemenize gerek yok.';
   static const String _focusNotFoundText =
       'Mesaj sohbette bulunamadı; sohbet en yeni mesajdan açıldı.';
   static const String _focusTooOldText =
@@ -648,30 +643,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _showLatest();
   }
 
-  /// Öğün fotoğrafını öğün kaydına ekler ve sohbete gönderir (bkz.
-  /// [MealManager.uploadChatMealPhoto]). Sohbet ekranı kapanmış olsa da
-  /// çalışır: context'e dokunmaz, diyalog yalnızca ekran açıksa gösterilir.
+  /// Öğün fotoğrafını öğün kaydına ekler ve sohbete gönderir; ikisi
+  /// birlikte yazılır (bkz. [MealManager.uploadChatMealPhoto]). Sohbet ekranı
+  /// kapanmış olsa da çalışır: context'e dokunmaz.
   Future<void> _uploadMealPhoto(
     PendingUpload upload,
     MealManager mealManager,
     ChatManager chat,
-  ) async {
-    final bool postedToChat = await mealManager.uploadChatMealPhoto(
-      upload,
-      userId: _currentUid,
-      chatManager: chat,
-    );
-    // Fotoğraf öğüne kaydedildi, yalnızca sohbete düşmedi: kullanıcı onu
-    // tekrar yüklemesin. Beklenmez: sıradakiler diyalog kapanmadan da
-    // yüklensin.
-    if (!postedToChat && mounted) {
-      DialogUtils.openInfo(
-        context,
-        title: _chatPostFailedTitle,
-        message: _chatPostFailedText,
+  ) =>
+      mealManager.uploadChatMealPhoto(
+        upload,
+        userId: _currentUid,
+        chatManager: chat,
       );
-    }
-  }
 
   /// Öğün fotoğrafı yükleme akışı: öğün seçimi → öğünün kalan fotoğraf
   /// hakkı (seçtirmeden önce) → kaynak → fotoğraf(lar) → sıraya ekleme.

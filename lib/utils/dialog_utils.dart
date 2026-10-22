@@ -276,6 +276,10 @@ class DialogUtils {
     );
   }
 
+  /// Oturum kapatılırken gösterilen yükleme yazısı (bkz.
+  /// `LoginProvider.signOut`).
+  static const String signingOutMessage = 'Çıkış yapılıyor...';
+
   /// Shows a loading dialog with a message
   /// Prevents user interaction during loading operations
   ///

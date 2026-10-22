@@ -177,6 +177,10 @@ class PendingUpload implements UploadObserver {
   /// gösterir.
   @override
   void onUploaded(UploadedImage image) {
+    // Dosyalar yüklendi: zaman aşımı sayacı yalnızca Storage yüklemesini
+    // izler. Kayıtlar tek işlemle yazılır, işlem kendisi başarısız olur;
+    // sayaç bu sırada dolup yazılan fotoğrafı ikinci kez yükletmesin.
+    _stopTracking();
     final String? thumbUrl = image.thumbUrl;
     final Uint8List? thumbBytes = image.thumbBytes;
     if (thumbUrl != null && thumbBytes != null) {

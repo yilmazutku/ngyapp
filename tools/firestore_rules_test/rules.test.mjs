@@ -176,6 +176,20 @@ async function run(rulesFile) {
   await check('I8 meal day state + reminder cancel (new day)', true, () => day().set({ meals: { lunch: true }, reminderCancelled: { lunch: true } }, { merge: true }));
   await check('I8b meal day uncheck', true, () => day().set({ meals: { lunch: false } }, { merge: true }));
   await check('I9 meal entry upload', true, () => day().collection('mealEntries').doc('lunch').set({ mealType: 'lunch', imageUrls: ['https://x/a.jpg'], thumbUrls: [''], imageTimes: [TS.now()], subscriptionId: 's1', timestamp: TS.now(), isChecked: true, createDate: TS.now() }));
+  await check('I9e chat meal photo: meal + day + chat summary + message in one transaction', true, () => { const d = db('u1'); return d.runTransaction(async (tx) => {
+    const dayRef = d.collection('users').doc('u1').collection('meals').doc('2026-10-22');
+    const mealRef = dayRef.collection('mealEntries').doc('dinner'); await tx.get(mealRef);
+    tx.set(mealRef, { mealType: 'dinner', imageUrls: ['https://x/d.jpg'], thumbUrls: [''], imageTimes: [TS.now()], subscriptionId: 'u1', timestamp: TS.now(), isChecked: true });
+    tx.set(dayRef, { meals: { dinner: true }, reminderCancelled: { dinner: true } }, { merge: true });
+    const chat = d.collection('chats').doc('u1');
+    tx.set(chat, summary('u1'), { merge: true });
+    tx.set(chat.collection('messages').doc(), photoMsg('u1', 'u1'));
+  }); });
+  await check('I9f same transaction posting into another client\'s chat', false, () => { const d = db('u1'); return d.runTransaction(async (tx) => {
+    const mealRef = d.collection('users').doc('u1').collection('meals').doc('2026-10-22').collection('mealEntries').doc('br'); await tx.get(mealRef);
+    tx.set(mealRef, { mealType: 'br', imageUrls: ['https://x/e.jpg'], thumbUrls: [''], imageTimes: [TS.now()], subscriptionId: 'u1', timestamp: TS.now(), isChecked: true });
+    tx.set(d.collection('chats').doc('u2').collection('messages').doc(), photoMsg('u2', 'u1'));
+  }); });
   await check('I9b meal entry thumbnail backfill (transaction)', true, () => { const d = db('u1'); return d.runTransaction(async (tx) => {
     const ref = d.collection('users').doc('u1').collection('meals').doc('2026-10-21').collection('mealEntries').doc('lunch'); await tx.get(ref);
     tx.update(ref, { thumbUrls: ['https://x/a_t.jpg'] });

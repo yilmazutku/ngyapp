@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
 
-import '../services/fcm_service.dart';
-import '../services/meal_reminder_service.dart';
-import '../services/notification_service.dart';
+import '../providers/login_manager.dart';
+import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
 
 class ChangePasswordPage extends StatefulWidget {
@@ -41,13 +41,20 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       // Update the password
       await user.updatePassword(newPassword);
 
-      // Cancel all local notifications before signing out
-      await NotificationService().cancelAllNotifications();
-      await MealReminderService().cancelAllMealReminders();
-      // Remove FCM token and sign the user out
-      await FcmService().removeFcmToken();
-      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      final LoginProvider loginProvider =
+          Provider.of<LoginProvider>(context, listen: false);
+      final LoadingDialog loading = DialogUtils.openLoading(
+        context,
+        message: DialogUtils.signingOutMessage,
+      );
+      try {
+        await loginProvider.signOut();
+      } finally {
+        loading.close();
+      }
 
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Şifre başarıyla değiştirildi. Lütfen tekrar giriş yapınız..';
       });
@@ -56,6 +63,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       // Navigator.of(context).pushReplacementNamed('/login');
 
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Şifre değiştirilemedi. Lütfen destek isteyiniz.';
       });

@@ -282,41 +282,36 @@ Future<int> mealImageSlotsLeft({
 /// uygulama açılışında geri yüklenen sıra (bkz.
 /// [ChatManager.restorePendingUploads]) aynı yolu kullanır.
 ///
-/// Fotoğraf öğüne kaydedildi ama sohbete düşmediyse false döner (tekrar
-/// yüklenmemeli). Öğünün fotoğraf sınırı dolmuşsa tekrar denenmeyen bir
-/// [UploadFailure] fırlatır.
-Future<bool> uploadChatMealPhoto(
+/// Öğün kaydı ve sohbet mesajı birlikte yazılır (bkz. [uploadMealImg]):
+/// sohbette görünmeyen fotoğraf öğünde de görünmez. Yazılamazsa hata
+/// fırlatılır, yükleme sırası "yüklenemedi" gösterip yeniden dener. Öğünün
+/// fotoğraf sınırı dolmuşsa tekrar denenmeyen bir [UploadFailure] fırlatır.
+Future<void> uploadChatMealPhoto(
   PendingUpload upload, {
   required String userId,
   required ChatManager chatManager,
 }) async {
-  bool postedToChat = true;
-  try {
-    final String? downloadUrl = await uploadMealImg(
-      meal: upload.meal,
-      image: upload.image,
-      userId: userId,
-      subscriptionId: userId,
-      overrideDate: upload.createdAt,
-      alsoPostToChat: true,
-      cancelsReminder: true,
-      chatManager: chatManager,
-      observer: upload,
+  final String? downloadUrl = await uploadMealImg(
+    meal: upload.meal,
+    image: upload.image,
+    userId: userId,
+    subscriptionId: userId,
+    overrideDate: upload.createdAt,
+    alsoPostToChat: true,
+    cancelsReminder: true,
+    chatManager: chatManager,
+    observer: upload,
+  );
+  // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
+  if (downloadUrl == null) {
+    throw const UploadFailure(
+      MealModel.maxImagesReachedMessage,
+      canRetry: false,
     );
-    // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
-    if (downloadUrl == null) {
-      throw const UploadFailure(
-        MealModel.maxImagesReachedMessage,
-        canRetry: false,
-      );
-    }
-  } on MealChatPostException {
-    postedToChat = false;
   }
   if (DateFormatter.isSameDay(upload.createdAt, DateTime.now())) {
     MealReminderService().cancelMealReminder(upload.meal);
   }
-  return postedToChat;
 }
 
 /// Uploads a meal photo to Firebase Storage and appends it to the meal document.
@@ -329,14 +324,13 @@ Future<bool> uploadChatMealPhoto(
 /// başarısız olursa hata fırlatılır (yüklenen dosyalar silinir); sohbetin
 /// yükleme sırası yeniden dener.
 ///
-/// [alsoPostToChat] true iken fotoğraf öğüne kaydedilip sohbete
-/// gönderilemezse [MealChatPostException] fırlatılır: fotoğraf öğünde durur,
-/// çağıran kullanıcıya sohbette görünmeyeceğini söyleyebilir.
+/// [alsoPostToChat] true iken sohbet mesajı ve sohbet özeti de aynı işlemde
+/// yazılır: fotoğraf ya hem öğünde hem sohbette görünür ya hiçbirinde.
 ///
 /// [observer] yüklemenin ilerlemesini izler ve iptal edebilir (bkz.
-/// [uploadImageWithThumbnail]); iptal edilirse kayıt yazılmaz (işlem
-/// sürerken iptal edildiyse eklenen fotoğraf geri alınır) ve
-/// [UploadCancelledException] fırlatılır.
+/// [uploadImageWithThumbnail]); kayıtlar yazılmadan iptal edilirse yazılmaz
+/// ve [UploadCancelledException] fırlatılır. İşlem yazıldıktan sonra
+/// fotoğraf gönderilmiş sayılır.
 ///
 /// [cancelsReminder] true ise öğünün o günkü hatırlatması kalıcı olarak
 /// kapanır (bkz. [mealStateFields]). Yalnızca danışanın sohbetten yüklemesi
@@ -389,17 +383,18 @@ Future<String?> uploadMealImg({
       throw const UploadCancelledException();
     }
 
-    // Sohbet mesajı kayıttan sonra yazılır: kayda girmeyen fotoğraf sohbete
-    // düşmesin.
     final bool added;
     try {
       added = await _addMealImage(
         mealDocRef,
+        userId: userId,
         meal: meal,
         subscriptionId: subscriptionId,
         image: uploaded,
         time: referenceDate,
         cancelsReminder: cancelsReminder,
+        postToChat: alsoPostToChat,
+        chatManager: chatManager,
         observer: observer,
       );
     } catch (e) {
@@ -411,41 +406,9 @@ Future<String?> uploadMealImg({
       return null;
     }
 
-    // İşlem sürerken iptal edildiyse eklenen fotoğraf geri alınır.
-    // Geri alma başarısız olursa yükleme tamamlanır: fotoğraf sohbetsiz
-    // kalmasın.
-    if (observer?.isCancelled ?? false) {
-      bool rolledBack = false;
-      try {
-        await _removeMealImage(mealDocRef, uploaded.url, meal: meal);
-        rolledBack = true;
-      } catch (e) {
-      }
-      if (rolledBack) {
-        await uploaded.delete();
-        throw const UploadCancelledException();
-      }
-    }
-
-    // Sohbet yazımının hatası ayrıca tutulur: öğün kaydı yine de tamamlanmış
-    // olur, yükleme "başarısız" sayılıp fotoğraf tekrar yüklenmesin.
-    Object? chatPostError;
-    final Future<void> writes = Future.wait([
-      if (alsoPostToChat)
-        _postToChat(userId, meal, uploaded, chatManager)
-            .catchError((Object e) {
-          chatPostError = e;
-        }),
-    ]);
-    // Yazımlar yerel önbelleğe düştü: sohbetteki mesaj şimdiden görünür.
+    // Kayıtlar (ve sohbet mesajı) yazıldı: fotoğraf gönderildi.
     observer?.onSaving();
-    await writes;
-
     notifyListeners();
-
-    if (chatPostError != null) {
-      throw MealChatPostException(uploaded.url, chatPostError!);
-    }
 
     return uploaded.url;
   } catch (e) {
@@ -671,15 +634,19 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
 
   /// [image] fotoğrafını öğün kaydına bir işlem (transaction) içinde, kaydın
   /// en güncel hâline ekler ([mealWithImageAdded]); günün öğün işareti
-  /// ([mealStateFields]) aynı işlemle yazılır. Sınır bu arada dolduysa
-  /// kayda dokunmaz ve false döner.
+  /// ([mealStateFields]) ve [postToChat] ise sohbet mesajı ile özeti
+  /// ([_queueChatPost]) aynı işlemle yazılır: ya hepsi ya hiçbiri. Sınır bu
+  /// arada dolduysa hiçbir şey yazılmaz ve false döner.
   Future<bool> _addMealImage(
     DocumentReference<Map<String, dynamic>> mealDocRef, {
+    required String userId,
     required Meals meal,
     required String subscriptionId,
     required UploadedImage image,
     required DateTime time,
     required bool cancelsReminder,
+    required bool postToChat,
+    ChatManager? chatManager,
     UploadObserver? observer,
   }) =>
       FirebaseFirestore.instance.runTransaction<bool>((transaction) async {
@@ -688,8 +655,13 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
         if (observer?.isCancelled ?? false) {
           throw const UploadCancelledException();
         }
+        final MealModel? current =
+            fresh.exists ? MealModel.fromDocument(fresh) : null;
+        // Önceki deneme yazıldı ama yanıtı kayboldu, işlem yeniden çalıştı:
+        // adres her yüklemede benzersiz, mesaj ikinci kez yazılmaz.
+        if (current?.imageUrls.contains(image.url) ?? false) return true;
         final MealModel? merged = mealWithImageAdded(
-          fresh.exists ? MealModel.fromDocument(fresh) : null,
+          current,
           meal: meal,
           subscriptionId: subscriptionId,
           imageUrl: image.url,
@@ -703,6 +675,9 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
           mealStateFields(meal, true, photoUploaded: cancelsReminder),
           SetOptions(merge: true),
         );
+        if (postToChat) {
+          _queueChatPost(transaction, userId, meal, image, chatManager);
+        }
         return true;
       });
 
@@ -741,25 +716,22 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
         );
       });
 
-  /// Posts the meal image to the user's chat. Hata yutulmaz; çağıran
-  /// ([uploadMealImg]) sohbete düşmeyen fotoğrafı kullanıcıya bildirir.
-  ///
-  /// Özet ve mesaj tek toplu yazımla gider (bkz. [ChatManager.sendTextTo]):
-  /// mesaj yerelde hemen görünür, çevrimdışıyken de; ikisi birbirinden kopmaz.
-  Future<void> _postToChat(
+  /// Öğün fotoğrafının sohbet mesajını ve sohbet özetini [transaction]'a
+  /// ekler (bkz. [_addMealImage]): mesaj öğün kaydıyla birlikte yazılır.
+  void _queueChatPost(
+    Transaction transaction,
     String userId,
     Meals meal,
     UploadedImage image,
     ChatManager? chatManager,
-  ) async {
+  ) {
     final chatId = userId; // In this app, chatId == userId
     final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
 
     // Chat summary and the admin unread counters in a single write:
     // set(merge: true) merges nested maps field by field, so the counters do
     // not need the dot-notation that would force a separate update().
-    final WriteBatch batch = FirebaseFirestore.instance.batch();
-    batch.set(chatDoc, {
+    transaction.set(chatDoc, {
       'participants': [chatId, ...ChatManager.adminIds],
       'lastMessage': meal.chatSummary,
       'lastImageUrl': image.url,
@@ -773,7 +745,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
       'hasUnreadFor': FieldValue.arrayUnion(ChatManager.adminIds.toList()),
     }, SetOptions(merge: true));
 
-    batch.set(chatDoc.collection('messages').doc(), {
+    transaction.set(chatDoc.collection('messages').doc(), {
       'chatId': chatId,
       'senderId': userId,
       'text': meal.chatCaption,
@@ -783,7 +755,6 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
       'createdAt': FieldValue.serverTimestamp(),
       'clientCreatedAt': Timestamp.now(),
     });
-    await batch.commit();
   }
 
   /// Sohbette [imageUrl] fotoğrafını taşıyan mesajı "fotoğraf silindi" notuna
@@ -941,18 +912,6 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
       rethrow;
     }
   }
-}
-/// Öğün fotoğrafı öğün kaydına eklendi ama sohbete gönderilemedi
-/// (bkz. [MealManager.uploadMealImg]).
-class MealChatPostException implements Exception {
-  /// Öğüne kaydedilen fotoğrafın adresi.
-  final String downloadUrl;
-  final Object cause;
-
-  const MealChatPostException(this.downloadUrl, this.cause);
-
-  @override
-  String toString() => 'MealChatPostException($downloadUrl): $cause';
 }
 
 /// Öğün kaydından çıkarılan fotoğrafın küçük görseli ve öğünde fotoğraf
