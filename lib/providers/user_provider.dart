@@ -1,4 +1,5 @@
 // user_provider.dart
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -302,47 +303,58 @@ class UserProvider extends ChangeNotifier {
 
   // ============ KVKK Consent Methods ============
 
-  /// Fetches KVKK consent status for a user
-  /// 
-  /// @param userId The ID of the user to check consent for
-  /// 
-  /// @return KvkkConsentModel containing consent status, or null if not found
-  Future<KvkkConsentModel?> fetchKvkkConsent({required String userId}) async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .get();
+  /// Onay okumasında sunucunun en fazla bekleneceği süre: internete çıkmayan
+  /// bir ağda Firestore'un çevrimdışı olduğunu anlaması uzun sürebiliyor.
+  static const Duration _kvkkReadTimeout = Duration(seconds: 8);
 
-      if (doc.exists) {
-        final data = doc.data();
-        if (data != null) {
-          return KvkkConsentModel.fromMap(data);
-        }
-      }
-      return null;
+  /// Onay yazımında sunucu onayının en fazla bekleneceği süre. Çevrimdışıyken
+  /// yazım sunucuya ulaşmaz ama cihazda kalıcı sırada bekler ve bağlantı
+  /// gelince gider; bu süreden sonra kaydedilmiş sayılır.
+  static const Duration _kvkkSaveAckTimeout = Duration(seconds: 5);
+
+  /// Kullanıcının KVKK onayı. Önce cihazdaki kopyaya bakılır: orada geçerli
+  /// onay varsa sunucu beklenmez (onayı yalnızca kullanıcı verir, sunucuda
+  /// daha eskisi olamaz), çevrimdışı açılış da hemen geçer. Yoksa sunucudan
+  /// (bağlantı yoksa cihazdaki kopyadan) okunur. Kayıt hiç okunamazsa
+  /// (çevrimdışı ve cihazda kopyası yok) [KvkkConsentStatus.unknown]: onay
+  /// vermiş kullanıcıya onay sayfası gösterilmesin.
+  Future<KvkkConsentStatus> checkKvkkConsent({required String userId}) async {
+    final DocumentReference<Map<String, dynamic>> userDoc =
+        FirebaseFirestore.instance.collection('users').doc(userId);
+
+    try {
+      final cached =
+          await userDoc.get(const GetOptions(source: Source.cache));
+      if (_hasValidConsent(cached)) return KvkkConsentStatus.valid;
     } catch (e) {
-      rethrow;
+      // Cihazda kopyası yok.
     }
+
+    try {
+      final doc = await userDoc.get().timeout(_kvkkReadTimeout);
+      return _hasValidConsent(doc)
+          ? KvkkConsentStatus.valid
+          : KvkkConsentStatus.missing;
+    } on TimeoutException {
+      return KvkkConsentStatus.unknown;
+    } on FirebaseException catch (e) {
+      return e.code == 'unavailable'
+          ? KvkkConsentStatus.unknown
+          : KvkkConsentStatus.missing;
+    } catch (e) {
+      return KvkkConsentStatus.missing;
+    }
+  }
+
+  static bool _hasValidConsent(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final Map<String, dynamic>? data = doc.data();
+    return data != null && KvkkConsentModel.fromMap(data).hasValidConsent;
   }
 
   /// Checks if a user has valid KVKK consent for the current version
-  /// 
-  /// @param userId The ID of the user to check
-  /// 
-  /// @return true if user has valid consent, false otherwise
-  Future<bool> hasValidKvkkConsent({required String userId}) async {
-    try {
-      final consent = await fetchKvkkConsent(userId: userId);
-      if (consent == null) {
-        return false;
-      }
-      final hasValid = consent.hasValidConsent;
-      return hasValid;
-    } catch (e) {
-      return false;
-    }
-  }
+  /// (see [checkKvkkConsent]); an unreadable record counts as no consent.
+  Future<bool> hasValidKvkkConsent({required String userId}) async =>
+      await checkKvkkConsent(userId: userId) == KvkkConsentStatus.valid;
 
   /// Saves KVKK consent for a user
   /// 
@@ -369,10 +381,15 @@ class UserProvider extends ChangeNotifier {
         consentData['explicitConsentAcceptedAt'] = Timestamp.fromDate(now);
       }
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .update(consentData);
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .update(consentData)
+            .timeout(_kvkkSaveAckTimeout);
+      } on TimeoutException {
+        // Çevrimdışı: yazım cihazda sırada, bağlantı gelince gider.
+      }
 
       notifyListeners();
       return true;
