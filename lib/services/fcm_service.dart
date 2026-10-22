@@ -138,9 +138,11 @@ class FcmService {
     // Set up message handlers
     _setupMessageHandlers();
 
-    // Save token for current user (if logged in)
-    await saveFcmToken();
-    
+    // Jeton burada beklenmez: açılış (runApp) ona takılmasın. Firestore
+    // yazımı ancak sunucu onaylayınca biter; çevrimdışı açılışta hiç bitmez
+    // ve uygulama açılış ekranında kalırdı. Kaydı aşağıdaki oturum dinleyicisi
+    // yapar (ilk olayı açıktaki oturumdur); yazım bağlantı gelince gider.
+
     // Clear any existing badge count when app starts
     await clearBadge();
 
