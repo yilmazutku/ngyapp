@@ -160,10 +160,15 @@ class LoginProvider extends ChangeNotifier {
   /// bu cihazın bildirim jetonu kayıttan silinir (bkz.
   /// [FcmService.removeFcmToken]; çevrimdışıyken birkaç saniye sürebilir),
   /// sonra çıkış yapılır. Çağıran bu sırada "Çıkış yapılıyor..." gösterir.
+  /// Giriş formundaki şifre silinir: telefonu eline alan önceki kullanıcının
+  /// şifresini göremez, onun hesabıyla giremez.
   Future<void> signOut() async {
     await NotificationService().cancelAllNotifications();
     await MealReminderService().cancelAllMealReminders();
     await FcmService().removeFcmToken();
     await FirebaseAuth.instance.signOut();
+    passwordController.clear();
+    _errorMessage = '';
+    notifyListeners();
   }
 }

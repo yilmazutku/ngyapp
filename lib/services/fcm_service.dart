@@ -554,7 +554,8 @@ class FcmService {
 
     final String? token;
     try {
-      token = await _messaging.getToken();
+      // Çevrimdışıyken jeton okuması da uzun sürebilir: çıkışı bekletmesin.
+      token = await _messaging.getToken().timeout(_logoutWriteTimeout);
     } catch (e) {
       return;
     }

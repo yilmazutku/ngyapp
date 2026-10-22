@@ -280,6 +280,11 @@ class DialogUtils {
   /// `LoginProvider.signOut`).
   static const String signingOutMessage = 'Çıkış yapılıyor...';
 
+  /// Oturum kapatılamadığında gösterilen hata.
+  static const String signOutFailedTitle = 'Hata';
+  static const String signOutFailedMessage =
+      'Çıkış yapılamadı. Lütfen tekrar deneyin.';
+
   /// Shows a loading dialog with a message
   /// Prevents user interaction during loading operations
   ///

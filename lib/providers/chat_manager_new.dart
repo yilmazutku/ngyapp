@@ -95,7 +95,7 @@ class MessageData {
   DateTime? get sentAt => (createdAt ?? clientCreatedAt)?.toDate();
 
   /// Danışanın sohbetten yüklediği öğün fotoğrafı mı (bkz.
-  /// `MealManager.uploadMealImg`, `alsoPostToChat`).
+  /// `MealManager.uploadMealImg`, `chatMessageId`).
   bool get isMealPhoto =>
       (imageUrl ?? '').isNotEmpty &&
       ((storagePath ?? '').startsWith(Meals.chatMarkerPrefix) ||

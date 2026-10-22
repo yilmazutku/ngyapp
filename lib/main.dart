@@ -872,15 +872,27 @@ class _HomePageState extends State<HomePage> {
                 );
                 try {
                   await loginProvider.signOut();
-                } finally {
+                } catch (e) {
                   loading.close();
+                  if (context.mounted) {
+                    await DialogUtils.openError(
+                      context,
+                      title: DialogUtils.signOutFailedTitle,
+                      message: DialogUtils.signOutFailedMessage,
+                    );
+                  }
+                  return;
                 }
+                loading.close();
+                // Çıkış sürerken bildirimden açılan bir sayfa (ör. sohbet)
+                // da kapanır: giriş sayfası tek başına kalır.
                 if (context.mounted) {
-                  Navigator.pushReplacement(
+                  Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
                       builder: (_) => const LoginPage(),
                     ),
+                    (route) => false,
                   );
                 }
               }

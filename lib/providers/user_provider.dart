@@ -301,6 +301,25 @@ class UserProvider extends ChangeNotifier {
     _customersCachedAt = null;
   }
 
+  /// Hesap silme talebinde sunucunun en fazla bekleneceği süre.
+  static const Duration _removalRequestTimeout = Duration(seconds: 10);
+
+  /// Kullanıcının hesap silme talebini (`isUserRequestedRemoval`) sunucuya
+  /// yazar. Bağlantı gerekir: talepten sonra oturum kapanır ve kapanan
+  /// oturumun sıradaki yazımı ancak aynı kullanıcı yeniden girince gider.
+  /// Önce sunucuya ulaşılabildiği denenir; ulaşılamazsa ya da yazım zamanında
+  /// bitmezse hata fırlatır (çağıran oturumu kapatmaz).
+  Future<void> requestAccountRemoval({required String userId}) async {
+    final DocumentReference<Map<String, dynamic>> userDoc =
+        FirebaseFirestore.instance.collection('users').doc(userId);
+    await userDoc
+        .get(const GetOptions(source: Source.server))
+        .timeout(_removalRequestTimeout);
+    await userDoc
+        .set({'isUserRequestedRemoval': true}, SetOptions(merge: true))
+        .timeout(_removalRequestTimeout);
+  }
+
   // ============ KVKK Consent Methods ============
 
   /// Onay okumasında sunucunun en fazla bekleneceği süre: internete çıkmayan
