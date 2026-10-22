@@ -291,7 +291,6 @@ Future<int> mealImageSlotsLeft({
 Future<void> uploadChatMealPhoto(
   PendingUpload upload, {
   required String userId,
-  required ChatManager chatManager,
 }) async {
   final String? downloadUrl = await uploadMealImg(
     meal: upload.meal,
@@ -301,7 +300,6 @@ Future<void> uploadChatMealPhoto(
     overrideDate: upload.createdAt,
     chatMessageId: upload.persistKey,
     cancelsReminder: true,
-    chatManager: chatManager,
     observer: upload,
   );
   // Öğün kaydı sınıra ulaşmışsa (ör. başka cihazdan yüklendi) null döner.
@@ -320,7 +318,7 @@ Future<void> uploadChatMealPhoto(
 /// A meal type can have up to [MealModel.maxImages] images.
 ///
 /// Fotoğraf kayda bir işlem (transaction) içinde, kaydın en güncel hâline
-/// eklenir ([_addMealImage]): yükleme sürerken öğüne eklenen ya da öğünden
+/// eklenir ([writeMealImage]): yükleme sürerken öğüne eklenen ya da öğünden
 /// silinen fotoğraflar kaybolmaz, geri gelmez. Sınır bu arada dolduysa
 /// yüklenen dosyalar silinir ve null döner. Kayıt okunamazsa ya da işlem
 /// başarısız olursa hata fırlatılır (yüklenen dosyalar silinir); sohbetin
@@ -354,7 +352,6 @@ Future<String?> uploadMealImg({
   DateTime? overrideDate,
   String? chatMessageId,
   bool cancelsReminder = false,
-  ChatManager? chatManager,
   UploadObserver? observer,
 }) async {
   try {
@@ -406,9 +403,10 @@ Future<String?> uploadMealImg({
       throw const UploadCancelledException();
     }
 
-    final _MealImageWrite result;
+    final MealImageWrite result;
     try {
-      result = await _addMealImage(
+      result = await writeMealImage(
+        FirebaseFirestore.instance,
         mealDocRef,
         userId: userId,
         meal: meal,
@@ -417,7 +415,6 @@ Future<String?> uploadMealImg({
         time: referenceDate,
         cancelsReminder: cancelsReminder,
         messageRef: messageRef,
-        chatManager: chatManager,
       ).timeout(_mealImageWriteTimeout);
     } on TimeoutException {
       // Sonuç belli değil: dosyalar kalır (bkz. yukarıdaki not).
@@ -425,13 +422,13 @@ Future<String?> uploadMealImg({
     }
 
     switch (result.kind) {
-      case _MealImageWriteKind.limitReached:
+      case MealImageWriteKind.limitReached:
         await uploaded.delete();
         return null;
-      case _MealImageWriteKind.alreadyPosted:
+      case MealImageWriteKind.alreadyPosted:
         // Önceki deneme yazmıştı: bu denemenin dosyaları kullanılmıyor.
         if (result.postedImageUrl != uploaded.url) await uploaded.delete();
-      case _MealImageWriteKind.written:
+      case MealImageWriteKind.written:
         break;
     }
 
@@ -451,7 +448,7 @@ Future<String?> uploadMealImg({
     observer?.onSaving();
     notifyListeners();
 
-    return result.kind == _MealImageWriteKind.written
+    return result.kind == MealImageWriteKind.written
         ? uploaded.url
         : result.postedImageUrl ?? '';
   } catch (e) {
@@ -675,7 +672,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   /// [mealPhotoLocation]).
   static const String _mealPhotosFolder = 'mealPhotos';
 
-  /// İşlemin (bkz. [_addMealImage]) en fazla bekleneceği süre: bağlantı
+  /// İşlemin (bkz. [writeMealImage]) en fazla bekleneceği süre: bağlantı
   /// var görünüp paketler gitmiyorsa işlem kendiliğinden bitmeyebilir.
   static const Duration _mealImageWriteTimeout = Duration(seconds: 60);
 
@@ -701,7 +698,11 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   /// ([_queueChatPost]) aynı işlemle yazılır: ya hepsi ya hiçbiri. Mesaj
   /// zaten varsa ya da fotoğraf kayıttaysa (önceki deneme yazdı) hiçbir şey
   /// yazılmaz. Sınır bu arada dolduysa hiçbir şey yazılmaz.
-  Future<_MealImageWrite> _addMealImage(
+  ///
+  /// [db] üzerinde çalışır (testte sahte Firestore).
+  @visibleForTesting
+  static Future<MealImageWrite> writeMealImage(
+    FirebaseFirestore db,
     DocumentReference<Map<String, dynamic>> mealDocRef, {
     required String userId,
     required Meals meal,
@@ -710,17 +711,15 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
     required DateTime time,
     required bool cancelsReminder,
     DocumentReference<Map<String, dynamic>>? messageRef,
-    ChatManager? chatManager,
   }) =>
-      FirebaseFirestore.instance
-          .runTransaction<_MealImageWrite>((transaction) async {
+      db.runTransaction<MealImageWrite>((transaction) async {
         final DocumentSnapshot<Map<String, dynamic>> fresh =
             await transaction.get(mealDocRef);
         final DocumentSnapshot<Map<String, dynamic>>? posted =
             messageRef == null ? null : await transaction.get(messageRef);
         if (posted != null && posted.exists) {
           return (
-            kind: _MealImageWriteKind.alreadyPosted,
+            kind: MealImageWriteKind.alreadyPosted,
             postedImageUrl: posted.data()?['imageUrl'] as String?,
           );
         }
@@ -728,7 +727,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
             fresh.exists ? MealModel.fromDocument(fresh) : null;
         if (current?.imageUrls.contains(image.url) ?? false) {
           return (
-            kind: _MealImageWriteKind.alreadyPosted,
+            kind: MealImageWriteKind.alreadyPosted,
             postedImageUrl: image.url,
           );
         }
@@ -742,7 +741,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
         );
         if (merged == null) {
           return (
-            kind: _MealImageWriteKind.limitReached,
+            kind: MealImageWriteKind.limitReached,
             postedImageUrl: null,
           );
         }
@@ -753,10 +752,9 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
           SetOptions(merge: true),
         );
         if (messageRef != null) {
-          _queueChatPost(
-              transaction, messageRef, userId, meal, image, chatManager);
+          _queueChatPost(transaction, messageRef, userId, meal, image);
         }
-        return (kind: _MealImageWriteKind.written, postedImageUrl: image.url);
+        return (kind: MealImageWriteKind.written, postedImageUrl: image.url);
       });
 
   /// [imageUrl] fotoğrafını öğün kaydından bir işlem (transaction) içinde,
@@ -795,17 +793,17 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
       });
 
   /// Öğün fotoğrafının sohbet mesajını ve sohbet özetini [transaction]'a
-  /// ekler (bkz. [_addMealImage]): mesaj öğün kaydıyla birlikte yazılır.
-  void _queueChatPost(
+  /// ekler (bkz. [writeMealImage]): mesaj öğün kaydıyla birlikte yazılır.
+  static void _queueChatPost(
     Transaction transaction,
     DocumentReference<Map<String, dynamic>> messageRef,
     String userId,
     Meals meal,
     UploadedImage image,
-    ChatManager? chatManager,
   ) {
     final chatId = userId; // In this app, chatId == userId
-    final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
+    final DocumentReference<Map<String, dynamic>> chatDoc =
+        messageRef.parent.parent!;
 
     // Chat summary and the admin unread counters in a single write:
     // set(merge: true) merges nested maps field by field, so the counters do
@@ -829,8 +827,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
       'senderId': userId,
       'text': meal.chatCaption,
       ...ChatManager.imageMessageFields(image),
-      if (chatManager != null)
-        'storagePath': '${Meals.chatMarkerPrefix}$userId/${meal.name}',
+      'storagePath': '${Meals.chatMarkerPrefix}$userId/${meal.name}',
       'createdAt': FieldValue.serverTimestamp(),
       'clientCreatedAt': Timestamp.now(),
     });
@@ -993,8 +990,8 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   }
 }
 
-/// [MealManager._addMealImage] işleminin sonucu.
-enum _MealImageWriteKind {
+/// [MealManager.writeMealImage] işleminin sonucu.
+enum MealImageWriteKind {
   /// Fotoğraf (ve sohbet mesajı) yazıldı.
   written,
 
@@ -1005,9 +1002,9 @@ enum _MealImageWriteKind {
   limitReached,
 }
 
-/// [_MealImageWriteKind] ve yazılmış mesajın fotoğraf adresi (fotoğraf
+/// [MealImageWriteKind] ve yazılmış mesajın fotoğraf adresi (fotoğraf
 /// sonradan silindiyse null).
-typedef _MealImageWrite = ({_MealImageWriteKind kind, String? postedImageUrl});
+typedef MealImageWrite = ({MealImageWriteKind kind, String? postedImageUrl});
 
 /// Öğün kaydından çıkarılan fotoğrafın küçük görseli ve öğünde fotoğraf
 /// kalıp kalmadığı (bkz. [MealManager._removeMealImage]).

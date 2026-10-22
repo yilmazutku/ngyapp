@@ -526,11 +526,8 @@ class _HomePageState extends State<HomePage> {
     final ({int restored, int missing}) result =
         await chatManager.restorePendingUploads(
       userId: userId,
-      runner: (upload) => mealManager.uploadChatMealPhoto(
-        upload,
-        userId: userId,
-        chatManager: chatManager,
-      ),
+      runner: (upload) =>
+          mealManager.uploadChatMealPhoto(upload, userId: userId),
     );
     final List<String> notes = [
       if (result.restored > 0)
