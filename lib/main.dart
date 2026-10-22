@@ -33,6 +33,7 @@ import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/timeslot_manager.dart';
 
 import 'firebase_options.dart';
+import 'models/kvkk_consent_model.dart';
 import 'pages/admin_appointments_page.dart';
 import 'platform/platform_config.dart';
 import 'platform/platform_config_factory.dart';
@@ -252,7 +253,7 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   /// Future for checking KVKK consent status
-  Future<bool>? _kvkkCheckFuture;
+  Future<KvkkConsentStatus>? _kvkkCheckFuture;
   
   /// Track the current user ID to reset KVKK check when user changes
   String? _currentUserId;
@@ -291,7 +292,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         // Initialize KVKK check future if not already done
         _kvkkCheckFuture ??= _checkKvkkConsent(userId);
         
-        return FutureBuilder<bool>(
+        return FutureBuilder<KvkkConsentStatus>(
           future: _kvkkCheckFuture,
           builder: (context, kvkkSnapshot) {
             // Show loading while checking KVKK consent
@@ -310,14 +311,16 @@ class _AuthWrapperState extends State<AuthWrapper> {
               );
             }
             
-            // Check if KVKK consent exists
-            final hasConsent = kvkkSnapshot.data ?? false;
-            
-            if (hasConsent) {
-              return const HomePage();
-            } else {
-              // User needs to accept KVKK consent
-              return const KvkkConsentPage();
+            switch (kvkkSnapshot.data ?? KvkkConsentStatus.unknown) {
+              case KvkkConsentStatus.valid:
+                return const HomePage();
+              case KvkkConsentStatus.missing:
+                return const KvkkConsentPage();
+              case KvkkConsentStatus.unknown:
+                return _ConsentCheckFailedPage(
+                  onRetry: () => setState(
+                      () => _kvkkCheckFuture = _checkKvkkConsent(userId)),
+                );
             }
           },
         );
@@ -326,13 +329,63 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
   
   /// Check if user has valid KVKK consent
-  Future<bool> _checkKvkkConsent(String userId) async {
+  Future<KvkkConsentStatus> _checkKvkkConsent(String userId) async {
     try {
       final userProvider = Provider.of<UserProvider>(context, listen: false);
-      return await userProvider.hasValidKvkkConsent(userId: userId);
+      return await userProvider.checkKvkkConsent(userId: userId);
     } catch (e) {
-      return false;
+      return KvkkConsentStatus.unknown;
     }
+  }
+}
+
+/// KVKK onayı okunamadığında (çevrimdışı ve cihazda kayıt yok) gösterilir:
+/// onay vermiş kullanıcıya yeniden onay sayfası açılmaz, bağlantı gelince
+/// tekrar denenir.
+class _ConsentCheckFailedPage extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _ConsentCheckFailedPage({required this.onRetry});
+
+  static const String _title = 'Bağlantı kurulamadı';
+  static const String _message =
+      'Oturum bilgileriniz kontrol edilemedi. İnternet bağlantınızı kontrol '
+      'edip tekrar deneyin.';
+  static const String _retryLabel = 'Tekrar Dene';
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.wifi_off_rounded,
+                    size: 56, color: theme.colorScheme.outline),
+                const SizedBox(height: 16),
+                Text(_title,
+                    style: theme.textTheme.titleLarge,
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                Text(_message,
+                    style: theme.textTheme.bodyMedium,
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text(_retryLabel),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -489,13 +542,6 @@ class _HomePageState extends State<HomePage> {
     ];
     if (notes.isEmpty || !mounted) return;
     messenger.showSnackBar(SnackBar(content: Text(notes.join('\n'))));
-  }
-
-  // Fetch user role (optional, for admin features)
-  Future<String> _getUserRole(String userId) async {
-    final userDoc =
-    await FirebaseFirestore.instance.collection('users').doc(userId).get();
-    return userDoc.data()?['role'] ?? 'user';
   }
 
   // Navigation method for "Planım" (example)
@@ -662,230 +708,222 @@ class _HomePageState extends State<HomePage> {
       return const Center(child: Text('Kullanıcı bulunamadı'));
     }
 
-    return FutureBuilder<String>(
-      future: _getUserRole(userId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final isAdmin = FcmService.isAdmin(userId);
+    final isAdmin = FcmService.isAdmin(userId);
 
-        // Items shown on the "Kullanıcı Tarafı" (user side)
-        final List<Map<String, dynamic>> userItems = [
-          {
-            'icon': Icons.chat,
-            'label': 'Sohbet',
-            'onTap': () => _navigateToChat(context, userId, isAdmin),
-            // Only admins get the badge stream (using cached stream)
-            'badgeStream': _unreadChatsStream,
-          },
-          {
-            'icon': Icons.food_bank,
-            'label': 'Planım',
-            'onTap': () => _navigateToMeal(context, userId),
-          },
-          {
-            'icon': Icons.payments,
-            'label': 'Ödemelerim',
-            'onTap': () => _navigateToPayments(context, userId),
-            // Red attention indicator when a pending/planned payment exists.
-            'alertStream': _plannedPaymentAlertStream,
-          },
-          {
-            'icon': Icons.calendar_today,
-            'label': 'Randevularım',
-            'onTap': () => _navigateToAppointments(context, userId),
-          },
-          {
-            'icon': Icons.person,
-            'label': 'Profilim',
-            'onTap': () => _navigateToProfile(context, userId),
-          },
-          {
-            'icon': Icons.fitness_center,
-            'label': 'Ölçümlerim',
-            'onTap': () => _navigateToMeas(context, userId),
-          },
-          {
-            'icon': Icons.newspaper,
-            'label': 'Duyurular',
-            'onTap': () => _navigateToNews(context),
-          },
-        ];
+    // Items shown on the "Kullanıcı Tarafı" (user side)
+    final List<Map<String, dynamic>> userItems = [
+      {
+        'icon': Icons.chat,
+        'label': 'Sohbet',
+        'onTap': () => _navigateToChat(context, userId, isAdmin),
+        // Only admins get the badge stream (using cached stream)
+        'badgeStream': _unreadChatsStream,
+      },
+      {
+        'icon': Icons.food_bank,
+        'label': 'Planım',
+        'onTap': () => _navigateToMeal(context, userId),
+      },
+      {
+        'icon': Icons.payments,
+        'label': 'Ödemelerim',
+        'onTap': () => _navigateToPayments(context, userId),
+        // Red attention indicator when a pending/planned payment exists.
+        'alertStream': _plannedPaymentAlertStream,
+      },
+      {
+        'icon': Icons.calendar_today,
+        'label': 'Randevularım',
+        'onTap': () => _navigateToAppointments(context, userId),
+      },
+      {
+        'icon': Icons.person,
+        'label': 'Profilim',
+        'onTap': () => _navigateToProfile(context, userId),
+      },
+      {
+        'icon': Icons.fitness_center,
+        'label': 'Ölçümlerim',
+        'onTap': () => _navigateToMeas(context, userId),
+      },
+      {
+        'icon': Icons.newspaper,
+        'label': 'Duyurular',
+        'onTap': () => _navigateToNews(context),
+      },
+    ];
 
-        // Items shown on the "Yönetici Tarafı" (admin side): from
-        // "Kullanıcı Ekle" through "Ayarlar". Only populated for admins.
-        final List<Map<String, dynamic>> adminItems = [
-            {
-              'icon': Icons.admin_panel_settings,
-              'label': 'Kullanıcı Ekle',
-              'onTap': () => _navigateToAdminUsers(context),
-            },
-            {
-              'icon': Icons.payments,
-              'label': 'Ödeme Yönetimi',
-              'onTap': () => _navigateToAdminPayments(context),
-            },
-            {
-              'icon': Icons.calendar_today,
-              'label': 'Randevu Yönetimi',
-              'onTap': () => _navigateToAdminAppointments(context),
-            },
-            {
-              'icon': Icons.table_chart,
-              'label': 'Danışanlar Özet',
-              'onTap': () => _navigateToCustomerSummary(context),
-            },
-            {
-              'icon': Icons.photo_library,
-              'label': 'Öğün Fotoğrafları',
-              'onTap': () => _navigateToMealPhotos(context),
-            },
-            {
-              'icon': Icons.image,
-              'label': 'Kullanıcı Yönetimi',
-              'onTap': () => _navigateToAdminImages(context),
-            },
-            {
-              'icon': Icons.access_time,
-              'label': 'Zaman Dilimi Yönetimi',
-              'onTap': () => _navigateToAdminTimeslots(context),
-            },
-            {
-              'icon': Icons.campaign,
-              'label': 'Duyuru Yönetimi',
-              'onTap': () => _navigateToAdminNews(context),
-            },
-            {
-              'icon': Icons.settings,
-              'label': 'Ayarlar',
-              'onTap': () => _navigateToTesting(context),
-            },
-        ];
+    // Items shown on the "Yönetici Tarafı" (admin side): from
+    // "Kullanıcı Ekle" through "Ayarlar". Only populated for admins.
+    final List<Map<String, dynamic>> adminItems = [
+        {
+          'icon': Icons.admin_panel_settings,
+          'label': 'Kullanıcı Ekle',
+          'onTap': () => _navigateToAdminUsers(context),
+        },
+        {
+          'icon': Icons.payments,
+          'label': 'Ödeme Yönetimi',
+          'onTap': () => _navigateToAdminPayments(context),
+        },
+        {
+          'icon': Icons.calendar_today,
+          'label': 'Randevu Yönetimi',
+          'onTap': () => _navigateToAdminAppointments(context),
+        },
+        {
+          'icon': Icons.table_chart,
+          'label': 'Danışanlar Özet',
+          'onTap': () => _navigateToCustomerSummary(context),
+        },
+        {
+          'icon': Icons.photo_library,
+          'label': 'Öğün Fotoğrafları',
+          'onTap': () => _navigateToMealPhotos(context),
+        },
+        {
+          'icon': Icons.image,
+          'label': 'Kullanıcı Yönetimi',
+          'onTap': () => _navigateToAdminImages(context),
+        },
+        {
+          'icon': Icons.access_time,
+          'label': 'Zaman Dilimi Yönetimi',
+          'onTap': () => _navigateToAdminTimeslots(context),
+        },
+        {
+          'icon': Icons.campaign,
+          'label': 'Duyuru Yönetimi',
+          'onTap': () => _navigateToAdminNews(context),
+        },
+        {
+          'icon': Icons.settings,
+          'label': 'Ayarlar',
+          'onTap': () => _navigateToTesting(context),
+        },
+    ];
 
-        final appBar = AppBar(
-            title: const Text('Ana Sayfa'),
-            centerTitle: true,
-            elevation: 4.0,
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(
-                bottom: Radius.circular(10),
-              ),
+    final appBar = AppBar(
+        title: const Text('Ana Sayfa'),
+        centerTitle: true,
+        elevation: 4.0,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            bottom: Radius.circular(10),
+          ),
+        ),
+        bottom: isAdmin
+            ? const TabBar(
+                indicatorColor: Colors.white,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white70,
+                labelStyle: TextStyle(fontWeight: FontWeight.bold),
+                tabs: [
+                  Tab(
+                    icon: Icon(Icons.people),
+                    text: 'Kullanıcı Tarafı',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.admin_panel_settings),
+                    text: 'Yönetici Tarafı',
+                  ),
+                ],
+              )
+            : null,
+        actions: [
+          // Version and logout share one horizontally scrollable slot, so a
+          // narrow phone scrolls them instead of overflowing the app bar.
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.6,
             ),
-            bottom: isAdmin
-                ? const TabBar(
-                    indicatorColor: Colors.white,
-                    labelColor: Colors.white,
-                    unselectedLabelColor: Colors.white70,
-                    labelStyle: TextStyle(fontWeight: FontWeight.bold),
-                    tabs: [
-                      Tab(
-                        icon: Icon(Icons.people),
-                        text: 'Kullanıcı Tarafı',
-                      ),
-                      Tab(
-                        icon: Icon(Icons.admin_panel_settings),
-                        text: 'Yönetici Tarafı',
-                      ),
-                    ],
-                  )
-                : null,
-            actions: [
-              // Version and logout share one horizontally scrollable slot, so a
-              // narrow phone scrolls them instead of overflowing the app bar.
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.6,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LabeledActionButton(
+                    icon: Icons.logout,
+                    label: 'Çıkış Yap',
+                    onPressed: () async {
+              // Show confirmation dialog before logging out
+              final shouldLogout = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Çıkış'),
+                  content: const Text('Oturumu kapatmak istediğinize emin misiniz?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Hayır'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Evet'),
+                    ),
+                  ],
                 ),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  reverse: true,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      LabeledActionButton(
-                        icon: Icons.logout,
-                        label: 'Çıkış Yap',
-                        onPressed: () async {
-                  // Show confirmation dialog before logging out
-                  final shouldLogout = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Çıkış'),
-                      content: const Text('Oturumu kapatmak istediğinize emin misiniz?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          child: const Text('Hayır'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          child: const Text('Evet'),
-                        ),
-                      ],
+              );
+
+              if (shouldLogout == true) {
+                // Cancel all local notifications before signing out
+                await NotificationService().cancelAllNotifications();
+                await MealReminderService().cancelAllMealReminders();
+                // Remove FCM token before signing out to stop push notifications
+                await FcmService().removeFcmToken();
+                await FirebaseAuth.instance.signOut();
+                if (context.mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const LoginPage(),
                     ),
                   );
-
-                  if (shouldLogout == true) {
-                    // Cancel all local notifications before signing out
-                    await NotificationService().cancelAllNotifications();
-                    await MealReminderService().cancelAllMealReminders();
-                    // Remove FCM token before signing out to stop push notifications
-                    await FcmService().removeFcmToken();
-                    await FirebaseAuth.instance.signOut();
-                    if (context.mounted) {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const LoginPage(),
-                        ),
-                      );
-                    }
-                  }
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-
-        if (isAdmin) {
-          // Admins get two tabs: user side and admin side.
-          return DefaultTabController(
-            length: 2,
-            initialIndex: 1,
-            child: Scaffold(
-              appBar: appBar,
-              body: Column(
-                children: [
-                  _buildViewToggle(),
-                  Expanded(
-                    child: TabBarView(
-                      children: [
-                        _buildItemsView(userItems),
-                        _buildItemsView(adminItems),
-                      ],
-                    ),
+                }
+              }
+                    },
                   ),
                 ],
               ),
             ),
-          );
-        }
+          ),
+        ],
+      );
 
-        // Regular users only see their own side.
-        return Scaffold(
+    if (isAdmin) {
+      // Admins get two tabs: user side and admin side.
+      return DefaultTabController(
+        length: 2,
+        initialIndex: 1,
+        child: Scaffold(
           appBar: appBar,
           body: Column(
             children: [
               _buildViewToggle(),
-              Expanded(child: _buildItemsView(userItems)),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _buildItemsView(userItems),
+                    _buildItemsView(adminItems),
+                  ],
+                ),
+              ),
             ],
           ),
-        );
-      },
+        ),
+      );
+    }
+
+    // Regular users only see their own side.
+    return Scaffold(
+      appBar: appBar,
+      body: Column(
+        children: [
+          _buildViewToggle(),
+          Expanded(child: _buildItemsView(userItems)),
+        ],
+      ),
     );
   }
 

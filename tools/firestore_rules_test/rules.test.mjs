@@ -161,6 +161,7 @@ async function run(rulesFile) {
 
   // I: uygulamanın danışan adına gerçekten yaptığı yazımlar.
   await check('I1 FCM token set-merge', true, () => u1().set({ fcmToken: 'tok' }, { merge: true }));
+  await check('I1c FCM token update (FcmService._saveTokenIfChanged)', true, () => u1().update({ fcmToken: 'tok2' }));
   await check('I2 FCM token removed in transaction (logout)', true, () => { const d = db('u1'); return d.runTransaction(async (tx) => {
     const ref = d.collection('users').doc('u1'); const snap = await tx.get(ref);
     if (snap.get('fcmToken') === 'tok') tx.update(ref, { fcmToken: FV.delete() });

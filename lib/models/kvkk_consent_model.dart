@@ -4,6 +4,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// Increment this when KVKK texts are updated to prompt users to re-consent.
 const String kvkkCurrentVersion = '1.0';
 
+/// KVKK onay kontrolünün sonucu (bkz. `UserProvider.checkKvkkConsent`).
+enum KvkkConsentStatus {
+  /// Geçerli sürüme onay verilmiş.
+  valid,
+
+  /// Onay yok ya da eski sürüme verilmiş: onay sayfası gösterilir.
+  missing,
+
+  /// Kayıt okunamadı (çevrimdışı ve cihazda kopyası yok): onay bilinmiyor.
+  unknown,
+}
+
 /// Model for storing KVKK consent data.
 /// Tracks which versions of consent documents were accepted and when.
 class KvkkConsentModel {
