@@ -69,12 +69,12 @@ import 'providers/test_provider.dart';
 import 'providers/user_provider.dart';
 import 'services/fcm_service.dart';
 import 'services/meal_reminder_service.dart';
-import 'services/notification_service.dart';
 import 'tabs/admin_images_page.dart';
 import 'news/news_provider.dart';
 import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
 import 'pages/testing_page.dart';
+import 'utils/dialog_utils.dart';
 import 'widgets/app_update_gate.dart';
 import 'widgets/labeled_action_button.dart';
 
@@ -866,13 +866,18 @@ class _HomePageState extends State<HomePage> {
                 ),
               );
 
-              if (shouldLogout == true) {
-                // Cancel all local notifications before signing out
-                await NotificationService().cancelAllNotifications();
-                await MealReminderService().cancelAllMealReminders();
-                // Remove FCM token before signing out to stop push notifications
-                await FcmService().removeFcmToken();
-                await FirebaseAuth.instance.signOut();
+              if (shouldLogout == true && context.mounted) {
+                final LoginProvider loginProvider =
+                    Provider.of<LoginProvider>(context, listen: false);
+                final LoadingDialog loading = DialogUtils.openLoading(
+                  context,
+                  message: DialogUtils.signingOutMessage,
+                );
+                try {
+                  await loginProvider.signOut();
+                } finally {
+                  loading.close();
+                }
                 if (context.mounted) {
                   Navigator.pushReplacement(
                     context,

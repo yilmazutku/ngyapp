@@ -116,12 +116,13 @@ abstract class UploadObserver {
   /// Yükleme iptal edildi mi (kullanıcı ya da zaman aşımı).
   bool get isCancelled;
 
-  /// Dosyalar yüklendi, kayıtlar henüz yazılmadı. Küçük görselin baytları
-  /// burada verilir: kayıt yazılınca görsel yeniden indirilmeden gösterilsin.
+  /// Dosyalar yüklendi, kayıtlar henüz yazılmadı; bundan sonra yükleme iptal
+  /// edilemez. Küçük görselin baytları burada verilir: kayıt yazılınca görsel
+  /// yeniden indirilmeden gösterilsin.
   void onUploaded(UploadedImage image);
 
-  /// Dosyalar yüklendi ve kayıtlar yazılmaya başlandı: bundan sonra iptal
-  /// edilemez; kayıt yerel önbellekte hemen görünür.
+  /// Dosyalar yüklendi ve kayıtlar yazıldı: yükleme tamamlandı, kayıt
+  /// görünür.
   void onSaving();
 }
 

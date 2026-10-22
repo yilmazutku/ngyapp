@@ -364,6 +364,8 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Fotoğrafı sıradan çıkarır; yükleniyorsa iptal edilir, mesaj yazılmaz.
   void discardUpload(PendingUpload upload) {
+    // Kayıt yazılıyorsa vazgeçilemez (bkz. PendingUploadStatus.committing).
+    if (upload.status.value == PendingUploadStatus.committing) return;
     upload.cancel();
     _forgetUpload(upload);
     _removePendingUpload(upload);
@@ -417,9 +419,10 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// yükleme beklenmez ([PendingUpload.aborted]); iptal edilmiş yükleme kayıt
   /// yazmaz (bkz. [uploadImageWithThumbnail]).
   ///
-  /// Kayıtlar yazılmaya başlayınca sıra kaydı silinir: bundan sonrasını
-  /// Firestore üstlenir (çevrimdışıysa yazımı bağlantı gelince iletir);
-  /// uygulama bu arada kapansa da fotoğraf açılışta ikinci kez yüklenmez.
+  /// Kayıtlar (öğün kaydı ve sohbet mesajı tek işlemde) yazılınca sıra kaydı
+  /// silinir: uygulama sonra kapansa da fotoğraf açılışta ikinci kez
+  /// yüklenmez. İşlem yazılamazsa yükleme "yüklenemedi" olur ve yeniden
+  /// denenir; fotoğraf ne öğünde ne sohbette görünür.
   Future<void> _runUpload(PendingUpload upload) async {
     void forgetWhenSaving() {
       if (upload.status.value == PendingUploadStatus.saving) {

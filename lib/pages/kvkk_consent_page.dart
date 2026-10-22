@@ -4,10 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../main.dart';
 import '../models/kvkk_consent_model.dart';
+import '../providers/login_manager.dart';
 import '../providers/user_provider.dart';
-import '../services/fcm_service.dart';
-import '../services/meal_reminder_service.dart';
-import '../services/notification_service.dart';
 import '../utils/dialog_utils.dart';
 import 'login_page.dart';
 
@@ -390,13 +388,18 @@ I understand that I may withdraw my explicit consent at any time (without affect
       cancelText: _isEnglish ? 'No' : 'Hayır',
     );
 
-    if (confirmed) {
-      // Cancel all local notifications before signing out
-      await NotificationService().cancelAllNotifications();
-      await MealReminderService().cancelAllMealReminders();
-      // Remove FCM token before signing out to stop push notifications
-      await FcmService().removeFcmToken();
-      await FirebaseAuth.instance.signOut();
+    if (confirmed && mounted) {
+      final LoginProvider loginProvider =
+          Provider.of<LoginProvider>(context, listen: false);
+      final LoadingDialog loading = DialogUtils.openLoading(
+        context,
+        message: DialogUtils.signingOutMessage,
+      );
+      try {
+        await loginProvider.signOut();
+      } finally {
+        loading.close();
+      }
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,

@@ -2,6 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../services/fcm_service.dart';
+import '../services/meal_reminder_service.dart';
+import '../services/notification_service.dart';
+
 ///TODO: mail/şifre yanlış girince defaulta düşüyor. login methodu commentler yer değiştirmeli uncommented yerlerle
 /// Manages user authentication and login state
 /// Provides functionality for user login and error handling
@@ -150,5 +154,16 @@ class LoginProvider extends ChangeNotifier {
     emailController.dispose();
     passwordController.dispose();
     super.dispose();
+  }
+
+  /// Oturumu kapatır: yerel bildirimler ve öğün hatırlatmaları iptal edilir,
+  /// bu cihazın bildirim jetonu kayıttan silinir (bkz.
+  /// [FcmService.removeFcmToken]; çevrimdışıyken birkaç saniye sürebilir),
+  /// sonra çıkış yapılır. Çağıran bu sırada "Çıkış yapılıyor..." gösterir.
+  Future<void> signOut() async {
+    await NotificationService().cancelAllNotifications();
+    await MealReminderService().cancelAllMealReminders();
+    await FcmService().removeFcmToken();
+    await FirebaseAuth.instance.signOut();
   }
 }
