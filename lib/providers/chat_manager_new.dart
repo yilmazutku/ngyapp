@@ -364,6 +364,8 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Fotoğrafı sıradan çıkarır; yükleniyorsa iptal edilir, mesaj yazılmaz.
   void discardUpload(PendingUpload upload) {
+    // Kayıt yazılıyorsa vazgeçilemez (bkz. PendingUploadStatus.committing).
+    if (upload.status.value == PendingUploadStatus.committing) return;
     upload.cancel();
     _forgetUpload(upload);
     _removePendingUpload(upload);

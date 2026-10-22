@@ -17,6 +17,10 @@ enum PendingUploadStatus {
   /// Yükleniyor (ilerleme [PendingUpload.progress]).
   uploading,
 
+  /// Dosyalar yüklendi; öğün kaydı ve sohbet mesajı birlikte yazılıyor. Artık
+  /// iptal edilemez.
+  committing,
+
   /// Dosyalar yüklendi, mesaj yazıldı: sohbette gerçek mesaj görünür, bekleyen
   /// baloncuk kalkar.
   saving,
@@ -124,10 +128,12 @@ class PendingUpload implements UploadObserver {
   bool _watchdogSuspended = false;
   final Completer<void> _aborted = Completer<void>();
 
-  /// Sırada ya da yükleniyor: öğün kaydına henüz yazılmadı ama yazılacak.
+  /// Sırada, yükleniyor ya da yazılıyor: öğün kaydına henüz yazılmadı ama
+  /// yazılacak.
   bool get isQueued =>
       status.value == PendingUploadStatus.waiting ||
-      status.value == PendingUploadStatus.uploading;
+      status.value == PendingUploadStatus.uploading ||
+      status.value == PendingUploadStatus.committing;
 
   /// Yüklenemedi ama bağlantı gelince kendiliğinden yeniden denenecek.
   bool get willAutoRetry =>
@@ -178,9 +184,10 @@ class PendingUpload implements UploadObserver {
   @override
   void onUploaded(UploadedImage image) {
     // Dosyalar yüklendi: zaman aşımı sayacı yalnızca Storage yüklemesini
-    // izler. Kayıtlar tek işlemle yazılır, işlem kendisi başarısız olur;
-    // sayaç bu sırada dolup yazılan fotoğrafı ikinci kez yükletmesin.
+    // izler; kayıt işleminin kendi süre sınırı var. İptal de artık yok:
+    // işlem yazılmış olabilir, geri alınamaz.
     _stopTracking();
+    status.value = PendingUploadStatus.committing;
     final String? thumbUrl = image.thumbUrl;
     final Uint8List? thumbBytes = image.thumbBytes;
     if (thumbUrl != null && thumbBytes != null) {

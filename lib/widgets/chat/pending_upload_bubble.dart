@@ -144,8 +144,15 @@ class PendingUploadBubble extends StatelessWidget {
         return const Icon(Icons.schedule, color: Colors.white, size: 36);
       case PendingUploadStatus.failed:
         return const Icon(Icons.error_outline, color: Colors.white, size: 40);
-      case PendingUploadStatus.uploading:
+      case PendingUploadStatus.committing:
       case PendingUploadStatus.saving:
+        // Dosyalar yüklendi, kayıt yazılıyor: iptal edilemez.
+        return const SizedBox(
+          width: 48,
+          height: 48,
+          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+        );
+      case PendingUploadStatus.uploading:
         return ValueListenableBuilder<double?>(
           valueListenable: upload.progress,
           builder: (context, progress, _) => Stack(
@@ -223,10 +230,11 @@ class PendingUploadBubble extends StatelessWidget {
             ),
           ),
         ),
-        TextButton(
-            style: buttonStyle,
-            onPressed: onDiscard,
-            child: const Text(_cancelLabel)),
+        if (status != PendingUploadStatus.committing)
+          TextButton(
+              style: buttonStyle,
+              onPressed: onDiscard,
+              child: const Text(_cancelLabel)),
       ],
     );
   }

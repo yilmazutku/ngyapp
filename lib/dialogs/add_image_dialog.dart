@@ -233,7 +233,6 @@ class _AddImageDialogState extends State<AddImageDialog> {
         meal: _selectedMeal!,
         image: _selectedImage!,
         subscriptionId: _selectedSubscription!.subscriptionId,
-        alsoPostToChat: false,
       );
 
       if (downloadUrl != null) {

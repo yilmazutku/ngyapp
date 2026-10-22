@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
@@ -297,7 +299,7 @@ Future<void> uploadChatMealPhoto(
     userId: userId,
     subscriptionId: userId,
     overrideDate: upload.createdAt,
-    alsoPostToChat: true,
+    chatMessageId: upload.persistKey,
     cancelsReminder: true,
     chatManager: chatManager,
     observer: upload,
@@ -324,13 +326,21 @@ Future<void> uploadChatMealPhoto(
 /// başarısız olursa hata fırlatılır (yüklenen dosyalar silinir); sohbetin
 /// yükleme sırası yeniden dener.
 ///
-/// [alsoPostToChat] true iken sohbet mesajı ve sohbet özeti de aynı işlemde
-/// yazılır: fotoğraf ya hem öğünde hem sohbette görünür ya hiçbirinde.
+/// [chatMessageId] verilirse sohbet mesajı (bu kimlikle) ve sohbet özeti de
+/// aynı işlemde yazılır: fotoğraf ya hem öğünde hem sohbette görünür ya
+/// hiçbirinde. Kimlik yüklemenin yeniden denemelerinde ve uygulama açılışında
+/// geri yüklenen sırada aynı kalır ([PendingUpload.persistKey]): o mesaj
+/// zaten yazıldıysa (önceki denemenin yanıtı kayboldu, uygulama kayıt
+/// sırasında kapandı) fotoğraf ikinci kez gönderilmez, gönderilmiş sayılır.
+///
+/// İşlemin sonucu belli değilse (bağlantı hatası, zaman aşımı) yüklenen
+/// dosyalar silinmez: kayıt yazılmış olabilir ve silinmiş dosyayı gösterirdi.
+/// Yeniden deneme yazılmış mesajı görüp tekrar göndermez.
 ///
 /// [observer] yüklemenin ilerlemesini izler ve iptal edebilir (bkz.
-/// [uploadImageWithThumbnail]); kayıtlar yazılmadan iptal edilirse yazılmaz
-/// ve [UploadCancelledException] fırlatılır. İşlem yazıldıktan sonra
-/// fotoğraf gönderilmiş sayılır.
+/// [uploadImageWithThumbnail]); dosyalar yüklenmeden iptal edilirse kayıt
+/// yazılmaz ve [UploadCancelledException] fırlatılır. Dosyalar yüklenince
+/// iptal edilemez ([UploadObserver.onUploaded]).
 ///
 /// [cancelsReminder] true ise öğünün o günkü hatırlatması kalıcı olarak
 /// kapanır (bkz. [mealStateFields]). Yalnızca danışanın sohbetten yüklemesi
@@ -342,7 +352,7 @@ Future<String?> uploadMealImg({
   required XFile image,
   required String subscriptionId,
   DateTime? overrideDate,
-  bool alsoPostToChat = false,
+  String? chatMessageId,
   bool cancelsReminder = false,
   ChatManager? chatManager,
   UploadObserver? observer,
@@ -357,6 +367,19 @@ Future<String?> uploadMealImg({
         .doc(currentDate)
         .collection('mealEntries')
         .doc(meal.name);
+
+    final DocumentReference<Map<String, dynamic>>? messageRef =
+        chatMessageId == null ? null : _chatMessageRef(userId, chatMessageId);
+
+    // Bu fotoğraf önceki bir denemede gönderildiyse yeniden yüklenmez.
+    if (messageRef != null) {
+      final DocumentSnapshot<Map<String, dynamic>> posted =
+          await messageRef.get();
+      if (posted.exists) {
+        observer?.onSaving();
+        return posted.data()?['imageUrl'] as String? ?? '';
+      }
+    }
 
     // Sınır doluysa hiç yüklenmez. Kayıt okunamazsa deneme başarısız olur.
     if (!await canAddMealImage(
@@ -383,9 +406,9 @@ Future<String?> uploadMealImg({
       throw const UploadCancelledException();
     }
 
-    final bool added;
+    final _MealImageWrite result;
     try {
-      added = await _addMealImage(
+      result = await _addMealImage(
         mealDocRef,
         userId: userId,
         meal: meal,
@@ -393,24 +416,44 @@ Future<String?> uploadMealImg({
         image: uploaded,
         time: referenceDate,
         cancelsReminder: cancelsReminder,
-        postToChat: alsoPostToChat,
+        messageRef: messageRef,
         chatManager: chatManager,
-        observer: observer,
-      );
-    } catch (e) {
-      await uploaded.delete();
-      rethrow;
-    }
-    if (!added) {
-      await uploaded.delete();
-      return null;
+      ).timeout(_mealImageWriteTimeout);
+    } on TimeoutException {
+      // Sonuç belli değil: dosyalar kalır (bkz. yukarıdaki not).
+      throw const UploadFailure(PendingUpload.timeoutText);
     }
 
-    // Kayıtlar (ve sohbet mesajı) yazıldı: fotoğraf gönderildi.
+    switch (result.kind) {
+      case _MealImageWriteKind.limitReached:
+        await uploaded.delete();
+        return null;
+      case _MealImageWriteKind.alreadyPosted:
+        // Önceki deneme yazmıştı: bu denemenin dosyaları kullanılmıyor.
+        if (result.postedImageUrl != uploaded.url) await uploaded.delete();
+      case _MealImageWriteKind.written:
+        break;
+    }
+
+    // Kayıtlar (ve sohbet mesajı) yazıldı. İşlemle yazılan mesaj yerel
+    // önbelleğe sunucudan gelir: bekleyen baloncuk mesaj sohbette görünene
+    // kadar kalsın.
+    if (messageRef != null) {
+      try {
+        await messageRef
+            .snapshots()
+            .timeout(_postedMessageWait)
+            .firstWhere((snapshot) => snapshot.exists);
+      } catch (e) {
+        // Mesaj sonradan gelir; baloncuk yine kalkar.
+      }
+    }
     observer?.onSaving();
     notifyListeners();
 
-    return uploaded.url;
+    return result.kind == _MealImageWriteKind.written
+        ? uploaded.url
+        : result.postedImageUrl ?? '';
   } catch (e) {
     rethrow;
   }
@@ -632,12 +675,33 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   /// [mealPhotoLocation]).
   static const String _mealPhotosFolder = 'mealPhotos';
 
+  /// İşlemin (bkz. [_addMealImage]) en fazla bekleneceği süre: bağlantı
+  /// var görünüp paketler gitmiyorsa işlem kendiliğinden bitmeyebilir.
+  static const Duration _mealImageWriteTimeout = Duration(seconds: 60);
+
+  /// İşlemle yazılan mesajın sohbetin yerel kopyasına gelmesinin en fazla
+  /// bekleneceği süre.
+  static const Duration _postedMessageWait = Duration(seconds: 10);
+
+  /// Öğün fotoğrafının sohbet mesajı: kimliği yüklemenin sabit anahtarıdır
+  /// (bkz. [uploadMealImg]).
+  DocumentReference<Map<String, dynamic>> _chatMessageRef(
+    String userId,
+    String messageId,
+  ) =>
+      FirebaseFirestore.instance
+          .collection('chats')
+          .doc(userId) // In this app, chatId == userId
+          .collection('messages')
+          .doc(messageId);
+
   /// [image] fotoğrafını öğün kaydına bir işlem (transaction) içinde, kaydın
   /// en güncel hâline ekler ([mealWithImageAdded]); günün öğün işareti
-  /// ([mealStateFields]) ve [postToChat] ise sohbet mesajı ile özeti
-  /// ([_queueChatPost]) aynı işlemle yazılır: ya hepsi ya hiçbiri. Sınır bu
-  /// arada dolduysa hiçbir şey yazılmaz ve false döner.
-  Future<bool> _addMealImage(
+  /// ([mealStateFields]) ve [messageRef] verilirse sohbet mesajı ile özeti
+  /// ([_queueChatPost]) aynı işlemle yazılır: ya hepsi ya hiçbiri. Mesaj
+  /// zaten varsa ya da fotoğraf kayıttaysa (önceki deneme yazdı) hiçbir şey
+  /// yazılmaz. Sınır bu arada dolduysa hiçbir şey yazılmaz.
+  Future<_MealImageWrite> _addMealImage(
     DocumentReference<Map<String, dynamic>> mealDocRef, {
     required String userId,
     required Meals meal,
@@ -645,21 +709,29 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
     required UploadedImage image,
     required DateTime time,
     required bool cancelsReminder,
-    required bool postToChat,
+    DocumentReference<Map<String, dynamic>>? messageRef,
     ChatManager? chatManager,
-    UploadObserver? observer,
   }) =>
-      FirebaseFirestore.instance.runTransaction<bool>((transaction) async {
+      FirebaseFirestore.instance
+          .runTransaction<_MealImageWrite>((transaction) async {
         final DocumentSnapshot<Map<String, dynamic>> fresh =
             await transaction.get(mealDocRef);
-        if (observer?.isCancelled ?? false) {
-          throw const UploadCancelledException();
+        final DocumentSnapshot<Map<String, dynamic>>? posted =
+            messageRef == null ? null : await transaction.get(messageRef);
+        if (posted != null && posted.exists) {
+          return (
+            kind: _MealImageWriteKind.alreadyPosted,
+            postedImageUrl: posted.data()?['imageUrl'] as String?,
+          );
         }
         final MealModel? current =
             fresh.exists ? MealModel.fromDocument(fresh) : null;
-        // Önceki deneme yazıldı ama yanıtı kayboldu, işlem yeniden çalıştı:
-        // adres her yüklemede benzersiz, mesaj ikinci kez yazılmaz.
-        if (current?.imageUrls.contains(image.url) ?? false) return true;
+        if (current?.imageUrls.contains(image.url) ?? false) {
+          return (
+            kind: _MealImageWriteKind.alreadyPosted,
+            postedImageUrl: image.url,
+          );
+        }
         final MealModel? merged = mealWithImageAdded(
           current,
           meal: meal,
@@ -668,17 +740,23 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
           thumbUrl: image.thumbUrl,
           time: time,
         );
-        if (merged == null) return false;
+        if (merged == null) {
+          return (
+            kind: _MealImageWriteKind.limitReached,
+            postedImageUrl: null,
+          );
+        }
         transaction.set(mealDocRef, merged.toMap());
         transaction.set(
           mealDocRef.parent.parent!,
           mealStateFields(meal, true, photoUploaded: cancelsReminder),
           SetOptions(merge: true),
         );
-        if (postToChat) {
-          _queueChatPost(transaction, userId, meal, image, chatManager);
+        if (messageRef != null) {
+          _queueChatPost(
+              transaction, messageRef, userId, meal, image, chatManager);
         }
-        return true;
+        return (kind: _MealImageWriteKind.written, postedImageUrl: image.url);
       });
 
   /// [imageUrl] fotoğrafını öğün kaydından bir işlem (transaction) içinde,
@@ -720,6 +798,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   /// ekler (bkz. [_addMealImage]): mesaj öğün kaydıyla birlikte yazılır.
   void _queueChatPost(
     Transaction transaction,
+    DocumentReference<Map<String, dynamic>> messageRef,
     String userId,
     Meals meal,
     UploadedImage image,
@@ -745,7 +824,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
       'hasUnreadFor': FieldValue.arrayUnion(ChatManager.adminIds.toList()),
     }, SetOptions(merge: true));
 
-    transaction.set(chatDoc.collection('messages').doc(), {
+    transaction.set(messageRef, {
       'chatId': chatId,
       'senderId': userId,
       'text': meal.chatCaption,
@@ -913,6 +992,22 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
     }
   }
 }
+
+/// [MealManager._addMealImage] işleminin sonucu.
+enum _MealImageWriteKind {
+  /// Fotoğraf (ve sohbet mesajı) yazıldı.
+  written,
+
+  /// Önceki bir deneme yazmıştı; bu deneme bir şey yazmadı.
+  alreadyPosted,
+
+  /// Öğünün fotoğraf sınırı doldu; bir şey yazılmadı.
+  limitReached,
+}
+
+/// [_MealImageWriteKind] ve yazılmış mesajın fotoğraf adresi (fotoğraf
+/// sonradan silindiyse null).
+typedef _MealImageWrite = ({_MealImageWriteKind kind, String? postedImageUrl});
 
 /// Öğün kaydından çıkarılan fotoğrafın küçük görseli ve öğünde fotoğraf
 /// kalıp kalmadığı (bkz. [MealManager._removeMealImage]).
