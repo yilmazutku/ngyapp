@@ -322,9 +322,9 @@ class UserProvider extends ChangeNotifier {
     final DocumentReference<Map<String, dynamic>> userDoc =
         FirebaseFirestore.instance.collection('users').doc(userId);
 
+    DocumentSnapshot<Map<String, dynamic>>? cached;
     try {
-      final cached =
-          await userDoc.get(const GetOptions(source: Source.cache));
+      cached = await userDoc.get(const GetOptions(source: Source.cache));
       if (_hasValidConsent(cached)) return KvkkConsentStatus.valid;
     } catch (e) {
       // Cihazda kopyası yok.
@@ -336,7 +336,11 @@ class UserProvider extends ChangeNotifier {
           ? KvkkConsentStatus.valid
           : KvkkConsentStatus.missing;
     } on TimeoutException {
-      return KvkkConsentStatus.unknown;
+      // Sunucu yanıt vermedi: cihazdaki kopya varsa (geçerli onay yok, ör.
+      // metin sürümü değişti) ona göre karar verilir.
+      return (cached?.exists ?? false)
+          ? KvkkConsentStatus.missing
+          : KvkkConsentStatus.unknown;
     } on FirebaseException catch (e) {
       return e.code == 'unavailable'
           ? KvkkConsentStatus.unknown
@@ -381,14 +385,21 @@ class UserProvider extends ChangeNotifier {
         consentData['explicitConsentAcceptedAt'] = Timestamp.fromDate(now);
       }
 
+      final DocumentReference<Map<String, dynamic>> userDoc =
+          FirebaseFirestore.instance.collection('users').doc(userId);
       try {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .update(consentData)
-            .timeout(_kvkkSaveAckTimeout);
+        await userDoc.update(consentData).timeout(_kvkkSaveAckTimeout);
       } on TimeoutException {
-        // Çevrimdışı: yazım cihazda sırada, bağlantı gelince gider.
+        // Sunucu onayı gelmedi (çevrimdışı): onay cihazdaki kayda işlendiyse
+        // sırada bekler, bağlantı gelince gider. İşlenmediyse (kayıt cihazda
+        // yok) kaydedilmiş sayılmaz.
+        DocumentSnapshot<Map<String, dynamic>>? local;
+        try {
+          local = await userDoc.get(const GetOptions(source: Source.cache));
+        } catch (e) {
+          // Cihazda kopyası yok.
+        }
+        if (local == null || !_hasValidConsent(local)) rethrow;
       }
 
       notifyListeners();

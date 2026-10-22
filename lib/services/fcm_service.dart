@@ -512,9 +512,11 @@ class FcmService {
       // Sunucuya ulaşılamadı: koşulsuz yazılır.
     }
 
-    await userDoc.set({
-      'fcmToken': token,
-    }, SetOptions(merge: true));
+    // update (set-merge değil): kullanıcı kaydı cihazda yokken çevrimdışı
+    // yazım cihazda yalnızca jetonlu bir kayıt oluşturmasın; KVKK kontrolü
+    // onu "onay yok" sanardı (bkz. UserProvider.checkKvkkConsent). Kaydı
+    // admin açar, sunucuda hep vardır.
+    await userDoc.update({'fcmToken': token});
   }
 
   /// Keeps the stored token in sync when FCM rotates it. Idempotent: only the
