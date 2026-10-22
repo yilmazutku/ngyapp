@@ -44,6 +44,7 @@ void main() {
     UploadedImage image, {
     bool toChat = true,
     bool cancelsReminder = true,
+    bool abandoned = false,
   }) =>
       MealManager.writeMealImage(
         db,
@@ -55,6 +56,7 @@ void main() {
         time: sentAt,
         cancelsReminder: cancelsReminder,
         messageRef: toChat ? messageDoc : null,
+        abandoned: () => abandoned,
       );
 
   Future<List<String>> mealUrls() async {
@@ -185,6 +187,30 @@ void main() {
       expect((await chatDoc.get()).exists, isFalse);
       expect((await dayDoc.get()).exists, isFalse);
       expect(await mealUrls(), hasLength(MealModel.maxImages));
+    });
+  });
+
+  group('süresi dolan deneme (bekleyen artık beklemiyor)', () {
+    test('işlem yeniden çalışsa da yazmaz', () async {
+      await expectLater(
+        write(_image('a'), abandoned: true),
+        throwsA(isA<UploadCancelledException>()),
+      );
+
+      expect((await messageDoc.get()).exists, isFalse);
+      expect((await chatDoc.get()).exists, isFalse);
+      expect((await dayDoc.get()).exists, isFalse);
+      expect(await mealUrls(), isEmpty);
+    });
+
+    test('ama önceki deneme yazdıysa yine "gönderildi" der', () async {
+      final UploadedImage image = _image('a');
+      await write(image);
+
+      final MealImageWrite rerun = await write(image, abandoned: true);
+
+      expect(rerun.kind, MealImageWriteKind.alreadyPosted);
+      expect(rerun.postedImageUrl, image.url);
     });
   });
 

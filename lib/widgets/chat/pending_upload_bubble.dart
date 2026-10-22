@@ -202,10 +202,12 @@ class PendingUploadBubble extends StatelessWidget {
           Wrap(
             alignment: WrapAlignment.end,
             children: [
-              TextButton(
-                  style: buttonStyle,
-                  onPressed: onDiscard,
-                  child: const Text(_discardLabel)),
+              // Sonucu belli değilse kaldırılmaz: fotoğraf gönderilmiş olabilir.
+              if (!upload.commitUnconfirmed)
+                TextButton(
+                    style: buttonStyle,
+                    onPressed: onDiscard,
+                    child: const Text(_discardLabel)),
               if (upload.canRetry)
                 TextButton(
                     style: buttonStyle,
@@ -230,11 +232,17 @@ class PendingUploadBubble extends StatelessWidget {
             ),
           ),
         ),
-        if (status != PendingUploadStatus.committing)
-          TextButton(
+        // Kayıt yazılırken gizlenir; yeri korunur, baloncuk boyu değişmez.
+        Visibility(
+          visible: status != PendingUploadStatus.committing,
+          maintainSize: true,
+          maintainAnimation: true,
+          maintainState: true,
+          child: TextButton(
               style: buttonStyle,
               onPressed: onDiscard,
               child: const Text(_cancelLabel)),
+        ),
       ],
     );
   }

@@ -35,7 +35,15 @@ class UploadFailure implements Exception {
   final String message;
   final bool canRetry;
 
-  const UploadFailure(this.message, {this.canRetry = true});
+  /// Kayıt işleminin sonucu belli değil: fotoğraf gönderilmiş olabilir (bkz.
+  /// [PendingUpload.commitUnconfirmed]).
+  final bool unconfirmed;
+
+  const UploadFailure(
+    this.message, {
+    this.canRetry = true,
+    this.unconfirmed = false,
+  });
 
   @override
   String toString() => 'UploadFailure($message)';
@@ -72,6 +80,10 @@ class PendingUpload implements UploadObserver {
   /// durdurulur.
   static const Duration stallTimeout = Duration(seconds: 30);
 
+  /// Dosyalar yüklendikten sonra kayıt işlemi en fazla bu kadar beklenir.
+  /// Arka planda geçen süre sayılmaz (bkz. [suspendWatchdog]).
+  static const Duration commitTimeout = Duration(seconds: 60);
+
   static const String timeoutText =
       'Bağlantı yok ya da çok yavaş; fotoğraf gönderilemedi.';
 
@@ -81,6 +93,11 @@ class PendingUpload implements UploadObserver {
   static const int maxAutoRetries = 5;
   static const String defaultErrorText =
       'Fotoğraf gönderilemedi. Lütfen tekrar deneyin.';
+
+  /// Kayıt işleminin sonucu zamanında gelmedi: fotoğraf gönderilmiş de
+  /// olabilir. Yeniden deneme aynı fotoğrafı ikinci kez göndermez.
+  static const String unconfirmedText =
+      'Fotoğrafın gönderildiği doğrulanamadı.';
 
   final String id;
   final String chatId;
@@ -119,6 +136,19 @@ class PendingUpload implements UploadObserver {
 
   bool _cancelledByUser = false;
   bool _timedOut = false;
+
+  /// Dosyalar yüklendi, kayıt işlemi sürüyor: sayaç [commitTimeout] sayar.
+  bool _committing = false;
+
+  /// Kayıt işleminin süresi doldu: sonucu belli değil (bkz.
+  /// [commitUnconfirmed]).
+  bool _commitTimedOut = false;
+
+  /// Kayıtlar yazıldı (bkz. [onWritten]).
+  bool _written = false;
+
+  /// Kayıt işlemi hata verdi, sonucu belli değil (bkz. [markFailed]).
+  bool _unconfirmedFailure = false;
   final List<UploadTask> _tasks = [];
   final List<StreamSubscription<TaskSnapshot>> _subscriptions = [];
   Timer? _watchdog;
@@ -129,11 +159,17 @@ class PendingUpload implements UploadObserver {
   final Completer<void> _aborted = Completer<void>();
 
   /// Sırada, yükleniyor ya da yazılıyor: öğün kaydına henüz yazılmadı ama
-  /// yazılacak.
+  /// yazılacak. Yazıldıysa ([onWritten]) öğünün kaydında zaten sayılır.
   bool get isQueued =>
-      status.value == PendingUploadStatus.waiting ||
-      status.value == PendingUploadStatus.uploading ||
-      status.value == PendingUploadStatus.committing;
+      !_written &&
+      (status.value == PendingUploadStatus.waiting ||
+          status.value == PendingUploadStatus.uploading ||
+          status.value == PendingUploadStatus.committing);
+
+  /// Kayıt işleminin süresi doldu, sonucu belli değil: fotoğraf gönderilmiş
+  /// olabilir. Baloncuk "Kaldır" sunmaz; yeniden deneme güvenlidir (aynı
+  /// mesaj kimliği, bkz. `MealManager.uploadMealImg`).
+  bool get commitUnconfirmed => _commitTimedOut || _unconfirmedFailure;
 
   /// Yüklenemedi ama bağlantı gelince kendiliğinden yeniden denenecek.
   bool get willAutoRetry =>
@@ -183,11 +219,12 @@ class PendingUpload implements UploadObserver {
   /// gösterir.
   @override
   void onUploaded(UploadedImage image) {
-    // Dosyalar yüklendi: zaman aşımı sayacı yalnızca Storage yüklemesini
-    // izler; kayıt işleminin kendi süre sınırı var. İptal de artık yok:
-    // işlem yazılmış olabilir, geri alınamaz.
+    // Dosyalar yüklendi: sayaç bundan sonra kayıt işlemini [commitTimeout]
+    // ile izler. İptal artık yok: işlem yazılmış olabilir, geri alınamaz.
     _stopTracking();
+    _committing = true;
     status.value = PendingUploadStatus.committing;
+    _armWatchdog();
     final String? thumbUrl = image.thumbUrl;
     final Uint8List? thumbBytes = image.thumbBytes;
     if (thumbUrl != null && thumbBytes != null) {
@@ -196,7 +233,15 @@ class PendingUpload implements UploadObserver {
   }
 
   @override
+  void onWritten() {
+    _committing = false;
+    _written = true;
+    _stopTracking();
+  }
+
+  @override
   void onSaving() {
+    _committing = false;
     _stopTracking();
     status.value = PendingUploadStatus.saving;
   }
@@ -206,7 +251,13 @@ class PendingUpload implements UploadObserver {
     status.value = PendingUploadStatus.uploading;
   }
 
-  void markFailed(String message, {bool canRetry = true}) {
+  void markFailed(
+    String message, {
+    bool canRetry = true,
+    bool unconfirmed = false,
+  }) {
+    _committing = false;
+    _unconfirmedFailure = unconfirmed;
     _stopTracking();
     errorText = message;
     this.canRetry = canRetry;
@@ -247,14 +298,15 @@ class PendingUpload implements UploadObserver {
   void resumeWatchdog() {
     if (!_watchdogSuspended) return;
     _watchdogSuspended = false;
-    if (_subscriptions.isNotEmpty) _armWatchdog();
+    if (_subscriptions.isNotEmpty || _committing) _armWatchdog();
   }
 
   void _armWatchdog() {
     _watchdog?.cancel();
     if (_watchdogSuspended) return;
-    _watchdog = Timer(stallTimeout, () {
+    _watchdog = Timer(_committing ? commitTimeout : stallTimeout, () {
       _timedOut = true;
+      _commitTimedOut = _committing;
       _abort();
     });
   }

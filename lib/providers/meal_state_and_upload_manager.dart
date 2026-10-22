@@ -368,20 +368,32 @@ Future<String?> uploadMealImg({
     final DocumentReference<Map<String, dynamic>>? messageRef =
         chatMessageId == null ? null : _chatMessageRef(userId, chatMessageId);
 
-    // Bu fotoğraf önceki bir denemede gönderildiyse yeniden yüklenmez.
-    if (messageRef != null) {
+    // Bu fotoğraf önceki bir denemede gönderildi mi (gönderildiyse adresi,
+    // fotoğrafı sonradan silindiyse boş). Okumalar sınırlı beklenir: dosya
+    // yüklenmeden önce süre sayan başka bir şey yok.
+    Future<String?> postedImageUrl() async {
+      if (messageRef == null) return null;
       final DocumentSnapshot<Map<String, dynamic>> posted =
-          await messageRef.get();
-      if (posted.exists) {
-        observer?.onSaving();
-        return posted.data()?['imageUrl'] as String? ?? '';
-      }
+          await messageRef.get().timeout(_preUploadReadTimeout);
+      if (!posted.exists) return null;
+      observer?.onSaving();
+      notifyListeners();
+      return posted.data()?['imageUrl'] as String? ?? '';
     }
 
-    // Sınır doluysa hiç yüklenmez. Kayıt okunamazsa deneme başarısız olur.
-    if (!await canAddMealImage(
-        userId: userId, meal: meal, date: referenceDate)) {
-      return null;
+    try {
+      final String? alreadyPosted = await postedImageUrl();
+      if (alreadyPosted != null) return alreadyPosted;
+
+      // Sınır doluysa hiç yüklenmez. Kayıt okunamazsa deneme başarısız olur.
+      if (!await canAddMealImage(
+              userId: userId, meal: meal, date: referenceDate)
+          .timeout(_preUploadReadTimeout)) {
+        // Sınırı dolduran, bu fotoğrafın süren önceki denemesi olabilir.
+        return await postedImageUrl();
+      }
+    } on TimeoutException {
+      throw const UploadFailure(PendingUpload.timeoutText);
     }
 
     final UploadedImage uploaded = await uploadImageWithThumbnail(
@@ -403,34 +415,64 @@ Future<String?> uploadMealImg({
       throw const UploadCancelledException();
     }
 
+    final Future<MealImageWrite> write = writeMealImage(
+      FirebaseFirestore.instance,
+      mealDocRef,
+      userId: userId,
+      meal: meal,
+      subscriptionId: subscriptionId,
+      image: uploaded,
+      time: referenceDate,
+      cancelsReminder: cancelsReminder,
+      messageRef: messageRef,
+      abandoned: observer == null ? null : () => observer.isCancelled,
+    );
     final MealImageWrite result;
-    try {
-      result = await writeMealImage(
-        FirebaseFirestore.instance,
-        mealDocRef,
-        userId: userId,
-        meal: meal,
-        subscriptionId: subscriptionId,
-        image: uploaded,
-        time: referenceDate,
-        cancelsReminder: cancelsReminder,
-        messageRef: messageRef,
-      ).timeout(_mealImageWriteTimeout);
-    } on TimeoutException {
-      // Sonuç belli değil: dosyalar kalır (bkz. yukarıdaki not).
-      throw const UploadFailure(PendingUpload.timeoutText);
+    if (observer == null) {
+      try {
+        result = await write.timeout(_mealImageWriteTimeout);
+      } catch (e) {
+        // Sonuç belli değil: yazıldıysa başarı, yazılmadıysa dosyalar
+        // silinir; anlaşılamazsa dosyalar kalır (kayıt onları gösteriyor
+        // olabilir).
+        final bool? written = await _mealHasImage(mealDocRef, uploaded.url);
+        if (written == true) {
+          notifyListeners();
+          return uploaded.url;
+        }
+        if (written == false) unawaited(uploaded.delete());
+        rethrow;
+      }
+    } else {
+      // Süreyi izleyen sayar: arka planda geçen süre sayılmaz (bkz.
+      // PendingUpload.commitTimeout).
+      try {
+        result = await write;
+      } on FirebaseException {
+        // Yazılmış olabilir: yeniden deneme aynı mesajı bulur, ikinci kez
+        // göndermez.
+        throw const UploadFailure(
+          PendingUpload.unconfirmedText,
+          unconfirmed: true,
+        );
+      }
     }
 
+    // Kullanılmayan dosyalar beklenmeden silinir: çevrimdışıyken silme
+    // dakikalarca sürebilir, sıradakiler beklemesin.
     switch (result.kind) {
       case MealImageWriteKind.limitReached:
-        await uploaded.delete();
+        unawaited(uploaded.delete());
         return null;
       case MealImageWriteKind.alreadyPosted:
         // Önceki deneme yazmıştı: bu denemenin dosyaları kullanılmıyor.
-        if (result.postedImageUrl != uploaded.url) await uploaded.delete();
+        if (result.postedImageUrl != uploaded.url) {
+          unawaited(uploaded.delete());
+        }
       case MealImageWriteKind.written:
         break;
     }
+    observer?.onWritten();
 
     // Kayıtlar (ve sohbet mesajı) yazıldı. İşlemle yazılan mesaj yerel
     // önbelleğe sunucudan gelir: bekleyen baloncuk mesaj sohbette görünene
@@ -676,6 +718,27 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   /// var görünüp paketler gitmiyorsa işlem kendiliğinden bitmeyebilir.
   static const Duration _mealImageWriteTimeout = Duration(seconds: 60);
 
+  /// Dosya yüklenmeden önceki okumaların (gönderildi mi, sınır) en fazla
+  /// bekleneceği süre.
+  static const Duration _preUploadReadTimeout = Duration(seconds: 30);
+
+  /// Sonucu belli olmayan sohbetsiz (admin) yazımda öğün kaydında [imageUrl]
+  /// var mı (sunucudan); okunamazsa null.
+  Future<bool?> _mealHasImage(
+    DocumentReference<Map<String, dynamic>> mealDocRef,
+    String imageUrl,
+  ) async {
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> snapshot = await mealDocRef
+          .get(const GetOptions(source: Source.server))
+          .timeout(_preUploadReadTimeout);
+      return snapshot.exists &&
+          MealModel.fromDocument(snapshot).imageUrls.contains(imageUrl);
+    } catch (e) {
+      return null;
+    }
+  }
+
   /// İşlemle yazılan mesajın sohbetin yerel kopyasına gelmesinin en fazla
   /// bekleneceği süre.
   static const Duration _postedMessageWait = Duration(seconds: 10);
@@ -711,6 +774,7 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
     required DateTime time,
     required bool cancelsReminder,
     DocumentReference<Map<String, dynamic>>? messageRef,
+    bool Function()? abandoned,
   }) =>
       db.runTransaction<MealImageWrite>((transaction) async {
         final DocumentSnapshot<Map<String, dynamic>> fresh =
@@ -730,6 +794,11 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
             kind: MealImageWriteKind.alreadyPosted,
             postedImageUrl: image.url,
           );
+        }
+        // Bekleyen artık bu denemeyi beklemiyor (süresi doldu): işlem
+        // kendiliğinden yeniden çalışsa da yazmasın; yeniden deneme yazar.
+        if (abandoned?.call() ?? false) {
+          throw const UploadCancelledException();
         }
         final MealModel? merged = mealWithImageAdded(
           current,
@@ -755,7 +824,10 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
           _queueChatPost(transaction, messageRef, userId, meal, image);
         }
         return (kind: MealImageWriteKind.written, postedImageUrl: image.url);
-      });
+        // Eklentinin kendi yeniden denemeleri kapalı: bir deneme süresini
+        // aşınca önceki denemenin komutları sonradan yazılabiliyor (iOS).
+        // Yeniden denemeyi sıra yapar; aynı fotoğrafı ikinci kez yazmaz.
+      }, maxAttempts: 1);
 
   /// [imageUrl] fotoğrafını öğün kaydından bir işlem (transaction) içinde,
   /// kaydın en güncel hâlinden adresine göre çıkarır

@@ -305,6 +305,10 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// gelince fotoğraflar kendiliğinden yeniden denenir.
   static const Duration _autoRetryInterval = Duration(seconds: 20);
 
+  /// Açılışta, dosyası kalmamış sıra kaydının mesajına en fazla bu kadar
+  /// bakılır.
+  static const Duration _postedCheckTimeout = Duration(seconds: 10);
+
   /// Bağlantı yoklamasında adı çözülen sunucu (Storage).
   static const String _connectivityProbeHost = 'firebasestorage.googleapis.com';
   static const Duration _connectivityProbeTimeout = Duration(seconds: 5);
@@ -342,6 +346,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
         upload,
       ];
       chatIds.add(upload.chatId);
+      if (!_appInForeground) upload.suspendWatchdog();
       unawaited(upload.loadPreviewAspectRatio());
       _persistUpload(upload);
     }
@@ -356,8 +361,9 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     final List<PendingUpload> current = pendingUploadsOf(upload.chatId);
     final int index = current.indexOf(upload);
     if (index < 0) return;
-    _pendingUploads[upload.chatId] = [...current]
-      ..[index] = upload.retryCopy(automatic: automatic);
+    final PendingUpload copy = upload.retryCopy(automatic: automatic);
+    if (!_appInForeground) copy.suspendWatchdog();
+    _pendingUploads[upload.chatId] = [...current]..[index] = copy;
     notifyListeners();
     _drainUploads(upload.chatId);
   }
@@ -433,16 +439,33 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     upload.status.addListener(forgetWhenSaving);
     upload.markUploading();
     try {
-      await Future.any<void>([upload.runner(upload), upload.aborted]);
+      final Future<void> run = upload.runner(upload);
+      await Future.any<void>([run, upload.aborted]);
       if (upload.timedOut) {
-        _markUploadFailed(upload, PendingUpload.timeoutText);
+        _markUploadFailed(
+          upload,
+          upload.commitUnconfirmed
+              ? PendingUpload.unconfirmedText
+              : PendingUpload.timeoutText,
+        );
+        // Kayıt işleminin süresi doldu ama işlem sürüyor: sonradan yazarsa
+        // fotoğraf gönderilmiş sayılır.
+        unawaited(run.then(
+          (_) => _finishLateWrite(upload),
+          onError: (Object e) {},
+        ));
       } else {
         _forgetUpload(upload);
         _removePendingUpload(upload);
         _deleteUploadFile(upload);
       }
     } on UploadFailure catch (e) {
-      _markUploadFailed(upload, e.message, canRetry: e.canRetry);
+      _markUploadFailed(
+        upload,
+        e.message,
+        canRetry: e.canRetry,
+        unconfirmed: e.unconfirmed,
+      );
     } catch (e) {
       if (upload.cancelledByUser) {
         _removePendingUpload(upload);
@@ -459,6 +482,18 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// Süresi dolduktan sonra yazan denemenin baloncuğunu kaldırır; yeniden
+  /// deneme onun yerini aldıysa o kendi sonucunu bulur (aynı mesaj kimliği).
+  void _finishLateWrite(PendingUpload upload) {
+    if (upload.status.value != PendingUploadStatus.saving ||
+        !pendingUploadsOf(upload.chatId).contains(upload)) {
+      return;
+    }
+    _forgetUpload(upload);
+    _removePendingUpload(upload);
+    _deleteUploadFile(upload);
+  }
+
   /// Yüklemeyi başarısız işaretler. Yeniden denenebilecekse bağlantı
   /// yoklaması kurulur; denenemeyecekse (ör. öğünün sınırı dolmuş) sıra
   /// kaydı silinir.
@@ -466,8 +501,9 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     PendingUpload upload,
     String message, {
     bool canRetry = true,
+    bool unconfirmed = false,
   }) {
-    upload.markFailed(message, canRetry: canRetry);
+    upload.markFailed(message, canRetry: canRetry, unconfirmed: unconfirmed);
     if (canRetry) {
       _scheduleAutoRetry();
     } else {
@@ -499,6 +535,8 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
       _scheduleAutoRetry();
       return;
     }
+    // Bağlantıya bakılırken uygulama arka plana geçtiyse öne gelince denenir.
+    if (!_appInForeground) return;
     for (final PendingUpload upload in _autoRetryCandidates) {
       retryUpload(upload, automatic: true);
     }
@@ -592,7 +630,12 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
           path is! String ||
           createdAt is! int ||
           !await File(path).exists()) {
-        missing++;
+        // Gönderilmiş olabilir (kayıt yazıldı, uygulama sıra kaydını silemeden
+        // kapandı; sonra cihaz geçici dosyayı sildi): mesajı varsa "yeniden
+        // seçin" denmez. Okunamazsa sonraki açılışta yeniden bakılır.
+        final bool? posted = await _isMealPhotoPosted(userId, key);
+        if (posted == null) continue;
+        if (!posted) missing++;
         _forgetKey(key);
         continue;
       }
@@ -615,6 +658,23 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
 
     enqueueUploads(restored);
     return (restored: restored.length, missing: missing);
+  }
+
+  /// Sıradaki öğün fotoğrafının mesajı (kimliği sıra anahtarı, bkz.
+  /// `MealManager.uploadMealImg`) sohbette var mı; okunamazsa null.
+  Future<bool?> _isMealPhotoPosted(String userId, String key) async {
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> message = await db
+          .collection('chats')
+          .doc(userId)
+          .collection('messages')
+          .doc(key)
+          .get()
+          .timeout(_postedCheckTimeout);
+      return message.exists;
+    } catch (e) {
+      return null;
+    }
   }
 
   Future<Map<String, Map<String, dynamic>>> _readPersistedUploads() {

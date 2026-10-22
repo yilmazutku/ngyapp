@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart' show XFile;
@@ -12,6 +14,7 @@ import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/pending_upload.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/utils/storage_upload.dart';
+import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -187,5 +190,121 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(upload.timedOut, isFalse);
     expect(upload.isCancelled, isFalse);
+  });
+
+  testWidgets(
+      'kayıt aşaması süresi yalnızca öndeyken sayılır; dolunca sonuç '
+      '"doğrulanamadı" olur', (tester) async {
+    final PendingUpload upload = uploadOf((upload) async {});
+    upload.markUploading();
+    _filesUploaded(upload);
+
+    await tester.pump(PendingUpload.commitTimeout - const Duration(seconds: 1));
+    expect(upload.timedOut, isFalse);
+
+    upload.suspendWatchdog();
+    await tester.pump(const Duration(minutes: 10));
+    expect(upload.timedOut, isFalse, reason: 'arka plan sayılmaz');
+
+    upload.resumeWatchdog();
+    await tester.pump(PendingUpload.commitTimeout - const Duration(seconds: 1));
+    expect(upload.timedOut, isFalse, reason: 'öne gelince baştan sayılır');
+    await tester.pump(const Duration(seconds: 2));
+    expect(upload.timedOut, isTrue);
+    expect(upload.commitUnconfirmed, isTrue);
+  });
+
+  testWidgets(
+      'kayıt süresi dolunca "doğrulanamadı" gösterilir, kaldırılamaz; işlem '
+      'sonradan yazarsa baloncuk kalkar', (tester) async {
+    // Kendiliğinden yeniden deneme zamanlayıcısı test bitmeden kapansın.
+    final ChatManager chat = ChatManager(
+      db: _FakeFirestore(),
+      auth: _FakeAuth(),
+      storage: _FakeStorage(),
+    );
+    final Completer<void> commit = Completer<void>();
+    chat.enqueueUploads([
+      uploadOf((upload) async {
+        _filesUploaded(upload);
+        await commit.future;
+        upload.onWritten();
+        upload.onSaving();
+      }),
+    ]);
+    await tester.pump();
+    final PendingUpload upload = chat.pendingUploadsOf(_chatId).single;
+    expect(upload.status.value, PendingUploadStatus.committing);
+
+    await tester.pump(PendingUpload.commitTimeout + const Duration(seconds: 1));
+    expect(upload.status.value, PendingUploadStatus.failed);
+    expect(upload.errorText, PendingUpload.unconfirmedText);
+    expect(upload.commitUnconfirmed, isTrue);
+    expect(upload.willAutoRetry, isTrue);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PendingUploadBubble(
+          upload: upload,
+          photoSizeOf: (_) => const Size(200, 150),
+          onDiscard: () {},
+          onRetry: () {},
+        ),
+      ),
+    ));
+    expect(find.text('Kaldır'), findsNothing,
+        reason: 'gönderilmiş olabilir: kaldırılırsa yine sohbete düşerdi');
+    expect(find.text('Tekrar dene'), findsOneWidget);
+    expect(find.textContaining(PendingUpload.unconfirmedText), findsOneWidget);
+
+    commit.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(chat.pendingUploadsOf(_chatId), isEmpty,
+        reason: 'işlem sonradan yazdı: fotoğraf gönderildi');
+    chat.dispose();
+  });
+
+  test(
+      'açılışta dosyası kalmamış ama gönderilmiş fotoğraf için "yeniden '
+      'seçin" denmez; gönderilmemişse denir', () async {
+    final FakeFirebaseFirestore db = FakeFirebaseFirestore();
+    await db
+        .collection('chats')
+        .doc(_chatId)
+        .collection('messages')
+        .doc('gonderildi')
+        .set({'imageUrl': 'https://x/a.jpg', 'senderId': _chatId});
+    Map<String, Object> entry(String key) => {
+          'key': key,
+          'chatId': _chatId,
+          'path': p.join(temporary.path, 'yok-$key.jpg'),
+          'name': 'yok.jpg',
+          'meal': Meals.lunch.name,
+          'createdAt': DateTime(2026, 10, 22).millisecondsSinceEpoch,
+        };
+    SharedPreferences.setMockInitialValues({
+      _persistedUploadsKey:
+          jsonEncode([entry('gonderildi'), entry('gonderilmedi')]),
+    });
+    final ChatManager restoring = ChatManager(
+      db: db,
+      auth: _FakeAuth(),
+      storage: _FakeStorage(),
+    );
+    addTearDown(restoring.dispose);
+
+    final ({int restored, int missing}) result =
+        await restoring.restorePendingUploads(
+      userId: _chatId,
+      runner: (upload) async {},
+    );
+
+    expect(result.restored, 0);
+    expect(result.missing, 1);
+    for (int i = 0; i < 100 && (await _persistedKeys()).isNotEmpty; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(await _persistedKeys(), isEmpty);
   });
 }
