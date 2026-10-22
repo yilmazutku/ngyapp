@@ -397,9 +397,18 @@ I understand that I may withdraw my explicit consent at any time (without affect
       );
       try {
         await loginProvider.signOut();
-      } finally {
+      } catch (e) {
         loading.close();
+        if (mounted) {
+          await DialogUtils.openError(
+            context,
+            title: DialogUtils.signOutFailedTitle,
+            message: DialogUtils.signOutFailedMessage,
+          );
+        }
+        return;
       }
+      loading.close();
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,

@@ -29,7 +29,7 @@ void main() {
     final PendingUpload u = upload()..markUploading();
     await pumpBubble(tester, u);
 
-    expect(find.text('İptal'), findsOneWidget);
+    expect(find.text('İptal').hitTestable(), findsOneWidget);
     expect(find.byIcon(Icons.close), findsOneWidget);
   });
 
@@ -40,7 +40,8 @@ void main() {
       ..status.value = PendingUploadStatus.committing;
     await pumpBubble(tester, u);
 
-    expect(find.text('İptal'), findsNothing);
+    // Yeri korunur (baloncuk boyu değişmez) ama görünmez, dokunulamaz.
+    expect(find.text('İptal').hitTestable(), findsNothing);
     expect(find.byIcon(Icons.close), findsNothing);
     expect(find.text('Gönderiliyor…'), findsOneWidget);
     expect(u.isQueued, isTrue,

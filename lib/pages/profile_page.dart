@@ -1,9 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:ngy_app/services/meal_reminder_service.dart';
+import '../providers/login_manager.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -129,20 +129,21 @@ class _ProfilePageState extends State<ProfilePage> {
     if (!secondConfirm) return;
     if (!mounted) return;
 
+    final UserProvider userProvider =
+        Provider.of<UserProvider>(context, listen: false);
+    final LoginProvider loginProvider =
+        Provider.of<LoginProvider>(context, listen: false);
     LoadingDialog? loading;
     try {
       if (mounted) {
         loading = DialogUtils.openLoading(context, message: 'İşlem yapılıyor...');
       }
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.userId)
-          .set({'isUserRequestedRemoval': true}, SetOptions(merge: true));
+      await userProvider.requestAccountRemoval(userId: widget.userId);
+      // Talep sunucuda: bu cihazın bildirimleri ve hatırlatmaları da kapanır.
+      await loginProvider.signOut();
 
       loading?.close();
-
-      await FirebaseAuth.instance.signOut();
 
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
@@ -153,7 +154,8 @@ class _ProfilePageState extends State<ProfilePage> {
         DialogUtils.openError(
           context,
           title: 'Hata',
-          message: 'İşlem sırasında bir hata oluştu. Lütfen tekrar deneyiniz.',
+          message: 'İşlem sırasında bir hata oluştu. İnternet bağlantınızı '
+              'kontrol edip tekrar deneyiniz.',
         );
       }
     }

@@ -121,6 +121,9 @@ abstract class UploadObserver {
   /// yeniden indirilmeden gösterilsin.
   void onUploaded(UploadedImage image);
 
+  /// Kayıtlar yazıldı (sonuç belli); sohbette henüz görünmüyor olabilir.
+  void onWritten();
+
   /// Dosyalar yüklendi ve kayıtlar yazıldı: yükleme tamamlandı, kayıt
   /// görünür.
   void onSaving();

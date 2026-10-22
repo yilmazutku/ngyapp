@@ -637,7 +637,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           chatId: _chatId,
           image: image,
           meal: meal,
-          runner: (upload) => _uploadMealPhoto(upload, mealManager, chat),
+          runner: (upload) => _uploadMealPhoto(upload, mealManager),
         ),
     ]);
     _showLatest();
@@ -649,13 +649,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _uploadMealPhoto(
     PendingUpload upload,
     MealManager mealManager,
-    ChatManager chat,
   ) =>
-      mealManager.uploadChatMealPhoto(
-        upload,
-        userId: _currentUid,
-        chatManager: chat,
-      );
+      mealManager.uploadChatMealPhoto(upload, userId: _currentUid);
 
   /// Öğün fotoğrafı yükleme akışı: öğün seçimi → öğünün kalan fotoğraf
   /// hakkı (seçtirmeden önce) → kaynak → fotoğraf(lar) → sıraya ekleme.
