@@ -18,7 +18,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Sıra işlerken Firebase'e dokunulmaz; yalnızca kurucu için.
 class _FakeFirestore extends Fake implements FirebaseFirestore {}
 
-class _FakeAuth extends Fake implements FirebaseAuth {}
+/// Oturum hiç değişmez.
+class _FakeAuth extends Fake implements FirebaseAuth {
+  @override
+  Stream<User?> authStateChanges() => const Stream<User?>.empty();
+}
 
 class _FakeStorage extends Fake implements FirebaseStorage {}
 

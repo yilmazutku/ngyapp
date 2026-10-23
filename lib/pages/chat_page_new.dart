@@ -630,6 +630,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final ChatManager chat = context.read<ChatManager>();
     final MealManager mealManager =
         Provider.of<MealManager>(context, listen: false);
+    // Yükleme sayfa kapandıktan sonra da sürer (ve yeniden denenir): yalnızca
+    // gerekenler tutulur, sayfa bellekte kalmaz.
+    final String uid = _currentUid;
 
     chat.enqueueUploads([
       for (final XFile image in images)
@@ -637,20 +640,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           chatId: _chatId,
           image: image,
           meal: meal,
-          runner: (upload) => _uploadMealPhoto(upload, mealManager),
+          runner: (upload) =>
+              mealManager.uploadChatMealPhoto(upload, userId: uid),
         ),
     ]);
     _showLatest();
   }
-
-  /// Öğün fotoğrafını öğün kaydına ekler ve sohbete gönderir; ikisi
-  /// birlikte yazılır (bkz. [MealManager.uploadChatMealPhoto]). Sohbet ekranı
-  /// kapanmış olsa da çalışır: context'e dokunmaz.
-  Future<void> _uploadMealPhoto(
-    PendingUpload upload,
-    MealManager mealManager,
-  ) =>
-      mealManager.uploadChatMealPhoto(upload, userId: _currentUid);
 
   /// Öğün fotoğrafı yükleme akışı: öğün seçimi → öğünün kalan fotoğraf
   /// hakkı (seçtirmeden önce) → kaynak → fotoğraf(lar) → sıraya ekleme.
@@ -703,7 +698,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         .pendingUploadsOf(_chatId)
         .where((upload) =>
             upload.meal == meal &&
-            upload.isQueued &&
+            upload.holdsMealSlot &&
             DateFormatter.isSameDay(upload.createdAt, now))
         .length;
     if (slotsLeft > 0) return slotsLeft;
