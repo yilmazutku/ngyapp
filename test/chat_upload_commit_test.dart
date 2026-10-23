@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,10 +18,20 @@ import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Sıra işlerken Firebase'e dokunulmaz; yalnızca kurucu için.
-class _FakeFirestore extends Fake implements FirebaseFirestore {}
+/// Oturum değişiklikleri testten verilir ([changes]).
+class _FakeAuth extends Fake implements FirebaseAuth {
+  final StreamController<User?> changes = StreamController<User?>();
 
-class _FakeAuth extends Fake implements FirebaseAuth {}
+  @override
+  Stream<User?> authStateChanges() => changes.stream;
+}
+
+class _FakeUser extends Fake implements User {
+  _FakeUser(this.uid);
+
+  @override
+  final String uid;
+}
 
 class _FakeStorage extends Fake implements FirebaseStorage {}
 
@@ -79,7 +89,7 @@ void main() {
         .setMockMethodCallHandler(_pathProvider, (call) async => temporary.path);
     SharedPreferences.setMockInitialValues({});
     chat = ChatManager(
-      db: _FakeFirestore(),
+      db: FakeFirebaseFirestore(),
       auth: _FakeAuth(),
       storage: _FakeStorage(),
     );
@@ -219,7 +229,7 @@ void main() {
       'sonradan yazarsa baloncuk kalkar', (tester) async {
     // Kendiliğinden yeniden deneme zamanlayıcısı test bitmeden kapansın.
     final ChatManager chat = ChatManager(
-      db: _FakeFirestore(),
+      db: FakeFirebaseFirestore(),
       auth: _FakeAuth(),
       storage: _FakeStorage(),
     );
@@ -306,5 +316,317 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     expect(await _persistedKeys(), isEmpty);
+  });
+
+  group('oturum', () {
+    test(
+        'oturum kapanınca bekleyen yüklemeler bu oturumdan çekilir, yeniden '
+        'denenmez; sıra kaydı kalır ve sahibi yeniden girince geri yüklenir',
+        () async {
+      final _FakeAuth auth = _FakeAuth();
+      final ChatManager chat = ChatManager(
+        db: FakeFirebaseFirestore(),
+        auth: auth,
+        storage: _FakeStorage(),
+      );
+      addTearDown(chat.dispose);
+      auth.changes.add(_FakeUser(_chatId));
+      await Future<void>.delayed(Duration.zero);
+
+      int runs = 0;
+      chat.enqueueUploads([
+        uploadOf((upload) async {
+          runs++;
+          throw const UploadFailure(PendingUpload.timeoutText);
+        }),
+      ]);
+      await _waitUntil(() =>
+          chat.pendingUploadsOf(_chatId).single.status.value ==
+          PendingUploadStatus.failed);
+      final String key = chat.pendingUploadsOf(_chatId).single.persistKey;
+
+      auth.changes.add(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(chat.pendingUploadsOf(_chatId), isEmpty,
+          reason: 'aynı cihazda giren başka hesap görmesin, yüklemesin');
+      chat.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(runs, 1, reason: 'oturum yokken yeniden denenmez');
+      expect(await _persistedKeys(), {key},
+          reason: 'sahibi için cihazda kalır');
+
+      auth.changes.add(_FakeUser(_chatId));
+      await Future<void>.delayed(Duration.zero);
+      final ({int restored, int missing}) result =
+          await chat.restorePendingUploads(
+        userId: _chatId,
+        runner: (upload) async {},
+      );
+      expect(result.restored, 1,
+          reason: 'aynı uygulama oturumunda yeniden girişte de geri gelir');
+      expect(chat.pendingUploadsOf(_chatId).single.persistKey, key);
+    });
+
+    test('başka hesaba geçince de çekilir', () async {
+      final _FakeAuth auth = _FakeAuth();
+      final ChatManager chat = ChatManager(
+        db: FakeFirebaseFirestore(),
+        auth: auth,
+        storage: _FakeStorage(),
+      );
+      addTearDown(chat.dispose);
+      auth.changes.add(_FakeUser(_chatId));
+      await Future<void>.delayed(Duration.zero);
+      final Completer<void> never = Completer<void>();
+      chat.enqueueUploads([uploadOf((upload) => never.future)]);
+      await _waitUntil(() =>
+          chat.pendingUploadsOf(_chatId).single.status.value ==
+          PendingUploadStatus.uploading);
+      final PendingUpload upload = chat.pendingUploadsOf(_chatId).single;
+
+      auth.changes.add(_FakeUser('admin-1'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(chat.pendingUploadsOf(_chatId), isEmpty);
+      expect(upload.released, isTrue);
+      expect(upload.isCancelled, isTrue, reason: 'kayıt yazmaz');
+    });
+  });
+
+  group('sonucu belli olmayan yükleme', () {
+    test(
+        'yeniden deneme de "belli değil" sayılır: vazgeçilemez, hatası '
+        '"doğrulanamadı" olur', () async {
+      int attempts = 0;
+      chat.enqueueUploads([
+        uploadOf((upload) async {
+          attempts++;
+          if (attempts == 1) {
+            throw const UploadFailure(
+              PendingUpload.unconfirmedText,
+              unconfirmed: true,
+            );
+          }
+          throw const UploadFailure(PendingUpload.defaultErrorText);
+        }),
+      ]);
+      await _waitUntil(() =>
+          chat.pendingUploadsOf(_chatId).single.status.value ==
+          PendingUploadStatus.failed);
+      expect(chat.pendingUploadsOf(_chatId).single.commitUnconfirmed, isTrue);
+
+      chat.retryUpload(chat.pendingUploadsOf(_chatId).single);
+      final PendingUpload copy = chat.pendingUploadsOf(_chatId).single;
+      expect(copy.commitUnconfirmed, isTrue);
+      await _waitUntil(() => attempts == 2 &&
+          copy.status.value == PendingUploadStatus.failed);
+
+      expect(copy.errorText, PendingUpload.unconfirmedText);
+      chat.discardUpload(copy);
+      expect(chat.pendingUploadsOf(_chatId), [copy],
+          reason: 'gönderilmiş olabilir: kaldırılamaz');
+    });
+
+    testWidgets('belli olmayan yeniden denemede iptal düğmeleri yok',
+        (tester) async {
+      final PendingUpload copy = PendingUpload(
+        chatId: _chatId,
+        image: XFile('/yok/foto.jpg'),
+        meal: Meals.lunch,
+        runner: (_) async {},
+        unconfirmed: true,
+      )..markUploading();
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: PendingUploadBubble(
+            upload: copy,
+            photoSizeOf: (_) => const Size(200, 150),
+            onDiscard: () {},
+            onRetry: () {},
+          ),
+        ),
+      ));
+
+      expect(find.byIcon(Icons.close), findsNothing);
+      expect(find.text('İptal').hitTestable(), findsNothing);
+    });
+
+    for (final TargetPlatform platform in [
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    ]) {
+      test(
+          '${platform.name}: mesajı sohbete düşünce gönderilmiş sayılır; '
+          'baloncuk, sıra kaydı ve geçici dosya kalkar', () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final FakeFirebaseFirestore db = FakeFirebaseFirestore();
+        final ChatManager chat = ChatManager(
+          db: db,
+          auth: _FakeAuth(),
+          storage: _FakeStorage(),
+        );
+        addTearDown(chat.dispose);
+        chat.enqueueUploads([
+          uploadOf((upload) async {
+            _filesUploaded(upload);
+            throw const UploadFailure(
+              PendingUpload.unconfirmedText,
+              unconfirmed: true,
+            );
+          }),
+        ]);
+        await _waitUntil(() =>
+            chat.pendingUploadsOf(_chatId).single.status.value ==
+            PendingUploadStatus.failed);
+        final PendingUpload upload = chat.pendingUploadsOf(_chatId).single;
+        final File photo = File(upload.image.path);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(chat.pendingUploadsOf(_chatId), [upload],
+            reason: 'mesaj yokken baloncuk kalır');
+        expect(await _persistedKeys(), {upload.persistKey});
+
+        await db
+            .collection('chats')
+            .doc(_chatId)
+            .collection('messages')
+            .doc(upload.persistKey)
+            .set({'imageUrl': 'https://x/a.jpg', 'senderId': _chatId});
+        await _waitUntil(() => chat.pendingUploadsOf(_chatId).isEmpty);
+
+        expect(chat.pendingUploadsOf(_chatId), isEmpty,
+            reason: 'fotoğraf sohbette: "doğrulanamadı" baloncuğu kalmaz');
+        await _waitUntil(() => !photo.existsSync());
+        expect(photo.existsSync(), isFalse);
+        for (int i = 0; i < 100 && (await _persistedKeys()).isNotEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        expect(await _persistedKeys(), isEmpty,
+            reason: 'açılışta yeniden gönderilmez');
+      });
+    }
+
+    test(
+        'yeniden denemesi sürerken mesaj düşerse deneme yarıda kesilmez, '
+        'kendi sonucunu bulur', () async {
+      final FakeFirebaseFirestore db = FakeFirebaseFirestore();
+      final ChatManager chat = ChatManager(
+        db: db,
+        auth: _FakeAuth(),
+        storage: _FakeStorage(),
+      );
+      addTearDown(chat.dispose);
+      final Completer<void> retry = Completer<void>();
+      int attempts = 0;
+      chat.enqueueUploads([
+        uploadOf((upload) async {
+          attempts++;
+          if (attempts == 1) {
+            throw const UploadFailure(
+              PendingUpload.unconfirmedText,
+              unconfirmed: true,
+            );
+          }
+          await retry.future;
+          upload.onSaving();
+        }),
+      ]);
+      await _waitUntil(() =>
+          chat.pendingUploadsOf(_chatId).single.status.value ==
+          PendingUploadStatus.failed);
+      chat.retryUpload(chat.pendingUploadsOf(_chatId).single);
+      final PendingUpload copy = chat.pendingUploadsOf(_chatId).single;
+      await _waitUntil(() => attempts == 2);
+
+      await db
+          .collection('chats')
+          .doc(_chatId)
+          .collection('messages')
+          .doc(copy.persistKey)
+          .set({'imageUrl': 'https://x/a.jpg', 'senderId': _chatId});
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(chat.pendingUploadsOf(_chatId), [copy]);
+      expect(copy.status.value, PendingUploadStatus.uploading);
+
+      retry.complete();
+      await _waitUntil(() => chat.pendingUploadsOf(_chatId).isEmpty);
+      expect(chat.pendingUploadsOf(_chatId), isEmpty);
+    });
+
+    test('yeniden denenemiyorsa (sınır doldu) kaldırılabilir', () async {
+      chat.enqueueUploads([
+        uploadOf((upload) async {
+          throw const UploadFailure(
+            PendingUpload.unconfirmedText,
+            unconfirmed: true,
+          );
+        }),
+      ]);
+      await _waitUntil(() =>
+          chat.pendingUploadsOf(_chatId).single.status.value ==
+          PendingUploadStatus.failed);
+      chat.retryUpload(chat.pendingUploadsOf(_chatId).single);
+      final PendingUpload copy = chat.pendingUploadsOf(_chatId).single;
+      copy.markFailed('Sınır doldu', canRetry: false);
+
+      chat.discardUpload(copy);
+      expect(chat.pendingUploadsOf(_chatId), isEmpty);
+    });
+  });
+
+  test(
+      'açılışta dosyası duran ama gönderilmiş fotoğraf yeniden yüklenmez, '
+      'kaydı silinir', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final File photo = File(p.join(temporary.path, 'gonderildi.jpg'))
+      ..writeAsStringSync('photo');
+    final FakeFirebaseFirestore db = FakeFirebaseFirestore();
+    await db
+        .collection('chats')
+        .doc(_chatId)
+        .collection('messages')
+        .doc('gonderildi')
+        .set({'imageUrl': 'https://x/a.jpg', 'senderId': _chatId});
+    SharedPreferences.setMockInitialValues({
+      _persistedUploadsKey: jsonEncode([
+        {
+          'key': 'gonderildi',
+          'chatId': _chatId,
+          'path': photo.path,
+          'name': 'gonderildi.jpg',
+          'meal': Meals.lunch.name,
+          'createdAt': DateTime(2026, 10, 22).millisecondsSinceEpoch,
+        },
+      ]),
+    });
+    final ChatManager restoring = ChatManager(
+      db: db,
+      auth: _FakeAuth(),
+      storage: _FakeStorage(),
+    );
+    addTearDown(restoring.dispose);
+
+    final ({int restored, int missing}) result =
+        await restoring.restorePendingUploads(
+      userId: _chatId,
+      runner: (upload) async {},
+    );
+
+    expect(result.restored, 0);
+    expect(result.missing, 0);
+    expect(restoring.pendingUploadsOf(_chatId), isEmpty);
+    await _waitUntil(() => !photo.existsSync());
+    expect(photo.existsSync(), isFalse);
+  });
+
+  test('öğün fotoğraf hakkı: yeniden denenecek başarısız yükleme de sayılır',
+      () {
+    final PendingUpload upload = uploadOf((_) async {});
+    expect(upload.holdsMealSlot, isTrue, reason: 'sırada');
+    upload.markFailed('bağlantı yok');
+    expect(upload.holdsMealSlot, isTrue, reason: 'yeniden denenecek');
+    upload.markFailed('sınır doldu', canRetry: false);
+    expect(upload.holdsMealSlot, isFalse);
   });
 }

@@ -68,7 +68,9 @@ class PendingUpload implements UploadObserver {
     String? persistKey,
     this.autoRetries = 0,
     double? previewAspectRatio,
-  })  : id = '${DateTime.now().microsecondsSinceEpoch}_${_sequence++}',
+    bool unconfirmed = false,
+  })  : _inheritedUnconfirmed = unconfirmed,
+        id = '${DateTime.now().microsecondsSinceEpoch}_${_sequence++}',
         createdAt = createdAt ?? DateTime.now(),
         previewAspectRatio = ValueNotifier<double?>(previewAspectRatio) {
     this.persistKey = persistKey ?? id;
@@ -149,6 +151,13 @@ class PendingUpload implements UploadObserver {
 
   /// Kayıt işlemi hata verdi, sonucu belli değil (bkz. [markFailed]).
   bool _unconfirmedFailure = false;
+
+  /// Önceki denemenin sonucu belli değildi (bkz. [retryCopy]): bu deneme
+  /// sırasında da fotoğraf gönderilmiş olabilir.
+  final bool _inheritedUnconfirmed;
+
+  /// Oturum kapandı: yükleme bu oturumdan çekildi (bkz. [release]).
+  bool _released = false;
   final List<UploadTask> _tasks = [];
   final List<StreamSubscription<TaskSnapshot>> _subscriptions = [];
   Timer? _watchdog;
@@ -166,10 +175,21 @@ class PendingUpload implements UploadObserver {
           status.value == PendingUploadStatus.uploading ||
           status.value == PendingUploadStatus.committing);
 
+  /// Öğünün fotoğraf hakkından düşülür: sırada, yükleniyor ya da yazılıyor;
+  /// ya da yüklenemedi ama yeniden denenecek (yazılırsa hakkı kullanır).
+  bool get holdsMealSlot =>
+      isQueued ||
+      (!_written && status.value == PendingUploadStatus.failed && canRetry);
+
   /// Kayıt işleminin süresi doldu, sonucu belli değil: fotoğraf gönderilmiş
   /// olabilir. Baloncuk "Kaldır" sunmaz; yeniden deneme güvenlidir (aynı
   /// mesaj kimliği, bkz. `MealManager.uploadMealImg`).
-  bool get commitUnconfirmed => _commitTimedOut || _unconfirmedFailure;
+  bool get commitUnconfirmed =>
+      _commitTimedOut || _unconfirmedFailure || _inheritedUnconfirmed;
+
+  /// Oturum kapandığı için durduruldu ([release]): sıra kaydı ve dosyası
+  /// kalır, sahibi yeniden girince yüklenir.
+  bool get released => _released;
 
   /// Yüklenemedi ama bağlantı gelince kendiliğinden yeniden denenecek.
   bool get willAutoRetry =>
@@ -185,7 +205,7 @@ class PendingUpload implements UploadObserver {
   Future<void> get aborted => _aborted.future;
 
   @override
-  bool get isCancelled => _cancelledByUser || _timedOut;
+  bool get isCancelled => _cancelledByUser || _timedOut || _released;
 
   @override
   void onTask(UploadTask task) {
@@ -278,7 +298,15 @@ class PendingUpload implements UploadObserver {
         persistKey: persistKey,
         autoRetries: automatic ? autoRetries + 1 : 0,
         previewAspectRatio: previewAspectRatio.value,
+        unconfirmed: commitUnconfirmed,
       );
+
+  /// Oturum kapandı: süren Storage görevi durdurulur, kayıt yazılmaz; sıra
+  /// kaydı ve dosya silinmez (sahibi yeniden girince yüklenir).
+  void release() {
+    _released = true;
+    _abort();
+  }
 
   /// Kullanıcı yüklemeyi iptal etti: süren Storage görevi durdurulur, yüklenmiş
   /// dosyalar yükleme adımı tarafından silinir, mesaj yazılmaz.

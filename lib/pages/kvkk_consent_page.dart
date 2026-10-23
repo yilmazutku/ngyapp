@@ -4,15 +4,17 @@ import 'package:provider/provider.dart';
 
 import '../main.dart';
 import '../models/kvkk_consent_model.dart';
-import '../providers/login_manager.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
-import 'login_page.dart';
 
 /// KVKK consent page shown after login for first-time users
 /// or when KVKK version has been updated.
 class KvkkConsentPage extends StatefulWidget {
-  const KvkkConsentPage({super.key});
+  /// Onay kaydedilince çağrılır: ana sayfayı [AuthWrapper] açar (bu sayfa
+  /// kendisi gezinmez; ilk sayfa AuthWrapper olarak kalmalı).
+  final VoidCallback onAccepted;
+
+  const KvkkConsentPage({super.key, required this.onAccepted});
 
   @override
   State<KvkkConsentPage> createState() => _KvkkConsentPageState();
@@ -354,12 +356,7 @@ I understand that I may withdraw my explicit consent at any time (without affect
         explicitConsentAccepted: _explicitConsentGiven,
       );
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const HomePage()),
-        );
-      }
+      if (mounted) widget.onAccepted();
     } catch (e) {
       if (mounted) {
         await DialogUtils.openError(
@@ -388,35 +385,7 @@ I understand that I may withdraw my explicit consent at any time (without affect
       cancelText: _isEnglish ? 'No' : 'Hayır',
     );
 
-    if (confirmed && mounted) {
-      final LoginProvider loginProvider =
-          Provider.of<LoginProvider>(context, listen: false);
-      final LoadingDialog loading = DialogUtils.openLoading(
-        context,
-        message: DialogUtils.signingOutMessage,
-      );
-      try {
-        await loginProvider.signOut();
-      } catch (e) {
-        loading.close();
-        if (mounted) {
-          await DialogUtils.openError(
-            context,
-            title: DialogUtils.signOutFailedTitle,
-            message: DialogUtils.signOutFailedMessage,
-          );
-        }
-        return;
-      }
-      loading.close();
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-          (route) => false,
-        );
-      }
-    }
+    if (confirmed && mounted) await signOutToRoot(context);
   }
 
   void _showTextDialog(String title, String content) {

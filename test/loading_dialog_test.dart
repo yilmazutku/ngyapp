@@ -245,4 +245,63 @@ void main() {
     expect(find.text(homePage), findsOneWidget);
     expect(await ownerResult, isNull);
   });
+
+  testWidgets('diyalog başka yoldan kaldırıldıysa close hata vermez',
+      (tester) async {
+    late LoadingDialog loading;
+    late NavigatorState navigator;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        navigator = Navigator.of(context);
+        return TextButton(
+          onPressed: () => loading =
+              DialogUtils.openLoading(context, message: 'Çıkış yapılıyor...'),
+          child: const Text('aç'),
+        );
+      }),
+    ));
+    await tester.tap(find.text('aç'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Ör. bildirim akışı ya da çıkış tüm sayfaları kaldırır.
+    navigator.pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const Text('Giriş')),
+      (_) => false,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+
+    loading.close();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Giriş'), findsOneWidget);
+  });
+
+  testWidgets('yükleme diyaloğu iç içe navigator\'da da kök navigator\'a '
+      'açılır', (tester) async {
+    late LoadingDialog loading;
+    await tester.pumpWidget(MaterialApp(
+      home: Navigator(
+        onGenerateRoute: (_) => MaterialPageRoute<void>(
+          builder: (context) => TextButton(
+            onPressed: () => loading =
+                DialogUtils.openLoading(context, message: 'Yükleniyor'),
+            child: const Text('aç'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('aç'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final NavigatorState root =
+        tester.state<NavigatorState>(find.byType(Navigator).first);
+    expect(ModalRoute.of(tester.element(find.byType(AlertDialog)))!.navigator,
+        root);
+    loading.close();
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+  });
 }

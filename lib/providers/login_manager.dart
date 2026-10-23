@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -53,7 +55,12 @@ class LoginProvider extends ChangeNotifier {
             .get();
         final data = userDoc.data();
         if (data != null && data['isUserRequestedRemoval'] == true) {
-          await FirebaseAuth.instance.signOut();
+          // Tam çıkış: girişle kaydedilen bildirim jetonu da kayıttan silinir.
+          try {
+            await signOut();
+          } catch (e) {
+            await FirebaseAuth.instance.signOut();
+          }
           _errorMessage =
               'E-posta adresi veya şifre yanlış, lütfen kontrol ediniz.';
           _setLoadingState(false);
@@ -63,6 +70,13 @@ class LoginProvider extends ChangeNotifier {
       }
 
       isLoginSuccessful = true;
+      // Çıkışta iptal edilen öğün hatırlatmaları yeniden kurulur; uygulama
+      // yeniden başlamadan da kurulsun diye burada (bkz. main()).
+      if (uid != null && MealReminderService().isSupported) {
+        unawaited(MealReminderService()
+            .scheduleMealReminders(uid)
+            .catchError((Object e) {}));
+      }
     } on FirebaseAuthException catch (e) {
       _handleFirebaseAuthError(e);
     } catch (e) {
@@ -158,8 +172,9 @@ class LoginProvider extends ChangeNotifier {
 
   /// Oturumu kapatır: yerel bildirimler ve öğün hatırlatmaları iptal edilir,
   /// bu cihazın bildirim jetonu kayıttan silinir (bkz.
-  /// [FcmService.removeFcmToken]; çevrimdışıyken birkaç saniye sürebilir),
-  /// sonra çıkış yapılır. Çağıran bu sırada "Çıkış yapılıyor..." gösterir.
+  /// [FcmService.removeFcmToken]; çevrimdışıyken birkaç saniye sürebilir ve
+  /// silme ancak bağlantı varken hemen sunucuya gider), sonra çıkış yapılır.
+  /// Çağıran bu sırada "Çıkış yapılıyor..." gösterir.
   /// Giriş formundaki şifre silinir: telefonu eline alan önceki kullanıcının
   /// şifresini göremez, onun hesabıyla giremez.
   Future<void> signOut() async {

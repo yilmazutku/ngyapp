@@ -11,6 +11,28 @@ import 'package:ngy_app/utils/storage_upload.dart';
 /// Kayıt işlemi Storage'a dokunmaz; yalnızca adres taşır.
 class _FakeRef extends Fake implements Reference {}
 
+/// İşlemin hangi deneme sayısıyla açıldığını kaydeder.
+class _RecordingFirestore extends Fake implements FirebaseFirestore {
+  _RecordingFirestore(this.inner);
+
+  final FakeFirebaseFirestore inner;
+  int? maxAttempts;
+
+  @override
+  Future<T> runTransaction<T>(
+    TransactionHandler<T> transactionHandler, {
+    Duration timeout = const Duration(seconds: 30),
+    int maxAttempts = 5,
+  }) {
+    this.maxAttempts = maxAttempts;
+    return inner.runTransaction(
+      transactionHandler,
+      timeout: timeout,
+      maxAttempts: maxAttempts,
+    );
+  }
+}
+
 const String _uid = 'danisan-1';
 const String _day = '2026-10-22';
 const String _messageId = '1729500000000000_0';
@@ -211,6 +233,34 @@ void main() {
 
       expect(rerun.kind, MealImageWriteKind.alreadyPosted);
       expect(rerun.postedImageUrl, image.url);
+    });
+  });
+
+  group('eklentinin kendi yeniden denemeleri', () {
+    Future<int?> attemptsOf({required bool toChat}) async {
+      final _RecordingFirestore recording = _RecordingFirestore(db);
+      await MealManager.writeMealImage(
+        recording,
+        mealDoc,
+        userId: _uid,
+        meal: Meals.lunch,
+        subscriptionId: _uid,
+        image: _image('a'),
+        time: sentAt,
+        cancelsReminder: toChat,
+        messageRef: toChat ? messageDoc : null,
+      );
+      return recording.maxAttempts;
+    }
+
+    test('sohbet yazımında kapalı: yeniden denemeyi sıra yapar', () async {
+      expect(await attemptsOf(toChat: true), 1);
+    });
+
+    test(
+        'sohbetsiz yazımda açık: danışanın aynı anki yazımıyla çakışınca '
+        'admin yüklemesi hata vermez', () async {
+      expect(await attemptsOf(toChat: false), greaterThan(1));
     });
   });
 

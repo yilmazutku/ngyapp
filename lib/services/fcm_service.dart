@@ -234,6 +234,8 @@ class FcmService {
       if (!isChatNotification && !isAnnouncementNotification) {
         return;
       }
+    } else if (!isMeantFor(message.data, currentUser.uid)) {
+      return;
     }
 
     final context = _navigatorKey?.currentContext;
@@ -267,6 +269,25 @@ class FcmService {
       body: notification.body ?? '',
       data: message.data,
     );
+  }
+
+  /// Bildirim [uid] kullanıcısına mı gönderilmiş. Cihazın jetonu, önceki
+  /// hesabın kaydından sunucu onu silene kadar orada da durabilir (bkz.
+  /// [removeFcmToken]); o hesabın sohbet bildirimleri bu cihazda oturumu açık
+  /// kişiye gösterilmez. Danışanın sohbet bildirimi kendi sohbetinindir
+  /// (`chatId` = UID), `chat_admin` yalnızca admine gider.
+  @visibleForTesting
+  static bool isMeantFor(Map<String, dynamic> data, String uid) {
+    final String type = (data['type'] ?? '').toString();
+    final bool isAdmin = _adminUids.contains(uid);
+    switch (type) {
+      case 'chat':
+        return !isAdmin && (data['chatId'] ?? '').toString() == uid;
+      case 'chat_admin':
+        return isAdmin;
+      default:
+        return true;
+    }
   }
 
   /// Check if notification should be suppressed because user is already viewing the chat
@@ -498,16 +519,19 @@ class FcmService {
   }
 
   /// [token]'ı kullanıcının kaydına yazar; sunucudaki kayıtta zaten o varsa
-  /// yazmaz. Kayıt sunucudan okunamazsa (çevrimdışı) karşılaştırma yapılmaz,
-  /// jeton yine yazılır: yazma bağlantı gelince gider. Cihazdaki eski bir
-  /// kopyayla karşılaştırılsaydı, kayıt bu arada başka bir cihazınkine
-  /// dönmüşken yazma atlanabilirdi.
+  /// ya da hesap silme talebi varsa (giriş o hesabı hemen çıkarır, bkz.
+  /// `LoginProvider.login`) yazmaz. Kayıt sunucudan okunamazsa (çevrimdışı)
+  /// karşılaştırma yapılmaz, jeton yine yazılır: yazma bağlantı gelince gider.
+  /// Cihazdaki eski bir kopyayla karşılaştırılsaydı, kayıt bu arada başka bir
+  /// cihazınkine dönmüşken yazma atlanabilirdi.
   Future<void> _saveTokenIfChanged(String uid, String token) async {
     final userDoc = _firestore.collection('users').doc(uid);
     try {
       final snapshot =
           await userDoc.get(const GetOptions(source: Source.server));
-      if (snapshot.data()?['fcmToken'] == token) return;
+      final Map<String, dynamic>? data = snapshot.data();
+      if (data?['fcmToken'] == token) return;
+      if (data?['isUserRequestedRemoval'] == true) return;
     } catch (e) {
       // Sunucuya ulaşılamadı: koşulsuz yazılır.
     }
@@ -540,10 +564,15 @@ class FcmService {
   /// Kayıttaki jeton bu cihazın değilse (kullanıcı sonra başka bir cihazdan
   /// girdi) silinmez: bu cihazdan çıkmak o cihazın bildirimlerini kesmez. Bu
   /// cihazın jetonu yoksa kayda dokunulmaz (kayıttaki başka bir cihazınkidir).
-  /// Kayıt okunamazsa (ör. çevrimdışı) jeton koşulsuz silinir; silinmeseydi
-  /// oturum kapandıktan sonra da bu cihaza (ve cihazda sonra giren hesaba) bu
-  /// kullanıcının bildirimleri gelirdi. Çıkış bu yazmayı en fazla
-  /// [_logoutWriteTimeout] bekler; çevrimdışıyken donmaz.
+  /// Kayıt okunamazsa (ör. çevrimdışı) jeton koşulsuz silinmeye çalışılır ama
+  /// bu silme sunucuya hemen gitmez: Firestore onu çıkan kullanıcının yazma
+  /// sırasında tutar ve ancak o kullanıcı bu cihazda yeniden girince gönderir.
+  /// O zamana kadar bu kullanıcının bildirimleri bu cihaza gelmeye devam eder.
+  /// Cihazda başka bir hesap girince jeton onun kaydına yazılır ve sunucu
+  /// (`releaseFcmTokenFromOtherUsers`) jetonu önceki hesabın kaydından siler;
+  /// uygulama açıkken başkasına ait sohbet bildirimi zaten gösterilmez (bkz.
+  /// [isMeantFor]). Çıkış bu yazmayı en fazla [_logoutWriteTimeout] bekler;
+  /// çevrimdışıyken donmaz.
   Future<void> removeFcmToken() async {
     if (!isSupported) return;
     

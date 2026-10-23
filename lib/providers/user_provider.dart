@@ -307,17 +307,17 @@ class UserProvider extends ChangeNotifier {
   /// Kullanıcının hesap silme talebini (`isUserRequestedRemoval`) sunucuya
   /// yazar. Bağlantı gerekir: talepten sonra oturum kapanır ve kapanan
   /// oturumun sıradaki yazımı ancak aynı kullanıcı yeniden girince gider.
-  /// Önce sunucuya ulaşılabildiği denenir; ulaşılamazsa ya da yazım zamanında
-  /// bitmezse hata fırlatır (çağıran oturumu kapatmaz).
+  /// Talep bir işlemle (transaction) yazılır: işlem cihazda sıraya girmez,
+  /// sunucuya ulaşılamazsa ya da zamanında bitmezse hata fırlatır (çağıran
+  /// oturumu kapatmaz) ve sonradan kendiliğinden yazılmaz. Kullanıcıya
+  /// "olmadı" denip talebin bağlantı gelince sunucuya gitmesi böylece önlenir.
   Future<void> requestAccountRemoval({required String userId}) async {
+    final FirebaseFirestore db = FirebaseFirestore.instance;
     final DocumentReference<Map<String, dynamic>> userDoc =
-        FirebaseFirestore.instance.collection('users').doc(userId);
-    await userDoc
-        .get(const GetOptions(source: Source.server))
-        .timeout(_removalRequestTimeout);
-    await userDoc
-        .set({'isUserRequestedRemoval': true}, SetOptions(merge: true))
-        .timeout(_removalRequestTimeout);
+        db.collection('users').doc(userId);
+    await db.runTransaction((transaction) async {
+      transaction.update(userDoc, {'isUserRequestedRemoval': true});
+    }, timeout: _removalRequestTimeout).timeout(_removalRequestTimeout);
   }
 
   // ============ KVKK Consent Methods ============

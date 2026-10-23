@@ -13,7 +13,7 @@
 - **Var olan widget'lar yeterliyse yenisi tanımlanmaz, var olan kullanılır.** Yeni widget ya da yardımcı yazmadan önce `lib/widgets`, `lib/utils`, `lib/services` ve ilgili sayfalarda benzeri aranır; neredeyse yeterliyse genişletilir, sayfaya özel bir widget başka yerde gerekiyorsa ortak dosyaya taşınır (bkz. `.cursor/rules/reuse_existing.mdc`).
 - Değişiklikten sonra `flutter analyze lib` çalıştırılır: hata bırakılmaz, dokunulan dosyalarda yeni uyarı bırakılmaz.
 - Firestore ve Storage güvenlik kuralları `firestore.rules` ve `storage.rules`'dadır ve Firebase Console'dakilerle aynı tutulur. Yazılan alan, koleksiyon ya da Storage yolu değişirse (ör. danışanın yeni bir yere dosya yüklemesi) kurallar da gözden geçirilir; kural değişince `tools/firestore_rules_test` içinde `npm install && npm test` ile emülatörde denenir (Java gerekir).
-- `functions/index.js`'teki `busySlots` aynası değişince `tools/functions_test` içinde emülatörde denenir: önce `functions` klasöründe `npm ci`, sonra `tools/functions_test`'te `npm install && npm test`.
+- `functions/index.js`'teki `busySlots` aynası ya da bildirim jetonu devri (`releaseFcmTokenFromOtherUsers`) değişince `tools/functions_test` içinde emülatörde denenir: önce `functions` klasöründe `npm ci`, sonra `tools/functions_test`'te `npm install && npm test`.
 - `flutter analyze` çalışırken `analysis_options.yaml`, `pubspec.lock` ve `lib/l10n/app_localizations.dart` (gen-l10n çıktısı) dosyalarını değiştirebiliyor; bunlar commit'e dahil edilmez.
 
 ## Ürün kuralları

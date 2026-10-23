@@ -1,10 +1,10 @@
 {
   "name": "ngyapp-functions-test",
   "private": true,
-  "description": "functions/index.js'teki busySlots aynasını (mirrorBusySlot, backfillBusySlots) Firebase emülatöründe dener (uygulamanın parçası değildir). Önce functions klasöründe npm ci çalıştırılır.",
+  "description": "functions/index.js'teki busySlots aynasını (mirrorBusySlot, backfillBusySlots) ve bildirim jetonu devrini (releaseFcmTokenFromOtherUsers) Firebase emülatöründe dener (uygulamanın parçası değildir). Önce functions klasöründe npm ci çalıştırılır.",
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore,functions --project demo-ngy \"node busy_slots.test.mjs\""
+    "test": "firebase emulators:exec --only firestore,functions --project demo-ngy \"node busy_slots.test.mjs && node fcm_token.test.mjs\""
   },
   "devDependencies": {
     "firebase-admin": "^13.7.0",
