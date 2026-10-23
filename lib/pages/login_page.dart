@@ -9,9 +9,7 @@ import 'package:ngy_app/pages/reset_password_page.dart';
 import '../main.dart';
 import '../news/blog_page.dart';
 import '../providers/login_manager.dart';
-import '../providers/user_provider.dart';
 import 'bmi_calculator_page.dart';
-import 'kvkk_consent_page.dart';
 
 // ---------------------------------------------------------------------------
 // Login page vertical layout ratio
@@ -190,20 +188,15 @@ class LoginPage extends StatelessWidget {
                       onPressed: isLoading
                           ? null
                           : () async {
-                        // If AUTO_LOGIN is true and user is already logged in, navigate directly
+                        // Already signed in (AUTO_LOGIN): AuthWrapper shows
+                        // the home page.
                         if (AUTO_LOGIN && FirebaseAuth.instance.currentUser != null) {
-                          if (context.mounted) {
-                            await _navigateAfterLogin(context);
-                          }
                           return;
                         }
 
-                        // Otherwise, use form credentials to login
-                        final ok = await loginProvider.login(context);
-
-                        if (ok && context.mounted) {
-                          await _navigateAfterLogin(context);
-                        }
+                        // Giriş başarılı olunca KVKK onayına ya da ana
+                        // sayfaya AuthWrapper geçirir (bu sayfa onun içinde).
+                        await loginProvider.login(context);
                       },
                       style: ElevatedButton.styleFrom(
                         shape: RoundedRectangleBorder(
@@ -449,31 +442,6 @@ class LoginPage extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  /// Navigates to the appropriate page after successful login.
-  /// Checks KVKK consent and redirects to consent page if needed.
-  Future<void> _navigateAfterLogin(BuildContext context) async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) return;
-
-    final userProvider = Provider.of<UserProvider>(context, listen: false);
-    final hasConsent = await userProvider.hasValidKvkkConsent(userId: userId);
-
-    if (!context.mounted) return;
-
-    if (hasConsent) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomePage()),
-      );
-    } else {
-      // Redirect to KVKK consent page
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const KvkkConsentPage()),
-      );
-    }
   }
 }
 

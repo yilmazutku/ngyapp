@@ -315,11 +315,16 @@ class _AuthWrapperState extends State<AuthWrapper> {
               case KvkkConsentStatus.valid:
                 return const HomePage();
               case KvkkConsentStatus.missing:
-                return const KvkkConsentPage();
+                return KvkkConsentPage(
+                  onAccepted: () => setState(() => _kvkkCheckFuture =
+                      Future<KvkkConsentStatus>.value(
+                          KvkkConsentStatus.valid)),
+                );
               case KvkkConsentStatus.unknown:
                 return _ConsentCheckFailedPage(
                   onRetry: () => setState(
                       () => _kvkkCheckFuture = _checkKvkkConsent(userId)),
+                  onSignOut: () => signOutToRoot(context),
                 );
             }
           },
@@ -339,19 +344,58 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 }
 
+/// Oturumu "Çıkış yapılıyor..." göstererek kapatır ([LoginProvider.signOut])
+/// ve ilk sayfaya döner. İlk sayfa her zaman [AuthWrapper]'dır (giriş, KVKK
+/// onayı ve ana sayfa arasında o seçer; hiçbir sayfa onu değiştirmez):
+/// oturum kapanınca giriş sayfasını o gösterir, bu arada açılmış sayfalar
+/// (ör. bildirimden sohbet) kapanır. Çıkış başarısız olursa hata gösterilir.
+Future<void> signOutToRoot(BuildContext context) async {
+  final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
+  final LoginProvider loginProvider =
+      Provider.of<LoginProvider>(context, listen: false);
+  final LoadingDialog loading = DialogUtils.openLoading(
+    context,
+    message: DialogUtils.signingOutMessage,
+  );
+  try {
+    await loginProvider.signOut();
+  } catch (e) {
+    loading.close();
+    // Çağıran sayfa bu arada kapanmış olabilir: diyalog gezginin
+    // bağlamıyla açılır.
+    if (!navigator.mounted) return;
+    await DialogUtils.openError(
+      navigator.context,
+      title: DialogUtils.signOutFailedTitle,
+      message: DialogUtils.signOutFailedMessage,
+    );
+    return;
+  }
+  loading.close();
+  navigator.popUntil((route) => route.isFirst);
+}
+
 /// KVKK onayı okunamadığında (çevrimdışı ve cihazda kayıt yok) gösterilir:
 /// onay vermiş kullanıcıya yeniden onay sayfası açılmaz, bağlantı gelince
 /// tekrar denenir.
 class _ConsentCheckFailedPage extends StatelessWidget {
   final VoidCallback onRetry;
 
-  const _ConsentCheckFailedPage({required this.onRetry});
+  /// Bağlantı gelmese de oturum kapatılabilsin (ör. cihaz başkasına
+  /// verilecek).
+  final VoidCallback onSignOut;
+
+  const _ConsentCheckFailedPage({
+    required this.onRetry,
+    required this.onSignOut,
+  });
 
   static const String _title = 'Bağlantı kurulamadı';
   static const String _message =
       'Oturum bilgileriniz kontrol edilemedi. İnternet bağlantınızı kontrol '
       'edip tekrar deneyin.';
   static const String _retryLabel = 'Tekrar Dene';
+  static const String _signOutLabel = 'Çıkış Yap';
 
   @override
   Widget build(BuildContext context) {
@@ -379,6 +423,11 @@ class _ConsentCheckFailedPage extends StatelessWidget {
                   onPressed: onRetry,
                   icon: const Icon(Icons.refresh),
                   label: const Text(_retryLabel),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: onSignOut,
+                  child: const Text(_signOutLabel),
                 ),
               ],
             ),
@@ -864,37 +913,7 @@ class _HomePageState extends State<HomePage> {
               );
 
               if (shouldLogout == true && context.mounted) {
-                final LoginProvider loginProvider =
-                    Provider.of<LoginProvider>(context, listen: false);
-                final LoadingDialog loading = DialogUtils.openLoading(
-                  context,
-                  message: DialogUtils.signingOutMessage,
-                );
-                try {
-                  await loginProvider.signOut();
-                } catch (e) {
-                  loading.close();
-                  if (context.mounted) {
-                    await DialogUtils.openError(
-                      context,
-                      title: DialogUtils.signOutFailedTitle,
-                      message: DialogUtils.signOutFailedMessage,
-                    );
-                  }
-                  return;
-                }
-                loading.close();
-                // Çıkış sürerken bildirimden açılan bir sayfa (ör. sohbet)
-                // da kapanır: giriş sayfası tek başına kalır.
-                if (context.mounted) {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const LoginPage(),
-                    ),
-                    (route) => false,
-                  );
-                }
+                await signOutToRoot(context);
               }
                     },
                   ),
