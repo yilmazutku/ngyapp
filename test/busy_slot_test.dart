@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ngy_app/models/appointment_model.dart';
@@ -71,5 +73,25 @@ void main() {
               const TimeOfDay(hour: 10, minute: 0), const <BusySlot>[]),
           isFalse);
     });
+  });
+
+  test('BusySlot.fromDocument: süresiz eski randevu 30 dakika sayılır',
+      () async {
+    final FakeFirebaseFirestore db = FakeFirebaseFirestore();
+    final DateTime start = DateTime(2030, 1, 10, 10);
+    final DocumentReference<Map<String, dynamic>> doc =
+        db.collection(BusySlot.collection).doc('a1');
+    await doc.set({BusySlot.startField: Timestamp.fromDate(start)});
+
+    final BusySlot slot = BusySlot.fromDocument(await doc.get());
+    expect(slot.start, start);
+    expect(slot.durationMinutes, 30,
+        reason: 'AppointmentModel.fromDocument ile aynı varsayılan');
+
+    await doc.set({
+      BusySlot.startField: Timestamp.fromDate(start),
+      BusySlot.durationField: 45,
+    });
+    expect(BusySlot.fromDocument(await doc.get()).durationMinutes, 45);
   });
 }

@@ -321,8 +321,7 @@ Future<void> uploadChatMealPhoto(
 /// eklenir ([writeMealImage]): yükleme sürerken öğüne eklenen ya da öğünden
 /// silinen fotoğraflar kaybolmaz, geri gelmez. Sınır bu arada dolduysa
 /// yüklenen dosyalar silinir ve null döner. Kayıt okunamazsa ya da işlem
-/// başarısız olursa hata fırlatılır (yüklenen dosyalar silinir); sohbetin
-/// yükleme sırası yeniden dener.
+/// başarısız olursa hata fırlatılır; sohbetin yükleme sırası yeniden dener.
 ///
 /// [chatMessageId] verilirse sohbet mesajı (bu kimlikle) ve sohbet özeti de
 /// aynı işlemde yazılır: fotoğraf ya hem öğünde hem sohbette görünür ya
@@ -333,7 +332,9 @@ Future<void> uploadChatMealPhoto(
 ///
 /// İşlemin sonucu belli değilse (bağlantı hatası, zaman aşımı) yüklenen
 /// dosyalar silinmez: kayıt yazılmış olabilir ve silinmiş dosyayı gösterirdi.
-/// Yeniden deneme yazılmış mesajı görüp tekrar göndermez.
+/// Yeniden deneme yazılmış mesajı görüp tekrar göndermez. Sohbetsiz yazımda
+/// süresi dolan işlem sonradan bitip dosyaları kullanmadığını bildirirse
+/// dosyalar o zaman silinir.
 ///
 /// [observer] yüklemenin ilerlemesini izler ve iptal edebilir (bkz.
 /// [uploadImageWithThumbnail]); dosyalar yüklenmeden iptal edilirse kayıt
@@ -432,15 +433,19 @@ Future<String?> uploadMealImg({
       try {
         result = await write.timeout(_mealImageWriteTimeout);
       } catch (e) {
-        // Sonuç belli değil: yazıldıysa başarı, yazılmadıysa dosyalar
-        // silinir; anlaşılamazsa dosyalar kalır (kayıt onları gösteriyor
-        // olabilir).
-        final bool? written = await _mealHasImage(mealDocRef, uploaded.url);
-        if (written == true) {
+        // Sonuç belli değil: yazıldıysa başarı. Yazılmamış görünse de
+        // dosyalar hemen silinmez: süresi dolan işlem sonradan yazabilir ve
+        // silinmiş dosyayı gösterirdi. İşlem bitip dosyaları kullanmadığını
+        // bildirirse silinir; hatayla biterse dosyalar kalır.
+        unawaited(write.then((MealImageWrite settled) {
+          if (!_usesUploadedFiles(settled, uploaded)) {
+            unawaited(uploaded.delete());
+          }
+        }, onError: (Object _) {}));
+        if (await _mealHasImage(mealDocRef, uploaded.url) == true) {
           notifyListeners();
           return uploaded.url;
         }
-        if (written == false) unawaited(uploaded.delete());
         rethrow;
       }
     } else {
@@ -460,18 +465,10 @@ Future<String?> uploadMealImg({
 
     // Kullanılmayan dosyalar beklenmeden silinir: çevrimdışıyken silme
     // dakikalarca sürebilir, sıradakiler beklemesin.
-    switch (result.kind) {
-      case MealImageWriteKind.limitReached:
-        unawaited(uploaded.delete());
-        return null;
-      case MealImageWriteKind.alreadyPosted:
-        // Önceki deneme yazmıştı: bu denemenin dosyaları kullanılmıyor.
-        if (result.postedImageUrl != uploaded.url) {
-          unawaited(uploaded.delete());
-        }
-      case MealImageWriteKind.written:
-        break;
+    if (!_usesUploadedFiles(result, uploaded)) {
+      unawaited(uploaded.delete());
     }
+    if (result.kind == MealImageWriteKind.limitReached) return null;
     observer?.onWritten();
 
     // Kayıtlar (ve sohbet mesajı) yazıldı. İşlemle yazılan mesaj yerel
@@ -722,6 +719,20 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
   /// bekleneceği süre.
   static const Duration _preUploadReadTimeout = Duration(seconds: 30);
 
+  /// [result] yazımı yüklenen dosyaları ([uploaded]) kullanıyor mu. Sınır
+  /// dolduysa ya da önceki bir deneme başka dosyalarla yazdıysa kullanmıyor:
+  /// silinebilirler.
+  static bool _usesUploadedFiles(
+    MealImageWrite result,
+    UploadedImage uploaded,
+  ) =>
+      switch (result.kind) {
+        MealImageWriteKind.written => true,
+        MealImageWriteKind.alreadyPosted =>
+          result.postedImageUrl == uploaded.url,
+        MealImageWriteKind.limitReached => false,
+      };
+
   /// Sonucu belli olmayan sohbetsiz (admin) yazımda öğün kaydında [imageUrl]
   /// var mı (sunucudan); okunamazsa null.
   Future<bool?> _mealHasImage(
@@ -824,10 +835,17 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
           _queueChatPost(transaction, messageRef, userId, meal, image);
         }
         return (kind: MealImageWriteKind.written, postedImageUrl: image.url);
-        // Eklentinin kendi yeniden denemeleri kapalı: bir deneme süresini
-        // aşınca önceki denemenin komutları sonradan yazılabiliyor (iOS).
-        // Yeniden denemeyi sıra yapar; aynı fotoğrafı ikinci kez yazmaz.
-      }, maxAttempts: 1);
+        // Sohbet yazımında eklentinin kendi yeniden denemeleri kapalı: bir
+        // deneme süresini aşınca önceki denemenin komutları sonradan
+        // yazılabiliyor (iOS). Yeniden denemeyi sıra yapar; aynı fotoğrafı
+        // ikinci kez yazmaz. Sohbetsiz (admin) yazımın sırası yok: eklenti
+        // yeniden dener (danışanın aynı anki yazımıyla çakışınca hata vermesin);
+        // önceki denemenin komutları gelse de aynı adresi bir kez yazar.
+      }, maxAttempts: messageRef == null ? _adminWriteAttempts : 1);
+
+  /// Sohbetsiz yazımda işlemin en fazla deneme sayısı (eklentinin
+  /// varsayılanı).
+  static const int _adminWriteAttempts = 5;
 
   /// [imageUrl] fotoğrafını öğün kaydından bir işlem (transaction) içinde,
   /// kaydın en güncel hâlinden adresine göre çıkarır

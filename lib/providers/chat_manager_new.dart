@@ -335,6 +335,11 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// Sırası bu oturumda geri yüklenmiş kullanıcılar.
   final Set<String> _restoredUsers = {};
 
+  /// Gönderildiği doğrulanamayan yüklemelerin (sıra anahtarı) sohbet
+  /// mesajını izleyen dinleyiciler (bkz. [_watchPostedMessage]).
+  final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
+      _postedWatches = {};
+
   void _onAuthChanged(User? user) {
     final String? uid = user?.uid;
     if (uid == _sessionUid) return;
@@ -352,6 +357,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   void _releaseUploads() {
     _autoRetryTimer?.cancel();
     _autoRetryTimer = null;
+    _stopPostedWatches();
     for (final List<PendingUpload> uploads in _pendingUploads.values) {
       for (final PendingUpload upload in uploads) {
         if (upload.status.value != PendingUploadStatus.committing) {
@@ -561,11 +567,61 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     );
     // Uygulama kapanırsa açılışta da "belli değil" olarak geri yüklensin.
     if (upload.commitUnconfirmed) _persistUpload(upload);
+    if (upload.commitUnconfirmed && canRetry) _watchPostedMessage(upload);
     if (canRetry) {
       _scheduleAutoRetry();
     } else {
       _forgetUpload(upload);
     }
+  }
+
+  /// Gönderildiği doğrulanamayan yüklemenin sohbet mesajını izler: mesaj
+  /// sohbete düşünce (önceki denemenin işlemi yazmıştı) fotoğraf gönderilmiş
+  /// sayılır, "doğrulanamadı" baloncuğu sohbetteki fotoğrafın yanında
+  /// kalmaz. Dinleyici her başarısızlıkta yeniden kurulur: ilk olayı
+  /// mesajın şimdiki hâlidir.
+  void _watchPostedMessage(PendingUpload upload) {
+    final String key = upload.persistKey;
+    final String chatId = upload.chatId;
+    unawaited(_postedWatches.remove(key)?.cancel());
+    _postedWatches[key] = _chatDoc(chatId)
+        .collection('messages')
+        .doc(key)
+        .snapshots()
+        .listen(
+      (snapshot) {
+        if (snapshot.exists) _finishPostedUpload(chatId, key);
+      },
+      onError: (Object e) => _stopPostedWatch(key),
+    );
+  }
+
+  /// Mesajı sohbete düşen yüklemenin baloncuğunu kaldırır. Yeniden denemesi
+  /// sürüyorsa o kendi sonucunu bulur (aynı mesaj kimliği; dinleyici o
+  /// deneme de doğrulanamazsa yeniden kurulur).
+  void _finishPostedUpload(String chatId, String key) {
+    final PendingUpload? current = pendingUploadsOf(chatId)
+        .where((upload) => upload.persistKey == key)
+        .firstOrNull;
+    if (current == null) {
+      _stopPostedWatch(key);
+      return;
+    }
+    if (current.status.value != PendingUploadStatus.failed) return;
+    _forgetUpload(current);
+    _removePendingUpload(current);
+    _deleteUploadFile(current);
+  }
+
+  void _stopPostedWatch(String key) =>
+      unawaited(_postedWatches.remove(key)?.cancel());
+
+  void _stopPostedWatches() {
+    for (final StreamSubscription<DocumentSnapshot<Map<String, dynamic>>> watch
+        in _postedWatches.values) {
+      unawaited(watch.cancel());
+    }
+    _postedWatches.clear();
   }
 
   /// Kendiliğinden yeniden denenecek yüklemeler.
@@ -638,6 +694,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     _authSubscription.cancel();
     _autoRetryTimer?.cancel();
+    _stopPostedWatches();
     if (_observingLifecycle) WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -780,7 +837,10 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  void _forgetUpload(PendingUpload upload) => _forgetKey(upload.persistKey);
+  void _forgetUpload(PendingUpload upload) {
+    _stopPostedWatch(upload.persistKey);
+    _forgetKey(upload.persistKey);
+  }
 
   void _forgetKey(String key) {
     _updatePersistedUploads((entries) => entries.remove(key));

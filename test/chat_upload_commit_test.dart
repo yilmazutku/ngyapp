@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -18,9 +17,6 @@ import 'package:ngy_app/utils/storage_upload.dart';
 import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
-
-/// Sıra işlerken Firebase'e dokunulmaz; yalnızca kurucu için.
-class _FakeFirestore extends Fake implements FirebaseFirestore {}
 
 /// Oturum değişiklikleri testten verilir ([changes]).
 class _FakeAuth extends Fake implements FirebaseAuth {
@@ -93,7 +89,7 @@ void main() {
         .setMockMethodCallHandler(_pathProvider, (call) async => temporary.path);
     SharedPreferences.setMockInitialValues({});
     chat = ChatManager(
-      db: _FakeFirestore(),
+      db: FakeFirebaseFirestore(),
       auth: _FakeAuth(),
       storage: _FakeStorage(),
     );
@@ -233,7 +229,7 @@ void main() {
       'sonradan yazarsa baloncuk kalkar', (tester) async {
     // Kendiliğinden yeniden deneme zamanlayıcısı test bitmeden kapansın.
     final ChatManager chat = ChatManager(
-      db: _FakeFirestore(),
+      db: FakeFirebaseFirestore(),
       auth: _FakeAuth(),
       storage: _FakeStorage(),
     );
@@ -329,7 +325,7 @@ void main() {
         () async {
       final _FakeAuth auth = _FakeAuth();
       final ChatManager chat = ChatManager(
-        db: _FakeFirestore(),
+        db: FakeFirebaseFirestore(),
         auth: auth,
         storage: _FakeStorage(),
       );
@@ -374,7 +370,7 @@ void main() {
     test('başka hesaba geçince de çekilir', () async {
       final _FakeAuth auth = _FakeAuth();
       final ChatManager chat = ChatManager(
-        db: _FakeFirestore(),
+        db: FakeFirebaseFirestore(),
         auth: auth,
         storage: _FakeStorage(),
       );
@@ -453,6 +449,108 @@ void main() {
 
       expect(find.byIcon(Icons.close), findsNothing);
       expect(find.text('İptal').hitTestable(), findsNothing);
+    });
+
+    for (final TargetPlatform platform in [
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    ]) {
+      test(
+          '${platform.name}: mesajı sohbete düşünce gönderilmiş sayılır; '
+          'baloncuk, sıra kaydı ve geçici dosya kalkar', () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final FakeFirebaseFirestore db = FakeFirebaseFirestore();
+        final ChatManager chat = ChatManager(
+          db: db,
+          auth: _FakeAuth(),
+          storage: _FakeStorage(),
+        );
+        addTearDown(chat.dispose);
+        chat.enqueueUploads([
+          uploadOf((upload) async {
+            _filesUploaded(upload);
+            throw const UploadFailure(
+              PendingUpload.unconfirmedText,
+              unconfirmed: true,
+            );
+          }),
+        ]);
+        await _waitUntil(() =>
+            chat.pendingUploadsOf(_chatId).single.status.value ==
+            PendingUploadStatus.failed);
+        final PendingUpload upload = chat.pendingUploadsOf(_chatId).single;
+        final File photo = File(upload.image.path);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(chat.pendingUploadsOf(_chatId), [upload],
+            reason: 'mesaj yokken baloncuk kalır');
+        expect(await _persistedKeys(), {upload.persistKey});
+
+        await db
+            .collection('chats')
+            .doc(_chatId)
+            .collection('messages')
+            .doc(upload.persistKey)
+            .set({'imageUrl': 'https://x/a.jpg', 'senderId': _chatId});
+        await _waitUntil(() => chat.pendingUploadsOf(_chatId).isEmpty);
+
+        expect(chat.pendingUploadsOf(_chatId), isEmpty,
+            reason: 'fotoğraf sohbette: "doğrulanamadı" baloncuğu kalmaz');
+        await _waitUntil(() => !photo.existsSync());
+        expect(photo.existsSync(), isFalse);
+        for (int i = 0; i < 100 && (await _persistedKeys()).isNotEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        expect(await _persistedKeys(), isEmpty,
+            reason: 'açılışta yeniden gönderilmez');
+      });
+    }
+
+    test(
+        'yeniden denemesi sürerken mesaj düşerse deneme yarıda kesilmez, '
+        'kendi sonucunu bulur', () async {
+      final FakeFirebaseFirestore db = FakeFirebaseFirestore();
+      final ChatManager chat = ChatManager(
+        db: db,
+        auth: _FakeAuth(),
+        storage: _FakeStorage(),
+      );
+      addTearDown(chat.dispose);
+      final Completer<void> retry = Completer<void>();
+      int attempts = 0;
+      chat.enqueueUploads([
+        uploadOf((upload) async {
+          attempts++;
+          if (attempts == 1) {
+            throw const UploadFailure(
+              PendingUpload.unconfirmedText,
+              unconfirmed: true,
+            );
+          }
+          await retry.future;
+          upload.onSaving();
+        }),
+      ]);
+      await _waitUntil(() =>
+          chat.pendingUploadsOf(_chatId).single.status.value ==
+          PendingUploadStatus.failed);
+      chat.retryUpload(chat.pendingUploadsOf(_chatId).single);
+      final PendingUpload copy = chat.pendingUploadsOf(_chatId).single;
+      await _waitUntil(() => attempts == 2);
+
+      await db
+          .collection('chats')
+          .doc(_chatId)
+          .collection('messages')
+          .doc(copy.persistKey)
+          .set({'imageUrl': 'https://x/a.jpg', 'senderId': _chatId});
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(chat.pendingUploadsOf(_chatId), [copy]);
+      expect(copy.status.value, PendingUploadStatus.uploading);
+
+      retry.complete();
+      await _waitUntil(() => chat.pendingUploadsOf(_chatId).isEmpty);
+      expect(chat.pendingUploadsOf(_chatId), isEmpty);
     });
 
     test('yeniden denenemiyorsa (sınır doldu) kaldırılabilir', () async {

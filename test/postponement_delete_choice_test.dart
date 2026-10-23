@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ngy_app/models/appointment_model.dart';
+import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/postponement_notices.dart';
 
 void main() {
@@ -131,5 +132,36 @@ void main() {
             appointment(postponedBy: PostponeSource.admin, sub: 's1'),
             returned: false),
         isEmpty);
+  });
+
+  testWidgets(
+      'openAttentionChoice: seçili kutucuğa yeniden dokununca seçim kalkar, '
+      'onay kapanır', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () => DialogUtils.openAttentionChoice<bool>(
+            context,
+            title: 'Başlık',
+            message: 'Mesaj',
+            options: const [(true, 'Evet'), (false, 'Hayır')],
+            confirmText: 'Sil',
+          ),
+          child: const Text('aç'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('aç'));
+    await tester.pumpAndSettle();
+    FilledButton confirm() =>
+        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Sil'));
+
+    await tester.tap(find.text('Evet'));
+    await tester.pump();
+    expect(confirm().onPressed, isNotNull);
+
+    await tester.tap(find.text('Evet'));
+    await tester.pump();
+    expect(confirm().onPressed, isNull);
   });
 }

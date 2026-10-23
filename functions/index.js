@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const admin = require('firebase-admin');
+const {FieldValue} = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const {onDocumentCreated, onDocumentUpdated, onDocumentWritten} =
 require('firebase-functions/v2/firestore');
@@ -1260,6 +1261,54 @@ exports.notifyUsersOnNewsPublished = onDocumentUpdated(
       }
 
       logger.info(`News publish notification sent for: ${newsId}`);
+    },
+);
+
+// =============================================================================
+// FCM TOKEN: BİR CİHAZ, BİR HESAP
+// Bir cihazın bildirim jetonu (fcmToken) yalnızca o cihazda en son giren
+// hesabın kaydında durur. Çevrimdışı çıkışta jeton kayıttan silinemez: silme,
+// çıkan kullanıcının yazma sırasında kalır ve ancak o kullanıcı aynı cihazda
+// yeniden girince gider. Sonra giren hesap aynı jetonu kendi kaydına yazınca
+// jeton önceki hesabın kaydından burada silinir: önceki kullanıcının
+// bildirimleri (mesaj önizlemeleri) yeni kullanıcının cihazına gitmez.
+// =============================================================================
+
+/**
+ * users/{userId}.fcmToken yazılınca aynı jetonu taşıyan diğer kullanıcı
+ * kayıtlarından jetonu siler. Her kayıt bir işlem içinde yeniden okunur:
+ * jeton bu arada değiştiyse dokunulmaz. Silme bu tetikleyiciyi yeniden
+ * çalıştırır, jeton boş olduğundan orada durur.
+ *
+ * Path: users/{userId}
+ */
+exports.releaseFcmTokenFromOtherUsers = onDocumentWritten(
+    'users/{userId}',
+    async (event) => {
+      const before = event.data && event.data.before.data();
+      const after = event.data && event.data.after.data();
+      const token = after && after.fcmToken;
+      if (typeof token !== 'string' || token === '') return;
+      if (before && before.fcmToken === token) return;
+
+      const {userId} = event.params;
+      const db = admin.firestore();
+      const holders = await db.collection('users')
+          .where('fcmToken', '==', token)
+          .get();
+      const others = holders.docs.filter((doc) => doc.id !== userId);
+      await Promise.all(others.map((doc) => db.runTransaction(async (tx) => {
+        const fresh = await tx.get(doc.ref);
+        if (fresh.exists && fresh.get('fcmToken') === token) {
+          tx.update(doc.ref, {fcmToken: FieldValue.delete()});
+        }
+      })));
+      if (others.length > 0) {
+        logger.info('Released FCM token from other users', {
+          userId,
+          released: others.map((doc) => doc.id),
+        });
+      }
     },
 );
 

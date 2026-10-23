@@ -171,6 +171,9 @@ async function run(rulesFile) {
   await check('I5 Profilim save (age + preferences)', true, () => u1().set({ age: 34, mealNotificationsEnabled: true, announcementNotificationsEnabled: false }, { merge: true }));
   await check('I6 meal reminder toggle', true, () => u1().set({ mealNotificationsEnabled: false }, { merge: true }));
   await check('I7 account deletion request', true, () => u1().set({ isUserRequestedRemoval: true }, { merge: true }));
+  await check('I7c account deletion request in transaction (UserProvider.requestAccountRemoval)', true, () => { const d = db('u1'); return d.runTransaction(async (tx) => {
+    tx.update(d.collection('users').doc('u1'), { isUserRequestedRemoval: true });
+  }); });
   await check('I7b withdraw deletion request', false, () => u1().set({ isUserRequestedRemoval: false }, { merge: true }));
   const day = () => u1().collection('meals').doc('2026-10-21');
   await check('I8 meal day state + reminder cancel (new day)', true, () => day().set({ meals: { lunch: true }, reminderCancelled: { lunch: true } }, { merge: true }));
