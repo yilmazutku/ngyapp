@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ngy_app/widgets/full_screen_image_page.dart';
+import 'package:ngy_app/widgets/reaction_picker.dart';
 
 void main() {
-  const String reactionsText = 'ifadeler';
-
   const String deleteText = 'Fotoğrafı Sil';
   const String deleteResult = 'sil';
 
-  /// Sohbetteki gibi açar: admin'de altta ortalanmış ifade satırı, danışanda
-  /// sağ üstte "Fotoğrafı Sil". Görüntüleyicinin sonucunu döner.
+  /// Sohbetteki gibi açar: admin'de altta ortalanmış ifade satırı
+  /// ([LiveReactionRow]), danışanda sağ üstte "Fotoğrafı Sil".
+  /// Görüntüleyicinin sonucunu döner.
   Future<Future<String?>> openViewer(
     WidgetTester tester, {
     bool asClient = false,
@@ -35,9 +35,15 @@ void main() {
           : null,
       bottomBarBuilder: asClient
           ? null
-          : (_) => const Padding(
-                padding: EdgeInsets.all(8),
-                child: Center(child: Text(reactionsText)),
+          : (_) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Center(
+                  child: LiveReactionRow(
+                    currentEmoji: null,
+                    errorText: 'İfade kaydedilemedi.',
+                    onReact: (emoji, current) async {},
+                  ),
+                ),
               ),
     );
     await tester.pumpAndSettle();
@@ -135,15 +141,47 @@ void main() {
     expect(find.byType(FullScreenImagePage), findsOneWidget);
   });
 
-  testWidgets('alt çubuk fotoğrafın altında, yalnızca içeriği kadar',
-      (tester) async {
+  testWidgets('admin: ifade satırı en altta, yatayda ortada', (tester) async {
     await openViewer(tester);
     final Size screen = screenOf(tester);
 
-    final Rect reactions = tester.getRect(find.text(reactionsText));
+    final Rect reactions = tester.getRect(find.byType(LiveReactionRow));
     expect(reactions.center.dx, closeTo(screen.width / 2, 1),
         reason: 'yatayda ortada');
-    expect(reactions.bottom, greaterThan(screen.height * 0.9),
-        reason: 'ekranın altında, dikeyde ortada değil');
+    expect(reactions.bottom, greaterThan(screen.height - 24),
+        reason: 'ekranın en altında, dikeyde ortada değil');
   });
+
+  for (final bool asClient in [false, true]) {
+    testWidgets(
+        '${asClient ? 'danışan' : 'admin'} (iPhone): hiçbir şey fotoğrafın '
+        'üstüne binmez, fotoğraf karartılmaz', (tester) async {
+      tester.view.physicalSize = const Size(1179, 2556);
+      tester.view.devicePixelRatio = 3;
+      tester.view.padding = const FakeViewPadding(top: 177, bottom: 102);
+      addTearDown(tester.view.reset);
+      await openViewer(tester, asClient: asClient);
+      final Size screen = screenOf(tester);
+
+      final Rect photo = tester.getRect(find.byType(InteractiveViewer));
+      final Rect close = tester.getRect(find.byIcon(Icons.close));
+      expect(photo.top, greaterThanOrEqualTo(close.bottom),
+          reason: 'çarpı ve başlık fotoğrafın üstünde, ayrı satırda');
+      if (asClient) {
+        expect(photo.bottom, screen.height, reason: 'alt çubuk yok');
+      } else {
+        final Rect reactions = tester.getRect(find.byType(LiveReactionRow));
+        expect(photo.bottom, lessThanOrEqualTo(reactions.top),
+            reason: 'ifade satırı fotoğrafın altında, ayrı satırda');
+      }
+      expect(photo.height, greaterThan(screen.height * 0.7),
+          reason: 'fotoğraf ekranın çoğunu kaplar');
+      expect(
+        find.byWidgetPredicate((widget) =>
+            widget is Container && widget.color == Colors.black54),
+        findsNothing,
+        reason: 'fotoğrafın üstünde yarı saydam katman yok',
+      );
+    });
+  }
 }
