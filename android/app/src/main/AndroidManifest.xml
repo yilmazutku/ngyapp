@@ -19,6 +19,16 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <!-- Uygulama içi kamera (camera paketi) yalnızca fotoğraf çeker: paketin
+         eklediği mikrofon ve eski Android'lerdeki depolama izinleri
+         kaldırılır; kamerası olmayan cihazlar da uygulamayı kurabilir. -->
+    <uses-feature android:name="android.hardware.camera.any"
+        android:required="false"
+        tools:replace="android:required" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO"
+        tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        tools:node="remove" />
 
      <application
          android:label="Dyt. Nilay Göktepe Yılmaz"
