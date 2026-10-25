@@ -163,6 +163,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const String _officeLabel = 'Diyetisyen';
   static const String _clientFallbackLabel = 'Danışan';
   static const String _chatMenuTooltip = 'Diğer işlemler';
+  static const String _removeReactionErrorTitle = 'İfade Silinemedi';
+  static const String _removeReactionErrorText =
+      'İfade silinemedi. Lütfen tekrar deneyin.';
   static const String _viewerReactErrorText =
       'İfade kaydedilemedi. Lütfen tekrar deneyin.';
   static const String _deleteChatLabel = 'Sohbeti Sil';
@@ -1438,6 +1441,29 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _refreshOlderMessage(message.id);
   }
 
+  /// İfade rozetine dokunma yalnızca admin'de: kendi ifadesini kaldırır.
+  void Function(MessageData message)? get _ownReactionTapHandler =>
+      _isAdminUser ? _confirmRemoveOwnReaction : null;
+
+  /// Admin kendi bıraktığı ifadenin rozetine dokundu: "İfade silinsin mi?"
+  /// sorusuna "Evet" derse ifade kaldırılır, "Hayır" derse kalır.
+  Future<void> _confirmRemoveOwnReaction(MessageData message) async {
+    final String? emoji = message.reactions[_currentUid];
+    if (emoji == null) return;
+    if (!await confirmRemoveReaction(context, emoji) || !mounted) return;
+    try {
+      await _chatManager.removeReaction(_chatId, message.id);
+      _refreshOlderMessage(message.id);
+    } catch (e) {
+      if (!mounted) return;
+      DialogUtils.openError(
+        context,
+        title: _removeReactionErrorTitle,
+        message: _removeReactionErrorText,
+      );
+    }
+  }
+
   /// Mesaj menüsünde (uzun basma / sağ tık) seçilen işlem.
   void _handleMessageAction(MessageData message, MessageAction action) {
     if (!mounted) return;
@@ -1983,6 +2009,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           onImageTap: _openPhoto,
           onToggleReaction: _handleToggleReaction,
           onAction: _handleMessageAction,
+          onOwnReactionTap: _ownReactionTapHandler,
         );
       }
 
@@ -2001,6 +2028,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         onToggleReaction: _handleToggleReaction,
         onAction: _handleMessageAction,
         onReplyTap: _focusOn,
+        onOwnReactionTap: _ownReactionTapHandler,
       );
     }
 
@@ -2204,6 +2232,18 @@ class _ChatRow {
       messages.any((message) => message.id == messageId);
 }
 
+/// Bakan [message]'a kendi ifadesini bıraktıysa rozete dokununca
+/// [onOwnReactionTap]'i çağıran işlev; bırakmadıysa (ör. rozette yalnızca
+/// diğer kişinin ifadesi var) rozet dokunulmaz.
+VoidCallback? _ownReactionTap(
+  MessageData message,
+  String myUid,
+  void Function(MessageData message)? onOwnReactionTap,
+) =>
+    onOwnReactionTap == null || !message.reactions.containsKey(myUid)
+        ? null
+        : () => onOwnReactionTap(message);
+
 /// Albüm baloncuğu: aynı öğünün arka arkaya gönderilen fotoğrafları tek
 /// baloncukta, iki sütunlu kare ızgarada (tek kalan son fotoğraf tam
 /// genişlikte). Her fotoğraf kendi mesajıdır: dokununca tam ekranda açılır,
@@ -2222,6 +2262,9 @@ class _AlbumBubble extends StatelessWidget {
   final void Function(MessageData message, String emoji) onToggleReaction;
   final void Function(MessageData message, MessageAction action) onAction;
 
+  /// Bakan kendi ifadesinin rozetine dokununca (bkz. [_ownReactionTap]).
+  final void Function(MessageData message)? onOwnReactionTap;
+
   const _AlbumBubble({
     required this.messages,
     required this.isMe,
@@ -2233,6 +2276,7 @@ class _AlbumBubble extends StatelessWidget {
     required this.onImageTap,
     required this.onToggleReaction,
     required this.onAction,
+    this.onOwnReactionTap,
   });
 
   /// Izgaradaki fotoğraflar arası boşluk.
@@ -2345,7 +2389,10 @@ class _AlbumBubble extends StatelessWidget {
               Positioned(
                 left: 4,
                 bottom: 0,
-                child: ReactionBadge(reactions: message.reactions),
+                child: ReactionBadge(
+                  reactions: message.reactions,
+                  onTap: _ownReactionTap(message, myUid, onOwnReactionTap),
+                ),
               ),
           ],
         ),
@@ -2454,6 +2501,9 @@ class _MessageBubble extends StatelessWidget {
   /// Alıntıya dokununca yanıtlanan mesaja gidilir.
   final void Function(String messageId) onReplyTap;
 
+  /// Bakan kendi ifadesinin rozetine dokununca (bkz. [_ownReactionTap]).
+  final void Function(MessageData message)? onOwnReactionTap;
+
   const _MessageBubble({
     required this.message,
     required this.isMe,
@@ -2467,6 +2517,7 @@ class _MessageBubble extends StatelessWidget {
     required this.onToggleReaction,
     required this.onAction,
     required this.onReplyTap,
+    this.onOwnReactionTap,
   });
 
   /// Fotoğraflı baloncuğun iç boşluğu.
@@ -2597,7 +2648,10 @@ class _MessageBubble extends StatelessWidget {
             body,
             // Reactions left on this message (shown to everyone in the chat).
             if (message.reactions.isNotEmpty)
-              ReactionBadge(reactions: message.reactions),
+              ReactionBadge(
+                reactions: message.reactions,
+                onTap: _ownReactionTap(message, myUid, onOwnReactionTap),
+              ),
           ],
         ),
       ),
