@@ -39,6 +39,10 @@ Future<T?> showFullScreenImage<T>(
 /// koyu zeminli kapatma düğmesi, aşağı ya da yukarı kaydırarak kapatma
 /// (yakınlaştırılmamışken) ve masaüstünde Esc. Orijinal inerken varsa küçük
 /// görsel gösterilir; ekran boş kalmaz.
+///
+/// Üst çubuk (çarpı, başlık) fotoğrafın üstünde, alt çubuk (ör. ifade
+/// satırı) altında kendi satırındadır: hiçbir şey fotoğrafın üstüne binmez,
+/// fotoğraf karartılmaz.
 class FullScreenImagePage extends StatefulWidget {
   final String imageUrl;
   final String? thumbUrl;
@@ -175,51 +179,40 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
         autofocus: true,
         child: Material(
           color: Colors.black.withValues(alpha: backgroundOpacity),
-          child: Stack(
-            fit: StackFit.expand,
+          child: Column(
             children: [
-              GestureDetector(
-                onVerticalDragUpdate: _zoomed ? null : _onDragUpdate,
-                onVerticalDragEnd: _zoomed ? null : _onDragEnd,
-                onDoubleTapDown: (details) =>
-                    _doubleTapPosition = details.localPosition,
-                onDoubleTap: _toggleDoubleTapZoom,
-                child: Transform.translate(
-                  offset: Offset(0, _dragOffset),
-                  child: InteractiveViewer(
-                    transformationController: _transformation,
-                    minScale: _minScale,
-                    maxScale: _maxScale,
-                    panEnabled: _zoomed,
-                    onInteractionEnd: (_) => _updateZoomed(),
-                    child: Center(child: _buildImage()),
+              _buildTopBar(context),
+              Expanded(
+                child: GestureDetector(
+                  onVerticalDragUpdate: _zoomed ? null : _onDragUpdate,
+                  onVerticalDragEnd: _zoomed ? null : _onDragEnd,
+                  onDoubleTapDown: (details) =>
+                      _doubleTapPosition = details.localPosition,
+                  onDoubleTap: _toggleDoubleTapZoom,
+                  child: Transform.translate(
+                    offset: Offset(0, _dragOffset),
+                    child: InteractiveViewer(
+                      transformationController: _transformation,
+                      minScale: _minScale,
+                      maxScale: _maxScale,
+                      panEnabled: _zoomed,
+                      onInteractionEnd: (_) => _updateZoomed(),
+                      child: Center(child: _buildImage()),
+                    ),
                   ),
                 ),
               ),
               if (bottomBarBuilder != null)
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  // Çubuk koyu zeminde: içindeki düğmeler ve yazılar koyu
-                  // temayla çizilir.
-                  child: Theme(
-                    data: ThemeData.dark(useMaterial3: true),
-                    child: Container(
-                      width: double.infinity,
-                      color: Colors.black54,
-                      child: SafeArea(
-                        top: false,
-                        // Çubuk içeriği kadar yer kaplar: içindeki Center
-                        // ekran boyunca uzayıp fotoğrafı, çarpıyı ve aşağı
-                        // kaydırmayı örtmez.
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [Builder(builder: bottomBarBuilder)],
-                        ),
-                      ),
-                    ),
+                // Çubuk siyah zeminde: içindeki düğmeler ve yazılar koyu
+                // temayla çizilir. Satırda kendi yüksekliği kadar yer kaplar,
+                // içindeki Center yalnızca yatayda ortalar.
+                Theme(
+                  data: ThemeData.dark(useMaterial3: true),
+                  child: SafeArea(
+                    top: false,
+                    child: Builder(builder: bottomBarBuilder),
                   ),
                 ),
-              _buildTopBar(context),
             ],
           ),
         ),
@@ -231,56 +224,53 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
     final String? title = widget.title;
     final WidgetBuilder? topActionBuilder = widget.topActionBuilder;
 
-    return Align(
-      alignment: Alignment.topCenter,
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              IconButton.filled(
-                tooltip: _closeTooltip,
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black54,
-                  foregroundColor: Colors.white,
-                ),
-                icon: const Icon(Icons.close),
-                onPressed: _close,
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            IconButton.filled(
+              tooltip: _closeTooltip,
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.black54,
+                foregroundColor: Colors.white,
               ),
-              const SizedBox(width: _topBarGap),
-              // Başlık kalan yere sığmazsa kısalır; sağdaki işlem yerinde
-              // kalır.
-              Expanded(
-                child: title == null
-                    ? const SizedBox.shrink()
-                    : Align(
-                        alignment: Alignment.centerLeft,
-                        // Çubuk başlık kadar yüksek kalır; ekran boyunca
-                        // uzayıp fotoğrafı örtmez.
-                        heightFactor: 1,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.black87,
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: _titleStyle,
-                          ),
+              icon: const Icon(Icons.close),
+              onPressed: _close,
+            ),
+            const SizedBox(width: _topBarGap),
+            // Başlık kalan yere sığmazsa kısalır; sağdaki işlem yerinde
+            // kalır.
+            Expanded(
+              child: title == null
+                  ? const SizedBox.shrink()
+                  : Align(
+                      alignment: Alignment.centerLeft,
+                      // Çubuk başlık kadar yüksek kalır; ekran boyunca
+                      // uzayıp fotoğrafı örtmez.
+                      heightFactor: 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: _titleStyle,
                         ),
                       ),
-              ),
-              if (topActionBuilder != null) ...[
-                const SizedBox(width: _topBarGap),
-                Builder(builder: topActionBuilder),
-              ],
+                    ),
+            ),
+            if (topActionBuilder != null) ...[
+              const SizedBox(width: _topBarGap),
+              Builder(builder: topActionBuilder),
             ],
-          ),
+          ],
         ),
       ),
     );

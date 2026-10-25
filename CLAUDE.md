@@ -12,9 +12,10 @@
 - Proje kuralları `.cursor/rules/` altındadır; her değişiklikten önce geçerli olanlar okunur.
 - **Var olan widget'lar yeterliyse yenisi tanımlanmaz, var olan kullanılır.** Yeni widget ya da yardımcı yazmadan önce `lib/widgets`, `lib/utils`, `lib/services` ve ilgili sayfalarda benzeri aranır; neredeyse yeterliyse genişletilir, sayfaya özel bir widget başka yerde gerekiyorsa ortak dosyaya taşınır (bkz. `.cursor/rules/reuse_existing.mdc`).
 - Değişiklikten sonra `flutter analyze lib` çalıştırılır: hata bırakılmaz, dokunulan dosyalarda yeni uyarı bırakılmaz.
+- **Analiz ve testler Xcode Cloud'un kullandığı Flutter sürümüyle çalıştırılır** (`ios/ci_scripts/ci_post_clone.sh` içindeki `FLUTTER_VERSION`, şu an 3.41.0); başka bir sürümle geçen test sayılmaz. Paket eklenince `pubspec.lock` da bu sürümle üretilip commit'e eklenir (paket sürümleri bu Flutter'ın desteklediklerinden seçilir).
 - Firestore ve Storage güvenlik kuralları `firestore.rules` ve `storage.rules`'dadır ve Firebase Console'dakilerle aynı tutulur. Yazılan alan, koleksiyon ya da Storage yolu değişirse (ör. danışanın yeni bir yere dosya yüklemesi) kurallar da gözden geçirilir; kural değişince `tools/firestore_rules_test` içinde `npm install && npm test` ile emülatörde denenir (Java gerekir).
 - `functions/index.js`'teki `busySlots` aynası ya da bildirim jetonu devri (`releaseFcmTokenFromOtherUsers`) değişince `tools/functions_test` içinde emülatörde denenir: önce `functions` klasöründe `npm ci`, sonra `tools/functions_test`'te `npm install && npm test`.
-- `flutter analyze` çalışırken `analysis_options.yaml`, `pubspec.lock` ve `lib/l10n/app_localizations.dart` (gen-l10n çıktısı) dosyalarını değiştirebiliyor; bunlar commit'e dahil edilmez.
+- `flutter analyze` çalışırken `analysis_options.yaml`, `pubspec.lock` ve `lib/l10n/app_localizations.dart` (gen-l10n çıktısı) dosyalarını değiştirebiliyor; bunlar commit'e dahil edilmez (paket eklenmedikçe `pubspec.lock` da).
 
 ## Ürün kuralları
 - **Öğün fotoğrafları yalnızca sohbetten yüklenir**; sohbet dışında (Planım vb.) fotoğraf yükleme yolu yoktur. Her öğün fotoğrafının sohbette bir mesajı vardır; "sohbette mesajı olmayan fotoğraf" durumu için ayrıca uyarı ya da not gösterilmez.
