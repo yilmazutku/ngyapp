@@ -149,7 +149,7 @@ void main() {
     final _Closing closing =
         await pumpEditor(tester, systemGestureInsets: systemGestureInsets);
     await edit();
-    await tester.tap(find.byTooltip('Tamam'));
+    await tester.tap(find.byTooltip('Gönder'));
     await waitUntilClosed(tester, closing);
     return closing.result;
   }
@@ -221,7 +221,7 @@ void main() {
     expect(find.byType(PhotoEditPage), findsOneWidget);
     expect(closing.closed, isFalse);
 
-    await tester.tap(find.byTooltip('Tamam'));
+    await tester.tap(find.byTooltip('Gönder'));
     await waitUntilClosed(tester, closing);
     expect(closing.result!.path, endsWith('source.png'));
   });
@@ -256,7 +256,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Sağa döndür'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Tamam'));
+    await tester.tap(find.byTooltip('Gönder'));
     await tester.binding.handlePopRoute();
     await tester.pump();
     expect(find.text(_discardMessage), findsNothing);
@@ -299,7 +299,7 @@ void main() {
     final _Closing closing = await pumpEditor(tester);
     await tester.tap(find.byTooltip('Sağa döndür'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Tamam'));
+    await tester.tap(find.byTooltip('Gönder'));
     await tester.pump();
 
     tester.state<NavigatorState>(find.byType(Navigator)).push(
@@ -351,5 +351,32 @@ void main() {
     await tester.tap(find.text('Düzenlemeye dön'));
     await waitUntilClosed(tester, closing);
     expect(closing.result!.path, endsWith('bad.jpg'));
+  });
+  testWidgets(
+      'yerleşim: sağ üstte çarpı, sol üstte "Sıfırla", sağ altta yeşil '
+      'gönder düğmesi', (tester) async {
+    await pumpEditor(tester);
+    final Size screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+
+    final Rect close = tester.getRect(find.byTooltip('Vazgeç'));
+    expect(close.right, greaterThan(screen.width - 16), reason: 'sağda');
+    expect(close.top, lessThan(screen.height * 0.2), reason: 'üstte');
+
+    final Rect reset = tester.getRect(find.text('Sıfırla'));
+    expect(reset.left, lessThan(screen.width * 0.2), reason: 'solda');
+    expect(reset.center.dy, closeTo(close.center.dy, 1));
+
+    final Finder send = find.byTooltip('Gönder');
+    final Rect sendRect = tester.getRect(send);
+    expect(sendRect.right, greaterThan(screen.width - 32), reason: 'sağda');
+    expect(sendRect.bottom, greaterThan(screen.height * 0.8), reason: 'altta');
+    expect(
+      find.descendant(of: send, matching: find.byIcon(Icons.send)),
+      findsOneWidget,
+    );
+    final FloatingActionButton button = tester.widget<FloatingActionButton>(
+      find.ancestor(of: send, matching: find.byType(FloatingActionButton)),
+    );
+    expect(button.backgroundColor, const Color(0xFF25D366), reason: 'yeşil');
   });
 }

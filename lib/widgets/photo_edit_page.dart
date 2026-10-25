@@ -27,7 +27,8 @@ Future<XFile?> showPhotoEditPage(BuildContext context, XFile photo) {
 
 /// WhatsApp'taki gibi fotoğraf düzenleme ekranı: köşelerinden ve
 /// kenarlarından sürüklenen kırpma çerçevesi (içinden tutulunca çerçeve
-/// taşınır), sola ve sağa 90 derecelik döndürme, "Sıfırla" ve onay.
+/// taşınır), sola ve sağa 90 derecelik döndürme, sol üstte "Sıfırla", sağ
+/// üstte vazgeçme çarpısı ve sağ altta yeşil gönder düğmesi.
 ///
 /// Fotoğraf ekranda düzenlenebilecek bir ölçüye küçültülerek çözülür
 /// ([_PhotoEditPageState._maxDecodeSide]); yüklemede zaten daha küçük bir
@@ -47,7 +48,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   static const String _resetLabel = 'Sıfırla';
   static const String _rotateLeftTooltip = 'Sola döndür';
   static const String _rotateRightTooltip = 'Sağa döndür';
-  static const String _doneTooltip = 'Tamam';
+  static const String _doneTooltip = 'Gönder';
   static const String _errorTitle = 'Hata';
   static const String _exportErrorText =
       'Fotoğraf düzenlenemedi. Lütfen tekrar deneyin.';
@@ -501,15 +502,15 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         children: [
+          TextButton(
+            onPressed: _changed && !_saving ? _reset : null,
+            child: const Text(_resetLabel),
+          ),
+          const Spacer(),
           IconButton(
             tooltip: _cancelTooltip,
             icon: const Icon(Icons.close),
             onPressed: _saving ? null : _confirmDiscard,
-          ),
-          const Spacer(),
-          TextButton(
-            onPressed: _changed && !_saving ? _reset : null,
-            child: const Text(_resetLabel),
           ),
         ],
       ),
@@ -585,7 +586,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
                       color: Colors.white,
                     ),
                   )
-                : const Icon(Icons.check),
+                : const Icon(Icons.send),
           ),
         ],
       ),

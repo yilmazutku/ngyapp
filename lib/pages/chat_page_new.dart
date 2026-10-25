@@ -1,5 +1,4 @@
 // lib/pages/chat_page_new.dart
-import 'dart:async' show unawaited;
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
@@ -29,7 +28,7 @@ import 'package:ngy_app/widgets/full_screen_image_page.dart';
 import 'package:ngy_app/widgets/home_button.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
 import 'package:ngy_app/widgets/meal_thumbnail_image.dart';
-import 'package:ngy_app/widgets/photo_edit_page.dart';
+import 'package:ngy_app/widgets/camera_capture_page.dart';
 import 'package:ngy_app/widgets/reaction_badge.dart';
 import 'package:ngy_app/widgets/reaction_picker.dart';
 import 'package:ngy_app/pages/admin_meal_photos_page.dart';
@@ -38,7 +37,6 @@ import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
 import 'package:ngy_app/utils/menu_utils.dart';
-import 'package:ngy_app/utils/temp_photo_files.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 
 import '../constants/app_constants.dart';
@@ -576,30 +574,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   /// Fotoğraf seçtirir: kameradan tek, galeriden en fazla [limit] tane.
-  /// Kamerayla çekilen fotoğraf göndermeden önce kırpılıp döndürülebilir
-  /// ([showPhotoEditPage]). Kamera izni yoksa ya da vazgeçilirse boş liste
-  /// döner. Galeri için izin sorulmaz: sistemin fotoğraf seçicisi (iOS'ta
-  /// PHPicker, Android'de Photo Picker, masaüstünde dosya seçici) izin
-  /// istemez; masaüstünde kamera izni de sorulmaz.
-  ///
-  /// Kameranın yazdığı dosya, düzenlenmiş kopyası gönderilecekse ya da
-  /// fotoğraftan vazgeçildiyse silinir ([TempPhotoFiles.delete]).
+  /// Kamera uygulamanın içinde açılır ([showCameraCapturePage]): çekilen
+  /// fotoğraf doğrudan kırpma ve döndürme ekranına geçer, oradan gönderilir.
+  /// Kamera izni yoksa ya da vazgeçilirse boş liste döner. Galeri için izin
+  /// sorulmaz: sistemin fotoğraf seçicisi (iOS'ta PHPicker, Android'de Photo
+  /// Picker, masaüstünde dosya seçici) izin istemez; masaüstünde kamera izni
+  /// de sorulmaz.
   Future<List<XFile>> _pickImages(ImageSource source, {required int limit}) async {
     if (source == ImageSource.camera) {
       if (!_isDesktopPlatform && !await _checkCameraPermission()) {
         return const [];
       }
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.rear,
-      );
-      if (image == null) return const [];
-      XFile? edited;
-      if (mounted) edited = await showPhotoEditPage(context, image);
-      if (edited?.path != image.path) {
-        unawaited(TempPhotoFiles.delete(image.path));
-      }
-      return edited == null ? const [] : [edited];
+      if (!mounted) return const [];
+      final XFile? photo = await showCameraCapturePage(context);
+      return photo == null ? const [] : [photo];
     }
 
     // Çoklu seçicinin sınırı en az 2 olabilir.

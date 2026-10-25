@@ -35,6 +35,9 @@ dependencies:
   flutter_timezone: ^4.1.0
   firebase_core: any
   image_picker: any
+  # Uygulama içi kamera: çekilen fotoğraf sistemin "Fotoğrafı Kullan" adımı
+  # olmadan doğrudan kırpma ekranında açılır (bkz. CameraCapturePage).
+  camera: ^0.12.0
   excel: ^2.0.4
   firebase_storage: any
   cloud_firestore: any
@@ -63,6 +66,9 @@ dev_dependencies:
   flutter_lints: ^2.0.3
   flutter_launcher_icons: ^0.14.3
   fake_cloud_firestore: ^3.1.0
+  # Testte kamera eklentisinin yerine sahtesi konur (bkz.
+  # test/camera_capture_page_test.dart).
+  camera_platform_interface: ^2.12.0
 
 # App icon configuration
 flutter_launcher_icons:
