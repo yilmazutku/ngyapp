@@ -10,7 +10,6 @@ import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/utils/menu_utils.dart';
 import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
-import 'package:ngy_app/widgets/home_button.dart';
 
 /// Full-page gallery of the photos a specific user has uploaded **in the chat**.
 ///
@@ -218,7 +217,6 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
     return Scaffold(
       appBar: AppBar(
         title: _buildTitle(),
-        actions: const [HomeButton()],
       ),
       body: StreamBuilder<List<MessageData>>(
         stream: _imagesStream,
