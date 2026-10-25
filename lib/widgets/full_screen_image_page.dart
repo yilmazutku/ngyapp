@@ -11,6 +11,7 @@ Future<T?> showFullScreenImage<T>(
   required String imageUrl,
   String? thumbUrl,
   String? title,
+  WidgetBuilder? topActionBuilder,
   WidgetBuilder? bottomBarBuilder,
 }) {
   return Navigator.of(context).push<T>(
@@ -23,6 +24,7 @@ Future<T?> showFullScreenImage<T>(
         imageUrl: imageUrl,
         thumbUrl: thumbUrl,
         title: title,
+        topActionBuilder: topActionBuilder,
         bottomBarBuilder: bottomBarBuilder,
       ),
       transitionsBuilder: (context, animation, secondaryAnimation, child) =>
@@ -42,6 +44,9 @@ class FullScreenImagePage extends StatefulWidget {
   final String? thumbUrl;
   final String? title;
 
+  /// Verilirse üst çubuğun sağında gösterilir (ör. "Fotoğrafı Sil").
+  final WidgetBuilder? topActionBuilder;
+
   /// Verilirse fotoğrafın altında işlemler çubuğu olarak gösterilir.
   final WidgetBuilder? bottomBarBuilder;
 
@@ -50,6 +55,7 @@ class FullScreenImagePage extends StatefulWidget {
     required this.imageUrl,
     this.thumbUrl,
     this.title,
+    this.topActionBuilder,
     this.bottomBarBuilder,
   });
 
@@ -74,6 +80,9 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
   static const Duration _springBackDuration = Duration(milliseconds: 180);
 
   static const String _closeTooltip = 'Kapat';
+
+  /// Üst çubukta çarpı, başlık ve sağdaki işlem arasındaki boşluk.
+  static const double _topBarGap = 12;
   static const String _loadErrorText = 'Görsel yüklenemedi';
 
   /// Başlık (öğün ve saat) fotoğrafın üstünde dikkat çeksin diye kalın ve
@@ -220,6 +229,7 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
 
   Widget _buildTopBar(BuildContext context) {
     final String? title = widget.title;
+    final WidgetBuilder? topActionBuilder = widget.topActionBuilder;
 
     return Align(
       alignment: Alignment.topCenter,
@@ -238,24 +248,36 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
                 icon: const Icon(Icons.close),
                 onPressed: _close,
               ),
-              if (title != null) ...[
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.black87,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _titleStyle,
-                    ),
-                  ),
-                ),
+              const SizedBox(width: _topBarGap),
+              // Başlık kalan yere sığmazsa kısalır; sağdaki işlem yerinde
+              // kalır.
+              Expanded(
+                child: title == null
+                    ? const SizedBox.shrink()
+                    : Align(
+                        alignment: Alignment.centerLeft,
+                        // Çubuk başlık kadar yüksek kalır; ekran boyunca
+                        // uzayıp fotoğrafı örtmez.
+                        heightFactor: 1,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black87,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _titleStyle,
+                          ),
+                        ),
+                      ),
+              ),
+              if (topActionBuilder != null) ...[
+                const SizedBox(width: _topBarGap),
+                Builder(builder: topActionBuilder),
               ],
             ],
           ),
