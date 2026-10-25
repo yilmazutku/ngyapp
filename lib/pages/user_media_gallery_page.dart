@@ -29,7 +29,8 @@ import 'package:ngy_app/widgets/home_button.dart';
 /// - Sorted oldest→newest so the most recent photo sits at the very bottom.
 /// - Bir fotoğrafa dokununca büyük görsel diyaloğu açılır; altındaki
 ///   "Sohbette göster" sayfayı fotoğrafın mesaj kimliğiyle kapatır, sohbet o
-///   mesaja gider.
+///   mesaja gider. Danışan kendi galerisinde yanındaki "Fotoğrafı Sil" ile
+///   fotoğrafı silebilir (uzun basınca açılan menüdeki gibi).
 class UserMediaGalleryPage extends StatefulWidget {
   /// The user whose chat-uploaded photos are shown (chatId == userId).
   final String userId;
@@ -52,6 +53,9 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   static const String _emptyText = 'Bu kişi sohbette henüz fotoğraf yüklemedi.';
   static const String _ownEmptyText = 'Sohbette henüz fotoğraf yüklemediniz.';
   static const String _goToChatLabel = 'Sohbette göster';
+
+  /// Büyük görsel diyaloğundaki düğmelerin arası.
+  static const double _footerButtonGap = 8;
 
   /// Owns the grid scroll position so the [Scrollbar] can attach to it
   /// (shared-controller rule) and so we can jump to the bottom on open.
@@ -107,31 +111,54 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
     );
   }
 
-  /// Fotoğrafın büyük görsel diyaloğunu açar; "Sohbette göster" seçilirse
-  /// galeri fotoğrafın mesaj kimliğiyle kapanır (bkz. `ChatPage`).
-  Future<void> _openPhoto(MealModel photo, double dialogImageHeight) async {
-    final String? messageId = await showMealImageDetailsDialog<String>(
+  /// Fotoğraf bu galeriden silinebilir mi: yalnızca danışanın kendi öğün
+  /// fotoğrafı (silme işlevi yalnızca ona verilir).
+  bool _canDelete(MessageData message) =>
+      widget.onDeletePhoto != null && message.isMealPhoto;
+
+  /// Fotoğrafın büyük görsel diyaloğunu açar. "Sohbette göster" seçilirse
+  /// galeri fotoğrafın mesaj kimliğiyle kapanır (bkz. `ChatPage`);
+  /// silinebiliyorsa yanında "Fotoğrafı Sil" vardır.
+  Future<void> _openPhoto(
+    MealModel photo,
+    MessageData message,
+    double dialogImageHeight,
+  ) async {
+    final bool canDelete = _canDelete(message);
+    final _PhotoAction? action = await showMealImageDetailsDialog<_PhotoAction>(
       context,
       photo,
       dialogImageHeight: dialogImageHeight,
       heroTag: MealImageCard.heroTagFor(photo),
-      footerBuilder: (dialogContext) => Align(
-        alignment: Alignment.centerLeft,
-        child: FilledButton.icon(
-          icon: const Icon(Icons.chat_bubble_outline),
-          label: const Text(_goToChatLabel),
-          onPressed: () => Navigator.of(dialogContext).pop(photo.mealId),
-        ),
+      footerBuilder: (dialogContext) => Wrap(
+        spacing: _footerButtonGap,
+        runSpacing: _footerButtonGap,
+        children: [
+          FilledButton.icon(
+            icon: const Icon(Icons.chat_bubble_outline),
+            label: const Text(_goToChatLabel),
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(_PhotoAction.goToChat),
+          ),
+          if (canDelete)
+            TextButton.icon(
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(dialogContext).colorScheme.error,
+              ),
+              icon: Icon(MessageAction.deletePhoto.icon),
+              label: Text(MessageAction.deletePhoto.label),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(_PhotoAction.deletePhoto),
+            ),
+        ],
       ),
     );
-    if (messageId == null || !mounted) return;
-    Navigator.of(context).pop(messageId);
+    if (action == null || !mounted) return;
+    await _runPhotoAction(message, action);
   }
 
   Future<void> _openPhotoMenu(MessageData message, Offset globalPosition) async {
-    final Future<void> Function(MessageData message)? onDeletePhoto =
-        widget.onDeletePhoto;
-    final bool canDelete = onDeletePhoto != null && message.isMealPhoto;
+    final bool canDelete = _canDelete(message);
     final Color errorColor = Theme.of(context).colorScheme.error;
 
     final _PhotoAction? action = await showMenuAt<_PhotoAction>(
@@ -161,11 +188,17 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
       ],
     );
     if (action == null || !mounted) return;
+    await _runPhotoAction(message, action);
+  }
 
+  /// Diyalogdan ya da menüden seçilen işlemi yapar.
+  Future<void> _runPhotoAction(MessageData message, _PhotoAction action) async {
     switch (action) {
       case _PhotoAction.goToChat:
         Navigator.of(context).pop(message.id);
       case _PhotoAction.deletePhoto:
+        final Future<void> Function(MessageData message)? onDeletePhoto =
+            widget.onDeletePhoto;
         if (onDeletePhoto != null) await onDeletePhoto(message);
     }
   }
@@ -231,7 +264,10 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
                     return MealImageCard(
                       meal: meals[i],
                       dialogImageHeight: dialogImageHeight,
-                      onTap: () => _openPhoto(meals[i], dialogImageHeight),
+                      onTap: message == null
+                          ? null
+                          : () =>
+                              _openPhoto(meals[i], message, dialogImageHeight),
                       onMenu: message == null
                           ? null
                           : (globalPosition) =>
