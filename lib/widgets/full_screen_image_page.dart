@@ -187,7 +187,6 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
                   ),
                 ),
               ),
-              _buildTopBar(context),
               if (bottomBarBuilder != null)
                 Align(
                   alignment: Alignment.bottomCenter,
@@ -200,11 +199,18 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
                       color: Colors.black54,
                       child: SafeArea(
                         top: false,
-                        child: Builder(builder: bottomBarBuilder),
+                        // Çubuk içeriği kadar yer kaplar: içindeki Center
+                        // ekran boyunca uzayıp fotoğrafı, çarpıyı ve aşağı
+                        // kaydırmayı örtmez.
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [Builder(builder: bottomBarBuilder)],
+                        ),
                       ),
                     ),
                   ),
                 ),
+              _buildTopBar(context),
             ],
           ),
         ),
