@@ -1494,7 +1494,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Fotoğrafı tam ekranda açar: önce küçük görsel görünür, orijinal iner.
   /// Altında admin danışanın fotoğrafına ifade bırakabilir; danışan kendi
-  /// öğün fotoğrafını silebilir (görüntüleyici kapanır, silme onayı sorulur).
+  /// öğün fotoğrafını sağ üstteki "Fotoğrafı Sil" ile silebilir
+  /// (görüntüleyici kapanır, silme onayı sorulur).
   Future<void> _openPhoto(MessageData message) async {
     final String? imageUrl = message.imageUrl;
     if (imageUrl == null) return;
@@ -1518,22 +1519,23 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               ),
             ),
           );
-    } else if (canDelete) {
-      bottomBar = (viewerContext) => Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Center(
-              child: TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(viewerContext).colorScheme.error,
-                ),
-                icon: Icon(MessageAction.deletePhoto.icon),
-                label: Text(MessageAction.deletePhoto.label),
-                onPressed: () => Navigator.of(viewerContext)
-                    .pop(MessageAction.deletePhoto),
-              ),
-            ),
-          );
     }
+    // Dolu zeminli düğme: fotoğrafın üstünde her renkte okunur.
+    final WidgetBuilder? deleteAction = canDelete
+        ? (viewerContext) {
+            final ColorScheme colors = Theme.of(viewerContext).colorScheme;
+            return FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.error,
+                foregroundColor: colors.onError,
+              ),
+              icon: Icon(MessageAction.deletePhoto.icon),
+              label: Text(MessageAction.deletePhoto.label),
+              onPressed: () =>
+                  Navigator.of(viewerContext).pop(MessageAction.deletePhoto),
+            );
+          }
+        : null;
 
     final MessageAction? action = await showFullScreenImage<MessageAction>(
       context,
@@ -1543,6 +1545,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (meal != null) meal.displayLabel,
         if (sentAt != null) DateFormatter.formatLongDateTime(sentAt),
       ].join(' · '),
+      topActionBuilder: deleteAction,
       bottomBarBuilder: bottomBar,
     );
     if (action == MessageAction.deletePhoto && mounted) {
