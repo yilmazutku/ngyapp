@@ -180,8 +180,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// The resolved chat ID (cached to avoid recalculation)
   late final String _chatId;
   
-  /// Whether the current user is an admin
-  late final bool _isAdminUser;
+  /// Bu sohbette ofis tarafında mı (bkz. [ChatManager.isOfficeSide]); kendi
+  /// sohbetindeki admin danışan tarafındadır.
+  late final bool _isOfficeSide;
 
   /// Mesaj akışı. Normalde son mesajlar ([ChatManager.messagesStreamFor]);
   /// sohbet bir mesajda açıldıysa o mesajı kapsayan pencere
@@ -350,8 +351,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Resolve chat ID once and cache it
     _chatId = widget.overrideChatId ?? _currentUid;
     
-    // Determine if current user is an admin
-    _isAdminUser = ChatManager.isAdminUid(_currentUid);
+    _isOfficeSide = ChatManager.isOfficeSide(_currentUid, _chatId);
 
     _messageController.text = _drafts[_draftKey] ?? '';
     _messageController.addListener(_saveDraft);
@@ -427,15 +427,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Admin başka bir danışanın sohbetine bakıyorsa başlıkta danışanın adı
   /// görünür.
-  bool get _showsUserTitle => widget.overrideChatId != null && _isAdminUser;
+  bool get _showsUserTitle => widget.overrideChatId != null && _isOfficeSide;
 
-  bool get _opensGalleryFromTitle => _showsUserTitle || !_isAdminUser;
+  bool get _opensGalleryFromTitle => _showsUserTitle || !_isOfficeSide;
 
   /// Mark chat as read (resets unread count) based on user type. Sayfa
   /// kapanırken de çağrıldığı için context kullanmaz.
   Future<void> _markChatAsRead() async {
     try {
-      if (_isAdminUser) {
+      if (_isOfficeSide) {
         await _chatManager.markChatAsRead(_chatId);
       } else {
         await _chatManager.markChatAsReadForUser(_chatId);
@@ -1431,7 +1431,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// İfade rozetine dokunma yalnızca admin'de: kendi ifadesini kaldırır.
   void Function(MessageData message)? get _ownReactionTapHandler =>
-      _isAdminUser ? _confirmRemoveOwnReaction : null;
+      _isOfficeSide ? _confirmRemoveOwnReaction : null;
 
   /// Admin kendi bıraktığı ifadenin rozetine dokundu: "İfade silinsin mi?"
   /// sorusuna "Evet" derse ifade kaldırılır, "Hayır" derse kalır.
@@ -1476,10 +1476,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (hasText && !message.isMealPhoto && !message.photoDeleted)
         MessageAction.copy,
       // Admin, danışanın öğün fotoğrafını Öğün Fotoğrafları'nda görebilir.
-      if (_isAdminUser && message.isMealPhoto && message.senderId == _chatId)
+      if (_isOfficeSide && message.isMealPhoto && message.senderId == _chatId)
         MessageAction.showInMealPhotos,
       // Danışan sohbetten yüklediği öğün fotoğrafını silebilir.
-      if (!_isAdminUser &&
+      if (!_isOfficeSide &&
           message.senderId == _currentUid &&
           message.isMealPhoto)
         MessageAction.deletePhoto,
@@ -1498,8 +1498,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// danışanın adıyla.
   String _senderLabel(String senderId) {
     if (senderId == _currentUid) return _youLabel;
-    if (ChatManager.isAdminUid(senderId)) {
-      return _isAdminUser
+    if (ChatManager.isOfficeSide(senderId, _chatId)) {
+      return _isOfficeSide
           ? _officeLabel
           : PushNotificationReference.chatAdminToUserTitle;
     }
@@ -1516,7 +1516,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     final Meals? meal = message.isMealPhoto ? message.photoMeal : null;
     final DateTime? sentAt = message.sentAt;
-    final bool canReact = _isAdminUser && _canReactTo(message);
+    final bool canReact = _isOfficeSide && _canReactTo(message);
     final bool canDelete =
         _actionsFor(message).contains(MessageAction.deletePhoto);
 
@@ -1614,10 +1614,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               )
             : const Text(PushNotificationReference.chatAdminToUserTitle),
         actions: [
-          if (_isAdminUser) const HomeButton(),
+          if (_isOfficeSide) const HomeButton(),
           // Silme gibi geri alınamayan işlem menüde durur: başlıkta
           // yanlışlıkla basılmasın. Silmeden önce onay alınır.
-          if (_isAdminUser)
+          if (_isOfficeSide)
             PopupMenuButton<_ChatMenuAction>(
               tooltip: _chatMenuTooltip,
               onSelected: (action) {
@@ -1706,8 +1706,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             controller: _messageController,
             focusNode: _inputFocusNode,
             onSend: _sendText,
-            // Admin öğün yüklemez: yalnızca danışan öğün fotoğrafı yükler.
-            onMealUpload: _isAdminUser ? null : _startMealUploadFlow,
+            // Ofis öğün yüklemez: öğün fotoğrafını sohbetin sahibi yükler.
+            onMealUpload: _isOfficeSide ? null : _startMealUploadFlow,
             replyTarget: _replyTarget,
             replyLabelOf: (message) => _senderLabel(message.senderId),
           ),
@@ -1971,13 +1971,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// Karşı tarafın mesajıysa ifade bırakılabilir. `_chatId` sohbet sahibinin
   /// (danışanın) UID'si: `senderId == _chatId` mesajın danışandan geldiğini,
-  /// admin UID'si ofisten geldiğini gösterir. Kendi mesajına ifade
+  /// başka bir admin UID'si ofisten geldiğini gösterir. Kendi mesajına ifade
   /// bırakılamaz; fotoğrafı silinmiş mesaja da.
   bool _canReactTo(MessageData message) =>
       !message.photoDeleted &&
-      (_isAdminUser
+      (_isOfficeSide
           ? message.senderId == _chatId
-          : ChatManager.isAdminUid(message.senderId));
+          : ChatManager.isOfficeSide(message.senderId, _chatId));
 
   /// Tek bir satır: mesaj baloncuğu ya da albüm (gerekirse üstünde gün
   /// ayırıcısıyla); listenin iki biçimi de bunu kullanır.
@@ -2091,7 +2091,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         heightFactor: _gallerySheetHeightFactor,
         child: UserMediaGalleryPage(
           userId: _chatId,
-          onDeletePhoto: _isAdminUser ? null : _confirmAndDeleteMealPhoto,
+          onDeletePhoto: _isOfficeSide ? null : _confirmAndDeleteMealPhoto,
         ),
       ),
     );
@@ -2929,7 +2929,7 @@ class _ChatInputRow extends StatefulWidget {
   final FocusNode focusNode;
   final VoidCallback onSend;
 
-  /// Öğün fotoğrafı yükleme. Admin öğün yüklemediği için onda null; ek
+  /// Öğün fotoğrafı yükleme. Ofis öğün yüklemediği için onda null; ek
   /// menüsü ("+") de gösterilmez.
   final VoidCallback? onMealUpload;
 

@@ -5,7 +5,9 @@ import 'package:ngy_app/services/fcm_service.dart';
 void main() {
   const String client = 'danisan-1';
   const String previousClient = 'danisan-0';
-  final String admin = ChatManager.adminIds.first;
+  final String admin = ChatManager.chatOfficeIds.first;
+  final String clientAdmin =
+      ChatManager.adminIds.difference(ChatManager.chatOfficeIds).first;
 
   Map<String, dynamic> chat(String chatId) =>
       {'type': 'chat', 'chatId': chatId};
@@ -35,6 +37,20 @@ void main() {
 
     test('admine danışana giden bildirim gösterilmez', () {
       expect(FcmService.isMeantFor(chat(client), admin), isFalse);
+    });
+
+    test('danışan gibi yazışan admin kendi sohbetinin bildirimini görür', () {
+      expect(FcmService.isMeantFor(chat(clientAdmin), clientAdmin), isTrue);
+    });
+
+    test('danışan gibi yazışan admine danışanların bildirimi gösterilmez', () {
+      expect(FcmService.isMeantFor(chatAdmin(client), clientAdmin), isFalse);
+      expect(FcmService.isMeantFor(chat(client), clientAdmin), isFalse);
+    });
+
+    test('ofis, danışan gibi yazışan adminin bildirimini görür', () {
+      expect(FcmService.isMeantFor(chatAdmin(clientAdmin), admin), isTrue);
+      expect(FcmService.isMeantFor(chat(clientAdmin), admin), isFalse);
     });
 
     test('duyuru bildirimi herkese gösterilir', () {

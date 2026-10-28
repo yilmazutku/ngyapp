@@ -899,17 +899,18 @@ static MealModel? mealWithImageRemovedAt(MealModel current, int index) {
     // set(merge: true) merges nested maps field by field, so the counters do
     // not need the dot-notation that would force a separate update().
     transaction.set(chatDoc, {
-      'participants': [chatId, ...ChatManager.adminIds],
+      'participants': [chatId, ...ChatManager.chatOfficeIds],
       'lastMessage': meal.chatSummary,
       'lastImageUrl': image.url,
       'lastImageThumbUrl': image.thumbUrl ?? '',
       'lastMessageAt': Timestamp.now(),
       'updatedAt': FieldValue.serverTimestamp(),
       'adminUnreadCount': {
-        for (final adminUid in ChatManager.adminIds)
+        for (final adminUid in ChatManager.chatOfficeIds)
           adminUid: FieldValue.increment(1),
       },
-      'hasUnreadFor': FieldValue.arrayUnion(ChatManager.adminIds.toList()),
+      'hasUnreadFor':
+          FieldValue.arrayUnion(ChatManager.chatOfficeIds.toList()),
     }, SetOptions(merge: true));
 
     transaction.set(messageRef, {

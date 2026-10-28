@@ -11,6 +11,7 @@ import '../constants/app_constants.dart';
 import '../pages/admin_chat_page.dart';
 import '../pages/chat_page_new.dart';
 import '../news/news_list_page.dart';
+import '../providers/chat_manager_new.dart';
 import 'notification_tap_gate.dart';
 import 'open_chats.dart';
 
@@ -84,7 +85,8 @@ class FcmService {
     return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
   }
 
-  // Admin UIDs for routing notifications
+  // Admin UIDs (Yönetici Tarafı); chat notifications follow
+  // ChatManager.chatOfficeIds.
   static const Set<String> _adminUids = {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
     'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
@@ -275,16 +277,17 @@ class FcmService {
   /// hesabın kaydından sunucu onu silene kadar orada da durabilir (bkz.
   /// [removeFcmToken]); o hesabın sohbet bildirimleri bu cihazda oturumu açık
   /// kişiye gösterilmez. Danışanın sohbet bildirimi kendi sohbetinindir
-  /// (`chatId` = UID), `chat_admin` yalnızca admine gider.
+  /// (`chatId` = UID), `chat_admin` yalnızca ofise gider
+  /// ([ChatManager.chatOfficeIds]).
   @visibleForTesting
   static bool isMeantFor(Map<String, dynamic> data, String uid) {
     final String type = (data['type'] ?? '').toString();
-    final bool isAdmin = _adminUids.contains(uid);
+    final bool isChatOffice = ChatManager.isChatOfficeUid(uid);
     switch (type) {
       case 'chat':
-        return !isAdmin && (data['chatId'] ?? '').toString() == uid;
+        return !isChatOffice && (data['chatId'] ?? '').toString() == uid;
       case 'chat_admin':
-        return isAdmin;
+        return isChatOffice;
       default:
         return true;
     }
@@ -403,7 +406,7 @@ class FcmService {
     if (navigator == null || user == null) return;
 
     final type = (data['type'] ?? '').toString();
-    final isAdmin = _adminUids.contains(user.uid);
+    final isChatOffice = ChatManager.isChatOfficeUid(user.uid);
 
     // İfade bildirimleri tepkinin bırakıldığı mesajı taşır: sohbet o mesajda
     // açılır (bkz. ChatPage.focusMessageId).
@@ -414,7 +417,7 @@ class FcmService {
     switch (type) {
       case 'chat':
         // Admin -> User notification
-        if (isAdmin) {
+        if (isChatOffice) {
           final chatId = (data['chatId'] ?? '').toString();
           if (chatId.isNotEmpty) {
             _openAdminChat(navigator, chatId, focusMessageId);
@@ -428,7 +431,7 @@ class FcmService {
 
       case 'chat_admin':
         // User -> Admin notification
-        if (!isAdmin) return;
+        if (!isChatOffice) return;
 
         final chatId = (data['chatId'] ?? '').toString();
         if (chatId.isNotEmpty) {
