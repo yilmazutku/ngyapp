@@ -528,8 +528,8 @@ class _HomePageState extends State<HomePage> {
   
   /// Initialize the chat unread stream for the current user
   /// Called in didChangeDependencies to ensure context is available
-  /// - For admins: shows count of chats with unread messages
-  /// - For regular users: shows count of unread messages in their chat
+  /// - For the chat office: shows count of chats with unread messages
+  /// - For everyone else: shows count of unread messages in their chat
   void _initUnreadStream() {
     // Only initialize once
     if (_streamInitialized) return;
@@ -539,12 +539,10 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     
-    final isAdmin = FcmService.isAdmin(userId);
-    
     final chatManager = context.read<ChatManager>();
     
-    if (isAdmin) {
-      // Admin: count of chats with unread messages
+    if (ChatManager.isChatOfficeUid(userId)) {
+      // Chat office: count of chats with unread messages
       _unreadChatsStream = chatManager.totalUnreadChatsStream();
     } else {
       // Regular user: count of unread messages in their chat
@@ -609,9 +607,9 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _navigateToChat(BuildContext context, String userId, bool isAdmin) async {
+  Future<void> _navigateToChat(BuildContext context, String userId, bool isChatOffice) async {
     if (!context.mounted) return;
-    if (isAdmin) {
+    if (isChatOffice) {
       Navigator.push(context, AdminChatListPage.route());
     } else {
       Navigator.push(context, ChatPage.route());
@@ -761,7 +759,8 @@ class _HomePageState extends State<HomePage> {
       {
         'icon': Icons.chat,
         'label': 'Sohbet',
-        'onTap': () => _navigateToChat(context, userId, isAdmin),
+        'onTap': () => _navigateToChat(
+            context, userId, ChatManager.isChatOfficeUid(userId)),
         // Only admins get the badge stream (using cached stream)
         'badgeStream': _unreadChatsStream,
       },

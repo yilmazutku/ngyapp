@@ -16,6 +16,25 @@ const ADMIN_UIDS = new Set([
   'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
 ]);
 
+// Admins who run the chats for the office (ChatManager.chatOfficeIds): user
+// messages and reactions notify them. Any other admin chats like a user, in
+// their own chat with these admins.
+const CHAT_OFFICE_UIDS = new Set([
+  '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+]);
+
+/**
+ * Whether [senderId] writes for the office in [chatId]: an admin in someone
+ * else's chat (chatId == the user's UID). An admin in their own chat is the
+ * user there.
+ * @param {string} senderId UID of the message's sender or of a reactor.
+ * @param {string} chatId The chat's ID (its user's UID).
+ * @return {boolean} True for the office side.
+ */
+function isOfficeSide(senderId, chatId) {
+  return senderId !== chatId && ADMIN_UIDS.has(senderId);
+}
+
 // =============================================================================
 // NOTIFICATION CHANNELS (must match Android string.xml notification_channel_id)
 // =============================================================================
@@ -219,10 +238,10 @@ exports.notifyUserOnAdminMessage = onDocumentCreated(
       const senderId = msg.senderId || '';
 
       // Only notify when ADMIN sends
-      if (!ADMIN_UIDS.has(senderId)) return;
+      if (!isOfficeSide(senderId, chatId)) return;
 
-      // Don't notify admins
-      if (ADMIN_UIDS.has(chatId)) return;
+      // Don't notify the office
+      if (CHAT_OFFICE_UIDS.has(chatId)) return;
 
       const userDoc = await admin.firestore()
           .collection('users')
@@ -298,14 +317,17 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
       const userChatId = event.params.chatId; // uid
       const senderId = msg.senderId || '';
 
+      // Never act on an office-owned chat (chatId is the user's UID).
+      if (CHAT_OFFICE_UIDS.has(userChatId)) return;
+
       // Only notify admins when USER sends (so skip admin->user messages)
-      if (ADMIN_UIDS.has(senderId)) return;
+      if (isOfficeSide(senderId, userChatId)) return;
 
       // Collect admin tokens (single token per admin); notifiedAdminUids[i]
       // owns tokens[i] (admins without a token are skipped).
       const tokens = [];
       const notifiedAdminUids = [];
-      for (const adminUid of ADMIN_UIDS) {
+      for (const adminUid of CHAT_OFFICE_UIDS) {
         const adminDoc = await admin.firestore()
             .collection('users')
             .doc(adminUid)
@@ -532,8 +554,8 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
           event.data.after.data() || {} : {};
       const chatId = event.params.chatId;
 
-      // Never notify an admin-owned chat (chatId is the user's UID).
-      if (ADMIN_UIDS.has(chatId)) return;
+      // Never notify an office-owned chat (chatId is the user's UID).
+      if (CHAT_OFFICE_UIDS.has(chatId)) return;
 
       // Only notify for reactions left on the USER's own messages, so the
       // "bir mesajınıza …" wording is always accurate.
@@ -550,7 +572,7 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
       let emoji = null;
       let reactorUid = null;
       for (const [uid, value] of Object.entries(afterReactions)) {
-        if (!ADMIN_UIDS.has(uid)) continue; // only admin reactions notify
+        if (!isOfficeSide(uid, chatId)) continue; // only office reactions
         if (beforeReactions[uid]) continue; // had one: unchanged or changed
         if (reactionAlreadyNotified(after, uid)) continue; // re-added
         emoji = value; // newly added
@@ -637,12 +659,12 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
           event.data.after.data() || {} : {};
       const chatId = event.params.chatId;
 
-      // Never act on an admin-owned chat (chatId is the user's UID).
-      if (ADMIN_UIDS.has(chatId)) return;
+      // Never act on an office-owned chat (chatId is the user's UID).
+      if (CHAT_OFFICE_UIDS.has(chatId)) return;
 
       // Only notify for reactions left on an ADMIN's message, so the
       // "bir mesajınıza …" wording is always accurate.
-      if (!ADMIN_UIDS.has(after.senderId || '')) return;
+      if (!isOfficeSide(after.senderId || '', chatId)) return;
 
       const beforeReactions =
           (before.reactions && typeof before.reactions === 'object') ?
@@ -666,7 +688,7 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
       // Collect admin tokens (single token per admin)
       const tokens = [];
       const notifiedAdminUids = [];
-      for (const adminUid of ADMIN_UIDS) {
+      for (const adminUid of CHAT_OFFICE_UIDS) {
         const adminDoc = await admin.firestore()
             .collection('users')
             .doc(adminUid)

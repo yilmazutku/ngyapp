@@ -255,7 +255,8 @@ class FocusWindow {
 /// Architecture:
 /// - One chat per user: chatId == userUid
 /// - Collection structure: chats/{userUid}/messages/*
-/// - The admin UID is automatically added as a participant in every chat
+/// - The chat office ([chatOfficeIds]) is automatically added as a
+///   participant in every chat
 /// - Supports admin viewing any user's chat
 /// 
 /// Admin UID:
@@ -265,14 +266,29 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   final FirebaseAuth auth;
   final FirebaseStorage storage;
 
-  /// Admin user IDs - these users have elevated permissions and are participants in all chats
+  /// Admin user IDs - these users have elevated permissions
   static const Set<String> adminIds = {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
     'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
   };
 
+  /// Sohbetleri ofis adına yürüten adminler: her sohbetin katılımcısıdır,
+  /// danışanın mesajı bunların okunmamış sayısını artırır. functions/index.js
+  /// CHAT_OFFICE_UIDS ile aynı tutulur. Listede olmayan admin sohbette
+  /// danışan gibidir: kendi sohbetinde bu kişilerle yazışır.
+  static const Set<String> chatOfficeIds = {
+    '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+  };
+
   /// Check if a given UID belongs to an admin user
   static bool isAdminUid(String uid) => adminIds.contains(uid);
+
+  static bool isChatOfficeUid(String uid) => chatOfficeIds.contains(uid);
+
+  /// [uid], [chatId] sohbetinde ofis tarafında mı: başkasının sohbetindeki
+  /// admin. Sohbetin sahibi (chatId == UID) admin olsa da danışan tarafıdır.
+  static bool isOfficeSide(String uid, String chatId) =>
+      uid != chatId && isAdminUid(uid);
 
   /// Get admin IDs set (for external access)
   static Set<String> get adminUids => adminIds;
@@ -1165,9 +1181,9 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   ///
   /// This data:
   /// - Creates the chat document if it doesn't exist
-  /// - Adds both admin UIDs and the user as participants
+  /// - Adds the chat office ([chatOfficeIds]) and the user as participants
   /// - Updates last message info for the admin chat list
-  /// - Increments unread count for admins when user sends a message
+  /// - Increments unread count for the chat office when user sends a message
   /// - Increments unread count for user when admin sends a message
   /// - Updates hasUnreadFor array for efficient unread count queries
   Map<String, dynamic> _chatSummaryData(
@@ -1179,7 +1195,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
         bool incrementUnreadForAdmins = false,
         bool incrementUnreadForUser = false,
       }) {
-    final participants = <String>{chatId, ...adminIds}.toList();
+    final participants = <String>{chatId, ...chatOfficeIds}.toList();
     
     // Everything lands in one write. set(merge: true) merges nested maps field
     // by field, so 'adminUnreadCount' can be written as a nested map instead of
@@ -1187,7 +1203,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     // Both unread flags feed a single arrayUnion, so raising them together can
     // no longer drop one side from hasUnreadFor.
     final unreadFor = <String>[
-      if (incrementUnreadForAdmins) ...adminIds,
+      if (incrementUnreadForAdmins) ...chatOfficeIds,
       if (incrementUnreadForUser) chatId,
     ];
 
@@ -1200,7 +1216,8 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
       'updatedAt': FieldValue.serverTimestamp(),
       if (incrementUnreadForAdmins)
         'adminUnreadCount': {
-          for (final adminUid in adminIds) adminUid: FieldValue.increment(1),
+          for (final adminUid in chatOfficeIds)
+            adminUid: FieldValue.increment(1),
         },
       if (incrementUnreadForUser) 'userUnreadCount': FieldValue.increment(1),
       if (unreadFor.isNotEmpty) 'hasUnreadFor': FieldValue.arrayUnion(unreadFor),
@@ -1217,7 +1234,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// Call this when admin opens a chat.
   Future<void> markChatAsRead(String chatId) async {
     final currentUid = auth.currentUser?.uid;
-    if (currentUid == null || !isAdminUid(currentUid)) {
+    if (currentUid == null || !isOfficeSide(currentUid, chatId)) {
       return;
     }
     
@@ -1239,11 +1256,6 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> markChatAsReadForUser(String chatId) async {
     final currentUid = auth.currentUser?.uid;
     if (currentUid == null) {
-      return;
-    }
-    
-    // Skip if current user is an admin (they use markChatAsRead instead)
-    if (isAdminUid(currentUid)) {
       return;
     }
     
@@ -1271,8 +1283,8 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
       return Stream.value(0);
     }
     
-    // If user is admin, return 0 (admins use totalUnreadChatsStream instead)
-    if (isAdminUid(currentUid)) {
+    // The chat office uses totalUnreadChatsStream instead
+    if (isChatOfficeUid(currentUid)) {
       return Stream.value(0);
     }
     
@@ -1300,7 +1312,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   /// and Firestore's arrayContains is highly efficient with proper indexing.
   Stream<int> totalUnreadChatsStream() {
     final currentUid = auth.currentUser?.uid;
-    if (currentUid == null || !isAdminUid(currentUid)) {
+    if (currentUid == null || !isChatOfficeUid(currentUid)) {
       return Stream.value(0);
     }
     
@@ -1320,7 +1332,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Oturumdaki kişinin [chatId] sohbetindeki okunmamış mesaj sayısı:
-  /// yönetici için kendi `adminUnreadCount` değeri, danışan için
+  /// ofis tarafı için kendi `adminUnreadCount` değeri, danışan için
   /// `userUnreadCount`. Sohbet bir mesajda (odaklı) açıldığında "En yeniye
   /// git" düğmesindeki sayı buradan okunur.
   Future<int> currentUserUnreadCount(String chatId) async {
@@ -1332,7 +1344,9 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     final Map<String, dynamic>? data = snapshot.data();
     if (data == null) return 0;
 
-    if (isAdminUid(uid)) return getUnreadCountFromChatData(data, uid);
+    if (isOfficeSide(uid, chatId)) {
+      return getUnreadCountFromChatData(data, uid);
+    }
     final Object? count = data['userUnreadCount'];
     return count is num ? count.toInt() : 0;
   }
@@ -1379,7 +1393,7 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     if (text.isEmpty) return;
 
     // User sends → notify admins; admin sends → notify user.
-    final isAdminMessage = isAdminUid(userId);
+    final isOfficeMessage = isOfficeSide(userId, chatId);
 
     final WriteBatch batch = db.batch();
     batch.set(
@@ -1391,8 +1405,8 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
         lastImageUrl: '',
         lastImageThumbUrl: '',
         lastAt: Timestamp.now(),
-        incrementUnreadForAdmins: !isAdminMessage,
-        incrementUnreadForUser: isAdminMessage,
+        incrementUnreadForAdmins: !isOfficeMessage,
+        incrementUnreadForUser: isOfficeMessage,
       ),
       SetOptions(merge: true),
     );

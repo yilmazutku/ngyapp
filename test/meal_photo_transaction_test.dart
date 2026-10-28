@@ -120,10 +120,15 @@ void main() {
       final Map<String, dynamic> summary = (await chatDoc.get()).data()!;
       expect(summary['lastMessage'], Meals.lunch.chatSummary);
       expect(summary['lastImageUrl'], image.url);
-      expect(summary['participants'], [_uid, ...ChatManager.adminIds]);
-      for (final String admin in ChatManager.adminIds) {
+      expect(summary['participants'], [_uid, ...ChatManager.chatOfficeIds]);
+      for (final String admin in ChatManager.chatOfficeIds) {
         expect(summary['adminUnreadCount'][admin], 1);
         expect(summary['hasUnreadFor'], contains(admin));
+      }
+      for (final String admin
+          in ChatManager.adminIds.difference(ChatManager.chatOfficeIds)) {
+        expect(summary['adminUnreadCount'][admin], isNull);
+        expect(summary['hasUnreadFor'], isNot(contains(admin)));
       }
     });
 
@@ -141,7 +146,7 @@ void main() {
       expect(await mealUrls(), [first.url]);
       expect(await messageCount(), 1);
       final Map<String, dynamic> summary = (await chatDoc.get()).data()!;
-      for (final String admin in ChatManager.adminIds) {
+      for (final String admin in ChatManager.chatOfficeIds) {
         expect(summary['adminUnreadCount'][admin], 1,
             reason: 'okunmamış sayısı iki kez artmaz');
       }
