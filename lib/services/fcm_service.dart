@@ -92,6 +92,15 @@ class FcmService {
     'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
   };
 
+  /// Aynı anda birden çok cihazda bildirim alan hesaplar: girdiği her cihazın
+  /// jetonu `fcmTokens` listesine eklenir, `fcmToken` en son girilen cihazı
+  /// tutar. Diğer hesaplarda yalnızca `fcmToken` vardır. Sunucu iki alanı
+  /// birlikte okur (functions/index.js tokensOf).
+  @visibleForTesting
+  static const Set<String> multiDeviceUids = {
+    '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
+  };
+
   // Global navigator key for notification tap navigation
   GlobalKey<NavigatorState>? _navigatorKey;
 
@@ -498,8 +507,9 @@ class FcmService {
       _tapGate.setUpdateBlocking(blocking);
 
   /// Save FCM token to Firestore for current user.
-  /// Uses a single token per user (overwrites previous token).
-  /// Kayıttaki jeton zaten bu cihazınkiyse yazılmaz.
+  /// Tek jetonlu hesapta önceki jetonun yerine yazılır; birden çok cihazlı
+  /// hesapta ([multiDeviceUids]) listeye eklenir. Kayıtta zaten varsa
+  /// yazılmaz.
   Future<void> saveFcmToken() async {
     if (!isSupported) return;
     
@@ -529,21 +539,71 @@ class FcmService {
   /// cihazınkine dönmüşken yazma atlanabilirdi.
   Future<void> _saveTokenIfChanged(String uid, String token) async {
     final userDoc = _firestore.collection('users').doc(uid);
+    Map<String, dynamic>? data;
     try {
       final snapshot =
           await userDoc.get(const GetOptions(source: Source.server));
-      final Map<String, dynamic>? data = snapshot.data();
-      if (data?['fcmToken'] == token) return;
+      data = snapshot.data();
       if (data?['isUserRequestedRemoval'] == true) return;
     } catch (e) {
       // Sunucuya ulaşılamadı: koşulsuz yazılır.
     }
 
+    final Map<String, Object>? update = tokenSaveUpdate(uid, token, data);
+    if (update == null) return;
+
     // update (set-merge değil): kullanıcı kaydı cihazda yokken çevrimdışı
     // yazım cihazda yalnızca jetonlu bir kayıt oluşturmasın; KVKK kontrolü
     // onu "onay yok" sanardı (bkz. UserProvider.checkKvkkConsent). Kaydı
     // admin açar, sunucuda hep vardır.
-    await userDoc.update({'fcmToken': token});
+    await userDoc.update(update);
+  }
+
+  /// [uid] kaydına bu cihazın jetonu ([token]) için yazılacak alanlar;
+  /// kayıtta ([data]) zaten öyleyse null. Kayıt okunamadıysa ([data] null)
+  /// koşulsuz yazılır.
+  @visibleForTesting
+  static Map<String, Object>? tokenSaveUpdate(
+    String uid,
+    String token,
+    Map<String, dynamic>? data,
+  ) {
+    final bool isLatest = data?['fcmToken'] == token;
+    if (!multiDeviceUids.contains(uid)) {
+      return isLatest ? null : {'fcmToken': token};
+    }
+    final Object? listed = data?['fcmTokens'];
+    if (isLatest && listed is List && listed.contains(token)) return null;
+    return {
+      'fcmToken': token,
+      'fcmTokens': FieldValue.arrayUnion([token]),
+    };
+  }
+
+  /// Çıkışta [uid] kaydından bu cihazın jetonunu ([token]) kaldıran alanlar;
+  /// kayıtta yoksa null. Kayıt okunamadıysa ([data] null) koşulsuz
+  /// kaldırılır.
+  @visibleForTesting
+  static Map<String, Object>? tokenRemovalUpdate(
+    String uid,
+    String token,
+    Map<String, dynamic>? data,
+  ) {
+    final bool multiDevice = multiDeviceUids.contains(uid);
+    if (data == null) {
+      return {
+        'fcmToken': FieldValue.delete(),
+        if (multiDevice) 'fcmTokens': FieldValue.arrayRemove([token]),
+      };
+    }
+    final Object? listed = data['fcmTokens'];
+    final bool inList = listed is List && listed.contains(token);
+    final bool isLatest = data['fcmToken'] == token;
+    if (!inList && !isLatest) return null;
+    return {
+      if (isLatest) 'fcmToken': FieldValue.delete(),
+      if (inList) 'fcmTokens': FieldValue.arrayRemove([token]),
+    };
   }
 
   /// Keeps the stored token in sync when FCM rotates it. Idempotent: only the
@@ -567,6 +627,7 @@ class FcmService {
   /// Kayıttaki jeton bu cihazın değilse (kullanıcı sonra başka bir cihazdan
   /// girdi) silinmez: bu cihazdan çıkmak o cihazın bildirimlerini kesmez. Bu
   /// cihazın jetonu yoksa kayda dokunulmaz (kayıttaki başka bir cihazınkidir).
+  /// Birden çok cihazlı hesapta listeden yalnızca bu cihazın jetonu çıkar.
   /// Kayıt okunamazsa (ör. çevrimdışı) jeton koşulsuz silinmeye çalışılır ama
   /// bu silme sunucuya hemen gitmez: Firestore onu çıkan kullanıcının yazma
   /// sırasında tutar ve ancak o kullanıcı bu cihazda yeniden girince gönderir.
@@ -584,30 +645,35 @@ class FcmService {
       return;
     }
 
-    final String? token;
+    final String token;
     try {
       // Çevrimdışıyken jeton okuması da uzun sürebilir: çıkışı bekletmesin.
-      token = await _messaging.getToken().timeout(_logoutWriteTimeout);
+      final String? current =
+          await _messaging.getToken().timeout(_logoutWriteTimeout);
+      if (current == null) return;
+      token = current;
     } catch (e) {
       return;
     }
-    if (token == null) return;
 
     final userDoc = _firestore.collection('users').doc(user.uid);
     try {
       await _firestore.runTransaction((transaction) async {
         final snapshot = await transaction.get(userDoc);
-        if (snapshot.data()?['fcmToken'] != token) return;
-        transaction.update(userDoc, {'fcmToken': FieldValue.delete()});
+        final Map<String, Object>? update =
+            tokenRemovalUpdate(user.uid, token, snapshot.data());
+        if (update == null) return;
+        transaction.update(userDoc, update);
       }).timeout(_logoutWriteTimeout);
       return;
     } catch (e) {
       // Kayıt okunamadı: aşağıda koşulsuz silinir.
     }
     try {
-      await userDoc.set({
-        'fcmToken': FieldValue.delete(),
-      }, SetOptions(merge: true)).timeout(_logoutWriteTimeout);
+      await userDoc
+          .set(tokenRemovalUpdate(user.uid, token, null)!,
+              SetOptions(merge: true))
+          .timeout(_logoutWriteTimeout);
     } catch (e) {
     }
   }

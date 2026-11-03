@@ -22,6 +22,7 @@
 - Bir öğünün fotoğrafı bir kez yüklenince o günün hatırlatması kalıcı olarak iptal olur; fotoğraf sonradan (sohbetten ya da Planım'dan) silinse de hatırlatma yeniden kurulmaz.
 - Sohbetten silinen fotoğraf Planım'dan da hemen kalkar (aynı öğün kaydı); ekranlar eski durumu göstermez.
 - FCM token yalnızca Android, iOS ve macOS'ta okunur/yazılır; Windows'ta (ve Linux'ta) token'a hiç dokunulmaz. Girişte/açılışta cihazın token'ı kayıtlı olandan farklıysa güncellenir.
+- Bildirimler normalde hesabın en son girdiği cihaza gider (`fcmToken`). Nilay'ın hesabı (`FcmService.multiDeviceUids`) bunun istisnasıdır: girdiği her cihazın token'ı `fcmTokens` listesinde durur ve bildirim hepsine aynı anda gider; çıkışta yalnızca o cihazınki silinir. Sunucu (functions) iki alanı birlikte okur; bir cihaza başka hesap girince token önceki hesabın iki alanından da silinir.
 
 ## Test
 - Sayfanın kendisi yerine aynı mantığın bir kopyasıyla (platform taklidiyle, `debugDefaultTargetPlatformOverride`) yazılan testlerde başka platformlar deneniyorsa **iOS da mutlaka denenir**; iOS listeden çıkarılmaz.
