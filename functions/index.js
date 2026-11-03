@@ -36,6 +36,120 @@ function isOfficeSide(senderId, chatId) {
 }
 
 // =============================================================================
+// FCM TOKENS
+// fcmToken holds the device a user last signed in on. An account that gets
+// notifications on every device at once (FcmService.multiDeviceUids in the
+// app: Nilay) also lists each of its devices in fcmTokens. Notifications go to
+// both fields.
+// =============================================================================
+
+/** FCM error codes for a token that will never work again. */
+const INVALID_TOKEN_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+]);
+
+/**
+ * The notification tokens of a user document, each once.
+ * @param {object|undefined|null} data The user document's data.
+ * @return {string[]} fcmToken and every entry of fcmTokens.
+ */
+function tokensOf(data) {
+  const tokens = new Set();
+  if (data && typeof data.fcmToken === 'string' && data.fcmToken) {
+    tokens.add(data.fcmToken);
+  }
+  if (data && Array.isArray(data.fcmTokens)) {
+    for (const token of data.fcmTokens) {
+      if (typeof token === 'string' && token) tokens.add(token);
+    }
+  }
+  return [...tokens];
+}
+
+/**
+ * The update that removes [tokens] from a user document, or null when the
+ * document holds none of them.
+ * @param {object|undefined|null} data The user document's data.
+ * @param {string[]} tokens Tokens to remove.
+ * @return {object|null} Fields for update().
+ */
+function tokenRemovalUpdate(data, tokens) {
+  if (!data) return null;
+  const update = {};
+  if (tokens.includes(data.fcmToken)) update.fcmToken = FieldValue.delete();
+  if (Array.isArray(data.fcmTokens) &&
+      data.fcmTokens.some((token) => tokens.includes(token))) {
+    update.fcmTokens = FieldValue.arrayRemove(...tokens);
+  }
+  return Object.keys(update).length > 0 ? update : null;
+}
+
+/**
+ * Removes [tokens] from users/{uid}. The document is read again in a
+ * transaction, so a token written meanwhile stays.
+ * @param {string} uid The user.
+ * @param {string[]} tokens Tokens to remove.
+ * @return {Promise<boolean>} Whether anything was removed.
+ */
+async function removeUserTokens(uid, tokens) {
+  const db = admin.firestore();
+  const ref = db.collection('users').doc(uid);
+  return db.runTransaction(async (tx) => {
+    const fresh = await tx.get(ref);
+    const update =
+        tokenRemovalUpdate(fresh.exists ? fresh.data() : null, tokens);
+    if (update) tx.update(ref, update);
+    return update !== null;
+  });
+}
+
+/**
+ * The tokens of [uids] for one multicast.
+ * @param {Iterable<string>} uids Users to notify.
+ * @return {Promise<{tokens: string[], owners: string[]}>} owners[i] holds
+ *     tokens[i].
+ */
+async function collectTokens(uids) {
+  const tokens = [];
+  const owners = [];
+  for (const uid of uids) {
+    const doc = await admin.firestore().collection('users').doc(uid).get();
+    for (const token of tokensOf(doc.exists ? doc.data() : null)) {
+      if (tokens.includes(token)) continue;
+      tokens.push(token);
+      owners.push(uid);
+    }
+  }
+  return {tokens, owners};
+}
+
+/**
+ * Logs the failed sends of a multicast and removes the tokens FCM no longer
+ * accepts from their owners' documents.
+ * @param {object} res The sendEachForMulticast result.
+ * @param {string[]} tokens The tokens sent to, in order.
+ * @param {string[]} owners owners[i] holds tokens[i].
+ */
+async function removeFailedTokens(res, tokens, owners) {
+  const invalidByOwner = new Map();
+  res.responses.forEach((response, i) => {
+    if (response.success) return;
+    const code = (response.error && response.error.code) ?
+        response.error.code : '';
+    logger.warn('FCM send failed', {code: code});
+    if (!INVALID_TOKEN_CODES.has(code)) return;
+    const invalid = invalidByOwner.get(owners[i]) || [];
+    invalid.push(tokens[i]);
+    invalidByOwner.set(owners[i], invalid);
+  });
+  for (const [uid, invalid] of invalidByOwner) {
+    await removeUserTokens(uid, invalid);
+    logger.info(`Removed invalid token for user ${uid}`);
+  }
+}
+
+// =============================================================================
 // NOTIFICATION CHANNELS (must match Android string.xml notification_channel_id)
 // =============================================================================
 const CHAT_CHANNEL_ID = 'chat_messages_v2';
@@ -243,17 +357,9 @@ exports.notifyUserOnAdminMessage = onDocumentCreated(
       // Don't notify the office
       if (CHAT_OFFICE_UIDS.has(chatId)) return;
 
-      const userDoc = await admin.firestore()
-          .collection('users')
-          .doc(chatId)
-          .get();
-
-      const userData = userDoc.exists ? userDoc.data() : null;
-
-      // Single token per user
-      const token = userData?.fcmToken;
-      if (!token) return;
-      const tokens = [token];
+      // Every device of the user (see tokensOf).
+      const {tokens, owners} = await collectTokens([chatId]);
+      if (tokens.length === 0) return;
 
       let body = CHAT_DEFAULT_BODY;
       if (typeof msg.text === 'string' && msg.text.trim().length) {
@@ -280,25 +386,7 @@ exports.notifyUserOnAdminMessage = onDocumentCreated(
         apns: buildApnsConfig(),
       });
 
-      // Check if token is invalid and remove it
-      const response = res.responses[0];
-      if (!response.success) {
-        const code = (response.error && response.error.code) ?
-        response.error.code : '';
-        const isInvalid =
-            code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token';
-
-        logger.warn('FCM send failed', {code: code});
-
-        if (isInvalid) {
-          await admin.firestore()
-              .collection('users')
-              .doc(chatId)
-              .update({fcmToken: admin.firestore.FieldValue.delete()});
-          logger.info(`Removed invalid token for user ${chatId}`);
-        }
-      }
+      await removeFailedTokens(res, tokens, owners);
     },
 );
 
@@ -323,23 +411,8 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
       // Only notify admins when USER sends (so skip admin->user messages)
       if (isOfficeSide(senderId, userChatId)) return;
 
-      // Collect admin tokens (single token per admin); notifiedAdminUids[i]
-      // owns tokens[i] (admins without a token are skipped).
-      const tokens = [];
-      const notifiedAdminUids = [];
-      for (const adminUid of CHAT_OFFICE_UIDS) {
-        const adminDoc = await admin.firestore()
-            .collection('users')
-            .doc(adminUid)
-            .get();
-
-        const adminData = adminDoc.exists ? adminDoc.data() : null;
-        if (adminData?.fcmToken) {
-          tokens.push(adminData.fcmToken);
-          notifiedAdminUids.push(adminUid);
-        }
-      }
-
+      // Every device of every office admin (see tokensOf).
+      const {tokens, owners} = await collectTokens(CHAT_OFFICE_UIDS);
       if (tokens.length === 0) return;
 
       // Notification body
@@ -389,28 +462,7 @@ exports.notifyAdminsOnUserMessage = onDocumentCreated(
         apns: buildApnsConfig(),
       });
 
-      // Clean up invalid tokens from admin docs
-      for (let i = 0; i < res.responses.length; i++) {
-        const response = res.responses[i];
-        if (response.success) continue;
-
-        const code = (response.error && response.error.code)?
-        response.error.code : '';
-        const isInvalid =
-            code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token';
-
-        logger.warn('FCM send failed', {code: code});
-
-        if (isInvalid && notifiedAdminUids[i]) {
-          await admin.firestore()
-              .collection('users')
-              .doc(notifiedAdminUids[i])
-              .update({fcmToken: admin.firestore.FieldValue.delete()});
-          logger.info(
-              `Removed invalid token for admin ${notifiedAdminUids[i]}`);
-        }
-      }
+      await removeFailedTokens(res, tokens, owners);
     },
 );
 
@@ -586,20 +638,15 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
         return;
       }
 
-      const userDoc = await admin.firestore()
-          .collection('users')
-          .doc(chatId)
-          .get();
-
-      const userData = userDoc.exists ? userDoc.data() : null;
-      const token = userData ? userData.fcmToken : null;
-      if (!token) return;
+      // Every device of the user (see tokensOf).
+      const {tokens, owners} = await collectTokens([chatId]);
+      if (tokens.length === 0) return;
 
       const title = CHAT_ADMIN_TO_USER_TITLE;
       const body = buildAdminReactionBody(after, emoji);
 
       const res = await admin.messaging().sendEachForMulticast({
-        tokens: [token],
+        tokens: tokens,
         notification: {
           title: title,
           body: body,
@@ -615,25 +662,8 @@ exports.notifyUserOnAdminReaction = onDocumentUpdated(
         apns: buildApnsConfig(),
       });
 
-      // Remove the token if FCM reports it is no longer valid.
-      const response = res.responses[0];
-      if (!response.success) {
-        const code = (response.error && response.error.code) ?
-            response.error.code : '';
-        const isInvalid =
-            code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token';
-
-        logger.warn('FCM reaction send failed', {code: code});
-
-        if (isInvalid) {
-          await admin.firestore()
-              .collection('users')
-              .doc(chatId)
-              .update({fcmToken: admin.firestore.FieldValue.delete()});
-          logger.info(`Removed invalid token for user ${chatId}`);
-        }
-      }
+      // Remove the tokens FCM reports as no longer valid.
+      await removeFailedTokens(res, tokens, owners);
     },
 );
 
@@ -685,22 +715,8 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
         return;
       }
 
-      // Collect admin tokens (single token per admin)
-      const tokens = [];
-      const notifiedAdminUids = [];
-      for (const adminUid of CHAT_OFFICE_UIDS) {
-        const adminDoc = await admin.firestore()
-            .collection('users')
-            .doc(adminUid)
-            .get();
-
-        const adminData = adminDoc.exists ? adminDoc.data() : null;
-        if (adminData?.fcmToken) {
-          tokens.push(adminData.fcmToken);
-          notifiedAdminUids.push(adminUid);
-        }
-      }
-
+      // Every device of every office admin (see tokensOf).
+      const {tokens, owners} = await collectTokens(CHAT_OFFICE_UIDS);
       if (tokens.length === 0) return;
 
       // Try to get the reacting user's name for a better notification title
@@ -742,28 +758,7 @@ exports.notifyAdminsOnUserReaction = onDocumentUpdated(
         apns: buildApnsConfig(),
       });
 
-      // Clean up invalid tokens from admin docs
-      for (let i = 0; i < res.responses.length; i++) {
-        const response = res.responses[i];
-        if (response.success) continue;
-
-        const code = (response.error && response.error.code) ?
-            response.error.code : '';
-        const isInvalid =
-            code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token';
-
-        logger.warn('FCM reaction send failed', {code: code});
-
-        if (isInvalid && notifiedAdminUids[i]) {
-          await admin.firestore()
-              .collection('users')
-              .doc(notifiedAdminUids[i])
-              .update({fcmToken: admin.firestore.FieldValue.delete()});
-          logger.info(
-              `Removed invalid token for admin ${notifiedAdminUids[i]}`);
-        }
-      }
+      await removeFailedTokens(res, tokens, owners);
     },
 );
 
@@ -1039,8 +1034,8 @@ function buildAndroidConfigForNews(title, body) {
 }
 
 /**
- * Collects all FCM tokens from all users (including admins).
- * Uses single fcmToken field per user.
+ * Collects all FCM tokens from all users (including admins): every device of
+ * every user (see tokensOf), each token once.
  * @param {boolean} checkAnnouncementPreference - If true, only returns tokens
  *   for users who have announcementNotificationsEnabled !== false.
  * @return {Promise<string[]>} Array of FCM tokens.
@@ -1050,11 +1045,12 @@ async function getAllUserTokens(checkAnnouncementPreference = false) {
       .collection('users')
       .get();
 
-  const allTokens = [];
+  const allTokens = new Set();
 
   usersSnapshot.docs.forEach((doc) => {
     const userData = doc.data();
-    if (!userData?.fcmToken) return;
+    const tokens = tokensOf(userData);
+    if (tokens.length === 0) return;
 
     // If checking announcement preference, skip users who disabled it
     if (checkAnnouncementPreference) {
@@ -1066,43 +1062,38 @@ async function getAllUserTokens(checkAnnouncementPreference = false) {
       }
     }
 
-    allTokens.push(userData.fcmToken);
+    for (const token of tokens) allTokens.add(token);
   });
 
-  return allTokens;
+  return [...allTokens];
 }
 
 /**
- * Removes invalid FCM tokens from user documents.
- * Uses single fcmToken field per user.
+ * Removes invalid FCM tokens from user documents (fcmToken and fcmTokens).
  * @param {string[]} invalidTokens Array of invalid tokens to remove.
  */
 async function removeInvalidTokensFromAllUsers(invalidTokens) {
   if (!invalidTokens.length) return;
 
-  const invalidSet = new Set(invalidTokens);
   const usersSnapshot = await admin.firestore()
       .collection('users')
       .get();
 
-  const batch = admin.firestore().batch();
+  let batch = admin.firestore().batch();
   let batchCount = 0;
 
   for (const doc of usersSnapshot.docs) {
-    const userData = doc.data();
-    if (!userData?.fcmToken) continue;
+    // This user's invalid tokens, if any
+    const update = tokenRemovalUpdate(doc.data(), invalidTokens);
+    if (!update) continue;
 
-    // Check if this user's token is invalid
-    if (!invalidSet.has(userData.fcmToken)) continue;
-
-    batch.update(doc.ref, {
-      fcmToken: admin.firestore.FieldValue.delete(),
-    });
+    batch.update(doc.ref, update);
     batchCount++;
 
     // Firestore batches have a limit of 500 operations
     if (batchCount >= 400) {
       await batch.commit();
+      batch = admin.firestore().batch();
       batchCount = 0;
     }
   }
@@ -1288,19 +1279,21 @@ exports.notifyUsersOnNewsPublished = onDocumentUpdated(
 
 // =============================================================================
 // FCM TOKEN: BİR CİHAZ, BİR HESAP
-// Bir cihazın bildirim jetonu (fcmToken) yalnızca o cihazda en son giren
-// hesabın kaydında durur. Çevrimdışı çıkışta jeton kayıttan silinemez: silme,
-// çıkan kullanıcının yazma sırasında kalır ve ancak o kullanıcı aynı cihazda
-// yeniden girince gider. Sonra giren hesap aynı jetonu kendi kaydına yazınca
-// jeton önceki hesabın kaydından burada silinir: önceki kullanıcının
-// bildirimleri (mesaj önizlemeleri) yeni kullanıcının cihazına gitmez.
+// Bir cihazın bildirim jetonu (fcmToken ya da fcmTokens listesinde) yalnızca
+// o cihazda en son giren hesabın kaydında durur. Çevrimdışı çıkışta jeton
+// kayıttan silinemez: silme, çıkan kullanıcının yazma sırasında kalır ve
+// ancak o kullanıcı aynı cihazda yeniden girince gider. Sonra giren hesap
+// aynı jetonu kendi kaydına yazınca jeton önceki hesabın kaydından burada
+// silinir: önceki kullanıcının bildirimleri (mesaj önizlemeleri) yeni
+// kullanıcının cihazına gitmez.
 // =============================================================================
 
 /**
- * users/{userId}.fcmToken yazılınca aynı jetonu taşıyan diğer kullanıcı
- * kayıtlarından jetonu siler. Her kayıt bir işlem içinde yeniden okunur:
- * jeton bu arada değiştiyse dokunulmaz. Silme bu tetikleyiciyi yeniden
- * çalıştırır, jeton boş olduğundan orada durur.
+ * users/{userId} kaydına yeni bir jeton yazılınca (fcmToken ya da fcmTokens
+ * listesine) aynı jetonu taşıyan diğer kullanıcı kayıtlarından jetonu siler.
+ * Her kayıt bir işlem içinde yeniden okunur: jeton bu arada değiştiyse
+ * dokunulmaz. Silme bu tetikleyiciyi yeniden çalıştırır; yeni jeton
+ * olmadığından orada durur.
  *
  * Path: users/{userId}
  */
@@ -1309,26 +1302,31 @@ exports.releaseFcmTokenFromOtherUsers = onDocumentWritten(
     async (event) => {
       const before = event.data && event.data.before.data();
       const after = event.data && event.data.after.data();
-      const token = after && after.fcmToken;
-      if (typeof token !== 'string' || token === '') return;
-      if (before && before.fcmToken === token) return;
+      const previous = new Set(tokensOf(before));
+      const added = tokensOf(after).filter((token) => !previous.has(token));
+      if (added.length === 0) return;
 
       const {userId} = event.params;
       const db = admin.firestore();
-      const holders = await db.collection('users')
-          .where('fcmToken', '==', token)
-          .get();
-      const others = holders.docs.filter((doc) => doc.id !== userId);
-      await Promise.all(others.map((doc) => db.runTransaction(async (tx) => {
-        const fresh = await tx.get(doc.ref);
-        if (fresh.exists && fresh.get('fcmToken') === token) {
-          tx.update(doc.ref, {fcmToken: FieldValue.delete()});
+      const released = new Set();
+      for (const token of added) {
+        const [single, multi] = await Promise.all([
+          db.collection('users').where('fcmToken', '==', token).get(),
+          db.collection('users')
+              .where('fcmTokens', 'array-contains', token)
+              .get(),
+        ]);
+        const others = new Set([...single.docs, ...multi.docs]
+            .map((doc) => doc.id)
+            .filter((id) => id !== userId));
+        for (const uid of others) {
+          if (await removeUserTokens(uid, [token])) released.add(uid);
         }
-      })));
-      if (others.length > 0) {
+      }
+      if (released.size > 0) {
         logger.info('Released FCM token from other users', {
           userId,
-          released: others.map((doc) => doc.id),
+          released: [...released],
         });
       }
     },
