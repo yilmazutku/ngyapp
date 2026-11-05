@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../constants/app_constants.dart';
 import '../models/app_update_info.dart';
@@ -34,18 +35,18 @@ class AppUpdateProvider extends ChangeNotifier {
   ///
   /// [currentVersion] defaults to the version this build reports; it is a
   /// parameter so the decision can be exercised without a rebuild.
-  Future<AppUpdateInfo?> checkForUpdate({
-    String currentVersion = AppConstants.appVersion,
-  }) async {
+  Future<AppUpdateInfo?> checkForUpdate({String? currentVersion}) async {
     // Windows and macOS builds are installed by hand: no store to link to.
     if (!isSupported) return null;
 
     try {
+      final String installedVersion =
+          currentVersion ?? (await PackageInfo.fromPlatform()).version;
       final snapshot =
           await _docRef.get().timeout(AppUpdateConstants.checkTimeout);
       return AppUpdateInfo.resolve(
         data: snapshot.data(),
-        currentVersion: currentVersion,
+        currentVersion: installedVersion,
         isIos: Platform.isIOS,
       );
     } catch (_) {

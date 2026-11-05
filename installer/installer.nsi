@@ -4,12 +4,12 @@
 !define APP_NAME "IlkApp"
 ; Visible name of the desktop shortcut the user sees after installation.
 !define SHORTCUT_NAME "NGY App"
-!define APP_VERSION "1.0.1"
+!define APP_VERSION "1.0.5"
 ; APP_EXE is the ACTUAL Flutter application executable produced by the Windows
 ; build. The on-disk name comes from windows/CMakeLists.txt (BINARY_NAME
 ; "ngy_app") and pubspec.yaml (name: ngy_app), so the built file is
 ; build\windows\x64\runner\Release\ngy_app.exe. This is NOT the setup exe
-; (IlkApp_Setup_1.0.1.exe) - that one is the installer this script produces.
+; (IlkApp_Setup_1.0.5.exe) - that one is the installer this script produces.
 !define APP_EXE "ngy_app.exe"
 
 ; Registry key used to register the app in Add/Remove Programs and to detect a
