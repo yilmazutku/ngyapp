@@ -14,7 +14,6 @@ import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/search_text.dart';
 import '../widgets/labeled_action_button.dart';
-import '../widgets/home_button.dart';
 import '../widgets/search_field.dart';
 
 /// Admin chat list page displaying all chats where the admin is a participant.
@@ -433,7 +432,6 @@ class _AdminChatListPageState extends State<AdminChatListPage> {
             _loadCustomers(forceRefresh: true);
           },
         ),
-        const HomeButton(),
       ],
     );
   }
