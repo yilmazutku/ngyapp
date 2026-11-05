@@ -14,7 +14,7 @@ echo "Working directory: $(pwd)"
 # ---------------------------------------------------------------------------
 # 1. Install Flutter SDK (download pre-built archive – avoids git clone bugs)
 # ---------------------------------------------------------------------------
-FLUTTER_VERSION="3.41.0"
+FLUTTER_VERSION="3.47.9"
 
 if [ ! -d "$HOME/flutter" ]; then
     echo "=== Downloading Flutter $FLUTTER_VERSION ==="

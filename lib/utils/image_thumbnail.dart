@@ -54,7 +54,7 @@ Future<ImagePixelSize?> readImageFilePixelSize(XFile file) async {
     }
     final ImagePixelSize? size = await readImagePixelSize(header.takeBytes());
     if (size != null) return size;
-    return readImagePixelSize(await file.readAsBytes());
+    return await readImagePixelSize(await file.readAsBytes());
   } catch (e) {
     return null;
   }

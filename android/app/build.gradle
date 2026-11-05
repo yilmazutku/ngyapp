@@ -129,7 +129,7 @@ flutter {
 dependencies {
     // Firebase surumleri elle sabitlenmiyor: FlutterFire eklentileri kendi
     // firebase-bom'unu uyguluyor (firebase_core -> FirebaseSDKVersion, su an
-    // 33.16.0). Buraya eski bir bom yazmak eklentilerin bekledigi surumlerle
+    // 35.1.0). Buraya eski bir bom yazmak eklentilerin bekledigi surumlerle
     // catisiyordu. Gerekirse android/build.gradle icinde
     // ext.FlutterFire = [FirebaseSDKVersion: "<surum>"] ile ezilebilir.
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'

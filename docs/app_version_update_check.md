@@ -14,9 +14,9 @@ kullanıcıyı **App Store**'a veya **Google Play**'e yönlendirir.
 | Dosya | Görevi |
 | --- | --- |
 | `lib/models/app_update_info.dart` | Firestore dökümanını okur, sürüm karşılaştırmasını yapar, mağaza adresini üretir |
-| `lib/providers/app_update_provider.dart` | Firestore'dan `admininput/appVersion` dökümanını çeker |
+| `lib/providers/app_update_provider.dart` | Firestore'dan `admininput/appVersion` dökümanını çeker; kurulu sürümü `package_info_plus` ile okur |
 | `lib/widgets/app_update_gate.dart` | Kontrolü tetikler, uyarıyı/engelleme ekranını gösterir, mağazayı açar |
-| `lib/constants/app_constants.dart` | `AppConstants.appVersion` ve `AppUpdateConstants` (paket adı, App Store id, metinler) |
+| `lib/constants/app_constants.dart` | `AppUpdateConstants` (paket adı, App Store id, metinler) |
 
 ---
 
@@ -106,21 +106,28 @@ yapmamış kullanıcıda sessiz kalır.
 
 ## 3. Yeni sürüm çıkarken yapılacaklar
 
-1. `pubspec.yaml` içindeki `version:` alanını yükselt.
-2. **`AppConstants.appVersion`'ı da aynı değere getir.** Kontrol bu sabiti
-   karşılaştırır; burası unutulursa güncel kullanıcılara da "güncelleyin"
-   uyarısı çıkmaya devam eder.
-3. Build mağazada yayına çıktıktan **sonra** Firestore'daki `latestVersion`'ı
+1. `pubspec.yaml` içindeki `version:` alanını yükselt. Kontrol, kurulu
+   uygulamanın sürümünü (`package_info_plus`: iOS'ta
+   `CFBundleShortVersionString`, Android'de `versionName`) okur; bu sürüm
+   `pubspec.yaml`'dan gelir, başka bir yerde elle güncellenecek sabit yok.
+2. Build mağazada yayına çıktıktan **sonra** Firestore'daki `latestVersion`'ı
    güncelle. Önce güncellenirse kullanıcılar mağazada olmayan bir sürüme
    yönlendirilir.
-4. Zorunlu güncelleme gerekiyorsa `minSupportedVersion`'ı ayrıca yükselt.
+3. Zorunlu güncelleme gerekiyorsa `minSupportedVersion`'ı ayrıca yükselt.
+
+1.0.5'ten önceki build'ler sürümü elle tutulan bir sabitten okuyordu ve
+1.0.3 ile 1.0.4 dahil hepsi kendini **1.0.2** olarak bildirir. Bu yüzden
+`minSupportedVersion` 1.0.2'den büyük olduğu sürece bu build'lerin hepsi
+engellenir.
 
 ## 4. iOS notu
 
-`AppUpdateConstants.iosAppId` şu an boş. App Store numarası bu sabite ya da
-Firestore dökümanındaki `iosAppId` alanına girilene kadar kontrol **iOS'ta
-sessiz kalır** — kullanıcıya hiçbir yere gitmeyen bir buton göstermemek için.
-Android tarafı paket adı bilindiği için ek ayar istemez.
+`AppUpdateConstants.iosAppId` App Store numarasını (`6756973059`) tutar;
+Firestore dökümanındaki `iosAppId` alanı onu ezer. 1.0.5'ten önceki iOS
+build'lerinde bu sabit boştu; onlarda kontrolün çalışması için Firestore
+dökümanında `iosAppId: "6756973059"` bulunmalı. Numara yoksa kontrol iOS'ta
+**sessiz kalır** — kullanıcıya hiçbir yere gitmeyen bir buton göstermemek
+için. Android tarafı paket adı bilindiği için ek ayar istemez.
 
 ## 5. Platform sınırı (sadece iOS/Android)
 

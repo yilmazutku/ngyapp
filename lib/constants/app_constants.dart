@@ -23,14 +23,6 @@ class AppConstants {
   /// The display name of the application
   static const String appName = 'Dyt. Nilay Göktepe Yılmaz';
 
-  /// Version shown to the user (top-right of the home page).
-  ///
-  /// Keep in step with the `version:` field in pubspec.yaml. This is also the
-  /// version the startup update check compares against the store, so a build
-  /// that forgets to bump it here keeps asking its users to update to a
-  /// version they already have.
-  static const String appVersion = '1.0.2';
-
   /// The app description shown in various places
   static const String appDescription = 'A new Flutter project.';
 }
@@ -52,11 +44,7 @@ class AppUpdateConstants {
   static const String androidPackageName = 'com.utkuyilmaz.ngy_app';
 
   /// App Store numeric id (the digits in `apps.apple.com/app/id...`).
-  ///
-  /// Empty until the app has an App Store listing. While it is empty the
-  /// check stays silent on iOS rather than showing a button that leads
-  /// nowhere; set it here or in the Firestore document to switch iOS on.
-  static const String iosAppId = '';
+  static const String iosAppId = '6756973059';
 
   /// Store names as users know them.
   static const String androidStoreName = 'Google Play';
