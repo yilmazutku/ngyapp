@@ -7,7 +7,9 @@ import '../utils/date_formatter.dart';
 enum AdminNotificationType {
   bloodTestReminder('bloodTestReminder'),
 
-  missingBloodTests('missingBloodTests');
+  missingBloodTests('missingBloodTests'),
+
+  test('test');
 
   const AdminNotificationType(this.value);
 
@@ -115,6 +117,12 @@ class AdminNotification {
   static const String dayField = 'day';
   static const String customersField = 'customers';
   static const String supersededField = 'superseded';
+  static const String onlyForField = 'onlyFor';
+
+  static const String testTitle = 'Deneme hatırlatması';
+  static const String testBody =
+      'Bu bir deneme bildirimidir. Uygulama açıkken şerit, kapalıyken sistem '
+      'bildirimi olarak gelmesi gerekir.';
 
   final String id;
   final AdminNotificationType type;
@@ -132,6 +140,8 @@ class AdminNotification {
 
   final bool superseded;
 
+  final String? onlyFor;
+
   const AdminNotification({
     required this.id,
     required this.type,
@@ -145,6 +155,7 @@ class AdminNotification {
     this.stage,
     this.customers = const [],
     this.superseded = false,
+    this.onlyFor,
   });
 
   static AdminNotification? fromDocument(
@@ -177,6 +188,7 @@ class AdminNotification {
     final Object? userName = data[userNameField];
     final Object? title = data[titleField];
     final Object? body = data[bodyField];
+    final Object? onlyFor = data[onlyForField];
     return AdminNotification(
       id: doc.id,
       type: type,
@@ -190,8 +202,11 @@ class AdminNotification {
       stage: BloodTestReminderStage.fromValue(data[stageField]),
       customers: customers,
       superseded: data[supersededField] == true,
+      onlyFor: onlyFor is String && onlyFor.isNotEmpty ? onlyFor : null,
     );
   }
+
+  bool isVisibleTo(String uid) => onlyFor == null || onlyFor == uid;
 
   bool isReadBy(String uid) => readBy.containsKey(uid);
 
@@ -210,6 +225,7 @@ class AdminNotification {
         stage: stage,
         customers: customers,
         superseded: superseded,
+        onlyFor: onlyFor,
       );
 
   bool isDueAt(DateTime now) => !fireAt.isAfter(now);

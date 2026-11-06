@@ -897,6 +897,19 @@ class _SystemNotificationsListState extends State<_SystemNotificationsList>
           onCustomerTap: (customer) =>
               _openCustomer(customer.userId, customer.name),
         );
+      case AdminNotificationType.test:
+        return _NotificationRow(
+          key: ValueKey<String>(notification.id),
+          unread: unread,
+          leading: _SystemIcon(
+            icon: Icons.science_rounded,
+            color: Colors.blue.shade600,
+          ),
+          title: notification.title,
+          subtitle: notification.body,
+          time: time,
+          onTap: () => _markRead(notification),
+        );
     }
   }
 }
