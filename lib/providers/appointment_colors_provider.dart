@@ -11,12 +11,16 @@ import '../models/appointment_color_palette.dart';
 /// are pushed into [AppointmentColorsRegistry] so [AppointmentType.getBgColor]
 /// can pick them up synchronously.
 class AppointmentColorsProvider extends ChangeNotifier {
+  AppointmentColorsProvider({FirebaseFirestore? db}) : _dbOverride = db;
+
   static const String _collection = 'admininput';
   static const String _docId = 'appointmentColors';
   static const String colorsField = 'colors';
   static const String updatedAtField = 'updatedAt';
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore? _dbOverride;
+
+  FirebaseFirestore get _firestore => _dbOverride ?? FirebaseFirestore.instance;
 
   bool _hasLoaded = false;
   bool get hasLoaded => _hasLoaded;
@@ -70,7 +74,7 @@ class AppointmentColorsProvider extends ChangeNotifier {
       await _docRef.set({
         colorsField: payload,
         updatedAtField: FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      }, SetOptions(mergeFields: const [colorsField, updatedAtField]));
       AppointmentColorsRegistry.setOverrides(overrides);
       _hasLoaded = true;
       notifyListeners();

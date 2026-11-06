@@ -81,25 +81,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: Focus(
-            onKeyEvent: (node, event) {
-              switch (chatInputKeyAction(
-                event,
-                platform: defaultTargetPlatform,
-                isShiftPressed: HardwareKeyboard.instance.isShiftPressed,
-                isComposing: controller.value.composing.isValid,
-                hasReply: reply.value != null,
-              )) {
-                case ChatInputKeyAction.send:
-                  sent.add(controller.text);
-                  return KeyEventResult.handled;
-                case ChatInputKeyAction.cancelReply:
-                  reply.value = null;
-                  return KeyEventResult.handled;
-                case ChatInputKeyAction.none:
-                  return KeyEventResult.ignored;
-              }
-            },
+          body: ChatInputKeyHandler(
+            controller: controller,
+            hasReply: () => reply.value != null,
+            onSend: () => sent.add(controller.text),
+            onCancelReply: () => reply.value = null,
             child: TextField(
               controller: controller,
               focusNode: focusNode,

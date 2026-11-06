@@ -2983,30 +2983,6 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
     super.dispose();
   }
 
-  /// Donanım klavyesinde (masaüstü, iPad, Mac'teki iOS uygulaması) Enter
-  /// mesajı gönderir, Shift+Enter yeni satır ekler; Esc yazılan yanıtı iptal
-  /// eder. Ekran klavyesinde Enter her zamanki gibi yeni satırdır (bkz.
-  /// [chatInputKeyAction]).
-  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    final ChatInputKeyAction action = chatInputKeyAction(
-      event,
-      platform: defaultTargetPlatform,
-      isShiftPressed: HardwareKeyboard.instance.isShiftPressed,
-      isComposing: widget.controller.value.composing.isValid,
-      hasReply: widget.replyTarget.value != null,
-    );
-    switch (action) {
-      case ChatInputKeyAction.send:
-        widget.onSend();
-        return KeyEventResult.handled;
-      case ChatInputKeyAction.cancelReply:
-        widget.replyTarget.value = null;
-        return KeyEventResult.handled;
-      case ChatInputKeyAction.none:
-        return KeyEventResult.ignored;
-    }
-  }
-
   void _toggleMenu() {
     setState(() {
       _isMenuOpen = !_isMenuOpen;
@@ -3118,8 +3094,11 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
 
                 // Text input field
                 Expanded(
-                  child: Focus(
-                    onKeyEvent: _handleKey,
+                  child: ChatInputKeyHandler(
+                    controller: widget.controller,
+                    hasReply: () => widget.replyTarget.value != null,
+                    onSend: widget.onSend,
+                    onCancelReply: () => widget.replyTarget.value = null,
                     child: TextField(
                       controller: widget.controller,
                       focusNode: widget.focusNode,

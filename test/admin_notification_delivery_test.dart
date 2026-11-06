@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ngy_app/models/admin_notification.dart';
 import 'package:ngy_app/services/admin_notification_delivery.dart';
@@ -27,6 +29,26 @@ class _FakeScheduler implements AdminNotificationScheduler {
 
   @override
   Future<Set<String>> pendingDocIds() async => scheduled.keys.toSet();
+}
+
+class _GatedScheduler extends _FakeScheduler {
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<bool> schedule({
+    required String docId,
+    required String title,
+    required String body,
+    required DateTime fireAt,
+  }) async {
+    await gate.future;
+    return super.schedule(
+      docId: docId,
+      title: title,
+      body: body,
+      fireAt: fireAt,
+    );
+  }
 }
 
 void main() {
@@ -203,5 +225,25 @@ void main() {
       becameDueInForeground: {'a'},
     );
     expect(banners, ['a']);
+  });
+
+  test('art arda gelen eşitlemeler sırayla uygulanır, silinen bildirim kalmaz',
+      () async {
+    final _GatedScheduler gated = _GatedScheduler();
+    final AdminNotificationDelivery d = AdminNotificationDelivery(
+      local: gated,
+      banner: ({required title, required body, required data}) {},
+      osShowsInForeground: false,
+    );
+    await d.attach(uid);
+
+    final Future<void> added =
+        d.syncUpcoming([notification('r', now.add(const Duration(hours: 1)))]);
+    final Future<void> removed = d.syncUpcoming(const []);
+    await pumpEventQueue();
+    gated.gate.complete();
+    await Future.wait([added, removed]);
+
+    expect(gated.scheduled, isEmpty);
   });
 }

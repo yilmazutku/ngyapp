@@ -23,6 +23,16 @@ enum AdminNotificationType {
   }
 }
 
+enum AdminTestNotificationKind {
+  plain,
+
+  bloodTestDayBefore,
+
+  bloodTestDueDay,
+
+  missingBloodTests,
+}
+
 enum BloodTestReminderStage {
   dayBefore('dayBefore'),
 
@@ -118,6 +128,7 @@ class AdminNotification {
   static const String customersField = 'customers';
   static const String supersededField = 'superseded';
   static const String onlyForField = 'onlyFor';
+  static const String isTestField = 'isTest';
 
   static const String testTitle = 'Deneme hatırlatması';
   static const String testBody =
@@ -142,6 +153,8 @@ class AdminNotification {
 
   final String? onlyFor;
 
+  final bool isTest;
+
   const AdminNotification({
     required this.id,
     required this.type,
@@ -156,6 +169,7 @@ class AdminNotification {
     this.customers = const [],
     this.superseded = false,
     this.onlyFor,
+    this.isTest = false,
   });
 
   static AdminNotification? fromDocument(
@@ -203,6 +217,7 @@ class AdminNotification {
       customers: customers,
       superseded: data[supersededField] == true,
       onlyFor: onlyFor is String && onlyFor.isNotEmpty ? onlyFor : null,
+      isTest: type == AdminNotificationType.test || data[isTestField] == true,
     );
   }
 
@@ -226,6 +241,7 @@ class AdminNotification {
         customers: customers,
         superseded: superseded,
         onlyFor: onlyFor,
+        isTest: isTest,
       );
 
   bool isDueAt(DateTime now) => !fireAt.isAfter(now);

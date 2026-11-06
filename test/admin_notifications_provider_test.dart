@@ -324,6 +324,84 @@ void main() {
       expect(provider.notifications, isEmpty);
     });
 
+    test('simülatör türleri gerçekleri gibi yazılır, yalnızca denemeler silinir',
+        () async {
+      final DateTime now = DateTime.now();
+      const NotificationCustomer ayse =
+          NotificationCustomer(userId: customer, name: 'Ayşe Yılmaz');
+      const NotificationCustomer can =
+          NotificationCustomer(userId: 'u2', name: 'Can Ak');
+      await provider.saveMissingBloodTestList(
+        day: '2026-11-05',
+        customers: const [can],
+        at: now.subtract(const Duration(minutes: 5)),
+      );
+      await provider.addTestNotification(
+        fireAt: now.subtract(const Duration(seconds: 3)),
+        kind: AdminTestNotificationKind.bloodTestDueDay,
+        customers: const [ayse],
+      );
+      await provider.addTestNotification(
+        fireAt: now.subtract(const Duration(seconds: 2)),
+        kind: AdminTestNotificationKind.bloodTestDayBefore,
+        customers: const [ayse],
+      );
+      await provider.addTestNotification(
+        fireAt: now.subtract(const Duration(seconds: 1)),
+        kind: AdminTestNotificationKind.missingBloodTests,
+        customers: const [ayse, can],
+      );
+
+      provider.start(admin, owner: home);
+      await pumpEventQueue();
+      final List<AdminNotification> list = provider.notifications;
+      expect(list.map((n) => n.type), [
+        AdminNotificationType.missingBloodTests,
+        AdminNotificationType.bloodTestReminder,
+        AdminNotificationType.bloodTestReminder,
+        AdminNotificationType.missingBloodTests,
+      ]);
+      expect(list.map((n) => n.isTest), [true, true, true, false]);
+      expect(list.first.customers.map((c) => c.name), ['Ayşe Yılmaz', 'Can Ak']);
+      expect(list.first.title, 'Kan tahlili eksik danışanlar (2)');
+      expect(list[1].stage, BloodTestReminderStage.dayBefore);
+      expect(list[1].title, 'Kan tahlili yarın 3 ayı dolduruyor');
+      expect(list[2].stage, BloodTestReminderStage.dueDay);
+      expect(list[2].title, 'Kan tahlilinin üzerinden 3 ay geçti');
+      expect(list[2].userId, customer);
+      expect(list[2].body, startsWith('Ayşe Yılmaz · '));
+      expect(provider.unreadCount, 4);
+
+      expect(await provider.removeTestNotifications(), 3);
+      await pumpEventQueue();
+      expect(provider.notifications.map((n) => n.isTest), [false]);
+    });
+
+    test('kan tahlili denemesi danışansız kurulmaz', () async {
+      await expectLater(
+        provider.addTestNotification(
+          fireAt: DateTime.now(),
+          kind: AdminTestNotificationKind.bloodTestDueDay,
+        ),
+        throwsArgumentError,
+      );
+      expect((await notifications().get()).docs, isEmpty);
+    });
+
+    test('silinen deneme bildiriminin kurulu sistem bildirimi iptal edilir',
+        () async {
+      provider.start(admin, owner: home);
+      await pumpEventQueue();
+      final String? id = await provider.addTestNotification(
+          fireAt: DateTime.now().add(const Duration(minutes: 5)));
+      await pumpEventQueue();
+      expect(scheduler.scheduled.keys, [id]);
+
+      await provider.removeTestNotifications();
+      await pumpEventQueue();
+      expect(scheduler.scheduled, isEmpty);
+    });
+
     test('dinlemeyi yalnızca başlatan bırakabilir', () async {
       await add('a', DateTime.now().subtract(const Duration(hours: 1)));
       final Object oldHome = Object();

@@ -38,6 +38,8 @@ class AdminNotificationDelivery {
 
   Future<void>? _loading;
 
+  Future<void> _syncQueue = Future<void>.value();
+
   Future<void> attach(String uid) {
     if (_uid == uid && _loading != null) return _loading!;
     _uid = uid;
@@ -93,8 +95,14 @@ class AdminNotificationDelivery {
     }
   }
 
-  Future<void> syncUpcoming(List<AdminNotification> upcoming) async {
-    if (!_local.isSupported) return;
+  Future<void> syncUpcoming(List<AdminNotification> upcoming) {
+    if (!_local.isSupported) return Future<void>.value();
+    return _syncQueue = _syncQueue
+        .then((_) => _sync(upcoming))
+        .catchError((Object e) {});
+  }
+
+  Future<void> _sync(List<AdminNotification> upcoming) async {
     final String? uid = _uid;
     if (uid == null) return;
     await _loading;

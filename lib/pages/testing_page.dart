@@ -78,7 +78,8 @@ class _FeatureTestEntry extends StatelessWidget {
         subtitle: const Text(
           'Kilo takibe geçiş tarihi, kan tahlili hatırlatmaları, bildirim '
           'zili, günlük tarama, doğum günleri ve Enter ile gönderme için '
-          'adım adım test listesi.',
+          'adım adım test listesi; bildirim simülatörü, tarama önizlemesi, '
+          'hatırlatma hesaplayıcı ve kopyalanabilir rapor.',
         ),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(

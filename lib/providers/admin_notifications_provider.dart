@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 
 import '../models/admin_notification.dart';
 import '../services/admin_notification_delivery.dart';
+import '../utils/date_formatter.dart';
 
 class AdminNotificationsProvider extends ChangeNotifier
     with WidgetsBindingObserver {
@@ -381,21 +382,80 @@ class AdminNotificationsProvider extends ChangeNotifier
     }
   }
 
-  Future<String?> addTestNotification({required DateTime fireAt}) async {
+  Future<String?> addTestNotification({
+    required DateTime fireAt,
+    AdminTestNotificationKind kind = AdminTestNotificationKind.plain,
+    List<NotificationCustomer> customers = const [],
+  }) async {
     final String? uid = _uid ?? _currentUid;
     if (uid == null) return null;
-    final String id = 'test_${uid}_${fireAt.millisecondsSinceEpoch}';
+    final String id = 'test_${uid}_${fireAt.microsecondsSinceEpoch}';
     await _collection.doc(id).set({
-      AdminNotification.typeField: AdminNotificationType.test.value,
-      AdminNotification.titleField: AdminNotification.testTitle,
-      AdminNotification.bodyField: AdminNotification.testBody,
+      ..._testContent(kind, fireAt, customers),
       AdminNotification.fireAtField: Timestamp.fromDate(fireAt),
       AdminNotification.onlyForField: uid,
+      AdminNotification.isTestField: true,
       AdminNotification.createdAtField: FieldValue.serverTimestamp(),
       AdminNotification.createdByField: uid,
       AdminNotification.readByField: <String, Object>{},
     });
     return id;
+  }
+
+  static Map<String, Object> _testContent(
+    AdminTestNotificationKind kind,
+    DateTime fireAt,
+    List<NotificationCustomer> customers,
+  ) {
+    switch (kind) {
+      case AdminTestNotificationKind.plain:
+        return {
+          AdminNotification.typeField: AdminNotificationType.test.value,
+          AdminNotification.titleField: AdminNotification.testTitle,
+          AdminNotification.bodyField: AdminNotification.testBody,
+        };
+      case AdminTestNotificationKind.bloodTestDayBefore:
+      case AdminTestNotificationKind.bloodTestDueDay:
+        if (customers.isEmpty) {
+          throw ArgumentError.value(customers, 'customers', 'Danışan seçilmedi');
+        }
+        final NotificationCustomer customer = customers.first;
+        final BloodTestReminderStage stage =
+            kind == AdminTestNotificationKind.bloodTestDayBefore
+                ? BloodTestReminderStage.dayBefore
+                : BloodTestReminderStage.dueDay;
+        final DateTime dueDay = DateTime(fireAt.year, fireAt.month,
+            fireAt.day + (stage == BloodTestReminderStage.dayBefore ? 1 : 0));
+        final DateTime testDate = BloodTestReminderSchedule.addMonths(
+            dueDay, -BloodTestReminderSchedule.monthsAfterTest);
+        return {
+          AdminNotification.typeField:
+              AdminNotificationType.bloodTestReminder.value,
+          AdminNotification.titleField:
+              AdminNotification.bloodTestReminderTitle(stage),
+          AdminNotification.bodyField: AdminNotification.bloodTestReminderBody(
+              customer.name, testDate, stage),
+          AdminNotification.userIdField: customer.userId,
+          AdminNotification.userNameField: customer.name,
+          AdminNotification.testDateField: Timestamp.fromDate(testDate),
+          AdminNotification.stageField: stage.value,
+        };
+      case AdminTestNotificationKind.missingBloodTests:
+        return {
+          AdminNotification.typeField:
+              AdminNotificationType.missingBloodTests.value,
+          AdminNotification.titleField:
+              AdminNotification.missingBloodTestsTitle(customers.length),
+          AdminNotification.bodyField:
+              AdminNotification.missingBloodTestsBody(customers),
+          AdminNotification.dayField: DateFormatter.formatIsoDate(fireAt),
+          AdminNotification.customersField: [
+            for (final NotificationCustomer customer in customers)
+              customer.toMap(),
+          ],
+          AdminNotification.supersededField: false,
+        };
+    }
   }
 
   Future<int> removeTestNotifications() async {
@@ -407,9 +467,7 @@ class AdminNotificationsProvider extends ChangeNotifier
     final List<DocumentReference<Map<String, dynamic>>> refs = [
       for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
           in snapshot.docs)
-        if (doc.data()[AdminNotification.typeField] ==
-            AdminNotificationType.test.value)
-          doc.reference,
+        if (AdminNotification.fromDocument(doc)?.isTest ?? false) doc.reference,
     ];
     await _deleteAll(refs);
     return refs.length;

@@ -9,6 +9,7 @@ import '../providers/meal_photo_notifications_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/customer_chip.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/meal_thumbnail_image.dart';
 import '../widgets/status_note.dart';
@@ -436,6 +437,7 @@ class _NotificationRow extends StatelessWidget {
   final VoidCallback onTap;
   final Widget? footer;
   final Widget? trailing;
+  final bool isTest;
 
   const _NotificationRow({
     super.key,
@@ -447,6 +449,7 @@ class _NotificationRow extends StatelessWidget {
     required this.onTap,
     this.footer,
     this.trailing,
+    this.isTest = false,
   });
 
   @override
@@ -488,6 +491,10 @@ class _NotificationRow extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (isTest) ...[
+                          const SizedBox(width: 6),
+                          const _TestTag(),
+                        ],
                         const SizedBox(width: 8),
                         Text(
                           time,
@@ -876,12 +883,13 @@ class _SystemNotificationsListState extends State<_SystemNotificationsList>
           title: notification.title,
           subtitle: notification.body,
           time: time,
+          isTest: notification.isTest,
           onTap: () => _markRead(notification),
           footer: userId == null
               ? null
               : Align(
                   alignment: Alignment.centerLeft,
-                  child: _CustomerChip(
+                  child: CustomerChip(
                     label: _openCustomerLabel,
                     onPressed: () => _openCustomer(userId, name),
                   ),
@@ -911,6 +919,33 @@ class _SystemNotificationsListState extends State<_SystemNotificationsList>
           onTap: () => _markRead(notification),
         );
     }
+  }
+}
+
+class _TestTag extends StatelessWidget {
+  const _TestTag();
+
+  static const String _label = 'DENEME';
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Text(
+        _label,
+        style: TextStyle(
+          fontSize: 10,
+          letterSpacing: 0.6,
+          fontWeight: FontWeight.w800,
+          color: Colors.blue.shade700,
+        ),
+      ),
+    );
   }
 }
 
@@ -954,29 +989,6 @@ class _SystemIcon extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: Icon(icon, color: color, size: 24),
-    );
-  }
-}
-
-class _CustomerChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onPressed;
-
-  const _CustomerChip({required this.label, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return ActionChip(
-      avatar: Icon(Icons.person_outline_rounded,
-          size: 16, color: Colors.deepPurple.shade400),
-      label: Text(label),
-      labelStyle: const TextStyle(fontSize: 12.5),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      backgroundColor: Colors.white,
-      side: BorderSide(color: Colors.deepPurple.shade100),
-      tooltip: 'Danışanı aç',
-      onPressed: onPressed,
     );
   }
 }
@@ -1026,6 +1038,7 @@ class _MissingBloodTestsRowState extends State<_MissingBloodTestsRow> {
       subtitle: '${customers.length} danışanın kan tahlili sisteme girilmemiş '
           '(eklenmesinin üzerinden 1 hafta geçmiş).',
       time: widget.time,
+      isTest: widget.notification.isTest,
       onTap: () {
         widget.onTap();
         if (canCollapse) setState(() => _expanded = !_expanded);
@@ -1035,7 +1048,7 @@ class _MissingBloodTestsRowState extends State<_MissingBloodTestsRow> {
         runSpacing: 6,
         children: [
           for (final NotificationCustomer customer in shown)
-            _CustomerChip(
+            CustomerChip(
               label: customer.name,
               onPressed: () => widget.onCustomerTap(customer),
             ),
