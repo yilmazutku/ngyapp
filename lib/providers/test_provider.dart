@@ -7,6 +7,10 @@ import '../utils/storage_upload.dart';
 /// Storage:  users/{userId}/tests/test_<ts>.<ext>
 /// Firestore: users/{userId}/tests/doc('pdfFiles')/collection('pdfFiles')/{test_<ts>}
 class TestProvider extends ChangeNotifier {
+  static const String isBloodTestField = 'isBloodTest';
+  static const String bloodTestDateField = 'bloodTestDate';
+  static const String bloodTestReminderField = 'bloodTestReminder';
+
   /// Upload a test attachment (PDF or image) and write its metadata.
   ///
   /// Streams the file from disk via [filePath] (low, constant memory). See
@@ -15,6 +19,8 @@ class TestProvider extends ChangeNotifier {
     required String userId,
     required String fileName,
     required String filePath,
+    DateTime? bloodTestDate,
+    bool bloodTestReminder = false,
   }) async {
     try {
       final now = DateTime.now();
@@ -51,6 +57,12 @@ class TestProvider extends ChangeNotifier {
         'contentType': contentType,
         'isImage': isImage,
         'ext': ext,
+        if (bloodTestDate != null) ...{
+          isBloodTestField: true,
+          bloodTestDateField: Timestamp.fromDate(DateTime(
+              bloodTestDate.year, bloodTestDate.month, bloodTestDate.day)),
+          bloodTestReminderField: bloodTestReminder,
+        },
       });
 
       notifyListeners();
@@ -80,11 +92,31 @@ class TestProvider extends ChangeNotifier {
           'contentType': data['contentType'] ?? '',
           'isImage': data['isImage'] ?? false,
           'ext': data['ext'] ?? '',
+          isBloodTestField: data[isBloodTestField] == true,
+          bloodTestDateField: data[bloodTestDateField],
+          bloodTestReminderField: data[bloodTestReminderField] == true,
         };
       }).toList();
     } catch (e) {
       return [];
     }
+  }
+
+  Future<bool> hasBloodTestOn({
+    required String userId,
+    required DateTime testDate,
+  }) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore
+        .instance
+        .collection('users')
+        .doc(userId)
+        .collection('tests')
+        .where(bloodTestDateField,
+            isEqualTo: Timestamp.fromDate(
+                DateTime(testDate.year, testDate.month, testDate.day)))
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
   }
 
   /// Delete attachment: removes Firestore doc and Storage blob

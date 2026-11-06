@@ -44,6 +44,12 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   static const String _allowedPostponementsLabel =
       'Toplam İzin Verilen Erteleme Sayısı';
   static const String _postponementsUsedLabel = 'Kullanılan Erteleme Sayısı';
+  static const String _weightTrackingStartDateLabel =
+      'Kilo Takibe Geçiş Tarihi';
+
+  static const String _weightTrackingStartDateSuggestedNote =
+      'Bu pakette kayıtlı bir tarih yok; bugünün tarihi önerildi. Doğru '
+      'tarihi seçip kaydedin.';
 
   /// Form doğrulaması düştüğünde gösterilen hata başlığı. Hatalı alan formun
   /// görünmeyen bir yerinde kalabildiği için mesaj dialogla verilir.
@@ -65,6 +71,8 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   DateTime? _startDate;
   // Freeze date is only relevant when the package type is "Donduruldu".
   DateTime? _freezeDate;
+  DateTime? _weightTrackingStartDate;
+  bool _weightTrackingStartDatePicked = false;
   bool _isLoading = false;
   late SubActiveStatus _status;
   // Package duration type (1 Aylık / 1 Aylık (Esnek) / 3 Aylık). Changing it
@@ -85,6 +93,15 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
   // Weight-tracking packages have no payment; payment widgets are hidden.
   bool get _isWeightTracking =>
       _status == SubActiveStatus.activeWeightTracking;
+
+  void _suggestWeightTrackingStartDate() {
+    if (!_isWeightTracking) return;
+    _weightTrackingStartDate ??= DateUtils.dateOnly(DateTime.now());
+  }
+
+  bool get _isWeightTrackingStartDateSuggested =>
+      widget.subscription.weightTrackingStartDate == null &&
+      !_weightTrackingStartDatePicked;
 
   // Payment type of the payment(s) linked to this subscription.
   // Null = unspecified (PaymentType.na). Loaded from the linked payment so the
@@ -136,7 +153,9 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         text: widget.subscription.allowedPostponements.toString());
     _startDate = widget.subscription.startDate;
     _freezeDate = widget.subscription.freezeDate;
+    _weightTrackingStartDate = widget.subscription.weightTrackingStartDate;
     _status = widget.subscription.status;
+    _suggestWeightTrackingStartDate();
     _packageType = widget.subscription.packageType;
     _meetingType = widget.subscription.meetingType;
     
@@ -398,6 +417,7 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 onChanged: (newValue) {
                   setState(() {
                     _status = newValue!;
+                    _suggestWeightTrackingStartDate();
                     // Keep the package type valid for the new status (Aktif/Kilo
                     // Takip → only "6 Aylık"; other statuses → 1 Aylık /
                     // 1 Aylık (Esnek) / 3 Aylık). When a
@@ -467,6 +487,11 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
                 ),
               ),
               const SizedBox(height: 16),
+
+              if (_isWeightTracking) ...[
+                _buildWeightTrackingStartDateTile(),
+                const SizedBox(height: 16),
+              ],
 
               // Freeze date (shown/editable only when the package is frozen).
               if (_status == SubActiveStatus.frozen) ...[
@@ -859,6 +884,42 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
     );
   }
 
+  Widget _buildWeightTrackingStartDateTile() {
+    final DateTime? date = _weightTrackingStartDate;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(
+        date == null
+            ? '$_weightTrackingStartDateLabel Seçimi'
+            : '$_weightTrackingStartDateLabel: ${DateFormatter.formatNumericDate(date)}',
+        style: date != null
+            ? const TextStyle(fontWeight: FontWeight.bold)
+            : null,
+      ),
+      subtitle: _isWeightTrackingStartDateSuggested
+          ? Text(
+              _weightTrackingStartDateSuggestedNote,
+              style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
+            )
+          : null,
+      trailing: const Icon(Icons.monitor_weight_outlined),
+      onTap: () async {
+        final DateTime? pickedDate = await showDatePicker(
+          context: context,
+          initialDate: date ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2050),
+        );
+        if (pickedDate != null && mounted) {
+          setState(() {
+            _weightTrackingStartDate = pickedDate;
+            _weightTrackingStartDatePicked = true;
+          });
+        }
+      },
+    );
+  }
+
   /// Kullanılan erteleme sayısı izin verileni aştığında formun en altında
   /// görünen uyarı. Kaydı engellemez: randevu dialoglarında hak yokken de
   /// erteleme yapılabildiği için bu durum geçerli bir veridir.
@@ -990,6 +1051,9 @@ class _EditSubscriptionDialogState extends State<EditSubscriptionDialog> {
         // Store the freeze date for frozen packages; clear it otherwise so a
         // package that gets unfrozen doesn't keep a stale freeze date.
         'freezeDate': _status == SubActiveStatus.frozen ? _freezeDate : null,
+        if (_isWeightTracking)
+          SubscriptionModel.weightTrackingStartDateField:
+              _weightTrackingStartDate,
         'updateDate': DateTime.now(),
         'updateUser': null, // TODO: Add current user ID if available
       };

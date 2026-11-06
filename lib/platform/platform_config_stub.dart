@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../services/fcm_service.dart';
 import 'platform_config.dart';
 
 /// Stub implementation for platforms without push notification support.
@@ -24,6 +25,7 @@ class StubPlatformConfig implements PlatformConfig {
   Future<void> initialize({
     required GlobalKey<NavigatorState> navigatorKey,
   }) async {
+    FcmService().setNavigatorKey(navigatorKey);
   }
 
   @override

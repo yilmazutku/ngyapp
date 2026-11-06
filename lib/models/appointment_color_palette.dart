@@ -37,6 +37,8 @@ class AppointmentColorPalette {
       id: 'pink_50', label: 'Açık Pembe', color: Color(0xFFFCE4EC));
   static const AppointmentColorOption pink = AppointmentColorOption(
       id: 'pink_200', label: 'Pembe', color: Color(0xFFF48FB1));
+  static const AppointmentColorOption pinkVivid = AppointmentColorOption(
+      id: 'pink_500', label: 'Canlı Pembe', color: Color(0xFFE91E63));
 
   static const AppointmentColorOption orangeLight = AppointmentColorOption(
       id: 'orange_100', label: 'Açık Turuncu', color: Color(0xFFFFE0B2));
@@ -80,6 +82,7 @@ class AppointmentColorPalette {
     red,
     pinkLight,
     pink,
+    pinkVivid,
     orangeLight,
     orange,
     yellowLight,
@@ -142,6 +145,12 @@ enum AppointmentColorSlot {
     storageKey: 'tartim',
     label: 'Tartım',
     defaultOptionId: 'green_100',
+  ),
+
+  birthday(
+    storageKey: 'birthday',
+    label: 'Doğum Günü (DG)',
+    defaultOptionId: 'pink_500',
   );
 
   const AppointmentColorSlot({

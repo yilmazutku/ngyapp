@@ -9,6 +9,7 @@ import 'package:app_badge_plus/app_badge_plus.dart';
 
 import '../constants/app_constants.dart';
 import '../pages/admin_chat_page.dart';
+import '../pages/admin_notifications_page.dart';
 import '../pages/chat_page_new.dart';
 import '../news/news_list_page.dart';
 import '../providers/chat_manager_new.dart';
@@ -91,6 +92,14 @@ class FcmService {
     '0MvvbZsjbmNPW4QYShRNSOOtkE43', // Nilay
     'SdPI69ChOvepuq9HrlW6no9rMRn1', // Admin
   };
+
+  static const String adminSystemType = 'admin_system';
+  static const String _adminNotificationIdKey = 'notificationId';
+
+  static Map<String, dynamic> adminNotificationTapData(String docId) => {
+        'type': adminSystemType,
+        _adminNotificationIdKey: docId,
+      };
 
   /// Aynı anda birden çok cihazda bildirim alan hesaplar: girdiği her cihazın
   /// jetonu `fcmTokens` listesine eklenir, `fcmToken` en son girilen cihazı
@@ -175,7 +184,31 @@ class FcmService {
 
     return true;
   }
-  
+
+  void setNavigatorKey(GlobalKey<NavigatorState> navigatorKey) {
+    _navigatorKey = navigatorKey;
+  }
+
+  void showInAppBanner({
+    required String title,
+    required String body,
+    required Map<String, dynamic> data,
+  }) {
+    final BuildContext? context = _navigatorKey?.currentContext;
+    if (context == null) return;
+    _showInAppNotification(
+      context: context,
+      title: title,
+      body: body,
+      data: data,
+    );
+  }
+
+  void openLocalNotification(Map<String, dynamic> data) {
+    _tapGate.open(data);
+    clearBadge();
+  }
+
   /// Clear the app icon badge count.
   /// 
   /// This should be called when:
@@ -349,17 +382,22 @@ class FcmService {
     // Determine notification type for color styling
     final type = (data['type'] ?? '').toString();
     final isNews = type == 'news';
+    final isSystem = type == adminSystemType;
 
     _currentBanner = OverlayEntry(
       builder: (context) => _InAppNotificationBanner(
         title: title,
         body: body,
-        backgroundColor: isNews 
-            ? Color(NotificationConstants.newsNotificationBannerColor) 
-            : Color(NotificationConstants.chatNotificationBannerColor),
-        accentColor: isNews 
-            ? Color(NotificationConstants.newsNotificationBannerAccentColor) 
-            : Color(NotificationConstants.chatNotificationBannerAccentColor),
+        backgroundColor: isSystem
+            ? Color(NotificationConstants.systemNotificationBannerColor)
+            : isNews
+                ? Color(NotificationConstants.newsNotificationBannerColor)
+                : Color(NotificationConstants.chatNotificationBannerColor),
+        accentColor: isSystem
+            ? Color(NotificationConstants.systemNotificationBannerAccentColor)
+            : isNews
+                ? Color(NotificationConstants.newsNotificationBannerAccentColor)
+                : Color(NotificationConstants.chatNotificationBannerAccentColor),
         onTap: () {
           _dismissCurrentBanner();
           _tapGate.open(data);
@@ -456,6 +494,17 @@ class FcmService {
         navigator.push(MaterialPageRoute(
           builder: (_) => const NewsListPage(),
         ));
+        break;
+
+      case adminSystemType:
+        if (!isAdmin(user.uid)) return;
+        final String notificationId =
+            (data[_adminNotificationIdKey] ?? '').toString();
+        openAdminNotificationCenter(
+          navigator.context,
+          initialTab: AdminNotificationTab.system,
+          markReadId: notificationId.isEmpty ? null : notificationId,
+        );
         break;
     }
   }

@@ -17,6 +17,7 @@ class LabeledActionButton extends StatelessWidget {
     this.backgroundColor,
     this.foregroundColor,
     this.dense = false,
+    this.badgeCount,
   });
 
   final IconData icon;
@@ -38,11 +39,27 @@ class LabeledActionButton extends StatelessWidget {
   /// button per row would push the row wider than a phone screen.
   final bool dense;
 
+  final int? badgeCount;
+
+  static const int _maxBadgeCount = 99;
+
+  Widget _buildIcon() {
+    final Widget iconWidget = Icon(icon, size: 18);
+    final int count = badgeCount ?? 0;
+    if (count <= 0) return iconWidget;
+    return Badge(
+      label: Text(count > _maxBadgeCount ? '$_maxBadgeCount+' : '$count'),
+      backgroundColor: Colors.red.shade600,
+      textColor: Colors.white,
+      child: iconWidget,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final Widget button = dense
         ? TextButton.icon(
-            icon: Icon(icon, size: 18),
+            icon: _buildIcon(),
             label: Text(label, style: const TextStyle(fontSize: 13)),
             onPressed: onPressed,
             style: TextButton.styleFrom(
@@ -54,7 +71,7 @@ class LabeledActionButton extends StatelessWidget {
             ),
           )
         : ElevatedButton.icon(
-            icon: Icon(icon, size: 18),
+            icon: _buildIcon(),
             label: Text(label),
             onPressed: onPressed,
             style: ElevatedButton.styleFrom(

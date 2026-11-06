@@ -113,6 +113,16 @@ class CustomerSummaryProvider extends ChangeNotifier {
       freezeDateCell = const SummaryCell.empty();
     }
 
+    final SummaryCell weightTrackingStartCell;
+    if (status == SubActiveStatus.activeWeightTracking) {
+      final DateTime? start = activeSub.weightTrackingStartDate;
+      weightTrackingStartCell = start != null
+          ? SummaryCell(_dateFormat.format(start))
+          : const SummaryCell.missing();
+    } else {
+      weightTrackingStartCell = const SummaryCell.empty();
+    }
+
     // Payments and appointments are unrelated queries, so they are issued
     // together instead of costing two sequential round trips per customer.
     final paymentFuture =
@@ -141,6 +151,7 @@ class CustomerSummaryProvider extends ChangeNotifier {
       packageType: packageTypeCell,
       notes: notes,
       freezeDate: freezeDateCell,
+      weightTrackingStartDate: weightTrackingStartCell,
       seans: appts.seans,
       totalMeetings: activeSub.totalMeetings,
       remainingPostponements: remainingCell,

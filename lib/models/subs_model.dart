@@ -12,6 +12,8 @@ double _wholeLira(Object? raw) {
   throw FormatException('Paket tutarı sayı değil: $raw');
 }
 
+DateTime? _optionalDate(Object? raw) => raw is Timestamp ? raw.toDate() : null;
+
 enum SubsMeetingType {
   online('online'),
   faceToFace('face_to_face'),
@@ -74,6 +76,8 @@ enum SubsPackageType {
 }
 
 class SubscriptionModel {
+  static const String weightTrackingStartDateField = 'weightTrackingStartDate';
+
   final String subscriptionId;
   final String userId;
   final String packageName;
@@ -102,6 +106,8 @@ class SubscriptionModel {
   /// Date the package was frozen. Only meaningful when [status] is
   /// [SubActiveStatus.frozen]; null for every other status.
   DateTime? freezeDate;
+
+  DateTime? weightTrackingStartDate;
   final DateTime createDate;
   final String? createUser;
   DateTime? updateDate;
@@ -126,6 +132,7 @@ class SubscriptionModel {
     this.onlineMeetings,
     this.faceToFaceMeetings,
     this.freezeDate,
+    this.weightTrackingStartDate,
     DateTime? createDate,
     this.createUser,
     this.updateDate,
@@ -157,6 +164,7 @@ class SubscriptionModel {
       onlineMeetings: data['onlineMeetings'],
       faceToFaceMeetings: data['faceToFaceMeetings'],
       freezeDate: data['freezeDate'] != null ? (data['freezeDate'] as Timestamp).toDate() : null,
+      weightTrackingStartDate: _optionalDate(data[weightTrackingStartDateField]),
       createDate: data['createDate'] != null ? (data['createDate'] as Timestamp).toDate() : DateTime.now(),
       createUser: data['createUser'],
       updateDate: data['updateDate'] != null ? (data['updateDate'] as Timestamp).toDate() : null,
@@ -184,6 +192,9 @@ class SubscriptionModel {
       'status': status.label,
       'meetingType': meetingType.label,
       if (freezeDate != null) 'freezeDate': Timestamp.fromDate(freezeDate!),
+      if (weightTrackingStartDate != null)
+        weightTrackingStartDateField:
+            Timestamp.fromDate(weightTrackingStartDate!),
       'createDate': Timestamp.fromDate(createDate),
       if (createUser != null) 'createUser': createUser,
       if (updateDate != null) 'updateDate': Timestamp.fromDate(updateDate!),
@@ -204,7 +215,7 @@ class SubscriptionModel {
 
   @override
   String toString() {
-    return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, packageType: $packageType, notes: $notes, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, freezeDate: $freezeDate, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
+    return 'SubscriptionModel{subscriptionId: $subscriptionId, userId: $userId, packageName: $packageName, packageType: $packageType, notes: $notes, startDate: $startDate, totalMeetings: $totalMeetings, meetingsCompleted: $meetingsCompleted, meetingsBurned: $meetingsBurned, postponementsUsed: $postponementsUsed, allowedPostponements: $allowedPostponements, totalAmount: $totalAmount, amountPaid: $amountPaid, status: $status, meetingType: $meetingType, onlineMeetings: $onlineMeetings, faceToFaceMeetings: $faceToFaceMeetings, freezeDate: $freezeDate, weightTrackingStartDate: $weightTrackingStartDate, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser}';
   }
 
   /// Paket adını paket süresi ve başlangıç tarihinden üretir:

@@ -13,7 +13,8 @@ Use this as a reference when you need to change any of these values.
 2. [Meal Notifications (Local)](#meal-notifications-local)
 3. [Chat Message Notifications (Push)](#chat-message-notifications-push)
 4. [News/Announcement Notifications (Push)](#newsannouncement-notifications-push)
-5. [In-App Notification Banner](#in-app-notification-banner)
+5. [Admin System Notifications (Local)](#admin-system-notifications-local)
+6. [In-App Notification Banner](#in-app-notification-banner)
 
 ---
 
@@ -201,6 +202,39 @@ firebase deploy --only functions
 
 ---
 
+## Admin System Notifications (Local)
+
+Yalnızca admin oturumunda: kan tahlili 3 ay hatırlatmaları (bir gün önce ve
+dolduğu gün, saat 09:00) ve günlük "kan tahlili eksik danışanlar" listesi.
+Kayıtlar Firestore'da `adminNotifications` koleksiyonundadır (yalnızca adminler
+okur/yazar); ana sayfanın sağ üstündeki zilde "Sistem" sekmesinde görünür.
+
+- Henüz düşmemiş olanlar her admin cihazında **yerel bildirim** olarak kurulur
+  (Android, iOS, macOS): uygulama kapalıyken de gelir.
+- Uygulama açıkken düşen bildirim **uygulama içi şeritle** gösterilir (Windows
+  dahil). iOS/macOS'ta kurulu bildirim uygulama açıkken sistem şeridi olarak
+  gösterilmez (yalnızca listeye düşer); Android'de sistem bildirimi gösterir.
+- Günlük tarama günde bir kez, saat 09:00'dan sonra açık olan ilk admin
+  cihazında yapılır (`adminState/bloodTests`).
+
+### Flutter Constants
+**File:** `lib/constants/app_constants.dart`
+
+| Constant | Current Value | Description |
+|----------|---------------|-------------|
+| `adminReminderChannelId` | `'admin_reminders'` | Android notification channel ID |
+| `adminReminderChannelName` | `'Yönetici Hatırlatmaları'` | Channel name shown in Android settings |
+| `adminReminderChannelDescription` | `'Kan tahlili hatırlatmaları ve günlük kontroller'` | Channel description |
+
+Bildirim başlık ve metinleri: `lib/models/admin_notification.dart`
+(`AdminNotification.bloodTestReminderTitle/Body`, `missingBloodTestsTitle/Body`).
+
+### Services Using These Constants
+- `lib/services/notification_service.dart` (`scheduleAdminNotification`)
+- `lib/services/admin_notification_delivery.dart`
+
+---
+
 ## In-App Notification Banner
 
 When the app is in the foreground, notifications are shown as in-app banners.
@@ -217,6 +251,8 @@ These are styled differently from system notifications.
 | `newsNotificationBannerAccentColor` | `0xFF64B5F6` | Accent color for news |
 | `chatNotificationBannerColor` | `0xFF075E54` | Background color for chat (WhatsApp green) |
 | `chatNotificationBannerAccentColor` | `0xFF25D366` | Accent color for chat |
+| `systemNotificationBannerColor` | `0xFF4527A0` | Background color for admin system notifications (deep purple) |
+| `systemNotificationBannerAccentColor` | `0xFFD1C4E9` | Accent color for admin system notifications |
 
 ### Banner Icon
 To change the banner icon, replace the file:

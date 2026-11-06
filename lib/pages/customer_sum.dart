@@ -1,6 +1,9 @@
 // customer_summary_page.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/user_provider.dart';
+import '../utils/dialog_utils.dart';
 import '../tabs/tests_tab.dart';
 import '../tabs/details_tab.dart';
 import '../tabs/appointments_tab.dart';
@@ -8,15 +11,47 @@ import '../tabs/payment_tab.dart';
 import '../tabs/images_tab.dart';
 import '../tabs/measurements_tab.dart';
 import '../tabs/diet_tab.dart';
-import '../dialogs/add_image_dialog.dart';
-import '../dialogs/add_payment_dialog.dart';
-import '../dialogs/add_appointment_dialog.dart';
-import '../dialogs/add_sub_dialog.dart';
-import '../dialogs/add_diet_dialog.dart';
 import '../models/user_model.dart';
 import '../tabs/basetab.dart';
 import '../tabs/sub_tab.dart';
 import '../widgets/home_button.dart';
+
+Future<Object?> openCustomerSummaryById(
+  BuildContext context, {
+  required String userId,
+  required String displayName,
+}) async {
+  final UserProvider userProvider =
+      Provider.of<UserProvider>(context, listen: false);
+  final NavigatorState navigator = Navigator.of(context);
+  final LoadingDialog loading =
+      DialogUtils.openLoading(context, message: 'Danışan açılıyor...');
+  try {
+    final UserModel? user = await userProvider.fetchUserDetails(userId: userId);
+    loading.close();
+    if (!context.mounted) return null;
+    if (user == null) {
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: '$displayName için danışan kaydı bulunamadı.',
+      );
+      return null;
+    }
+    return await navigator.push<Object?>(
+      MaterialPageRoute(builder: (_) => CustomerSummaryPage(user: user)),
+    );
+  } catch (e) {
+    loading.close();
+    if (!context.mounted) return null;
+    await DialogUtils.openError(
+      context,
+      title: 'Hata',
+      message: 'Danışan bilgileri açılırken bir hata oluştu: $e',
+    );
+    return null;
+  }
+}
 
 class CustomerSummaryPage extends StatefulWidget {
   final UserModel user;
@@ -118,7 +153,11 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
       case 3:
         return ImagesTab(key: _keys[index], userId: userId);
       case 4:
-        return TestsTab(key: _keys[index], userId: userId);
+        return TestsTab(
+          key: _keys[index],
+          userId: userId,
+          userName: widget.user.fullName,
+        );
       case 5:
         return MeasTab(key: _keys[index], userId: userId);
       case 6:
@@ -138,7 +177,7 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('${user.name} ${user.surname ?? ""}'.trim()),
+        title: Text('${user.name} ${user.surname}'.trim()),
         backgroundColor: Colors.blue.shade800,
         foregroundColor: Colors.white,
         leading: IconButton(
@@ -164,107 +203,6 @@ class _CustomerSummaryPageState extends State<CustomerSummaryPage>
               (i) => _buildTabBody(i, user.userId),
         ),
       ),
-      // floatingActionButton: FloatingActionButton(
-      //   onPressed: _onAddButtonPressed,
-      //   child: const Icon(Icons.add),
-      // ),
-    );
-  }
-
-  // void _onAddButtonPressed() {
-  //   final currentIndex = _tabController.index;
-  //   logger.info('Add button pressed: tabIndex={}', [currentIndex]);
-  //
-  //   try {
-  //     switch (currentIndex) {
-  //       case 1:
-  //         _showAddAppointmentDialog();
-  //         break;
-  //       case 2:
-  //         _showAddPaymentDialog();
-  //         break;
-  //       case 3:
-  //         _showAddImageDialog();
-  //         break;
-  //       case 7:
-  //         _showAddSubscriptionDialog();
-  //         break;
-  //       case 6:
-  //         DialogUtils.openInfo(
-  //           context,
-  //           title: 'Bilgi',
-  //           message: 'Ekleme yapmak için Yeni Diyet Ekle butonunu kullanınız.',
-  //         );
-  //         break;
-  //       default:
-  //         DialogUtils.openError(
-  //           context,
-  //           title: 'Uyarı',
-  //           message: 'Bu sekme için ekleme bu butondan yapılamaz.',
-  //         );
-  //     }
-  //   } catch (e) {
-  //     logger.err('Error while handling add button: {}', [e]);
-  //   }
-  // }
-
-  void _showAddDietDialog() {
-    showDialog(
-      context: context,
-      builder: (_) => AddDietDialog(userId: widget.user.userId),
-    );
-  }
-
-  void _showAddSubscriptionDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AddSubscriptionDialog(
-          userId: widget.user.userId,
-          onSubscriptionAdded: () {
-            // Tabs keep their own state; relevant tabs will react via providers.
-          },
-        );
-      },
-    );
-  }
-
-  void _showAddAppointmentDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AddAppointmentDialog(
-          userId: widget.user.userId,
-          onAppointmentAdded: () {
-          },
-        );
-      },
-    );
-  }
-
-  void _showAddPaymentDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AddPaymentDialog(
-          userId: widget.user.userId,
-          onPaymentAdded: () {
-          },
-        );
-      },
-    );
-  }
-
-  void _showAddImageDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AddImageDialog(
-          userId: widget.user.userId,
-          onImageAdded: () {
-          },
-        );
-      },
     );
   }
 }

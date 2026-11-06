@@ -241,6 +241,20 @@ async function run(rulesFile) {
     await db(ADMIN2).collection('users').doc('u1').collection('subscriptions').doc('s1').update({ meetingsCompleted: FV.increment(1) });
   });
 
+  await seed((f) => f.collection('adminNotifications').doc('n1').set({ type: 'bloodTestReminder', fireAt: TS.now(), userId: 'u1', userName: 'Ayşe', readBy: {} }));
+  await check('M1 admin lists admin notifications', true, () => db(ADMIN).collection('adminNotifications').orderBy('fireAt', 'desc').limit(200).get());
+  await check('M2 admin creates reminder', true, () => db(ADMIN2).collection('adminNotifications').doc('n2').set({ type: 'bloodTestReminder', fireAt: TS.now(), userId: 'u1', readBy: {} }));
+  await check('M3 admin marks read', true, () => db(ADMIN).collection('adminNotifications').doc('n1').update({ [`readBy.${ADMIN}`]: FV.serverTimestamp() }));
+  await check('M4 admin writes daily scan state', true, () => db(ADMIN).collection('adminState').doc('bloodTests').set({ lastScanDay: '2026-11-06' }, { merge: true }));
+  await check('M5 admin marks blood test present', true, () => db(ADMIN).collection('users').doc('u1').update({ isBloodTestPresent: true }));
+  await check('M6 admin queries customers missing blood test', true, () => db(ADMIN).collection('users').where('isBloodTestPresent', '==', false).get());
+  await check('M7 customer reads admin notifications', false, () => db('u1').collection('adminNotifications').doc('n1').get());
+  await check('M7b customer lists admin notifications', false, () => db('u1').collection('adminNotifications').get());
+  await check('M7c customer writes admin notification', false, () => db('u1').collection('adminNotifications').doc('x').set({ type: 'bloodTestReminder', fireAt: TS.now() }));
+  await check('M8 customer reads daily scan state', false, () => db('u1').collection('adminState').doc('bloodTests').get());
+  await check('M9 customer changes own blood test mark', false, () => db('u1').collection('users').doc('u1').update({ isBloodTestPresent: false }));
+  await check('M10 signed-out reads admin notifications', false, () => db(null).collection('adminNotifications').get());
+
   await env.cleanup();
   return results;
 }

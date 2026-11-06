@@ -5,6 +5,7 @@ import 'package:ngy_app/tabs/appointments_tab.dart';
 import '../dialogs/edit_sub_dialog.dart';
 import '../dialogs/add_sub_dialog.dart';
 import '../models/subs_model.dart';
+import '../models/customer_summary_row.dart';
 import '../models/appointment_model.dart';
 import '../models/filter_params.dart';
 import '../pages/bulk_add_page.dart';
@@ -584,6 +585,28 @@ class _SubscriptionsTabState extends FilterableTabState<SubProvider, Subscriptio
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
                   color: Colors.blue.shade800,
+                ),
+              ),
+            ]),
+          ],
+
+          if (s.status == SubActiveStatus.activeWeightTracking ||
+              s.weightTrackingStartDate != null) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.monitor_weight_outlined,
+                  size: 16, color: Colors.teal.shade800),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  'Kilo Takibe Geçiş: ${s.weightTrackingStartDate != null ? _df.format(s.weightTrackingStartDate!) : SummaryCell.missingText}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: s.weightTrackingStartDate != null
+                        ? Colors.teal.shade800
+                        : Colors.orange.shade800,
+                  ),
                 ),
               ),
             ]),

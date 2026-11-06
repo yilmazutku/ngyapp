@@ -148,6 +148,14 @@ class NotificationConstants {
   static const String paymentReminderChannelDescription = 
       'Ödeme zamanı yaklaştığında bildirim gönderir';
 
+
+  static const String adminReminderChannelId = 'admin_reminders';
+
+  static const String adminReminderChannelName = 'Yönetici Hatırlatmaları';
+
+  static const String adminReminderChannelDescription =
+      'Kan tahlili hatırlatmaları ve günlük kontroller';
+
   // ============================================================
   // TEST NOTIFICATIONS (Local - Flutter)
   // ============================================================
@@ -181,6 +189,10 @@ class NotificationConstants {
   
   /// Accent color for chat notifications (in-app banner)
   static const int chatNotificationBannerAccentColor = 0xFF25D366;
+
+  static const int systemNotificationBannerColor = 0xFF4527A0;
+
+  static const int systemNotificationBannerAccentColor = 0xFFD1C4E9;
 
   // ============================================================
   // ANDROID LOCAL NOTIFICATION ICON

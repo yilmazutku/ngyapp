@@ -21,6 +21,7 @@ import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
 import 'package:ngy_app/widgets/chat/chat_bubble_style.dart';
 import 'package:ngy_app/widgets/chat/chat_date_separator.dart';
+import 'package:ngy_app/widgets/chat/chat_input_keys.dart';
 import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/chat/message_reply_quote.dart';
 import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
@@ -40,9 +41,10 @@ import 'package:ngy_app/services/fcm_service.dart';
 
 import '../constants/app_constants.dart';
 
-/// Masaüstü platformu mu (Windows, macOS, Linux). Enter ile gönderme, sağ tık
-/// menüsü ve seçilebilir metin yalnızca burada açılır; dokunmatikte uzun basma
-/// davranışları olduğu gibi kalır.
+/// Masaüstü platformu mu (Windows, macOS, Linux). Sağ tık menüsü ve
+/// seçilebilir metin yalnızca burada açılır; dokunmatikte uzun basma
+/// davranışları olduğu gibi kalır. Enter ile gönderme ayrıca iPad ve Mac'teki
+/// iOS uygulamasının donanım klavyesinde de çalışır (bkz. [chatEnterSendsOn]).
 bool get _isDesktopPlatform => const {
       TargetPlatform.windows,
       TargetPlatform.macOS,
@@ -2981,30 +2983,28 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
     super.dispose();
   }
 
-  /// Masaüstünde Enter mesajı gönderir, Shift+Enter yeni satır ekler; Esc
-  /// yazılan yanıtı iptal eder. Dokunmatik klavyede Enter her zamanki gibi
-  /// yeni satırdır.
+  /// Donanım klavyesinde (masaüstü, iPad, Mac'teki iOS uygulaması) Enter
+  /// mesajı gönderir, Shift+Enter yeni satır ekler; Esc yazılan yanıtı iptal
+  /// eder. Ekran klavyesinde Enter her zamanki gibi yeni satırdır (bkz.
+  /// [chatInputKeyAction]).
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (!_isDesktopPlatform || event is! KeyDownEvent) {
-      return KeyEventResult.ignored;
+    final ChatInputKeyAction action = chatInputKeyAction(
+      event,
+      platform: defaultTargetPlatform,
+      isShiftPressed: HardwareKeyboard.instance.isShiftPressed,
+      isComposing: widget.controller.value.composing.isValid,
+      hasReply: widget.replyTarget.value != null,
+    );
+    switch (action) {
+      case ChatInputKeyAction.send:
+        widget.onSend();
+        return KeyEventResult.handled;
+      case ChatInputKeyAction.cancelReply:
+        widget.replyTarget.value = null;
+        return KeyEventResult.handled;
+      case ChatInputKeyAction.none:
+        return KeyEventResult.ignored;
     }
-    if (event.logicalKey == LogicalKeyboardKey.escape &&
-        widget.replyTarget.value != null) {
-      widget.replyTarget.value = null;
-      return KeyEventResult.handled;
-    }
-    final bool isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
-        event.logicalKey == LogicalKeyboardKey.numpadEnter;
-    if (!isEnter || HardwareKeyboard.instance.isShiftPressed) {
-      return KeyEventResult.ignored;
-    }
-    // Harf birleştirme (IME) sürerken Enter onu tamamlar, göndermez.
-    if (widget.controller.value.composing.isValid) {
-      return KeyEventResult.ignored;
-    }
-
-    widget.onSend();
-    return KeyEventResult.handled;
   }
 
   void _toggleMenu() {

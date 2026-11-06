@@ -24,6 +24,9 @@ class AddSubscriptionDialog extends StatefulWidget {
 }
 
 class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
+  static const String _weightTrackingStartDateLabel =
+      'Kilo Takibe Geçiş Tarihi';
+
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _packageNameController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
@@ -37,6 +40,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
   DateTime? _startDate=DateTime.now();
   // Freeze date is only relevant when the package type is "Donduruldu".
   DateTime? _freezeDate;
+  DateTime? _weightTrackingStartDate;
   bool _isLoading = false;
   bool _isPaymentReceived = false;
   // "Ödeme Alınacak": creates a planned payment with the date below.
@@ -132,6 +136,10 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   }).toList(),
                   onChanged: (newValue) => setState(() {
                     _selectedStatus = newValue!;
+                    if (_isWeightTracking) {
+                      _weightTrackingStartDate ??=
+                          DateUtils.dateOnly(DateTime.now());
+                    }
                     // Package-type options depend on the status (Aktif/Kilo
                     // Takip → only "6 Aylık"; other statuses → 1 Aylık /
                     // 1 Aylık (Esnek) / 3 Aylık). Keep
@@ -194,28 +202,25 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                 ),
                 const SizedBox(height: 16),
 
+                if (_isWeightTracking) ...[
+                  _buildDateTile(
+                    title: _weightTrackingStartDateLabel,
+                    date: _weightTrackingStartDate,
+                    icon: Icons.monitor_weight_outlined,
+                    initialDate: _weightTrackingStartDate ?? DateTime.now(),
+                    onPicked: (picked) => _weightTrackingStartDate = picked,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
                 // Freeze date (shown only when the package is frozen).
                 if (_selectedStatus == SubActiveStatus.frozen) ...[
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Dondurulma Tarihi'),
-                    subtitle: Text(
-                        _freezeDate != null
-                            ? DateFormatter.formatNumericDate(_freezeDate!)
-                            : 'Bir tarih seçin',
-                        style: _freezeDate != null
-                            ? const TextStyle(fontWeight: FontWeight.bold)
-                            : null),
-                    trailing: const Icon(Icons.ac_unit),
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: _freezeDate ?? DateTime.now(),
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2050),
-                      );
-                      if (picked != null) setState(() => _freezeDate = picked);
-                    },
+                  _buildDateTile(
+                    title: 'Dondurulma Tarihi',
+                    date: _freezeDate,
+                    icon: Icons.ac_unit,
+                    initialDate: _freezeDate ?? DateTime.now(),
+                    onPicked: (picked) => _freezeDate = picked,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -293,31 +298,15 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                 ],
 
                 // Start Date
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Başlangıç Tarihi'),
-                  subtitle: Text(
-                      _startDate != null
-                          ? DateFormatter.formatNumericDate(_startDate!)
-                          : 'Bir tarih seçin',
-                      style: _startDate != null
-                          ? const TextStyle(fontWeight: FontWeight.bold)
-                          : null),
-                  trailing: const Icon(Icons.calendar_today),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _startDate ?? DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2050),
-                    );
-                    if (picked != null) {
-                      setState(() {
-                        _startDate = picked;
-                        // Keep the auto-generated name in sync with the date.
-                        _updatePackageName();
-                      });
-                    }
+                _buildDateTile(
+                  title: 'Başlangıç Tarihi',
+                  date: _startDate,
+                  icon: Icons.calendar_today,
+                  initialDate: _startDate ?? DateTime.now(),
+                  onPicked: (picked) {
+                    _startDate = picked;
+                    // Keep the auto-generated name in sync with the date.
+                    _updatePackageName();
                   },
                 ),
                 const SizedBox(height: 16),
@@ -448,29 +437,13 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                     const SizedBox(height: 8),
                     // Received payment date (date-picker widget, same style as
                     // "Başlangıç Tarihi"). Defaults to the package start date.
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Ödeme Alınan Tarih'),
-                      subtitle: Text(
-                          _receivedDate != null
-                              ? DateFormatter.formatNumericDate(_receivedDate!)
-                              : 'Bir tarih seçin',
-                          style: _receivedDate != null
-                              ? const TextStyle(fontWeight: FontWeight.bold)
-                              : null),
-                      trailing: const Icon(Icons.event),
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate:
-                              _receivedDate ?? _startDate ?? DateTime.now(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2050),
-                        );
-                        if (picked != null) {
-                          setState(() => _receivedDate = picked);
-                        }
-                      },
+                    _buildDateTile(
+                      title: 'Ödeme Alınan Tarih',
+                      date: _receivedDate,
+                      icon: Icons.event,
+                      initialDate:
+                          _receivedDate ?? _startDate ?? DateTime.now(),
+                      onPicked: (picked) => _receivedDate = picked,
                     ),
                   ],
 
@@ -497,29 +470,13 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
                   // Chosen with a date-picker widget, same as "Başlangıç Tarihi".
                   if (_isPaymentPlanned) ...[
                     const SizedBox(height: 8),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Ödemenin Alınacağı Tarih'),
-                      subtitle: Text(
-                          _plannedDate != null
-                              ? DateFormatter.formatNumericDate(_plannedDate!)
-                              : 'Bir tarih seçin',
-                          style: _plannedDate != null
-                              ? const TextStyle(fontWeight: FontWeight.bold)
-                              : null),
-                      trailing: const Icon(Icons.event),
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate:
-                              _plannedDate ?? _startDate ?? DateTime.now(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2050),
-                        );
-                        if (picked != null) {
-                          setState(() => _plannedDate = picked);
-                        }
-                      },
+                    _buildDateTile(
+                      title: 'Ödemenin Alınacağı Tarih',
+                      date: _plannedDate,
+                      icon: Icons.event,
+                      initialDate:
+                          _plannedDate ?? _startDate ?? DateTime.now(),
+                      onPicked: (picked) => _plannedDate = picked,
                     ),
                   ],
                 ],
@@ -547,6 +504,34 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
     );
   }
 
+  Widget _buildDateTile({
+    required String title,
+    required DateTime? date,
+    required IconData icon,
+    required DateTime initialDate,
+    required ValueChanged<DateTime> onPicked,
+  }) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      subtitle: Text(
+          date != null ? DateFormatter.formatNumericDate(date) : 'Bir tarih seçin',
+          style: date != null
+              ? const TextStyle(fontWeight: FontWeight.bold)
+              : null),
+      trailing: Icon(icon),
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: initialDate,
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2050),
+        );
+        if (picked != null && mounted) setState(() => onPicked(picked));
+      },
+    );
+  }
+
   Future<void> _addSubscription() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -566,6 +551,15 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
         context,
         title: 'Hata',
         message: 'Paket donduruldu olarak işaretlendi. Lütfen dondurulma tarihini seçin.',
+      );
+      return;
+    }
+
+    if (_isWeightTracking && _weightTrackingStartDate == null) {
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Lütfen kilo takibe geçiş tarihini seçin.',
       );
       return;
     }
@@ -627,6 +621,9 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
         // Persist the freeze date only for frozen packages.
         if (_selectedStatus == SubActiveStatus.frozen && _freezeDate != null)
           'freezeDate': _freezeDate,
+        if (_isWeightTracking && _weightTrackingStartDate != null)
+          SubscriptionModel.weightTrackingStartDateField:
+              _weightTrackingStartDate,
         'createDate': DateTime.now(),
         'createUser': null, // TODO: Add current user ID if available
       };

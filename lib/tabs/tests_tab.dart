@@ -5,7 +5,12 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../dialogs/document_upload_dialog.dart';
+import '../models/admin_notification.dart';
+import '../providers/admin_notifications_provider.dart';
+import '../providers/blood_test_provider.dart';
 import '../providers/test_provider.dart';
+import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/full_screen_image_page.dart';
@@ -15,7 +20,10 @@ import '../widgets/labeled_action_button.dart';
 /// Accepts PDFs and images (jpg/jpeg/png/webp/heic)
 class TestsTab extends StatefulWidget {
   final String userId;
-  const TestsTab({super.key, required this.userId});
+
+  final String userName;
+
+  const TestsTab({super.key, required this.userId, required this.userName});
 
   @override
   State<TestsTab> createState() => _TestsTabState();
@@ -40,6 +48,7 @@ class _TestsTabState extends State<TestsTab> {
       if (ts is Timestamp) dt = ts.toDate();
       final contentType = (m['contentType'] ?? '') as String;
       final isImage = (m['isImage'] as bool?) ?? contentType.startsWith('image/');
+      final Object? bloodTestDate = m[TestProvider.bloodTestDateField];
       return _TestAttachmentModel(
         docId: (m['docId'] ?? '') as String,
         url: (m['pdfUrl'] ?? '') as String,
@@ -48,6 +57,11 @@ class _TestsTabState extends State<TestsTab> {
         storagePath: (m['storagePath'] ?? '') as String,
         contentType: contentType,
         isImage: isImage,
+        bloodTestDate: m[TestProvider.isBloodTestField] == true &&
+                bloodTestDate is Timestamp
+            ? bloodTestDate.toDate()
+            : null,
+        bloodTestReminder: m[TestProvider.bloodTestReminderField] == true,
       );
     }).toList();
   }
@@ -73,7 +87,14 @@ class _TestsTabState extends State<TestsTab> {
       );
       if (result == null || result.files.isEmpty) return;
 
-      if (mounted) setState(() { _busy = true; });
+      if (!mounted) return;
+      final DocumentUploadOptions? options = await showDocumentUploadDialog(
+        context,
+        fileNames: [for (final file in result.files) file.name],
+      );
+      if (options == null || !mounted) return;
+
+      setState(() { _busy = true; });
 
       final files = result.files;
       final total = files.length;
@@ -91,6 +112,10 @@ class _TestsTabState extends State<TestsTab> {
         // Re-checked after the await: the widget may be gone by now.
         if (!mounted) return;
         final provider = Provider.of<TestProvider>(context, listen: false);
+        final BloodTestProvider bloodTests =
+            Provider.of<BloodTestProvider>(context, listen: false);
+        final AdminNotificationsProvider notifications =
+            Provider.of<AdminNotificationsProvider>(context, listen: false);
         for (int i = 0; i < total; i++) {
           final file = files[i];
           progress.value = 'Dosyalar yükleniyor (${i + 1}/$total)...';
@@ -110,6 +135,8 @@ class _TestsTabState extends State<TestsTab> {
               userId: widget.userId,
               fileName: file.name,
               filePath: path, // streamed from disk
+              bloodTestDate: options.bloodTestDate,
+              bloodTestReminder: options.wantsReminder,
             );
             success++;
           } catch (e) {
@@ -119,23 +146,50 @@ class _TestsTabState extends State<TestsTab> {
           }
         }
 
+        String? bloodTestNote;
+        String? bloodTestError;
+        final DateTime? bloodTestDate = options.bloodTestDate;
+        if (success > 0 && bloodTestDate != null) {
+          progress.value = 'Kan tahlili kaydediliyor...';
+          try {
+            bloodTestNote = await _registerBloodTest(
+              bloodTests: bloodTests,
+              notifications: notifications,
+              testDate: bloodTestDate,
+              wantsReminder: options.wantsReminder,
+            );
+          } catch (e) {
+            bloodTestError = 'Dosyalar yüklendi fakat kan tahlili bilgisi '
+                'kaydedilemedi: $e';
+          }
+        }
+
         // Close loading BEFORE showing info/error
         loading?.close();
 
         if (mounted) {
           setState(() { _filesFuture = _fetchFiles(); });
-          if (failed.isEmpty) {
+          if (bloodTestError != null) {
+            await DialogUtils.openError(
+              context,
+              title: 'Uyarı',
+              message: bloodTestError,
+            );
+          } else if (failed.isEmpty) {
             await DialogUtils.openInfo(
               context,
               title: 'Başarılı',
-              message: '$success dosya yüklendi.',
+              message: bloodTestNote == null
+                  ? '$success dosya yüklendi.'
+                  : '$success dosya yüklendi.\n\n$bloodTestNote',
             );
           } else {
             await DialogUtils.openError(
               context,
               title: success > 0 ? 'Kısmen Tamamlandı' : 'Hata',
               message: '$success dosya yüklendi, ${failed.length} dosya '
-                  'yüklenemedi:\n${failed.join('\n')}',
+                  'yüklenemedi:\n${failed.join('\n')}'
+                  '${bloodTestNote == null ? '' : '\n\n$bloodTestNote'}',
             );
           }
         }
@@ -155,11 +209,36 @@ class _TestsTabState extends State<TestsTab> {
     }
   }
 
+  Future<String> _registerBloodTest({
+    required BloodTestProvider bloodTests,
+    required AdminNotificationsProvider notifications,
+    required DateTime testDate,
+    required bool wantsReminder,
+  }) async {
+    await bloodTests.setBloodTestPresent(userId: widget.userId, present: true);
+    final String date = DateFormatter.formatNumericDate(testDate);
+    if (!wantsReminder) {
+      return '$date tarihli kan tahlili kaydedildi.';
+    }
+    await notifications.addBloodTestReminders(
+      userId: widget.userId,
+      userName: widget.userName,
+      testDate: testDate,
+    );
+    final DateTime due = BloodTestReminderSchedule.dueDay(testDate);
+    return '$date tarihli kan tahlili kaydedildi. 3 ay hatırlatması '
+        '${DateFormatter.formatLongDate(due)} ve bir gün öncesi için kuruldu.';
+  }
+
   Future<void> _deleteFile(_TestAttachmentModel f) async {
+    final DateTime? bloodTestDate = f.bloodTestDate;
     final ok = await DialogUtils.openConfirm(
       context,
       title: 'Dosyayı Sil',
-      message: '"${f.fileName}" dosyasını silmek istiyor musunuz?',
+      message: bloodTestDate != null && f.bloodTestReminder
+          ? '"${f.fileName}" dosyasını silmek istiyor musunuz?\n\nBu tarihli '
+              'tahlilin başka dosyası kalmazsa 3 ay hatırlatması da kaldırılır.'
+          : '"${f.fileName}" dosyasını silmek istiyor musunuz?',
       confirmText: 'Sil',
       cancelText: 'İptal',
     );
@@ -168,11 +247,21 @@ class _TestsTabState extends State<TestsTab> {
 
     try {
       final provider = Provider.of<TestProvider>(context, listen: false);
+      final AdminNotificationsProvider notifications =
+          Provider.of<AdminNotificationsProvider>(context, listen: false);
       await provider.deleteTestAttachment(
         userId: widget.userId,
         docId: f.docId,
         storagePath: f.storagePath,
       );
+      if (bloodTestDate != null &&
+          !await provider.hasBloodTestOn(
+              userId: widget.userId, testDate: bloodTestDate)) {
+        await notifications.removeBloodTestReminders(
+          userId: widget.userId,
+          testDate: bloodTestDate,
+        );
+      }
       if (!mounted) return;
       await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Dosya silindi.');
       // Re-checked: the tab can be left while the dialog is open.
@@ -292,7 +381,16 @@ class _TestsTabState extends State<TestsTab> {
                     return ListTile(
                       leading: leading,
                       title: Text(f.fileName),
-                      subtitle: Text(dtStr),
+                      subtitle: f.bloodTestDate == null
+                          ? Text(dtStr)
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(dtStr),
+                                const SizedBox(height: 4),
+                                _BloodTestBadges(file: f),
+                              ],
+                            ),
                       onTap: () => _openFile(f),
                       trailing: LabeledActionButton(
                         dense: true,
@@ -322,6 +420,9 @@ class _TestAttachmentModel {
   final String contentType;
   final bool isImage;
 
+  final DateTime? bloodTestDate;
+  final bool bloodTestReminder;
+
   _TestAttachmentModel({
     required this.docId,
     required this.url,
@@ -330,5 +431,65 @@ class _TestAttachmentModel {
     required this.storagePath,
     required this.contentType,
     required this.isImage,
+    this.bloodTestDate,
+    this.bloodTestReminder = false,
   });
+}
+
+class _BloodTestBadges extends StatelessWidget {
+  final _TestAttachmentModel file;
+
+  const _BloodTestBadges({required this.file});
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime testDate = file.bloodTestDate!;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: [
+        _badge(
+          icon: Icons.bloodtype_rounded,
+          text: 'Kan tahlili · ${DateFormatter.formatNumericDate(testDate)}',
+          color: Colors.red.shade700,
+        ),
+        if (file.bloodTestReminder)
+          _badge(
+            icon: Icons.alarm_rounded,
+            text: 'Hatırlatma: ${DateFormatter.formatNumericDate(BloodTestReminderSchedule.dueDay(testDate))}',
+            color: Colors.deepPurple,
+          ),
+      ],
+    );
+  }
+
+  Widget _badge({
+    required IconData icon,
+    required String text,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
