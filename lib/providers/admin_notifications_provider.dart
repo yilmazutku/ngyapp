@@ -127,9 +127,11 @@ class AdminNotificationsProvider extends ChangeNotifier
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, dynamic>> snapshot) {
+    final String? uid = _uid;
     _all = snapshot.docs
         .map(AdminNotification.fromDocument)
         .whereType<AdminNotification>()
+        .where((n) => uid != null && n.isVisibleTo(uid))
         .toList();
     if (_older.isEmpty) {
       _oldestLoaded = snapshot.docs.isEmpty ? null : snapshot.docs.last;
@@ -210,12 +212,14 @@ class AdminNotificationsProvider extends ChangeNotifier
         for (final n in _all) n.id,
         for (final n in _older) n.id,
       };
+      final String? uid = _uid;
       _older = [
         ..._older,
         ...page.docs
             .map(AdminNotification.fromDocument)
             .whereType<AdminNotification>()
-            .where((n) => !known.contains(n.id)),
+            .where((n) =>
+                !known.contains(n.id) && uid != null && n.isVisibleTo(uid)),
       ];
       if (page.docs.isNotEmpty) _oldestLoaded = page.docs.last;
       _hasMoreOlder = page.docs.length >= olderPageSize;
@@ -375,6 +379,40 @@ class AdminNotificationsProvider extends ChangeNotifier
       }
       await batch.commit();
     }
+  }
+
+  Future<String?> addTestNotification({required DateTime fireAt}) async {
+    final String? uid = _uid ?? _currentUid;
+    if (uid == null) return null;
+    final String id = 'test_${uid}_${fireAt.millisecondsSinceEpoch}';
+    await _collection.doc(id).set({
+      AdminNotification.typeField: AdminNotificationType.test.value,
+      AdminNotification.titleField: AdminNotification.testTitle,
+      AdminNotification.bodyField: AdminNotification.testBody,
+      AdminNotification.fireAtField: Timestamp.fromDate(fireAt),
+      AdminNotification.onlyForField: uid,
+      AdminNotification.createdAtField: FieldValue.serverTimestamp(),
+      AdminNotification.createdByField: uid,
+      AdminNotification.readByField: <String, Object>{},
+    });
+    return id;
+  }
+
+  Future<int> removeTestNotifications() async {
+    final String? uid = _uid ?? _currentUid;
+    if (uid == null) return 0;
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _collection
+        .where(AdminNotification.onlyForField, isEqualTo: uid)
+        .get();
+    final List<DocumentReference<Map<String, dynamic>>> refs = [
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs)
+        if (doc.data()[AdminNotification.typeField] ==
+            AdminNotificationType.test.value)
+          doc.reference,
+    ];
+    await _deleteAll(refs);
+    return refs.length;
   }
 
   Future<void> supersedeMissingBloodTestLists({String? exceptId}) async {

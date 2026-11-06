@@ -13,6 +13,7 @@ import '../utils/dialog_utils.dart';
 import '../widgets/appointment_color_picker.dart';
 import '../widgets/home_button.dart';
 import '../widgets/labeled_action_button.dart';
+import 'feature_test_page.dart';
 
 class TestingPage extends StatefulWidget {
   const TestingPage({super.key});
@@ -37,6 +38,8 @@ class _TestingPageState extends State<TestingPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: const [
+                _FeatureTestEntry(),
+                SizedBox(height: 16),
                 _SpecialLinesSection(),
                 SizedBox(height: 16),
                 _AppointmentColorsSection(),
@@ -48,6 +51,39 @@ class _TestingPageState extends State<TestingPage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _FeatureTestEntry extends StatelessWidget {
+  const _FeatureTestEntry();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 2,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Color(0xFFD1C4E9)),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        leading: const Icon(Icons.fact_check_outlined, size: 32),
+        title: const Text(
+          FeatureTestPage.title,
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        subtitle: const Text(
+          'Kilo takibe geçiş tarihi, kan tahlili hatırlatmaları, bildirim '
+          'zili, günlük tarama, doğum günleri ve Enter ile gönderme için '
+          'adım adım test listesi.',
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => const FeatureTestPage(),
+        )),
       ),
     );
   }

@@ -294,6 +294,36 @@ void main() {
       expect(provider.isRead(provider.notifications.last), isTrue);
     });
 
+    test('deneme bildirimi yalnızca kuran admine görünür ve silinebilir',
+        () async {
+      final DateTime now = DateTime.now();
+      await provider.addTestNotification(
+          fireAt: now.subtract(const Duration(seconds: 1)));
+      provider.start(admin, owner: home);
+      await pumpEventQueue();
+      expect(provider.notifications.map((n) => n.type),
+          [AdminNotificationType.test]);
+      expect(provider.unreadCount, 1);
+
+      final AdminNotificationsProvider other = AdminNotificationsProvider(
+        db: db,
+        currentUid: () => 'admin-2',
+        delivery: AdminNotificationDelivery(
+          local: _FakeScheduler(),
+          banner: ({required title, required body, required data}) {},
+          osShowsInForeground: false,
+        ),
+      );
+      addTearDown(other.dispose);
+      other.start('admin-2', owner: home);
+      await pumpEventQueue();
+      expect(other.notifications, isEmpty);
+
+      expect(await provider.removeTestNotifications(), 1);
+      await pumpEventQueue();
+      expect(provider.notifications, isEmpty);
+    });
+
     test('dinlemeyi yalnızca başlatan bırakabilir', () async {
       await add('a', DateTime.now().subtract(const Duration(hours: 1)));
       final Object oldHome = Object();

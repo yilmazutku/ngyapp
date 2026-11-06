@@ -149,12 +149,16 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> runDailyScan({required String uid, required DateTime now}) async {
+  Future<int?> runDailyScan({
+    required String uid,
+    required DateTime now,
+    bool force = false,
+  }) async {
     final String today = DateFormatter.formatIsoDate(now);
     final DocumentSnapshot<Map<String, dynamic>> stateSnapshot =
         await _stateDoc.get(const GetOptions(source: Source.server));
     final Map<String, dynamic> state = stateSnapshot.data() ?? const {};
-    if (state[_lastScanDayField] == today) return false;
+    if (!force && state[_lastScanDayField] == today) return null;
 
     final Object? initializedAt = state[_presenceInitializedAtField];
     if (initializedAt is! Timestamp) {
@@ -189,7 +193,8 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       _lastScanAtField: FieldValue.serverTimestamp(),
       _lastScanByField: uid,
     }, SetOptions(merge: true));
-    return true;
+    if (_uid == uid) _scannedDay = today;
+    return missing.length;
   }
 
   void _armTimer({bool retry = false}) {

@@ -62,7 +62,7 @@ void main() {
     await addUser('silinecek', createDate: old, removalRequested: true);
     await addUser('admin', role: 'admin', createDate: old);
 
-    expect(await provider.runDailyScan(uid: admin, now: now), isTrue);
+    expect(await provider.runDailyScan(uid: admin, now: now), 2);
 
     final String today = DateFormatter.formatIsoDate(now);
     final AdminNotification digest = AdminNotification.fromDocument(await db
@@ -90,15 +90,17 @@ void main() {
     final DateTime now = DateTime.now();
     await addUser('eski',
         createDate: now.subtract(const Duration(days: 30)));
-    expect(await provider.runDailyScan(uid: admin, now: now), isTrue);
-    expect(await provider.runDailyScan(uid: admin, now: now), isFalse);
+    expect(await provider.runDailyScan(uid: admin, now: now), 1);
+    expect(await provider.runDailyScan(uid: admin, now: now), isNull);
+    expect(
+        await provider.runDailyScan(uid: admin, now: now, force: true), 1);
   });
 
   test('eksik yoksa liste yazılmaz', () async {
     final DateTime now = DateTime.now();
     await addUser('var',
         createDate: now.subtract(const Duration(days: 30)), present: true);
-    expect(await provider.runDailyScan(uid: admin, now: now), isTrue);
+    expect(await provider.runDailyScan(uid: admin, now: now), 0);
     expect(
         (await db.collection(AdminNotificationsProvider.collectionName).get())
             .docs,
