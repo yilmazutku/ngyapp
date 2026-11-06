@@ -4,16 +4,20 @@ import 'package:provider/provider.dart';
 
 import '../dialogs/add_appointment_dialog.dart';
 import '../dialogs/dialog_widgets.dart';
+import '../models/appointment_color_palette.dart';
 import '../models/appointment_model.dart';
 import '../models/event_model.dart';
+import '../models/summary_color_config.dart';
 import '../models/user_model.dart';
 import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_manager.dart';
 import '../providers/event_provider.dart';
 import '../providers/timeslot_manager.dart';
+import '../providers/user_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/edit_event_dialog.dart';
 import '../dialogs/overlap_warning_dialog.dart';
+import '../utils/birthdays.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -53,6 +57,10 @@ const double kDayHeaderHeight = 54.0; // Height for day title + add button
 // Same header, mobile layout (single-day view has a slimmer header).
 const double kMobileDayHeaderHeight = 36.0;
 const double kDayDividerWidth = 1; // Width of vertical dividing lines between days (editable)
+
+const double kBirthdayChipHeight = 20.0;
+const double kBirthdayChipGap = 3.0;
+const String kBirthdayPrefix = 'DG: ';
 
 
 // "Tartım" visits are only ~5 min long; on the calendar their card is given at
@@ -121,6 +129,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   late Future<List<AppointmentModel>> _appointmentsFuture;
   List<EventModel> _events = [];
 
+  BirthdayIndex _birthdays = const BirthdayIndex.empty();
+
   // Scroll controllers + keys (avoid "no ScrollPosition" and preserve positions)
   late final ScrollController _verticalCtrl;
   late final ScrollController _horizontalCtrl;
@@ -153,6 +163,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     _fetchAllAppointments();
     _fetchEvents();
+    _loadBirthdays();
     // Danışanların saat seçicisinin okuduğu dolu saat aynası eski randevularla
     // doldurulur; beklenmez.
     Provider.of<TimeslotManager>(context, listen: false)
@@ -169,6 +180,34 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// Initiates fetching of all appointments
   void _fetchAllAppointments() {
     _appointmentsFuture = _fetchAppointmentsWithUsers();
+  }
+
+  Future<void> _loadBirthdays({bool forceRefresh = false}) async {
+    final UserProvider userProvider =
+        Provider.of<UserProvider>(context, listen: false);
+    final AppointmentColorsProvider colorsProvider =
+        Provider.of<AppointmentColorsProvider>(context, listen: false);
+    try {
+      await colorsProvider.fetchColors();
+    } catch (e) {
+    }
+    try {
+      final List<UserModel> customers =
+          await userProvider.fetchAllCustomers(forceRefresh: forceRefresh);
+      if (!mounted) return;
+      setState(() => _birthdays = BirthdayIndex(customers));
+    } catch (e) {
+    }
+  }
+
+  double _dayHeaderHeightFor(List<DateTime> days) {
+    int maxBirthdays = 0;
+    for (final DateTime day in days) {
+      final int count = _birthdays.on(day).length;
+      if (count > maxBirthdays) maxBirthdays = count;
+    }
+    return kDayHeaderHeight +
+        maxBirthdays * (kBirthdayChipHeight + kBirthdayChipGap);
   }
 
   Future<void> _fetchEvents() async {
@@ -1092,7 +1131,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   }
 
   /// Build a day column with appointments positioned by time
-  Widget _buildDayColumn(DateTime day, List<AppointmentModel> dayAppointments, double columnWidth) {
+  Widget _buildDayColumn(DateTime day, List<AppointmentModel> dayAppointments,
+      double columnWidth, double headerHeight) {
     final String dayTitle = _dayTitleFmt.format(day);
     
     return Container(
@@ -1107,7 +1147,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         children: [
           // Day header
           Container(
-            height: kDayHeaderHeight,
+            height: headerHeight,
             padding: const EdgeInsets.symmetric(horizontal: kMainMargin, vertical: 2),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1117,6 +1157,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: kDayTitleFontSize),
                   overflow: TextOverflow.ellipsis,
                 ),
+                for (final UserModel user in _birthdays.on(day))
+                  _BirthdayChip(user: user, day: day),
                 const Spacer(),
                 Row(
                   children: [
@@ -1251,6 +1293,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                         style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.w600),
                       ),
                     ),
+                  for (final UserModel user in _birthdays.on(_selectedDay))
+                    _BirthdayChip(user: user, day: _selectedDay),
                 ],
               ),
             ),
@@ -1538,7 +1582,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   Widget _buildWeeklyView(Map<DateTime, List<AppointmentModel>> byDay, double screenWidth) {
     final columnWidth = screenWidth / kDaysToShow;
     final List<DateTime> weekDays = List.generate(kDaysToShow, (index) => startDate!.add(Duration(days: index)));
-    final totalHeight = kDayHeaderHeight + _timeGridHeight;
+    final double headerHeight = _dayHeaderHeightFor(weekDays);
+    final totalHeight = headerHeight + _timeGridHeight;
 
     Widget dayColumnsRow = Row(
       mainAxisSize: MainAxisSize.min,
@@ -1546,7 +1591,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       children: weekDays.map((day) {
         final dayKey = _dateOnly(day);
         final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
-        return _buildDayColumn(day, dayAppointments, columnWidth);
+        return _buildDayColumn(day, dayAppointments, columnWidth, headerHeight);
       }).toList(),
     );
 
@@ -1560,7 +1605,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     Widget gridContent = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildTimeColumn(),
+        _buildTimeColumn(headerHeight: headerHeight),
         Expanded(child: scrollableDayColumns),
       ],
     );
@@ -1637,7 +1682,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           LabeledActionButton(
             icon: Icons.refresh,
             label: 'Yenile',
-            onPressed: () => setState(() => _fetchAllAppointments()),
+            onPressed: () {
+              setState(() => _fetchAllAppointments());
+              _loadBirthdays(forceRefresh: true);
+            },
           ),
           LabeledActionButton(
             icon: Icons.date_range,
@@ -1739,6 +1787,66 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _BirthdayChip extends StatelessWidget {
+  const _BirthdayChip({required this.user, required this.day});
+
+  final UserModel user;
+  final DateTime day;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color background =
+        AppointmentColorsRegistry.colorFor(AppointmentColorSlot.birthday);
+    final Color foreground =
+        SummaryColorsRegistry.readableTextColor(background);
+    final DateTime? birthDate = user.birthDate;
+    final String tooltip = birthDate == null
+        ? 'Doğum günü: ${user.fullName}'
+        : 'Doğum günü: ${user.fullName} '
+            '(${BirthdayIndex.ageOn(birthDate, day)} yaşına giriyor)';
+
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        height: kBirthdayChipHeight,
+        margin: const EdgeInsets.only(top: kBirthdayChipGap),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: [
+            BoxShadow(
+              color: background.withValues(alpha: 0.45),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cake_rounded, size: 13, color: foreground),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                '$kBirthdayPrefix${user.fullName}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  height: 1.1,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

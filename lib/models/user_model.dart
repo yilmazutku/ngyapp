@@ -40,6 +40,10 @@ class UserModel {
   /// Danışanın kullandığı ilaçlar ve sahip olduğu hastalıklar (serbest metin).
   final String? medicationsAndConditions;
 
+  static const String bloodTestPresentField = 'isBloodTestPresent';
+
+  final bool? isBloodTestPresent;
+
   UserModel({
     required this.userId,
     required this.name,
@@ -59,6 +63,7 @@ class UserModel {
     this.phone,
     this.birthDate,
     this.medicationsAndConditions,
+    this.isBloodTestPresent,
   }) : createDate = createDate ?? DateTime.now(); // Use provided or current time
 
   factory UserModel.fromDocument(DocumentSnapshot doc) {
@@ -89,6 +94,9 @@ class UserModel {
           ? (data['birthDate'] as Timestamp).toDate()
           : null,
       medicationsAndConditions: data['medicationsAndConditions'],
+      isBloodTestPresent: data[bloodTestPresentField] is bool
+          ? data[bloodTestPresentField] as bool
+          : null,
     );
   }
 
@@ -113,8 +121,12 @@ class UserModel {
       // Diğer alanların aksine null olsa da yazılır: alan boşaltıldığında
       // update() onu atlarsa Firestore'daki eski değer silinemezdi.
       'medicationsAndConditions': medicationsAndConditions,
+      if (isBloodTestPresent != null)
+        bloodTestPresentField: isBloodTestPresent,
     };
   }
+
+  bool get hasBloodTest => isBloodTestPresent == true;
 
   /// "Ad Soyad" for display. Falls back to whichever half exists, so a record
   /// missing one of them never renders a stray space.
@@ -136,6 +148,6 @@ class UserModel {
 
   @override
   String toString() {
-    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, phone: $phone, birthDate: $birthDate, medicationsAndConditions: $medicationsAndConditions}';
+    return 'UserModel{userId: $userId, name: $name, email: $email, role: $role, createDate: $createDate, createUser: $createUser, updateDate: $updateDate, updateUser: $updateUser, surname: $surname, age: $age, reference: $reference, notes: $notes, dosyaNo: $dosyaNo, tcNo: $tcNo, phone: $phone, birthDate: $birthDate, medicationsAndConditions: $medicationsAndConditions, isBloodTestPresent: $isBloodTestPresent}';
   }
 }

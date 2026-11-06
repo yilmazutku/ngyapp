@@ -1,0 +1,207 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ngy_app/models/admin_notification.dart';
+import 'package:ngy_app/services/admin_notification_delivery.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class _FakeScheduler implements AdminNotificationScheduler {
+  _FakeScheduler({this.isSupported = true});
+
+  @override
+  final bool isSupported;
+
+  final Map<String, DateTime> scheduled = {};
+
+  @override
+  Future<bool> schedule({
+    required String docId,
+    required String title,
+    required String body,
+    required DateTime fireAt,
+  }) async {
+    scheduled[docId] = fireAt;
+    return true;
+  }
+
+  @override
+  Future<void> cancel(String docId) async => scheduled.remove(docId);
+
+  @override
+  Future<Set<String>> pendingDocIds() async => scheduled.keys.toSet();
+}
+
+void main() {
+  const String uid = 'admin-1';
+  final DateTime now = DateTime(2026, 11, 6, 9, 0, 5);
+
+  late _FakeScheduler scheduler;
+  late List<String> banners;
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    scheduler = _FakeScheduler();
+    banners = [];
+  });
+
+  AdminNotificationDelivery delivery({required bool android}) =>
+      AdminNotificationDelivery(
+        local: scheduler,
+        banner: ({required title, required body, required data}) =>
+            banners.add(title),
+        osShowsInForeground: android,
+      );
+
+  AdminNotification notification(String id, DateTime fireAt,
+          {bool read = false}) =>
+      AdminNotification(
+        id: id,
+        type: AdminNotificationType.bloodTestReminder,
+        title: id,
+        body: '',
+        fireAt: fireAt,
+        readBy: read ? {uid: now} : const {},
+      );
+
+  for (final bool android in [false, true]) {
+    final String platform = android ? 'Android' : 'iOS';
+
+    test('$platform: kurulu bildirim uygulama öndeyken düşünce', () async {
+      final AdminNotificationDelivery d = delivery(android: android);
+      await d.attach(uid);
+      final AdminNotification reminder =
+          notification('r', now.add(const Duration(hours: 1)));
+      await d.syncUpcoming([reminder]);
+      expect(scheduler.scheduled.keys, ['r']);
+
+      final AdminNotification due = notification('r', now);
+      await d.announce(
+        due: [due],
+        now: now,
+        inForeground: true,
+        becameDueInForeground: {'r'},
+      );
+      expect(banners, android ? isEmpty : ['r']);
+
+      await d.announce(
+        due: [due],
+        now: now,
+        inForeground: true,
+        becameDueInForeground: const {},
+      );
+      expect(banners, android ? isEmpty : ['r'], reason: 'iki kez duyurulmaz');
+    });
+
+    test('$platform: kurulu bildirim uygulama kapalıyken düştüyse şerit çıkmaz',
+        () async {
+      final AdminNotificationDelivery d = delivery(android: android);
+      await d.attach(uid);
+      await d.syncUpcoming(
+          [notification('r', now.add(const Duration(minutes: 1)))]);
+
+      await d.announce(
+        due: [notification('r', now.add(const Duration(minutes: 1)))],
+        now: now.add(const Duration(hours: 2)),
+        inForeground: true,
+        becameDueInForeground: const {},
+      );
+      expect(banners, isEmpty);
+    });
+
+    test('$platform: bu cihazda kurulmamış yeni bildirim açılınca duyurulur',
+        () async {
+      final AdminNotificationDelivery d = delivery(android: android);
+      await d.attach(uid);
+      await d.announce(
+        due: [notification('liste', now)],
+        now: now,
+        inForeground: false,
+        becameDueInForeground: const {},
+      );
+      expect(banners, isEmpty, reason: 'arka planda şerit gösterilmez');
+
+      await d.announce(
+        due: [notification('liste', now)],
+        now: now.add(const Duration(minutes: 3)),
+        inForeground: true,
+        becameDueInForeground: const {},
+      );
+      expect(banners, ['liste']);
+    });
+  }
+
+  test('okunmuş ya da 24 saatten eski bildirim duyurulmaz', () async {
+    final AdminNotificationDelivery d = delivery(android: false);
+    await d.attach(uid);
+    await d.announce(
+      due: [
+        notification('okunmus', now, read: true),
+        notification('eski', now.subtract(const Duration(hours: 25))),
+      ],
+      now: now,
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, isEmpty);
+  });
+
+  test('aynı anda birden çok bildirim tek şeritte toplanır', () async {
+    final AdminNotificationDelivery d = delivery(android: false);
+    await d.attach(uid);
+    await d.announce(
+      due: [notification('a', now), notification('b', now)],
+      now: now,
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, ['2 yeni sistem bildirimi']);
+  });
+
+  test('duyurulanlar cihazda saklanır: yeniden açılışta tekrar çıkmaz',
+      () async {
+    final AdminNotificationDelivery first = delivery(android: false);
+    await first.attach(uid);
+    await first.announce(
+      due: [notification('a', now)],
+      now: now,
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, ['a']);
+
+    final AdminNotificationDelivery second = delivery(android: false);
+    await second.attach(uid);
+    await second.announce(
+      due: [notification('a', now)],
+      now: now,
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, ['a']);
+  });
+
+  test('silinen bildirimin kurulumu kalkar', () async {
+    final AdminNotificationDelivery d = delivery(android: true);
+    await d.attach(uid);
+    await d.syncUpcoming([
+      notification('a', now.add(const Duration(days: 1))),
+      notification('b', now.add(const Duration(days: 2))),
+    ]);
+    await d.syncUpcoming([notification('b', now.add(const Duration(days: 2)))]);
+    expect(scheduler.scheduled.keys, ['b']);
+  });
+
+  test('yerel bildirimi olmayan platformda (Windows) yalnızca şerit', () async {
+    scheduler = _FakeScheduler(isSupported: false);
+    final AdminNotificationDelivery d = delivery(android: false);
+    await d.attach(uid);
+    await d.syncUpcoming([notification('a', now.add(const Duration(hours: 1)))]);
+    expect(scheduler.scheduled, isEmpty);
+
+    await d.announce(
+      due: [notification('a', now)],
+      now: now,
+      inForeground: true,
+      becameDueInForeground: {'a'},
+    );
+    expect(banners, ['a']);
+  });
+}

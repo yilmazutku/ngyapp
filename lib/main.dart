@@ -49,13 +49,16 @@ import 'pages/meal_upload_page.dart';
 import 'pages/meas_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/user_payments_page.dart';
+import 'providers/admin_notifications_provider.dart';
 import 'providers/app_update_provider.dart';
 import 'providers/appointment_manager.dart';
+import 'providers/blood_test_provider.dart';
 import 'providers/customer_summary_provider.dart';
 import 'providers/daily_data_provider.dart';
 import 'providers/event_provider.dart';
 import 'providers/diet_provider.dart';
 import 'providers/login_manager.dart';
+import 'providers/meal_photo_notifications_provider.dart';
 import 'providers/meal_state_and_upload_manager.dart';
 import 'providers/meas_provider.dart';
 import 'providers/mock_test_data_provider.dart';
@@ -75,6 +78,7 @@ import 'news/news_list_page.dart';
 import 'news/admin_news_page.dart';
 import 'pages/testing_page.dart';
 import 'utils/dialog_utils.dart';
+import 'widgets/admin_notification_bell.dart';
 import 'widgets/app_update_gate.dart';
 import 'widgets/labeled_action_button.dart';
 
@@ -165,7 +169,13 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => TimeslotManager()),
         ChangeNotifierProvider(create: (_) => EventProvider()),
         ChangeNotifierProvider(create: (_) => LoginProvider()),
-        ChangeNotifierProvider(create: (_) => UserProvider()),
+        ChangeNotifierProvider(
+          create: (ctx) => UserProvider(
+            onUserDeleted: (userId) => ctx
+                .read<AdminNotificationsProvider>()
+                .removePendingNotificationsOfUser(userId),
+          ),
+        ),
         ChangeNotifierProvider(
           create: (ctx) => PaymentProvider(subProvider: ctx.read<SubProvider>()),
         ),
@@ -181,6 +191,13 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CustomerSummaryProvider()),
         ChangeNotifierProvider(create: (_) => SummaryColorsProvider()),
         ChangeNotifierProvider(create: (_) => AppUpdateProvider()),
+        ChangeNotifierProvider(create: (_) => AdminNotificationsProvider()),
+        ChangeNotifierProvider(create: (_) => MealPhotoNotificationsProvider()),
+        ChangeNotifierProvider(
+          create: (ctx) => BloodTestProvider(
+            notifications: ctx.read<AdminNotificationsProvider>(),
+          ),
+        ),
       ],
       child: AppLifecycleManager(
         child: MaterialApp(
@@ -503,6 +520,10 @@ class _HomePageState extends State<HomePage> {
   /// Toggled by the user via a button in the AppBar.
   bool _isGridView = true;
 
+  AdminNotificationsProvider? _adminNotifications;
+  MealPhotoNotificationsProvider? _mealPhotoNotifications;
+  BloodTestProvider? _bloodTests;
+
   @override
   void initState() {
     super.initState();
@@ -517,7 +538,25 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     FcmService().markHomeGone(this);
+    _releaseAdminSession();
     super.dispose();
+  }
+
+  void _startAdminSession(String userId) {
+    _adminNotifications =
+        Provider.of<AdminNotificationsProvider>(context, listen: false)
+          ..start(userId, owner: this);
+    _mealPhotoNotifications =
+        Provider.of<MealPhotoNotificationsProvider>(context, listen: false)
+          ..start(userId, owner: this);
+    _bloodTests = Provider.of<BloodTestProvider>(context, listen: false)
+      ..startDailyScan(userId, owner: this);
+  }
+
+  void _releaseAdminSession() {
+    _adminNotifications?.release(this);
+    _mealPhotoNotifications?.release(this);
+    _bloodTests?.releaseDailyScan(this);
   }
 
   @override
@@ -557,6 +596,8 @@ class _HomePageState extends State<HomePage> {
     // admin's user-side tab).
     _plannedPaymentAlertStream =
         context.read<PaymentProvider>().hasPlannedPaymentStream(userId);
+
+    if (FcmService.isAdmin(userId)) _startAdminSession(userId);
 
     _streamInitialized = true;
   }
@@ -916,6 +957,7 @@ class _HomePageState extends State<HomePage> {
               }
                     },
                   ),
+                  if (isAdmin) const AdminNotificationBell(),
                 ],
               ),
             ),

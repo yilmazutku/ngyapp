@@ -7,6 +7,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 
 import '../constants/app_constants.dart';
+import 'fcm_service.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -68,18 +69,41 @@ class NotificationService {
       requestCriticalPermission: true,
     );
 
+    const macOSSettings = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
+      macOS: macOSSettings,
     );
 
     await _notifications.initialize(
       initSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // Handle notification tap
-      },
+      onDidReceiveNotificationResponse: _onNotificationResponse,
     );
     _isInitialized = true;
+
+    try {
+      final NotificationAppLaunchDetails? launch =
+          await _notifications.getNotificationAppLaunchDetails();
+      final NotificationResponse? response = launch?.notificationResponse;
+      if (launch?.didNotificationLaunchApp == true && response != null) {
+        _onNotificationResponse(response);
+      }
+    } catch (e) {
+    }
+  }
+
+  void _onNotificationResponse(NotificationResponse response) {
+    final String? docId = adminNotificationDocId(response.payload);
+    if (docId == null) return;
+    FcmService().openLocalNotification(
+      FcmService.adminNotificationTapData(docId),
+    );
   }
 
   /// Ensure initialized before using notifications
@@ -308,6 +332,105 @@ class NotificationService {
             UILocalNotificationDateInterpretation.absoluteTime,
       );
     } catch (e) {
+    }
+  }
+
+  static const String _adminPayloadPrefix = 'adminNotification:';
+
+  static const int _adminIdBase = 200000000;
+  static const int _adminIdRange = 100000000;
+
+  static int adminNotificationId(String docId) {
+    int hash = 0x811c9dc5;
+    for (final int unit in docId.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    return _adminIdBase + hash % _adminIdRange;
+  }
+
+  static String? adminNotificationDocId(String? payload) {
+    if (payload == null || !payload.startsWith(_adminPayloadPrefix)) {
+      return null;
+    }
+    final String docId = payload.substring(_adminPayloadPrefix.length);
+    return docId.isEmpty ? null : docId;
+  }
+
+  Future<bool> scheduleAdminNotification({
+    required String docId,
+    required String title,
+    required String body,
+    required DateTime fireAt,
+  }) async {
+    try {
+      final isReady = await _ensureInitialized();
+      if (!isReady || !fireAt.isAfter(DateTime.now())) return false;
+
+      final androidDetails = AndroidNotificationDetails(
+        NotificationConstants.adminReminderChannelId,
+        NotificationConstants.adminReminderChannelName,
+        channelDescription: NotificationConstants.adminReminderChannelDescription,
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+        category: AndroidNotificationCategory.reminder,
+        styleInformation: BigTextStyleInformation(body),
+      );
+
+      const darwinDetails = DarwinNotificationDetails(
+        presentAlert: false,
+        presentBanner: false,
+        presentList: true,
+        presentBadge: false,
+        presentSound: true,
+        interruptionLevel: InterruptionLevel.active,
+      );
+
+      await _notifications.zonedSchedule(
+        adminNotificationId(docId),
+        title,
+        body,
+        tz.TZDateTime.from(fireAt, tz.local),
+        NotificationDetails(
+          android: androidDetails,
+          iOS: darwinDetails,
+          macOS: darwinDetails,
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        payload: '$_adminPayloadPrefix$docId',
+      );
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> cancelAdminNotification(String docId) async {
+    if (!_isSupported) return;
+    try {
+      await _notifications.cancel(adminNotificationId(docId));
+    } catch (e) {
+    }
+  }
+
+  Future<Set<String>> pendingAdminNotificationDocIds() async {
+    if (!_isSupported) return const {};
+    try {
+      final isReady = await _ensureInitialized();
+      if (!isReady) return const {};
+      final List<PendingNotificationRequest> pending =
+          await _notifications.pendingNotificationRequests();
+      return {
+        for (final PendingNotificationRequest request in pending)
+          if (adminNotificationDocId(request.payload) case final String docId)
+            docId,
+      };
+    } catch (e) {
+      return const {};
     }
   }
 

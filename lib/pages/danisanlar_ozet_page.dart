@@ -6,8 +6,6 @@ import '../models/subs_model.dart';
 import '../models/summary_color_config.dart';
 import '../providers/customer_summary_provider.dart';
 import '../providers/summary_colors_provider.dart';
-import '../providers/user_provider.dart';
-import '../utils/dialog_utils.dart';
 import '../utils/search_text.dart';
 import 'customer_sum.dart';
 import '../widgets/labeled_action_button.dart';
@@ -284,6 +282,10 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     with AutomaticKeepAliveClientMixin {
   static const String _noSearchResultText =
       'Aramanıza uyan danışan bulunamadı.';
+  static const String _weightTrackingStartColumn = 'Kilo Takibe Geçiş Tarihi';
+
+  bool get _showsWeightTrackingStart =>
+      widget.status == SubActiveStatus.activeWeightTracking;
 
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
@@ -527,6 +529,8 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
       const DataColumn(label: Text('Paket Süresi / Görüşme Türü')),
       if (widget.status == SubActiveStatus.frozen)
         const DataColumn(label: Text('Dondurulma Tarihi')),
+      if (_showsWeightTrackingStart)
+        const DataColumn(label: Text(_weightTrackingStartColumn)),
       for (int i = 1; i <= CustomerSummaryRow.maxSeans; i++)
         DataColumn(label: Text('$i.Seans')),
       const DataColumn(label: Text('Kalan Erteleme Hakkı'), numeric: true),
@@ -557,6 +561,7 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
         ],
         _cell(row.packageType),
         if (widget.status == SubActiveStatus.frozen) _cell(row.freezeDate),
+        if (_showsWeightTrackingStart) _dateCell(row.weightTrackingStartDate),
         for (int i = 0; i < row.seans.length; i++)
           _seansCell(row.seans[i], isBeyondPackage: i >= row.totalMeetings),
         _cell(row.remainingPostponements),
@@ -572,52 +577,20 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
   /// page, so its back button returns here; opened from anywhere else it
   /// returns to whatever pushed it.
   Future<void> _openCustomerDetails(CustomerSummaryRow row) async {
-    // The summary row only carries the id, and the customer page needs the full
-    // user record for its header.
-    final userProvider = Provider.of<UserProvider>(context, listen: false);
-
-    LoadingDialog? loading;
-    if (mounted) {
-      loading = DialogUtils.openLoading(context, message: 'Danışan açılıyor...');
-    }
-
-    try {
-      final user = await userProvider.fetchUserDetails(userId: row.userId);
-      loading?.close();
-      if (!mounted) return;
-
-      if (user == null) {
-        await DialogUtils.openError(
-          context,
-          title: 'Hata',
-          message: '${row.fullName} için danışan kaydı bulunamadı.',
-        );
-        return;
-      }
-
-      // The details tab pops back with the deleted user's id when the admin
-      // removes them, so the row is dropped here instead of leaving a customer
-      // listed who no longer exists.
-      final deletedUserId = await Navigator.push<Object?>(
-        context,
-        MaterialPageRoute(builder: (_) => CustomerSummaryPage(user: user)),
-      );
-      if (!mounted) return;
-      if (deletedUserId is String && deletedUserId.isNotEmpty) {
-        setState(() {
-          _rows =
-              _rows.where((r) => r.row.userId != deletedUserId).toList();
-          _applySearch();
-        });
-      }
-    } catch (e) {
-      loading?.close();
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Danışan bilgileri açılırken bir hata oluştu: $e',
-      );
+    // The details tab pops back with the deleted user's id when the admin
+    // removes them, so the row is dropped here instead of leaving a customer
+    // listed who no longer exists.
+    final Object? deletedUserId = await openCustomerSummaryById(
+      context,
+      userId: row.userId,
+      displayName: row.fullName,
+    );
+    if (!mounted) return;
+    if (deletedUserId is String && deletedUserId.isNotEmpty) {
+      setState(() {
+        _rows = _rows.where((r) => r.row.userId != deletedUserId).toList();
+        _applySearch();
+      });
     }
   }
 
@@ -700,10 +673,19 @@ class _CustomerSummaryTabState extends State<_CustomerSummaryTab>
     );
   }
 
-  TextStyle _cellStyle(SummaryCell cell) => TextStyle(
-        color: cell.isError ? Colors.red.shade700 : null,
-        fontWeight: cell.isError ? FontWeight.bold : null,
+  TextStyle _cellStyle(SummaryCell cell) {
+    if (cell.isMissing) {
+      return TextStyle(
+        color: Colors.orange.shade800,
+        fontStyle: FontStyle.italic,
+        fontWeight: FontWeight.w600,
       );
+    }
+    return TextStyle(
+      color: cell.isError ? Colors.red.shade700 : null,
+      fontWeight: cell.isError ? FontWeight.bold : null,
+    );
+  }
 
   /// Ödeme tutarı hücresi. Gösterilen ödeme henüz tahsil edilmemişse tutarın
   /// solunda kalın "(P)" işareti gösterilir. Hücre tek satır kalır; sütun

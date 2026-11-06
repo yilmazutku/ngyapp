@@ -692,7 +692,9 @@ class _AppointmentColorsSectionState extends State<_AppointmentColorsSection> {
             Text(
               'Randevu kartlarının arkaplan rengi randevu türüne göre değişir. '
               'Her tür için kullanılacak rengi aşağıdaki listeden seçebilirsiniz. '
-              'Boş bırakılan slotlar uygulamanın varsayılan rengini kullanır.',
+              'Takvimdeki doğum günü hatırlatmasının (DG) rengi de buradan '
+              'seçilir. Boş bırakılan slotlar uygulamanın varsayılan rengini '
+              'kullanır.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),

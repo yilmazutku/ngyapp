@@ -176,6 +176,7 @@ class _CreateUserPageState extends State<CreateUserPage> {
         phone: phone,
         tcNo: tcNo,
         birthDate: birthDate,
+        isBloodTestPresent: false,
       );
 
       // Store user data in Firestore

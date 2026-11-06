@@ -4,12 +4,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
-import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../constants/app_constants.dart';
 import '../models/meal_model.dart';
 import '../utils/diet_menu_parser.dart';
+import 'notification_service.dart';
 
 /// Service for scheduling meal upload reminder notifications.
 /// 
@@ -52,25 +52,7 @@ class MealReminderService {
   /// Initialize the service
   Future<void> initialize() async {
     if (_isInitialized || !isSupported) return;
-
-    // Initialize timezone data
-    tz_data.initializeTimeZones();
-
-    // Initialize notification plugin
-    const androidSettings = AndroidInitializationSettings(NotificationConstants.androidNotificationIcon);
-    const iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-
-    const initSettings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
-
-    await _notifications.initialize(initSettings);
-
+    await NotificationService().initialize();
     _isInitialized = true;
   }
 

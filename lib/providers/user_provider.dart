@@ -12,6 +12,10 @@ import '../models/kvkk_consent_model.dart';
 /// Provides user management functionality, including user data handling, authentication,
 /// and subscription management. Implements ChangeNotifier pattern for state management.
 class UserProvider extends ChangeNotifier {
+  UserProvider({this.onUserDeleted});
+
+  final Future<void> Function(String userId)? onUserDeleted;
+
   /// Base URL for the project's HTTPS Cloud Functions (default us-central1
   /// region). Callable functions are invoked over HTTP here instead of via the
   /// `cloud_functions` plugin, which has no Windows desktop support.
@@ -188,6 +192,10 @@ class UserProvider extends ChangeNotifier {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       invalidateCustomers();
       notifyListeners();
+      try {
+        await onUserDeleted?.call(userId);
+      } catch (e) {
+      }
       return;
     }
 

@@ -5,25 +5,39 @@
 /// for that column), or an error cell shown as "Hata" when a value is missing
 /// where one is expected (e.g. a completed payment with no payment date).
 class SummaryCell {
+  static const String missingText = 'Girilmemiş';
+
   final String text;
   final bool isError;
+
+  final bool isMissing;
 
   /// Seans hücrelerinde randevunun "Yakıldı" (burned) olup olmadığı. Tablo
   /// yakılmış ve yapılmış seansları ayrı arkaplan renkleriyle gösterir; diğer
   /// sütunlarda bu bayrak her zaman false'tur.
   final bool isBurned;
 
-  const SummaryCell(this.text, {this.isBurned = false}) : isError = false;
+  const SummaryCell(this.text, {this.isBurned = false})
+      : isError = false,
+        isMissing = false;
 
   const SummaryCell.empty()
       : text = '',
         isError = false,
-        isBurned = false;
+        isBurned = false,
+        isMissing = false;
 
   const SummaryCell.error()
       : text = 'Hata',
         isError = true,
-        isBurned = false;
+        isBurned = false,
+        isMissing = false;
+
+  const SummaryCell.missing()
+      : text = missingText,
+        isError = false,
+        isBurned = false,
+        isMissing = true;
 
   bool get isEmpty => !isError && text.isEmpty;
 }
@@ -72,6 +86,8 @@ class CustomerSummaryRow {
   /// cell for every other status (the column is only shown on the frozen tab).
   final SummaryCell freezeDate;
 
+  final SummaryCell weightTrackingStartDate;
+
   /// Always [maxSeans] entries; unused trailing slots are empty cells.
   final List<SummaryCell> seans;
 
@@ -107,6 +123,7 @@ class CustomerSummaryRow {
     this.packageType = const SummaryCell.empty(),
     required this.notes,
     this.freezeDate = const SummaryCell.empty(),
+    this.weightTrackingStartDate = const SummaryCell.empty(),
     required this.seans,
     this.totalMeetings = maxSeans,
     required this.remainingPostponements,
