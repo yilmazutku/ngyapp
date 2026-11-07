@@ -143,7 +143,7 @@ class UserModel {
     final String letters =
         '${first.isEmpty ? '' : first[0]}${last.isEmpty ? '' : last[0]}';
     if (letters.isEmpty) return '?';
-    return letters.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
+    return toUpperTr(letters);
   }
 
   @override

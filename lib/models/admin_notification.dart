@@ -87,6 +87,15 @@ class BloodTestReminderSchedule {
   static DateTime dueDay(DateTime testDate) => addMonths(
       DateTime(testDate.year, testDate.month, testDate.day), monthsAfterTest);
 
+  static DateTime testDateDueOnOrAfter(DateTime day) {
+    final DateTime target = DateTime(day.year, day.month, day.day);
+    DateTime testDate = addMonths(target, -monthsAfterTest);
+    while (dueDay(testDate).isBefore(target)) {
+      testDate = DateTime(testDate.year, testDate.month, testDate.day + 1);
+    }
+    return testDate;
+  }
+
   static DateTime fireTime(DateTime testDate, BloodTestReminderStage stage) {
     final DateTime due = dueDay(testDate);
     final DateTime day = stage == BloodTestReminderStage.dayBefore

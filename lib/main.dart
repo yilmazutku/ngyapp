@@ -43,6 +43,7 @@ import 'pages/admin_payments_page.dart';
 import 'pages/admin_timeslots_page.dart';
 import 'pages/appointments_page.dart';
 import 'pages/danisanlar_ozet_page.dart';
+import 'pages/document_control_page.dart';
 import 'pages/kvkk_consent_page.dart';
 import 'pages/login_page.dart';
 import 'pages/meal_upload_page.dart';
@@ -714,6 +715,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _navigateToDocumentControl(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const DocumentControlPage(),
+      ),
+    );
+  }
+
   void _navigateToMealPhotos(BuildContext context) {
     Navigator.push(
       context,
@@ -861,6 +871,11 @@ class _HomePageState extends State<HomePage> {
           'icon': Icons.table_chart,
           'label': 'Danışanlar Özet',
           'onTap': () => _navigateToCustomerSummary(context),
+        },
+        {
+          'icon': Icons.fact_check,
+          'label': DocumentControlPage.title,
+          'onTap': () => _navigateToDocumentControl(context),
         },
         {
           'icon': Icons.photo_library,

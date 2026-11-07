@@ -105,10 +105,10 @@ class NotificationService {
   }
 
   void _onNotificationResponse(NotificationResponse response) {
-    final String? docId = adminNotificationDocId(response.payload);
-    if (docId == null) return;
+    final String? payload = response.payload;
+    if (!isAdminPayload(payload)) return;
     FcmService().openLocalNotification(
-      FcmService.adminNotificationTapData(docId),
+      FcmService.adminNotificationTapData(adminNotificationDocId(payload) ?? ''),
     );
   }
 
@@ -355,6 +355,9 @@ class NotificationService {
     return _adminIdBase + hash % _adminIdRange;
   }
 
+  static bool isAdminPayload(String? payload) =>
+      payload != null && payload.startsWith(_adminPayloadPrefix);
+
   static String? adminNotificationDocId(String? payload) {
     if (payload == null || !payload.startsWith(_adminPayloadPrefix)) {
       return null;
@@ -373,37 +376,12 @@ class NotificationService {
       final isReady = await _ensureInitialized();
       if (!isReady || !fireAt.isAfter(DateTime.now())) return false;
 
-      final androidDetails = AndroidNotificationDetails(
-        NotificationConstants.adminReminderChannelId,
-        NotificationConstants.adminReminderChannelName,
-        channelDescription: NotificationConstants.adminReminderChannelDescription,
-        importance: Importance.high,
-        priority: Priority.high,
-        playSound: true,
-        enableVibration: true,
-        category: AndroidNotificationCategory.reminder,
-        styleInformation: BigTextStyleInformation(body),
-      );
-
-      const darwinDetails = DarwinNotificationDetails(
-        presentAlert: false,
-        presentBanner: false,
-        presentList: true,
-        presentBadge: false,
-        presentSound: true,
-        interruptionLevel: InterruptionLevel.active,
-      );
-
       await _notifications.zonedSchedule(
         adminNotificationId(docId),
         title,
         body,
         tz.TZDateTime.from(fireAt, tz.local),
-        NotificationDetails(
-          android: androidDetails,
-          iOS: darwinDetails,
-          macOS: darwinDetails,
-        ),
+        _adminNotificationDetails(body),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
@@ -413,6 +391,55 @@ class NotificationService {
     } catch (e) {
       return false;
     }
+  }
+
+  Future<bool> showAdminNotification({
+    required String docId,
+    required String title,
+    required String body,
+    String? notificationKey,
+  }) async {
+    try {
+      final isReady = await _ensureInitialized();
+      if (!isReady) return false;
+      await _notifications.show(
+        adminNotificationId(notificationKey ?? docId),
+        title,
+        body,
+        _adminNotificationDetails(body),
+        payload: '$_adminPayloadPrefix$docId',
+      );
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  static NotificationDetails _adminNotificationDetails(String body) {
+    const DarwinNotificationDetails darwinDetails = DarwinNotificationDetails(
+      presentAlert: false,
+      presentBanner: false,
+      presentList: true,
+      presentBadge: false,
+      presentSound: true,
+      interruptionLevel: InterruptionLevel.active,
+    );
+    return NotificationDetails(
+      android: AndroidNotificationDetails(
+        NotificationConstants.adminReminderChannelId,
+        NotificationConstants.adminReminderChannelName,
+        channelDescription:
+            NotificationConstants.adminReminderChannelDescription,
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+        category: AndroidNotificationCategory.reminder,
+        styleInformation: BigTextStyleInformation(body),
+      ),
+      iOS: darwinDetails,
+      macOS: darwinDetails,
+    );
   }
 
   Future<void> cancelAdminNotification(String docId) async {

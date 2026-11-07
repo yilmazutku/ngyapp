@@ -17,6 +17,15 @@ class _NoScheduler implements AdminNotificationScheduler {
   bool get isSupported => false;
 
   @override
+  Future<bool> showNow({
+    required String docId,
+    required String title,
+    required String body,
+    String? notificationKey,
+  }) async =>
+      true;
+
+  @override
   Future<bool> schedule({
     required String docId,
     required String title,

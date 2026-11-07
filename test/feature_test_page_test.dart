@@ -21,6 +21,15 @@ class _NoScheduler implements AdminNotificationScheduler {
   bool get isSupported => false;
 
   @override
+  Future<bool> showNow({
+    required String docId,
+    required String title,
+    required String body,
+    String? notificationKey,
+  }) async =>
+      true;
+
+  @override
   Future<bool> schedule({
     required String docId,
     required String title,
@@ -244,6 +253,67 @@ void main() {
             ))
             .onPressed,
         isNull);
+  });
+
+  testWidgets('zaman makinesi gerçek kurallarla hızlandırılmış deneme '
+      'bildirimleri kurar', (WidgetTester tester) async {
+    await pumpPage(tester);
+    final Finder machine = find.byKey(const ValueKey<String>('zaman'));
+    expect(
+        find.descendant(
+            of: machine,
+            matching: find.textContaining('Günlük taramada')),
+        findsOneWidget);
+
+    final DateTime before = DateTime.now();
+    await tester.tap(find.descendant(
+      of: machine,
+      matching: find.widgetWithText(FilledButton, 'Başlat'),
+    ));
+    await tester.pumpAndSettle();
+
+    final List<AdminNotification> first = [
+      for (final doc in (await db
+              .collection(AdminNotificationsProvider.collectionName)
+              .get())
+          .docs)
+        AdminNotification.fromDocument(doc)!,
+    ];
+    expect(first.map((n) => n.type), [AdminNotificationType.missingBloodTests]);
+    expect(first.single.isTest, isTrue);
+    expect(first.single.onlyFor, admin);
+    expect(first.single.customers.map((c) => c.name), ['Deneme Danışan']);
+    expect(first.single.fireAt.isAfter(before), isTrue);
+    expect(first.single.fireAt.isBefore(before.add(const Duration(minutes: 4))),
+        isTrue);
+
+    await tester.tap(find.descendant(
+      of: machine,
+      matching: find.widgetWithText(FilterChip, '2 gün sonra 3 ay doluyor'),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+      of: machine,
+      matching: find.widgetWithText(FilledButton, 'Başlat'),
+    ));
+    await tester.pumpAndSettle();
+    final List<AdminNotification> all = [
+      for (final doc in (await db
+              .collection(AdminNotificationsProvider.collectionName)
+              .get())
+          .docs)
+        AdminNotification.fromDocument(doc)!,
+    ];
+    final List<AdminNotification> reminders = [
+      for (final AdminNotification n in all)
+        if (n.type == AdminNotificationType.bloodTestReminder) n,
+    ]..sort((a, b) => a.fireAt.compareTo(b.fireAt));
+    expect(reminders.map((n) => n.stage), [
+      BloodTestReminderStage.dayBefore,
+      BloodTestReminderStage.dueDay,
+    ]);
+    expect(reminders.every((n) => n.isTest && n.userName == 'Deneme Danışan'),
+        isTrue);
   });
 }
 

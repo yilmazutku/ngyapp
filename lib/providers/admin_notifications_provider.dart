@@ -71,6 +71,7 @@ class AdminNotificationsProvider extends ChangeNotifier
   bool _loaded = false;
   bool _hasError = false;
   bool _inForeground = true;
+  bool _inBackground = false;
   DateTime _lastDueCheck = DateTime.now();
   Timer? _dueTimer;
   Timer? _dayTimer;
@@ -112,6 +113,7 @@ class AdminNotificationsProvider extends ChangeNotifier
     _owner = owner;
     _uid = uid;
     _inForeground = true;
+    _inBackground = false;
     _lastDueCheck = DateTime.now();
     WidgetsBinding.instance.addObserver(this);
     _delivery.attach(uid);
@@ -284,6 +286,7 @@ class AdminNotificationsProvider extends ChangeNotifier
       due: _due,
       now: now,
       inForeground: _inForeground,
+      inBackground: _inBackground,
       becameDueInForeground: becameDueInForeground,
     );
     _armDueTimer(now);
@@ -306,8 +309,14 @@ class AdminNotificationsProvider extends ChangeNotifier
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final bool inForeground = state == AppLifecycleState.resumed;
-    if (inForeground == _inForeground) return;
+    final bool inBackground = state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached;
+    if (inForeground == _inForeground && inBackground == _inBackground) {
+      return;
+    }
     _inForeground = inForeground;
+    _inBackground = inBackground;
     if (inForeground &&
         _uid != null &&
         (_hasError || !DateFormatter.isSameDay(_windowStart, DateTime.now()))) {
@@ -532,12 +541,14 @@ class AdminNotificationsProvider extends ChangeNotifier
     required DateTime fireAt,
     AdminTestNotificationKind kind = AdminTestNotificationKind.plain,
     List<NotificationCustomer> customers = const [],
+    DateTime? testDate,
   }) async {
     final String? uid = _uid ?? _currentUid;
     if (uid == null) return null;
-    final String id = 'test_${uid}_${fireAt.microsecondsSinceEpoch}';
+    final String id =
+        'test_${uid}_${fireAt.microsecondsSinceEpoch}_${kind.name}';
     await _collection.doc(id).set({
-      ..._testContent(kind, fireAt, customers),
+      ..._testContent(kind, fireAt, customers, testDate),
       AdminNotification.fireAtField: Timestamp.fromDate(fireAt),
       AdminNotification.onlyForField: uid,
       AdminNotification.isTestField: true,
@@ -552,6 +563,7 @@ class AdminNotificationsProvider extends ChangeNotifier
     AdminTestNotificationKind kind,
     DateTime fireAt,
     List<NotificationCustomer> customers,
+    DateTime? givenTestDate,
   ) {
     switch (kind) {
       case AdminTestNotificationKind.plain:
@@ -572,8 +584,10 @@ class AdminNotificationsProvider extends ChangeNotifier
                 : BloodTestReminderStage.dueDay;
         final DateTime dueDay = DateTime(fireAt.year, fireAt.month,
             fireAt.day + (stage == BloodTestReminderStage.dayBefore ? 1 : 0));
-        final DateTime testDate = BloodTestReminderSchedule.addMonths(
-            dueDay, -BloodTestReminderSchedule.monthsAfterTest);
+        final DateTime testDate = givenTestDate == null
+            ? BloodTestReminderSchedule.testDateDueOnOrAfter(dueDay)
+            : DateTime(
+                givenTestDate.year, givenTestDate.month, givenTestDate.day);
         return {
           AdminNotification.typeField:
               AdminNotificationType.bloodTestReminder.value,
@@ -628,7 +642,9 @@ class AdminNotificationsProvider extends ChangeNotifier
     final List<DocumentReference<Map<String, dynamic>>> refs = [
       for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
           in snapshot.docs)
-        if (doc.id != exceptId) doc.reference,
+        if (doc.id != exceptId &&
+            !(AdminNotification.fromDocument(doc)?.isTest ?? false))
+          doc.reference,
     ];
     for (int start = 0; start < refs.length; start += _batchLimit) {
       final WriteBatch batch = _db.batch();

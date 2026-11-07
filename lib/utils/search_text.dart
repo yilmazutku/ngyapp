@@ -46,6 +46,9 @@ String normalizeSearchText(String input) {
   return buffer.toString();
 }
 
+String toUpperTr(String text) =>
+    text.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
+
 /// [input] içindeki aranabilir kelimeler (normalize edilmiş).
 ///
 /// Ad soyad, e-posta gibi alanlar boşluk, nokta, "@", tire gibi ayraçlardan

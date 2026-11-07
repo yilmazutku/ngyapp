@@ -52,7 +52,8 @@ enum FeatureTestShortcut {
   openSummary(Icons.table_chart_outlined, 'Danışanlar Özet'),
   openAppointments(Icons.calendar_month_outlined, 'Randevu Yönetimi'),
   openChats(Icons.forum_outlined, 'Tüm Sohbetler'),
-  openNotifications(Icons.notifications_outlined, 'Bildirim Merkezi');
+  openNotifications(Icons.notifications_outlined, 'Bildirim Merkezi'),
+  openDocumentControl(Icons.fact_check_outlined, 'Doküman Kontrol');
 
   const FeatureTestShortcut(this.icon, this.label);
 
@@ -67,12 +68,31 @@ enum FeatureTestTool {
   notificationStatus(Icons.insights_rounded, 'Anlık durum'),
   scanPreview(Icons.manage_search_rounded, 'Tarama önizlemesi'),
   birthdayPreview(Icons.cake_outlined, 'Doğum günü önizlemesi'),
-  enterKeys(Icons.keyboard_alt_outlined, 'Enter deneme alanı');
+  enterKeys(Icons.keyboard_alt_outlined, 'Enter deneme alanı'),
+  timeMachine(Icons.fast_forward_rounded, 'Zaman makinesi');
 
   const FeatureTestTool(this.icon, this.label);
 
   final IconData icon;
   final String label;
+}
+
+enum FeatureTestSpeed {
+  realTime(1, 'Gerçek zaman'),
+  dayInFiveMinutes(288, '1 gün = 5 dk'),
+  dayInMinute(1440, '1 gün = 1 dk'),
+  dayInTenSeconds(8640, '1 gün = 10 sn');
+
+  const FeatureTestSpeed(this.factor, this.label);
+
+  final int factor;
+  final String label;
+
+  DateTime realTimeOf(DateTime simulated, DateTime start) {
+    if (!simulated.isAfter(start)) return start;
+    return start.add(Duration(
+        microseconds: simulated.difference(start).inMicroseconds ~/ factor));
+  }
 }
 
 String featureTestPlatformLabel(TargetPlatform platform) {
@@ -297,6 +317,48 @@ const List<FeatureTestSection> featureTestSections = [
     tools: [FeatureTestTool.notificationSimulator],
   ),
   FeatureTestSection(
+    id: 'zaman',
+    title: 'Zaman Makinesi (hızlandırılmış bildirim testi)',
+    icon: Icons.fast_forward_rounded,
+    color: Color(0xFF00838F),
+    note:
+        'Danışan seçtiğiniz tarihte eklenmiş (ve isterseniz kan tahlili seçtiğiniz tarihte yapılmış) gibi kabul edilir; zaman çizelgesi uygulamanın gerçek kurallarıyla hesaplanır ve bildirimler seçtiğiniz hızla kurulur. Danışanın kaydı değişmez; bildirimler yalnızca size gelir ve "DENEME" etiketlidir.',
+    steps: [
+      FeatureTestStep(
+        'zaman.liste',
+        'Eklenmeyi "5 gün önce", kan tahlilini "Yok", hızı "1 gün = 1 dk" seçip "Başlat"a basın.',
+        'Çizelgedeki "listesine girer" satırında yazan sürede (birkaç dakika) zile "DENEME" etiketli "Kan tahlili eksik danışanlar (1)" düşer.',
+      ),
+      FeatureTestStep(
+        'zaman.gecmis',
+        'Eklenmeyi "10 gün önce" seçip başlatın.',
+        'Liste hemen düşer; çizelgenin altında Doküman Kontrol durumu "İlk kan tahlili yüklenmedi" yazar.',
+      ),
+      FeatureTestStep(
+        'zaman.tahlil',
+        'Kan tahlilini "2 gün sonra 3 ay doluyor" seçip başlatın.',
+        '"Kan tahlili yarın 3 ayı dolduruyor" ve ardından "Kan tahlilinin üzerinden 3 ay geçti" çizelgedeki sürelerde düşer.',
+      ),
+      FeatureTestStep(
+        'zaman.kapali',
+        'Başlattıktan hemen sonra uygulamayı arka plana alın ya da kapatın.',
+        'Süreler dolunca telefonda ve Mac\'te sistem bildirimi gelir; Windows\'ta uygulamaya dönünce şerit çıkar.',
+      ),
+      FeatureTestStep(
+        'zaman.gercek',
+        'Gerçek bir danışan seçip başlatın; düşen hatırlatmadaki "Danışanı aç"a basın.',
+        'Seçilen danışanın sayfası açılır; danışanın kendi kayıtları değişmemiştir.',
+      ),
+      FeatureTestStep(
+        'zaman.sil',
+        '"Deneme bildirimlerini sil"e basın.',
+        'Henüz düşmemiş olanlar dahil bütün deneme bildirimleri kalkar.',
+      ),
+    ],
+    shortcuts: [FeatureTestShortcut.openNotifications],
+    tools: [FeatureTestTool.timeMachine],
+  ),
+  FeatureTestSection(
     id: 'zil',
     title: 'Zil ve Bildirim Merkezi',
     icon: Icons.notifications_none_rounded,
@@ -400,6 +462,48 @@ const List<FeatureTestSection> featureTestSections = [
     ],
     shortcuts: [FeatureTestShortcut.openUsers],
     tools: [FeatureTestTool.scanPreview],
+  ),
+  FeatureTestSection(
+    id: 'dokuman',
+    title: 'Doküman Kontrol',
+    icon: Icons.fact_check_outlined,
+    color: Color(0xFFC62828),
+    steps: [
+      FeatureTestStep(
+        'dokuman.ac',
+        'Ana sayfadaki "Doküman Kontrol" simgesine basın.',
+        'Doküman Kontrol sayfası açılır.',
+      ),
+      FeatureTestStep(
+        'dokuman.kontrol',
+        '"Kan tahlillerini kontrol et"e basın.',
+        'İlerleme gösterilir; bitince bütün danışanlar listelenir. En üstte "Gecikmiş" olanlar (3 ayı dolan ya da 1 haftadır ilk tahlili yüklenmeyen), en çok geciken en üstte.',
+      ),
+      FeatureTestStep(
+        'dokuman.kart',
+        '"Durum" çiplerine ("Gecikmiş (N)", "Yaklaşan (N)" vb.) basın ve aramayı deneyin.',
+        'Liste seçilen duruma ve yazılan isme göre süzülür; "Tümü" yeniden hepsini gösterir.',
+      ),
+      FeatureTestStep(
+        'dokuman.ac2',
+        'Bir satıra basın.',
+        'Danışanın sayfası açılır.',
+      ),
+      FeatureTestStep(
+        'dokuman.yukle',
+        'Gecikmiş bir danışana bugünün tarihiyle kan tahlili yükleyip yeniden kontrol edin.',
+        'Danışan "Güncel"e geçer; 3 ayın dolacağı tarih ve kalan gün yazar.',
+      ),
+      FeatureTestStep(
+        'dokuman.tarihsiz',
+        'Detay\'da "Evet" seçili ama tarihli kan tahlili yüklenmemiş bir danışana bakın.',
+        '"Tarihi bilinmiyor" grubunda görünür.',
+      ),
+    ],
+    shortcuts: [
+      FeatureTestShortcut.openDocumentControl,
+      FeatureTestShortcut.openUsers,
+    ],
   ),
   FeatureTestSection(
     id: 'dg',

@@ -14,6 +14,15 @@ class _FakeScheduler implements AdminNotificationScheduler {
   bool get isSupported => true;
 
   @override
+  Future<bool> showNow({
+    required String docId,
+    required String title,
+    required String body,
+    String? notificationKey,
+  }) async =>
+      true;
+
+  @override
   Future<bool> schedule({
     required String docId,
     required String title,
@@ -475,6 +484,22 @@ void main() {
       expect(await provider.removeTestNotifications(), 3);
       await pumpEventQueue();
       expect(provider.notifications.map((n) => n.isTest), [false]);
+    });
+
+    test('denemede verilen tahlil tarihi hatırlatma metnine yazılır',
+        () async {
+      final String? id = await provider.addTestNotification(
+        fireAt: DateTime.now().add(const Duration(minutes: 2)),
+        kind: AdminTestNotificationKind.bloodTestDueDay,
+        customers: const [
+          NotificationCustomer(userId: customer, name: 'Ayşe Yılmaz'),
+        ],
+        testDate: DateTime(2026, 8, 5, 15, 30),
+      );
+      final AdminNotification n =
+          AdminNotification.fromDocument(await notifications().doc(id).get())!;
+      expect(n.testDate, DateTime(2026, 8, 5));
+      expect(n.body, contains('05.08.2026'));
     });
 
     test('kan tahlili denemesi danışansız kurulmaz', () async {
