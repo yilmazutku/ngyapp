@@ -19,12 +19,11 @@ void main() {
       AppointmentColorSlot.diger: 'pink_200',
     });
 
-    final Map<String, dynamic> stored = (await db
-            .collection('admininput')
-            .doc('appointmentColors')
-            .get())
-        .data()!;
-    expect(stored[AppointmentColorsProvider.colorsField], {'diger': 'pink_200'});
+    final Map<String, dynamic> stored =
+        (await db.collection('admininput').doc('appointmentColors').get())
+            .data()!;
+    expect(
+        stored[AppointmentColorsProvider.colorsField], {'diger': 'pink_200'});
 
     AppointmentColorsRegistry.setOverrides(const {});
     final Map<AppointmentColorSlot, String> loaded =
@@ -44,11 +43,9 @@ void main() {
     });
     await provider.saveColors(const {});
 
-    final Map<String, dynamic> stored = (await db
-            .collection('admininput')
-            .doc('appointmentColors')
-            .get())
-        .data()!;
+    final Map<String, dynamic> stored =
+        (await db.collection('admininput').doc('appointmentColors').get())
+            .data()!;
     expect(stored[AppointmentColorsProvider.colorsField], isEmpty);
   });
 }

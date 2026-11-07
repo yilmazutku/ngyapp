@@ -62,8 +62,8 @@ enum FeatureTestShortcut {
 
 enum FeatureTestTool {
   reminderCalculator(Icons.event_repeat_rounded, 'Hatırlatma hesaplayıcı'),
-  notificationSimulator(
-      Icons.notification_add_outlined, 'Bildirim simülatörü'),
+  upcomingReminders(Icons.pending_actions_rounded, 'Bekleyen hatırlatmalar'),
+  notificationSimulator(Icons.notification_add_outlined, 'Bildirim simülatörü'),
   notificationStatus(Icons.insights_rounded, 'Anlık durum'),
   scanPreview(Icons.manage_search_rounded, 'Tarama önizlemesi'),
   birthdayPreview(Icons.cake_outlined, 'Doğum günü önizlemesi'),
@@ -119,7 +119,7 @@ class FeatureTestSection {
   final String? note;
   final List<FeatureTestStep> steps;
   final List<FeatureTestShortcut> shortcuts;
-  final FeatureTestTool? tool;
+  final List<FeatureTestTool> tools;
 
   const FeatureTestSection({
     required this.id,
@@ -129,7 +129,7 @@ class FeatureTestSection {
     this.note,
     required this.steps,
     this.shortcuts = const [],
-    this.tool,
+    this.tools = const [],
   });
 }
 
@@ -197,7 +197,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'kan.yukle',
         'Yükle\'ye basın.',
-        'Bilgi mesajında tahlil tarihi ve hatırlatma günü yazar; listede "Kan tahlili" ve "Hatırlatma" rozetleri görünür.',
+        'Bilgi mesajında tahlil tarihi ve hatırlatma günü yazar; listede "Kan tahlili" ve "Hatırlatma" rozetleri görünür; aşağıdaki "Bekleyen hatırlatmalar"da danışan seçilince iki "Bekliyor" hatırlatma (1 gün kala ve 3 ay doldu) görünür.',
       ),
       FeatureTestStep(
         'kan.detay',
@@ -205,8 +205,18 @@ const List<FeatureTestSection> featureTestSections = [
         '"Danışanın kan değerleri dokümanı mevcut mu?" kartında "Evet" seçilidir.',
       ),
       FeatureTestStep(
+        'kan.eskiyukle',
+        'Aynı danışana, bu tahlilden daha eski tarihli bir kan tahlilini hatırlatıcı açık yükleyin.',
+        'Bilgi mesajı, daha yeni tarihli tahlil olduğu için 3 ay hatırlatmasının kurulmadığını söyler; bekleyen hatırlatmalar değişmez.',
+      ),
+      FeatureTestStep(
+        'kan.yeniyukle',
+        'Başka bir danışana 1 ay önceki tarihle hatırlatıcı açık, ardından bugünün tarihiyle hatırlatıcı kapalı birer kan tahlili yükleyin.',
+        'İkinci yüklemeden sonra "Bekleyen hatırlatmalar"da o danışan seçilince ilk tahlilin iki hatırlatması artık görünmez.',
+      ),
+      FeatureTestStep(
         'kan.eski',
-        'Tahlil tarihi olarak 3 aydan eski bir gün (ör. 4 ay önce) seçip hatırlatıcı açıkken bir kan tahlili daha yükleyin.',
+        'Kan tahlili olmayan bir danışana, tarihi 3 aydan eski (ör. 4 ay önce) bir kan tahlilini hatırlatıcı açık yükleyin.',
         'Pencerede "üzerinden 3 ay geçmiş" uyarısı çıkar; yükleyince zilin Sistem sekmesine "Kan tahlilinin üzerinden 3 ay geçti" hemen düşer.',
       ),
       FeatureTestStep(
@@ -217,21 +227,25 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'kan.sil',
         'Hatırlatmalı bir kan tahlili dosyasını silin.',
-        'Onay mesajı hatırlatmanın da kalkacağını söyler; o tarihin başka dosyası kalmadıysa bekleyen hatırlatma silinir.',
+        'Onay mesajı hatırlatmanın da kalkacağını söyler; o tarihin başka dosyası kalmadıysa hatırlatmaları "Bekleyen hatırlatmalar"dan (danışan seçiliyken) kalkar.',
       ),
     ],
     shortcuts: [
       FeatureTestShortcut.openUsers,
       FeatureTestShortcut.openNotifications,
     ],
-    tool: FeatureTestTool.reminderCalculator,
+    tools: [
+      FeatureTestTool.reminderCalculator,
+      FeatureTestTool.upcomingReminders,
+    ],
   ),
   FeatureTestSection(
     id: 'teslim',
     title: 'Bildirimin Gelmesi (uygulama açık / kapalı)',
     icon: Icons.notifications_active_outlined,
     color: Color(0xFF5E35B1),
-    note: 'Simülatörün kurduğu bildirimler yalnızca sizin hesabınıza gelir, diğer adminler görmez; zilde "DENEME" etiketiyle görünür. Hesabınızın açık olduğu bütün cihazlara gelir. Android, uygulama arka plandayken bildirimi birkaç dakika geciktirebilir.',
+    note:
+        'Simülatörün kurduğu bildirimler yalnızca sizin hesabınıza gelir, diğer adminler görmez; zilde "DENEME" etiketiyle görünür. Hesabınızın açık olduğu bütün cihazlara gelir. Android, uygulama arka plandayken bildirimi birkaç dakika geciktirebilir.',
     steps: [
       FeatureTestStep(
         'teslim.acik',
@@ -268,9 +282,19 @@ const List<FeatureTestSection> featureTestSections = [
         'Süresi dolmamış bir deneme bildirimi kurup "Deneme bildirimlerini sil"e basın.',
         'Deneme bildirimleri zilden kalkar; silinen bildirim süresi dolunca da gelmez.',
       ),
+      FeatureTestStep(
+        'teslim.danisansil',
+        'Silinecek bir deneme danışanı için simülatörle 5 dk sonraya "Kan tahlili · 3 ay doldu" kurun, sonra danışanı Kullanıcı Yönetimi\'nden silin.',
+        '5 dakika dolunca bu bildirim gelmez; silinen danışanın bekleyen hatırlatmaları da silinmiştir.',
+      ),
+      FeatureTestStep(
+        'teslim.cikis',
+        'Süresi dolmamış bir deneme bildirimi kurup hesaptan çıkış yapın.',
+        'Süre dolunca bu cihaza sistem bildirimi gelmez; yeniden girince bildirim zilde görünür ve şeritle duyurulur.',
+      ),
     ],
     shortcuts: [FeatureTestShortcut.openNotifications],
-    tool: FeatureTestTool.notificationSimulator,
+    tools: [FeatureTestTool.notificationSimulator],
   ),
   FeatureTestSection(
     id: 'zil',
@@ -318,19 +342,25 @@ const List<FeatureTestSection> featureTestSections = [
         'Bir kan tahlili hatırlatmasındaki "Danışanı aç" çipine basın.',
         'Danışanın sayfası açılır.',
       ),
+      FeatureTestStep(
+        'zil.acikken',
+        'Simülatörde 10 sn seçip bildirimi kurun; hemen "Bildirim Merkezi"ni Sohbet sekmesinde açın ve gelen bildirime dokunun.',
+        'Merkez açık kalır ve Sistem sekmesine geçer; bildirim okundu olur.',
+      ),
     ],
     shortcuts: [
       FeatureTestShortcut.openNotifications,
       FeatureTestShortcut.openChats,
     ],
-    tool: FeatureTestTool.notificationStatus,
+    tools: [FeatureTestTool.notificationStatus],
   ),
   FeatureTestSection(
     id: 'tarama',
     title: 'Günlük Kan Tahlili Taraması',
     icon: Icons.assignment_late_outlined,
     color: Color(0xFFF57C00),
-    note: 'Tarama normalde günde bir kez, saat 09:00\'dan sonra uygulaması açık olan ilk admin cihazında kendiliğinden yapılır. Önizleme hiçbir şeyi değiştirmez; "Gerçek taramayı çalıştır" bu kuralı atlayıp hemen tarar ve listeyi bütün adminlere gönderir.',
+    note:
+        'Tarama normalde günde bir kez, saat 09:00\'dan sonra uygulaması açık olan ilk admin cihazında kendiliğinden yapılır. Önizleme hiçbir şeyi değiştirmez; "Gerçek taramayı çalıştır" bu kuralı atlayıp hemen tarar ve listeyi bütün adminlere gönderir.',
     steps: [
       FeatureTestStep(
         'tarama.detay',
@@ -369,7 +399,7 @@ const List<FeatureTestSection> featureTestSections = [
       ),
     ],
     shortcuts: [FeatureTestShortcut.openUsers],
-    tool: FeatureTestTool.scanPreview,
+    tools: [FeatureTestTool.scanPreview],
   ),
   FeatureTestSection(
     id: 'dg',
@@ -412,14 +442,15 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestShortcut.openUsers,
       FeatureTestShortcut.openAppointments,
     ],
-    tool: FeatureTestTool.birthdayPreview,
+    tools: [FeatureTestTool.birthdayPreview],
   ),
   FeatureTestSection(
     id: 'enter',
     title: 'Sohbette Enter ile Gönderme',
     icon: Icons.keyboard_return_rounded,
     color: Color(0xFF1E88E5),
-    note: 'Deneme alanı sohbetteki yazı kutusunun tuş kurallarının aynısını kullanır; kimseye mesaj gitmez.',
+    note:
+        'Deneme alanı sohbetteki yazı kutusunun tuş kurallarının aynısını kullanır; kimseye mesaj gitmez.',
     steps: [
       FeatureTestStep(
         'enter.alan',
@@ -456,6 +487,6 @@ const List<FeatureTestSection> featureTestSections = [
       ),
     ],
     shortcuts: [FeatureTestShortcut.openChats],
-    tool: FeatureTestTool.enterKeys,
+    tools: [FeatureTestTool.enterKeys],
   ),
 ];

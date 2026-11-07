@@ -102,18 +102,32 @@ class TestProvider extends ChangeNotifier {
     }
   }
 
+  CollectionReference<Map<String, dynamic>> _testsOf(String userId) =>
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('tests');
+
+  static Timestamp _dayOf(DateTime date) =>
+      Timestamp.fromDate(DateTime(date.year, date.month, date.day));
+
   Future<bool> hasBloodTestOn({
     required String userId,
     required DateTime testDate,
   }) async {
-    final QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore
-        .instance
-        .collection('users')
-        .doc(userId)
-        .collection('tests')
-        .where(bloodTestDateField,
-            isEqualTo: Timestamp.fromDate(
-                DateTime(testDate.year, testDate.month, testDate.day)))
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _testsOf(userId)
+        .where(bloodTestDateField, isEqualTo: _dayOf(testDate))
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
+  }
+
+  Future<bool> hasBloodTestAfter({
+    required String userId,
+    required DateTime testDate,
+  }) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _testsOf(userId)
+        .where(bloodTestDateField, isGreaterThan: _dayOf(testDate))
         .limit(1)
         .get();
     return snapshot.docs.isNotEmpty;

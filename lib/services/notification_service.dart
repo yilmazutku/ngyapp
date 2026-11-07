@@ -30,9 +30,15 @@ class NotificationService {
   /// Public getter to check if notifications are supported on this platform
   bool get isSupported => _isSupported;
 
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-    
+  Future<void>? _initializing;
+
+  Future<void> initialize() {
+    if (_isInitialized) return Future<void>.value();
+    return _initializing ??=
+        _initialize().whenComplete(() => _initializing = null);
+  }
+
+  Future<void> _initialize() async {
     if (!_isSupported) {
       _isInitialized = true; // Mark as initialized to avoid repeated attempts
       return;

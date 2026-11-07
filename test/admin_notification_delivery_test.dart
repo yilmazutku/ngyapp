@@ -246,4 +246,81 @@ void main() {
 
     expect(gated.scheduled, isEmpty);
   });
+
+  test('düşmüş ama henüz gösterilmemiş bildirim iptal edilmez, silinen edilir',
+      () async {
+    final AdminNotificationDelivery d = delivery(android: true);
+    await d.attach(uid);
+    await d.syncUpcoming([
+      notification('a', now.add(const Duration(minutes: 1))),
+      notification('b', now.add(const Duration(minutes: 2))),
+    ]);
+    expect(scheduler.scheduled.keys.toSet(), {'a', 'b'});
+
+    await d.syncUpcoming(const [], inFlight: {'a'});
+    expect(scheduler.scheduled.keys, ['a'], reason: 'b silindi');
+  });
+
+  test('en fazla ${AdminNotificationDelivery.maxScheduled} yakın bildirim '
+      'kurulur', () async {
+    final AdminNotificationDelivery d = delivery(android: false);
+    await d.attach(uid);
+    final List<AdminNotification> upcoming = [
+      for (int i = 0; i < AdminNotificationDelivery.maxScheduled + 5; i++)
+        notification('n$i', now.add(Duration(hours: i + 1))),
+    ];
+    await d.syncUpcoming(upcoming);
+    expect(scheduler.scheduled.keys.toSet(), {
+      for (int i = 0; i < AdminNotificationDelivery.maxScheduled; i++) 'n$i',
+    });
+
+    await d.syncUpcoming(upcoming.skip(1).toList());
+    expect(scheduler.scheduled.keys.toSet(), {
+      for (int i = 1; i <= AdminNotificationDelivery.maxScheduled; i++) 'n$i',
+    });
+  });
+
+  test('oturum kapanınca kurulumlar temizlenir; yeniden girişte kaçan '
+      'bildirim şeritle duyurulur', () async {
+    final AdminNotificationDelivery first = delivery(android: false);
+    await first.attach(uid);
+    await first
+        .syncUpcoming([notification('r', now.add(const Duration(minutes: 5)))]);
+    expect(scheduler.scheduled.keys, ['r']);
+
+    first.detach(clearDevice: true);
+    await first.syncUpcoming(const []);
+    expect(scheduler.scheduled, isEmpty);
+
+    final AdminNotificationDelivery second = delivery(android: false);
+    await second.attach(uid);
+    await second.announce(
+      due: [notification('r', now.add(const Duration(minutes: 5)))],
+      now: now.add(const Duration(minutes: 10)),
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, ['r']);
+  });
+
+  test('dışarıdan iptal edilen kurulum yeniden kurulur', () async {
+    final AdminNotificationDelivery d = delivery(android: false);
+    await d.attach(uid);
+    final List<AdminNotification> upcoming = [
+      notification('r', now.add(const Duration(hours: 1))),
+    ];
+    await d.syncUpcoming(upcoming);
+    scheduler.scheduled.clear();
+    await d.syncUpcoming(upcoming);
+    expect(scheduler.scheduled.keys, ['r']);
+  });
+
+  test('oturum açıkken bırakılınca kurulumlar cihazda kalır', () async {
+    final AdminNotificationDelivery d = delivery(android: true);
+    await d.attach(uid);
+    await d.syncUpcoming([notification('r', now.add(const Duration(hours: 1)))]);
+    d.detach();
+    await d.syncUpcoming(const []);
+    expect(scheduler.scheduled.keys, ['r']);
+  });
 }

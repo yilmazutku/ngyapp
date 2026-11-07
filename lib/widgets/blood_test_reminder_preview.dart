@@ -14,8 +14,7 @@ class BloodTestReminderPreview extends StatelessWidget {
     final DateTime now = this.now ?? DateTime.now();
     final Map<BloodTestReminderStage, DateTime> plan =
         BloodTestReminderSchedule.plan(testDate, now);
-    final bool alreadyDue =
-        !plan.containsKey(BloodTestReminderStage.dayBefore);
+    final bool alreadyDue = !plan.containsKey(BloodTestReminderStage.dayBefore);
 
     String whenOf(BloodTestReminderStage stage) {
       final DateTime fireAt = plan[stage]!;

@@ -23,6 +23,8 @@ class AdminNotificationDelivery {
 
   static const Duration recentWindow = Duration(hours: 24);
 
+  static const int maxScheduled = 48;
+
   static const Duration _keepRecordsFor = Duration(days: 30);
 
   static const String _scheduledKeyPrefix = 'adminNotifications.scheduled.';
@@ -48,11 +50,28 @@ class AdminNotificationDelivery {
     return _loading = _load(uid);
   }
 
-  void detach() {
+  void detach({bool clearDevice = false}) {
+    final String? uid = _uid;
     _uid = null;
     _loading = null;
     _scheduled = {};
     _announced = {};
+    if (!clearDevice || uid == null || !_local.isSupported) return;
+    _syncQueue = _syncQueue
+        .then((_) => _clearDevice(uid))
+        .catchError((Object e) {});
+  }
+
+  Future<void> _clearDevice(String uid) async {
+    for (final String docId in await _local.pendingDocIds()) {
+      await _local.cancel(docId);
+    }
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.remove('$_scheduledKeyPrefix$uid');
+    } catch (e) {
+      return;
+    }
   }
 
   Future<void> _load(String uid) async {
@@ -95,28 +114,46 @@ class AdminNotificationDelivery {
     }
   }
 
-  Future<void> syncUpcoming(List<AdminNotification> upcoming) {
+  Future<void> syncUpcoming(
+    List<AdminNotification> upcoming, {
+    Set<String> inFlight = const {},
+  }) {
     if (!_local.isSupported) return Future<void>.value();
     return _syncQueue = _syncQueue
-        .then((_) => _sync(upcoming))
+        .then((_) => _sync(upcoming, inFlight))
         .catchError((Object e) {});
   }
 
-  Future<void> _sync(List<AdminNotification> upcoming) async {
+  Future<void> _sync(
+    List<AdminNotification> upcoming,
+    Set<String> inFlight,
+  ) async {
     final String? uid = _uid;
     if (uid == null) return;
     await _loading;
     if (_uid != uid) return;
 
-    final Set<String> wanted = {for (final n in upcoming) n.id};
+    final List<AdminNotification> wanted =
+        upcoming.take(maxScheduled).toList();
+    final Set<String> wantedIds = {for (final n in wanted) n.id};
     final Set<String> pending = await _local.pendingDocIds();
-    for (final String docId in pending.difference(wanted)) {
-      await _local.cancel(docId);
-      _scheduled.remove(docId);
-    }
+    if (_uid != uid) return;
 
     bool changed = false;
-    for (final AdminNotification notification in upcoming) {
+    for (final String docId in pending) {
+      if (wantedIds.contains(docId) || inFlight.contains(docId)) continue;
+      await _local.cancel(docId);
+      if (_scheduled.remove(docId) != null) changed = true;
+    }
+    if (_uid != uid) return;
+
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final int before = _scheduled.length;
+    _scheduled.removeWhere(
+        (docId, fireAt) => fireAt > now && !pending.contains(docId));
+    if (_scheduled.length != before) changed = true;
+
+    for (final AdminNotification notification in wanted) {
       final int fireAt = notification.fireAt.millisecondsSinceEpoch;
       if (_scheduled[notification.id] == fireAt &&
           pending.contains(notification.id)) {

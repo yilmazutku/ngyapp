@@ -90,6 +90,8 @@ class FeatureTestToolPanel extends StatelessWidget {
     switch (tool) {
       case FeatureTestTool.reminderCalculator:
         return _ReminderCalculator(color: color);
+      case FeatureTestTool.upcomingReminders:
+        return const _UpcomingReminders();
       case FeatureTestTool.notificationSimulator:
         return _NotificationSimulator(checklist: checklist, color: color);
       case FeatureTestTool.notificationStatus:
@@ -208,6 +210,210 @@ class _ReminderCalculatorState extends State<_ReminderCalculator> {
         const SizedBox(height: 10),
         BloodTestReminderPreview(testDate: _testDate),
       ],
+    );
+  }
+}
+
+class _UpcomingReminders extends StatefulWidget {
+  const _UpcomingReminders();
+
+  @override
+  State<_UpcomingReminders> createState() => _UpcomingRemindersState();
+}
+
+class _UpcomingRemindersState extends State<_UpcomingReminders> {
+  static const int _collapsedCount = 8;
+
+  NotificationCustomer? _customer;
+  Stream<List<AdminNotification>>? _customerReminders;
+  bool _showAll = false;
+
+  Future<void> _pickCustomer() async {
+    final UserProvider users =
+        Provider.of<UserProvider>(context, listen: false);
+    final AdminNotificationsProvider notifications =
+        Provider.of<AdminNotificationsProvider>(context, listen: false);
+    final LoadingDialog loading =
+        DialogUtils.openLoading(context, message: 'Danışanlar yükleniyor...');
+    try {
+      final List<UserModel> customers = await users.fetchAllCustomers();
+      loading.close();
+      if (!mounted) return;
+      final UserModel? picked =
+          await showCustomerPickerDialog(context, customers: customers);
+      if (picked == null || !mounted) return;
+      setState(() {
+        _customer = NotificationCustomer(
+          userId: picked.userId,
+          name: _customerName(picked),
+        );
+        _customerReminders = notifications.remindersOf(picked.userId);
+        _showAll = false;
+      });
+    } catch (e) {
+      loading.close();
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Danışanlar yüklenemedi: $e',
+      );
+    }
+  }
+
+  void _clearCustomer() {
+    setState(() {
+      _customer = null;
+      _customerReminders = null;
+      _showAll = false;
+    });
+  }
+
+  Widget _list(List<AdminNotification> reminders, String emptyText) {
+    if (reminders.isEmpty) return _ToolHint(emptyText);
+    final List<AdminNotification> shown =
+        _showAll ? reminders : reminders.take(_collapsedCount).toList();
+    final DateTime now = DateTime.now();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final AdminNotification n in shown)
+          _UpcomingRow(n, isDue: n.isDueAt(now)),
+        if (reminders.length > shown.length)
+          TextButton(
+            onPressed: () => setState(() => _showAll = true),
+            child: Text('+${reminders.length - shown.length} daha'),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AdminNotificationsProvider notifications =
+        Provider.of<AdminNotificationsProvider>(context, listen: false);
+    final NotificationCustomer? customer = _customer;
+    final Stream<List<AdminNotification>>? customerReminders =
+        _customerReminders;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _ToolHint('Danışan seçince o danışanın bütün hatırlatmaları '
+            '(zamanı gelmiş ve gelmemiş) listelenir; seçilmezse zamanı en '
+            'yakın hatırlatmalar görünür.'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _pickCustomer,
+              icon: const Icon(Icons.person_search_outlined, size: 18),
+              label: Text(customer?.name ?? 'Danışan seç'),
+            ),
+            if (customer != null)
+              TextButton(
+                onPressed: _clearCustomer,
+                child: const Text('Seçimi kaldır'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (customerReminders != null)
+          StreamBuilder<List<AdminNotification>>(
+            stream: customerReminders,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const _ToolHint('Hatırlatmalar okunamadı.');
+              }
+              final List<AdminNotification>? reminders = snapshot.data;
+              if (reminders == null) {
+                return const _ToolHint('Yükleniyor...');
+              }
+              return _list(reminders, 'Bu danışanın hatırlatması yok.');
+            },
+          )
+        else
+          ListenableBuilder(
+            listenable: notifications,
+            builder: (context, _) {
+              if (!notifications.isLoaded) {
+                return const _ToolHint('Bildirimler yükleniyor...');
+              }
+              final List<AdminNotification> upcoming = notifications.upcoming;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (upcoming.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: _ToolHint(notifications.upcomingWindowIsFull
+                          ? 'Zamanı en yakın ${upcoming.length} hatırlatma '
+                              'gösteriliyor; daha ilerisi için danışan seçin.'
+                          : '${upcoming.length} hatırlatmanın zamanı henüz '
+                              'gelmedi; en yakını en üstte.'),
+                    ),
+                  _list(upcoming, 'Henüz zamanı gelmemiş hatırlatma yok.'),
+                ],
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class _UpcomingRow extends StatelessWidget {
+  const _UpcomingRow(this.notification, {required this.isDue});
+
+  final AdminNotification notification;
+  final bool isDue;
+
+  @override
+  Widget build(BuildContext context) {
+    final AdminNotification n = notification;
+    final String? userName = n.userName;
+    final Color color = n.type == AdminNotificationType.test
+        ? Colors.blue.shade600
+        : n.stage == BloodTestReminderStage.dueDay
+            ? Colors.red.shade600
+            : Colors.orange.shade700;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            isDue ? Icons.notifications_rounded : Icons.schedule_rounded,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${DateFormatter.formatNumericDateTime(n.fireAt)} · '
+                  '${isDue ? 'Düştü' : 'Bekliyor'} · '
+                  '${n.title}${n.isTest ? ' (deneme)' : ''}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (userName != null)
+                  Text(
+                    userName,
+                    style:
+                        TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

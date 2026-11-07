@@ -87,8 +87,8 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Finder inStep(String stepId, Finder matching) =>
-      find.descendant(of: find.byKey(ValueKey<String>(stepId)), matching: matching);
+  Finder inStep(String stepId, Finder matching) => find.descendant(
+      of: find.byKey(ValueKey<String>(stepId)), matching: matching);
 
   Future<Map<String, Object?>> stored() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -121,18 +121,21 @@ void main() {
     expect(find.textContaining('0 / '), findsOneWidget);
     expect(find.text('Sıfırla'), findsNothing);
 
-    await tester.tap(inStep('kilo.ekle', find.byTooltip('Geçti olarak işaretle')));
+    await tester
+        .tap(inStep('kilo.ekle', find.byTooltip('Geçti olarak işaretle')));
     await tester.pumpAndSettle();
     expect(find.textContaining('1 / '), findsOneWidget);
 
-    await tester.tap(inStep('kilo.kart', find.widgetWithText(ChoiceChip, 'Hatalı')));
+    await tester
+        .tap(inStep('kilo.kart', find.widgetWithText(ChoiceChip, 'Hatalı')));
     await tester.pumpAndSettle();
     expect(find.text('Not Ekle'), findsOneWidget);
     await tester.enterText(
         find.widgetWithText(TextField, 'Not'), 'Kart görünmedi');
     await tester.tap(find.widgetWithText(FilledButton, 'Kaydet'));
     await tester.pumpAndSettle();
-    expect(inStep('kilo.kart', find.text('Not: Kart görünmedi')), findsOneWidget);
+    expect(
+        inStep('kilo.kart', find.text('Not: Kart görünmedi')), findsOneWidget);
     expect(find.textContaining('2 / '), findsOneWidget);
 
     final Map<String, Object?> saved = await stored();
@@ -151,7 +154,8 @@ void main() {
     expect(copied, contains('HATALI ADIMLAR (1)'));
     expect(copied, contains('Not: Kart görünmedi'));
 
-    await tester.tap(find.widgetWithText(FilterChip, 'Tümü (${_totalSteps()})'));
+    await tester
+        .tap(find.widgetWithText(FilterChip, 'Tümü (${_totalSteps()})'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sıfırla'));
     await tester.pumpAndSettle();
@@ -184,7 +188,8 @@ void main() {
         find.widgetWithText(TextField, 'Beklenen sonuç'), 'Tarih de silinir');
     await tester.tap(find.widgetWithText(FilledButton, 'Kaydet'));
     await tester.pumpAndSettle();
-    expect(find.text('${featureTestSections.first.steps.length + 1}. Paketi sil'),
+    expect(
+        find.text('${featureTestSections.first.steps.length + 1}. Paketi sil'),
         findsOneWidget);
     expect(find.text('Kendi adımınız'), findsOneWidget);
 
@@ -198,7 +203,8 @@ void main() {
     expect(find.textContaining('Paketi sil'), findsNothing);
   });
 
-  testWidgets('bildirim simülatörü yalnızca kurana görünen deneme bildirimi kurar',
+  testWidgets(
+      'bildirim simülatörü yalnızca kurana görünen deneme bildirimi kurar',
       (WidgetTester tester) async {
     await pumpPage(tester);
     final Finder simulator = find.byKey(const ValueKey<String>('teslim'));

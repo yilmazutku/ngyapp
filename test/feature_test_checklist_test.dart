@@ -74,8 +74,8 @@ void main() {
   });
 
   test('sonuçlar, notlar, eklenen adımlar ve ayarlar geri yüklenir', () async {
-    final FeatureTestChecklist first =
-        FeatureTestChecklist(platform: TargetPlatform.android, sections: sections);
+    final FeatureTestChecklist first = FeatureTestChecklist(
+        platform: TargetPlatform.android, sections: sections);
     await first.load();
     first.setResult('a.1', FeatureTestResult.failed);
     first.setNote('a.1', '  Bildirim gelmedi  ');
@@ -119,8 +119,8 @@ void main() {
       () async {
     final FeatureTestChecklist checklist = await loaded();
     checklist.setResult('a.1', FeatureTestResult.failed);
-    expect(checklist.visibleStepsOf(sections[0]).map((s) => s.id),
-        ['a.1', 'a.2']);
+    expect(
+        checklist.visibleStepsOf(sections[0]).map((s) => s.id), ['a.1', 'a.2']);
     expect(checklist.summary.total, 3);
 
     checklist.onlyThisDevice = true;
@@ -136,8 +136,7 @@ void main() {
     expect(checklist.visibleStepsOf(sections[1]), isEmpty);
   });
 
-  test('eklenen adım düzenlenir; silinince sonucu ve notu da gider',
-      () async {
+  test('eklenen adım düzenlenir; silinince sonucu ve notu da gider', () async {
     final FeatureTestChecklist checklist = await loaded();
     final String id = checklist.addCustomStep(
       sectionId: 'a',

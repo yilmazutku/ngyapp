@@ -559,7 +559,6 @@ class _SectionCard extends StatelessWidget {
     };
     final bool collapsed = checklist.isCollapsed(section.id);
     final String? note = section.note;
-    final FeatureTestTool? tool = section.tool;
     final Color pillColor = summary.failed > 0
         ? _failedColor
         : summary.isComplete
@@ -711,7 +710,7 @@ class _SectionCard extends StatelessWidget {
                   ],
                 ),
               ),
-            if (tool != null)
+            for (final FeatureTestTool tool in section.tools)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                 child: FeatureTestToolPanel(

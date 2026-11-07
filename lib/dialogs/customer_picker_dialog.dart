@@ -103,9 +103,8 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
                               ),
                             ),
                             title: Text(_nameOf(user)),
-                            subtitle: user.fullName.isEmpty
-                                ? null
-                                : Text(user.email),
+                            subtitle:
+                                user.fullName.isEmpty ? null : Text(user.email),
                             onTap: () =>
                                 DialogUtils.closeOwnRoute(context, user),
                           );

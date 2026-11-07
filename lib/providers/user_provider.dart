@@ -54,7 +54,7 @@ class UserProvider extends ChangeNotifier {
       final userDoc = FirebaseFirestore.instance
           .collection('users')
           .doc(updatedUser.userId);
-      await userDoc.update(updatedUser.toMap());
+      await userDoc.update(updatedUser.toMap()..remove('createDate'));
       invalidateCustomers();
       notifyListeners();
       return true;

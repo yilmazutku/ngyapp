@@ -153,6 +153,7 @@ class _TestsTabState extends State<TestsTab> {
           progress.value = 'Kan tahlili kaydediliyor...';
           try {
             bloodTestNote = await _registerBloodTest(
+              tests: provider,
               bloodTests: bloodTests,
               notifications: notifications,
               testDate: bloodTestDate,
@@ -210,24 +211,44 @@ class _TestsTabState extends State<TestsTab> {
   }
 
   Future<String> _registerBloodTest({
+    required TestProvider tests,
     required BloodTestProvider bloodTests,
     required AdminNotificationsProvider notifications,
     required DateTime testDate,
     required bool wantsReminder,
   }) async {
     await bloodTests.setBloodTestPresent(userId: widget.userId, present: true);
-    final String date = DateFormatter.formatNumericDate(testDate);
-    if (!wantsReminder) {
-      return '$date tarihli kan tahlili kaydedildi.';
+    final String saved =
+        '${DateFormatter.formatNumericDate(testDate)} tarihli kan tahlili '
+        'kaydedildi.';
+    if (!wantsReminder ||
+        await tests.hasBloodTestAfter(
+            userId: widget.userId, testDate: testDate)) {
+      await notifications.removePendingBloodTestRemindersBefore(
+        userId: widget.userId,
+        testDate: testDate,
+      );
+      return wantsReminder
+          ? '$saved Danışanın daha yeni tarihli bir kan tahlili olduğu için '
+              '3 ay hatırlatması kurulmadı.'
+          : saved;
     }
-    await notifications.addBloodTestReminders(
+    final int written = await notifications.addBloodTestReminders(
       userId: widget.userId,
       userName: widget.userName,
       testDate: testDate,
     );
+    if (written == 0) {
+      return '$saved Bu tarihli tahlilin 3 ay hatırlatması zaten kurulu.';
+    }
+    if (!BloodTestReminderSchedule.plan(testDate, DateTime.now())
+        .containsKey(BloodTestReminderStage.dayBefore)) {
+      return '$saved Tahlilin üzerinden 3 ay geçtiği için hatırlatma Sistem '
+          'bildirimlerine düştü.';
+    }
     final DateTime due = BloodTestReminderSchedule.dueDay(testDate);
-    return '$date tarihli kan tahlili kaydedildi. 3 ay hatırlatması '
-        '${DateFormatter.formatLongDate(due)} ve bir gün öncesi için kuruldu.';
+    return '$saved 3 ay hatırlatması ${DateFormatter.formatLongDate(due)} ve '
+        'bir gün öncesi için kuruldu.';
   }
 
   Future<void> _deleteFile(_TestAttachmentModel f) async {
@@ -245,31 +266,43 @@ class _TestsTabState extends State<TestsTab> {
     if (ok != true) return;
     if (!mounted) return;
 
+    final TestProvider provider =
+        Provider.of<TestProvider>(context, listen: false);
+    final AdminNotificationsProvider notifications =
+        Provider.of<AdminNotificationsProvider>(context, listen: false);
     try {
-      final provider = Provider.of<TestProvider>(context, listen: false);
-      final AdminNotificationsProvider notifications =
-          Provider.of<AdminNotificationsProvider>(context, listen: false);
       await provider.deleteTestAttachment(
         userId: widget.userId,
         docId: f.docId,
         storagePath: f.storagePath,
       );
-      if (bloodTestDate != null &&
-          !await provider.hasBloodTestOn(
-              userId: widget.userId, testDate: bloodTestDate)) {
-        await notifications.removeBloodTestReminders(
-          userId: widget.userId,
-          testDate: bloodTestDate,
-        );
-      }
-      if (!mounted) return;
-      await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Dosya silindi.');
-      // Re-checked: the tab can be left while the dialog is open.
-      if (!mounted) return;
-      setState(() { _filesFuture = _fetchFiles(); });
     } catch (e) {
       if (!mounted) return;
       await DialogUtils.openError(context, title: 'Hata', message: 'Dosya silinemedi: $e');
+      return;
+    }
+
+    String? reminderError;
+    if (bloodTestDate != null) {
+      try {
+        if (!await provider.hasBloodTestOn(
+            userId: widget.userId, testDate: bloodTestDate)) {
+          await notifications.removeBloodTestReminders(
+            userId: widget.userId,
+            testDate: bloodTestDate,
+          );
+        }
+      } catch (e) {
+        reminderError =
+            'Dosya silindi fakat 3 ay hatırlatması kaldırılamadı: $e';
+      }
+    }
+    if (!mounted) return;
+    setState(() { _filesFuture = _fetchFiles(); });
+    if (reminderError != null) {
+      await DialogUtils.openError(context, title: 'Uyarı', message: reminderError);
+    } else {
+      await DialogUtils.openInfo(context, title: 'Başarılı', message: 'Dosya silindi.');
     }
   }
 

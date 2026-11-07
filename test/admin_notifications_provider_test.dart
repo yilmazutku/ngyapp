@@ -170,6 +170,77 @@ void main() {
     });
   });
 
+  test('daha yeni tahlil, eski tahlillerin bekleyen hatırlatmalarını kaldırır',
+      () async {
+    final DateTime now = DateTime.now();
+    await provider.addBloodTestReminders(
+      userId: customer,
+      userName: 'Ayşe Yılmaz',
+      testDate: daysAgo(10),
+    );
+    await provider.addBloodTestReminders(
+      userId: customer,
+      userName: 'Ayşe Yılmaz',
+      testDate: daysAgo(120),
+    );
+    await provider.removePendingBloodTestRemindersBefore(
+      userId: customer,
+      testDate: now,
+    );
+
+    final List<String> left = [
+      for (final doc in (await notifications().get()).docs) doc.id,
+    ];
+    expect(left, [
+      AdminNotification.bloodTestReminderId(
+          customer, daysAgo(120), BloodTestReminderStage.dueDay),
+    ]);
+  });
+
+  test('hatırlatmalar bir kez yazılır; yazılan sayı döner', () async {
+    final DateTime testDate = daysAgo(10);
+    expect(
+        await provider.addBloodTestReminders(
+            userId: customer, userName: 'Ayşe Yılmaz', testDate: testDate),
+        2);
+    expect(
+        await provider.addBloodTestReminders(
+            userId: customer, userName: 'Ayşe Yılmaz', testDate: testDate),
+        0);
+  });
+
+  test('eski hatırlatmaları temizlemek simülatörün denemelerine dokunmaz',
+      () async {
+    await provider.addTestNotification(
+      fireAt: DateTime.now().add(const Duration(minutes: 5)),
+      kind: AdminTestNotificationKind.bloodTestDueDay,
+      customers: const [
+        NotificationCustomer(userId: customer, name: 'Ayşe Yılmaz'),
+      ],
+    );
+    await provider.removePendingBloodTestRemindersBefore(
+      userId: customer,
+      testDate: DateTime.now(),
+    );
+    expect((await notifications().get()).docs, hasLength(1));
+  });
+
+  test('danışanın hatırlatmaları zamanına göre listelenir', () async {
+    final DateTime testDate = daysAgo(10);
+    await provider.addBloodTestReminders(
+        userId: customer, userName: 'Ayşe Yılmaz', testDate: testDate);
+    await provider.addBloodTestReminders(
+        userId: 'baska', userName: 'Can Ak', testDate: testDate);
+
+    final List<AdminNotification> reminders =
+        await provider.remindersOf(customer).first;
+    expect(reminders.map((n) => n.stage), [
+      BloodTestReminderStage.dayBefore,
+      BloodTestReminderStage.dueDay,
+    ]);
+    expect(reminders.every((n) => n.userId == customer), isTrue);
+  });
+
   test('günün eksik tahlil listesi yeniden yazılınca okundu bilgisi kalır',
       () async {
     const String day = '2026-11-06';
@@ -294,6 +365,35 @@ void main() {
       expect(provider.isRead(provider.notifications.last), isTrue);
     });
 
+    test('çok sayıda ileri tarihli hatırlatma düşmüş bildirimleri gizlemez, '
+        'yalnızca en yakınları kurulur', () async {
+      final DateTime now = DateTime.now();
+      await add('dusmus', now.subtract(const Duration(minutes: 1)));
+      const int future = AdminNotificationsProvider.listLimit + 10;
+      for (int i = 0; i < future; i++) {
+        await add('ileri$i', now.add(Duration(days: i + 1)));
+      }
+      provider.start(admin, owner: home);
+      await pumpEventQueue();
+
+      expect(provider.notifications.map((n) => n.id), ['dusmus']);
+      expect(provider.unreadCount, 1);
+      expect(scheduler.scheduled.keys.toSet(), {
+        for (int i = 0; i < AdminNotificationDelivery.maxScheduled; i++)
+          'ileri$i',
+      });
+    });
+
+    test('okundu bilgisi hemen yerelde görünür', () async {
+      await add('a', DateTime.now().subtract(const Duration(minutes: 1)));
+      provider.start(admin, owner: home);
+      await pumpEventQueue();
+      await provider.markRead('a');
+      final Map<String, dynamic>? data = await docData('a');
+      expect((data![AdminNotification.readByField] as Map)[admin],
+          isA<Timestamp>());
+    });
+
     test('deneme bildirimi yalnızca kuran admine görünür ve silinebilir',
         () async {
       final DateTime now = DateTime.now();
@@ -398,6 +498,36 @@ void main() {
       expect(scheduler.scheduled.keys, [id]);
 
       await provider.removeTestNotifications();
+      await pumpEventQueue();
+      expect(scheduler.scheduled, isEmpty);
+    });
+
+    test('oturum kapanınca kurulu sistem bildirimleri cihazdan kalkar, '
+        'açıkken bırakılınca kalır', () async {
+      String? signedIn = admin;
+      final AdminNotificationsProvider session = AdminNotificationsProvider(
+        db: db,
+        currentUid: () => signedIn,
+        delivery: AdminNotificationDelivery(
+          local: scheduler,
+          banner: ({required title, required body, required data}) {},
+          osShowsInForeground: false,
+        ),
+      );
+      addTearDown(session.dispose);
+      await add('yarin', DateTime.now().add(const Duration(days: 1)));
+
+      session.start(admin, owner: home);
+      await pumpEventQueue();
+      expect(scheduler.scheduled.keys, ['yarin']);
+      session.release(home);
+      await pumpEventQueue();
+      expect(scheduler.scheduled.keys, ['yarin']);
+
+      session.start(admin, owner: home);
+      await pumpEventQueue();
+      signedIn = null;
+      session.release(home);
       await pumpEventQueue();
       expect(scheduler.scheduled, isEmpty);
     });

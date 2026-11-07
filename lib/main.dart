@@ -169,11 +169,12 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => TimeslotManager()),
         ChangeNotifierProvider(create: (_) => EventProvider()),
         ChangeNotifierProvider(create: (_) => LoginProvider()),
+        ChangeNotifierProvider(create: (_) => AdminNotificationsProvider()),
         ChangeNotifierProvider(
           create: (ctx) => UserProvider(
-            onUserDeleted: (userId) => ctx
+            onUserDeleted: ctx
                 .read<AdminNotificationsProvider>()
-                .removePendingNotificationsOfUser(userId),
+                .removePendingNotificationsOfUser,
           ),
         ),
         ChangeNotifierProvider(
@@ -191,7 +192,6 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CustomerSummaryProvider()),
         ChangeNotifierProvider(create: (_) => SummaryColorsProvider()),
         ChangeNotifierProvider(create: (_) => AppUpdateProvider()),
-        ChangeNotifierProvider(create: (_) => AdminNotificationsProvider()),
         ChangeNotifierProvider(create: (_) => MealPhotoNotificationsProvider()),
         ChangeNotifierProvider(
           create: (ctx) => BloodTestProvider(
