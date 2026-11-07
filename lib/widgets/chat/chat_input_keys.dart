@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 enum ChatInputKeyAction {
   send,
@@ -40,4 +42,46 @@ ChatInputKeyAction chatInputKeyAction(
     return ChatInputKeyAction.none;
   }
   return ChatInputKeyAction.send;
+}
+
+class ChatInputKeyHandler extends StatelessWidget {
+  const ChatInputKeyHandler({
+    super.key,
+    required this.controller,
+    required this.hasReply,
+    required this.onSend,
+    required this.onCancelReply,
+    required this.child,
+  });
+
+  final TextEditingController controller;
+  final bool Function() hasReply;
+  final VoidCallback onSend;
+  final VoidCallback onCancelReply;
+  final Widget child;
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    final ChatInputKeyAction action = chatInputKeyAction(
+      event,
+      platform: defaultTargetPlatform,
+      isShiftPressed: HardwareKeyboard.instance.isShiftPressed,
+      isComposing: controller.value.composing.isValid,
+      hasReply: hasReply(),
+    );
+    switch (action) {
+      case ChatInputKeyAction.send:
+        onSend();
+        return KeyEventResult.handled;
+      case ChatInputKeyAction.cancelReply:
+        onCancelReply();
+        return KeyEventResult.handled;
+      case ChatInputKeyAction.none:
+        return KeyEventResult.ignored;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(onKeyEvent: _onKeyEvent, child: child);
+  }
 }

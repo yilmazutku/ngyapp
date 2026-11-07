@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/widgets.dart';
 
 import '../models/admin_notification.dart';
+import '../models/blood_test_scan.dart';
 import '../models/user_model.dart';
 import '../utils/date_formatter.dart';
 import '../utils/search_text.dart';
@@ -64,17 +65,37 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  static final DateTime _listedSinceAlways = DateTime.utc(1970);
+
+  static DateTime? missingBloodTestListedFrom(
+    UserModel user, {
+    required DateTime? createdAt,
+    required bool removalRequested,
+  }) {
+    if (user.role != _customerRole || user.hasBloodTest) return null;
+    if (removalRequested || user.isExcludedFromActiveCustomers) return null;
+    return createdAt?.add(uploadGracePeriod) ?? _listedSinceAlways;
+  }
+
   static bool isMissingBloodTest(
     UserModel user, {
     required DateTime? createdAt,
     required bool removalRequested,
     required DateTime now,
   }) {
-    if (user.role != _customerRole || user.hasBloodTest) return false;
-    if (removalRequested || user.isExcludedFromActiveCustomers) return false;
-    if (createdAt == null) return true;
-    return !createdAt.add(uploadGracePeriod).isAfter(now);
+    final DateTime? listedFrom = missingBloodTestListedFrom(
+      user,
+      createdAt: createdAt,
+      removalRequested: removalRequested,
+    );
+    return listedFrom != null && !listedFrom.isAfter(now);
   }
+
+  static NotificationCustomer _notificationCustomerOf(UserModel user) =>
+      NotificationCustomer(
+        userId: user.userId,
+        name: user.fullName.isEmpty ? user.email : user.fullName,
+      );
 
   static DateTime? _createdAtOf(Map<String, dynamic> data) {
     final Object? raw = data[_createDateField] ?? data[_legacyCreatedAtField];
@@ -261,12 +282,75 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       )) {
         continue;
       }
-      missing.add(NotificationCustomer(
-        userId: user.userId,
-        name: user.fullName.isEmpty ? user.email : user.fullName,
-      ));
+      missing.add(_notificationCustomerOf(user));
     }
     missing.sort((a, b) => compareSearchText(a.name, b.name));
     return missing;
+  }
+
+  Future<BloodTestScanPreview> previewScan({required DateTime at}) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
+        .where(_roleField, isEqualTo: _customerRole)
+        .get(const GetOptions(source: Source.server));
+    final List<NotificationCustomer> missing = [];
+    final List<BloodTestScanWaiting> waiting = [];
+    int unrecordedCount = 0;
+    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+        in snapshot.docs) {
+      final UserModel user;
+      try {
+        user = UserModel.fromDocument(doc);
+      } catch (e) {
+        continue;
+      }
+      final Map<String, dynamic> data = doc.data();
+      if (!data.containsKey(UserModel.bloodTestPresentField)) {
+        unrecordedCount++;
+      }
+      final DateTime? listedFrom = missingBloodTestListedFrom(
+        user,
+        createdAt: _createdAtOf(data),
+        removalRequested: data[_removalRequestedField] == true,
+      );
+      if (listedFrom == null) continue;
+      if (listedFrom.isAfter(at)) {
+        waiting.add(BloodTestScanWaiting(
+          customer: _notificationCustomerOf(user),
+          listedFrom: listedFrom,
+        ));
+      } else {
+        missing.add(_notificationCustomerOf(user));
+      }
+    }
+    missing.sort((a, b) => compareSearchText(a.name, b.name));
+    waiting.sort((a, b) {
+      final int byDate = a.listedFrom.compareTo(b.listedFrom);
+      return byDate != 0
+          ? byDate
+          : compareSearchText(a.customer.name, b.customer.name);
+    });
+    return BloodTestScanPreview(
+      at: at,
+      missing: missing,
+      waiting: waiting,
+      unrecordedCount: unrecordedCount,
+    );
+  }
+
+  Future<BloodTestScanState> fetchScanState() async {
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await _stateDoc.get(const GetOptions(source: Source.server));
+    final Map<String, dynamic> data = snapshot.data() ?? const {};
+    final Object? lastScanDay = data[_lastScanDayField];
+    final Object? lastScanAt = data[_lastScanAtField];
+    final Object? lastScanBy = data[_lastScanByField];
+    final Object? initializedAt = data[_presenceInitializedAtField];
+    return BloodTestScanState(
+      lastScanDay: lastScanDay is String ? lastScanDay : null,
+      lastScanAt: lastScanAt is Timestamp ? lastScanAt.toDate() : null,
+      lastScanBy: lastScanBy is String ? lastScanBy : null,
+      presenceInitializedAt:
+          initializedAt is Timestamp ? initializedAt.toDate() : null,
+    );
   }
 }

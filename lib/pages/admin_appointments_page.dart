@@ -4,10 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../dialogs/add_appointment_dialog.dart';
 import '../dialogs/dialog_widgets.dart';
-import '../models/appointment_color_palette.dart';
 import '../models/appointment_model.dart';
 import '../models/event_model.dart';
-import '../models/summary_color_config.dart';
 import '../models/user_model.dart';
 import '../providers/appointment_colors_provider.dart';
 import '../providers/appointment_manager.dart';
@@ -21,6 +19,7 @@ import '../utils/birthdays.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/birthday_chip.dart';
 import '../widgets/labeled_action_button.dart';
 
 // Configuration constants
@@ -58,9 +57,6 @@ const double kDayHeaderHeight = 54.0; // Height for day title + add button
 const double kMobileDayHeaderHeight = 36.0;
 const double kDayDividerWidth = 1; // Width of vertical dividing lines between days (editable)
 
-const double kBirthdayChipHeight = 20.0;
-const double kBirthdayChipGap = 3.0;
-const String kBirthdayPrefix = 'DG: ';
 
 
 // "Tartım" visits are only ~5 min long; on the calendar their card is given at
@@ -1158,7 +1154,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 for (final UserModel user in _birthdays.on(day))
-                  _BirthdayChip(user: user, day: day),
+                  BirthdayChip(user: user, day: day),
                 const Spacer(),
                 Row(
                   children: [
@@ -1294,7 +1290,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                       ),
                     ),
                   for (final UserModel user in _birthdays.on(_selectedDay))
-                    _BirthdayChip(user: user, day: _selectedDay),
+                    BirthdayChip(user: user, day: _selectedDay),
                 ],
               ),
             ),
@@ -1787,66 +1783,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _BirthdayChip extends StatelessWidget {
-  const _BirthdayChip({required this.user, required this.day});
-
-  final UserModel user;
-  final DateTime day;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color background =
-        AppointmentColorsRegistry.colorFor(AppointmentColorSlot.birthday);
-    final Color foreground =
-        SummaryColorsRegistry.readableTextColor(background);
-    final DateTime? birthDate = user.birthDate;
-    final String tooltip = birthDate == null
-        ? 'Doğum günü: ${user.fullName}'
-        : 'Doğum günü: ${user.fullName} '
-            '(${BirthdayIndex.ageOn(birthDate, day)} yaşına giriyor)';
-
-    return Tooltip(
-      message: tooltip,
-      child: Container(
-        height: kBirthdayChipHeight,
-        margin: const EdgeInsets.only(top: kBirthdayChipGap),
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: [
-            BoxShadow(
-              color: background.withValues(alpha: 0.45),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cake_rounded, size: 13, color: foreground),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                '$kBirthdayPrefix${user.fullName}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: foreground,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
-                  height: 1.1,
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

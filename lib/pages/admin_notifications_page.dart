@@ -9,6 +9,8 @@ import '../providers/meal_photo_notifications_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/count_badge.dart';
+import '../widgets/customer_chip.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/meal_thumbnail_image.dart';
 import '../widgets/status_note.dart';
@@ -23,7 +25,15 @@ const double _panelMaxHeight = 680;
 
 const Color _brandColor = Color(0xFFA16AEC);
 
-bool _centerOpen = false;
+ModalRoute<void>? _openCenterRoute;
+
+final ValueNotifier<_TabRequest?> _tabRequests = ValueNotifier<_TabRequest?>(null);
+
+class _TabRequest {
+  const _TabRequest(this.tab);
+
+  final AdminNotificationTab tab;
+}
 
 Future<void> openAdminNotificationCenter(
   BuildContext context, {
@@ -35,46 +45,51 @@ Future<void> openAdminNotificationCenter(
         .markRead(markReadId)
         .catchError((Object e) {});
   }
-  if (_centerOpen) return;
-  _centerOpen = true;
-  try {
-    final bool wide = MediaQuery.sizeOf(context).width >= _panelBreakpoint;
-    if (!wide) {
-      await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => AdminNotificationsPage(initialTab: initialTab),
-      ));
-      return;
-    }
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: AdminNotificationCenter.closeLabel,
-      barrierColor: Colors.black26,
-      transitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (dialogContext, _, __) => SafeArea(
-        child: Align(
-          alignment: Alignment.topRight,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, kToolbarHeight, 12, 16),
-            child: _NotificationPanel(initialTab: initialTab),
+  final ModalRoute<void>? open = _openCenterRoute;
+  if (open != null && open.isActive && open.isCurrent) {
+    _tabRequests.value = _TabRequest(initialTab);
+    return;
+  }
+  final bool wide = MediaQuery.sizeOf(context).width >= _panelBreakpoint;
+  final NavigatorState navigator = Navigator.of(context, rootNavigator: wide);
+  final ModalRoute<void> route = wide
+      ? RawDialogRoute<void>(
+          barrierDismissible: true,
+          barrierLabel: AdminNotificationCenter.closeLabel,
+          barrierColor: Colors.black26,
+          transitionDuration: const Duration(milliseconds: 180),
+          pageBuilder: (dialogContext, _, __) => SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, kToolbarHeight, 12, 16),
+                child: _NotificationPanel(initialTab: initialTab),
+              ),
+            ),
           ),
-        ),
-      ),
-      transitionBuilder: (context, animation, _, child) {
-        final Animation<double> curved =
-            CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
-        return FadeTransition(
-          opacity: curved,
-          child: ScaleTransition(
-            scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
-            alignment: Alignment.topRight,
-            child: child,
-          ),
+          transitionBuilder: (context, animation, _, child) {
+            final Animation<double> curved =
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+            return FadeTransition(
+              opacity: curved,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
+                alignment: Alignment.topRight,
+                child: child,
+              ),
+            );
+          },
+        )
+      : MaterialPageRoute<void>(
+          builder: (_) => AdminNotificationsPage(initialTab: initialTab),
         );
-      },
-    );
+  _openCenterRoute = route;
+  try {
+    await navigator.push(route);
   } finally {
-    _centerOpen = false;
+    if (identical(_openCenterRoute, route)) {
+      _openCenterRoute = open != null && open.isActive ? open : null;
+    }
   }
 }
 
@@ -236,13 +251,21 @@ class _AdminNotificationCenterState extends State<AdminNotificationCenter>
     );
     _system = Provider.of<AdminNotificationsProvider>(context, listen: false);
     _chat = Provider.of<MealPhotoNotificationsProvider>(context, listen: false);
+    _tabRequests.addListener(_onTabRequest);
     _loadNames();
   }
 
   @override
   void dispose() {
+    _tabRequests.removeListener(_onTabRequest);
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _onTabRequest() {
+    final _TabRequest? request = _tabRequests.value;
+    if (request == null || ModalRoute.of(context)?.isCurrent != true) return;
+    _tabController.animateTo(request.tab.index);
   }
 
   Future<void> _loadNames() async {
@@ -329,34 +352,9 @@ class _AdminNotificationCenterState extends State<AdminNotificationCenter>
           Text(label),
           if (unread > 0) ...[
             const SizedBox(width: 6),
-            _CountPill(count: unread),
+            CountBadge(count: unread),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _CountPill extends StatelessWidget {
-  final int count;
-
-  const _CountPill({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-      decoration: BoxDecoration(
-        color: Colors.red.shade600,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        count > 99 ? '99+' : '$count',
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-        ),
       ),
     );
   }
@@ -436,6 +434,7 @@ class _NotificationRow extends StatelessWidget {
   final VoidCallback onTap;
   final Widget? footer;
   final Widget? trailing;
+  final bool isTest;
 
   const _NotificationRow({
     super.key,
@@ -447,6 +446,7 @@ class _NotificationRow extends StatelessWidget {
     required this.onTap,
     this.footer,
     this.trailing,
+    this.isTest = false,
   });
 
   @override
@@ -488,6 +488,10 @@ class _NotificationRow extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (isTest) ...[
+                          const SizedBox(width: 6),
+                          const _TestTag(),
+                        ],
                         const SizedBox(width: 8),
                         Text(
                           time,
@@ -876,12 +880,13 @@ class _SystemNotificationsListState extends State<_SystemNotificationsList>
           title: notification.title,
           subtitle: notification.body,
           time: time,
+          isTest: notification.isTest,
           onTap: () => _markRead(notification),
           footer: userId == null
               ? null
               : Align(
                   alignment: Alignment.centerLeft,
-                  child: _CustomerChip(
+                  child: CustomerChip(
                     label: _openCustomerLabel,
                     onPressed: () => _openCustomer(userId, name),
                   ),
@@ -908,9 +913,37 @@ class _SystemNotificationsListState extends State<_SystemNotificationsList>
           title: notification.title,
           subtitle: notification.body,
           time: time,
+          isTest: notification.isTest,
           onTap: () => _markRead(notification),
         );
     }
+  }
+}
+
+class _TestTag extends StatelessWidget {
+  const _TestTag();
+
+  static const String _label = 'DENEME';
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Text(
+        _label,
+        style: TextStyle(
+          fontSize: 10,
+          letterSpacing: 0.6,
+          fontWeight: FontWeight.w800,
+          color: Colors.blue.shade700,
+        ),
+      ),
+    );
   }
 }
 
@@ -954,29 +987,6 @@ class _SystemIcon extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: Icon(icon, color: color, size: 24),
-    );
-  }
-}
-
-class _CustomerChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onPressed;
-
-  const _CustomerChip({required this.label, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return ActionChip(
-      avatar: Icon(Icons.person_outline_rounded,
-          size: 16, color: Colors.deepPurple.shade400),
-      label: Text(label),
-      labelStyle: const TextStyle(fontSize: 12.5),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      backgroundColor: Colors.white,
-      side: BorderSide(color: Colors.deepPurple.shade100),
-      tooltip: 'Danışanı aç',
-      onPressed: onPressed,
     );
   }
 }
@@ -1026,6 +1036,7 @@ class _MissingBloodTestsRowState extends State<_MissingBloodTestsRow> {
       subtitle: '${customers.length} danışanın kan tahlili sisteme girilmemiş '
           '(eklenmesinin üzerinden 1 hafta geçmiş).',
       time: widget.time,
+      isTest: widget.notification.isTest,
       onTap: () {
         widget.onTap();
         if (canCollapse) setState(() => _expanded = !_expanded);
@@ -1035,7 +1046,7 @@ class _MissingBloodTestsRowState extends State<_MissingBloodTestsRow> {
         runSpacing: 6,
         children: [
           for (final NotificationCustomer customer in shown)
-            _CustomerChip(
+            CustomerChip(
               label: customer.name,
               onPressed: () => widget.onCustomerTap(customer),
             ),

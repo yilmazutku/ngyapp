@@ -3,6 +3,7 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:ngy_app/models/admin_notification.dart';
+import 'package:ngy_app/models/blood_test_scan.dart';
 import 'package:ngy_app/providers/admin_notifications_provider.dart';
 import 'package:ngy_app/providers/blood_test_provider.dart';
 import 'package:ngy_app/utils/date_formatter.dart';
@@ -153,5 +154,54 @@ void main() {
     expect((await userData('d1'))['isBloodTestPresent'], isTrue);
     expect(provider.savedPresence('d1'), isTrue);
     expect(provider.savedPresence('d2'), isNull);
+  });
+
+  test('önizleme hiçbir şey yazmadan listeyi ve bekleyenleri gösterir',
+      () async {
+    final DateTime now = DateTime.now();
+    final DateTime old = now.subtract(const Duration(days: 60));
+    final DateTime fresh = now.subtract(const Duration(days: 2));
+    await addUser('eski', name: 'Zeynep', surname: 'Kaya', createDate: old);
+    await addUser('hayir',
+        name: 'Ayşe', surname: 'Demir', createDate: old, present: false);
+    await addUser('yeni',
+        name: 'Can', surname: 'Ak', createDate: fresh, present: false);
+    await addUser('var', createDate: old, present: true);
+    await addUser('silinecek', createDate: old, removalRequested: true);
+    await addUser('admin', role: 'admin', createDate: old);
+
+    final BloodTestScanPreview today = await provider.previewScan(at: now);
+    expect(today.missing.map((c) => c.userId), ['hayir', 'eski']);
+    expect(today.waiting.map((w) => w.customer.userId), ['yeni']);
+    expect(today.waiting.single.listedFrom,
+        fresh.add(BloodTestProvider.uploadGracePeriod));
+    expect(today.unrecordedCount, 2);
+
+    final BloodTestScanPreview later = await provider.previewScan(
+        at: now.add(const Duration(days: 8)));
+    expect(later.missing.map((c) => c.name),
+        ['Ayşe Demir', 'Can Ak', 'Zeynep Kaya']);
+    expect(later.waiting, isEmpty);
+
+    expect((await userData('eski')).containsKey('isBloodTestPresent'),
+        isFalse);
+    expect(
+        (await db.collection(AdminNotificationsProvider.collectionName).get())
+            .docs,
+        isEmpty);
+    expect((await provider.fetchScanState()).hasScanned, isFalse);
+  });
+
+  test('son tarama bilgisi okunur', () async {
+    final DateTime now = DateTime.now();
+    await addUser('eski', createDate: now.subtract(const Duration(days: 30)));
+    await provider.runDailyScan(uid: admin, now: now);
+
+    final BloodTestScanState state = await provider.fetchScanState();
+    expect(state.hasScanned, isTrue);
+    expect(state.lastScanDay, DateFormatter.formatIsoDate(now));
+    expect(state.lastScanBy, admin);
+    expect(state.lastScanAt, isNotNull);
+    expect(state.presenceInitializedAt, isNotNull);
   });
 }

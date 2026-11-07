@@ -51,7 +51,8 @@ class FilterChipGroup<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bgColor = backgroundColor ?? Colors.grey[200];
-    final selColor = selectedColor ?? theme.primaryColor.withOpacity(0.15);
+    final selColor =
+        selectedColor ?? theme.primaryColor.withValues(alpha: 0.15);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -112,8 +113,7 @@ class FilterChipGroup<T> extends StatelessWidget {
         ),
       );
 
-      // Add spacing after the "All" chip
-      result.add(const SizedBox(width: 8));
+      if (horizontalScroll) result.add(const SizedBox(width: 8));
     }
 
     // Add all option chips
@@ -130,8 +130,7 @@ class FilterChipGroup<T> extends StatelessWidget {
         ),
       );
 
-      // Add spacing between chips
-      result.add(const SizedBox(width: 8));
+      if (horizontalScroll) result.add(const SizedBox(width: 8));
     }
 
     return result;

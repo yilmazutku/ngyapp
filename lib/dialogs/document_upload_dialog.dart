@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../models/admin_notification.dart';
 import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/blood_test_reminder_preview.dart';
 
 class DocumentUploadOptions {
   final DateTime? bloodTestDate;
@@ -202,76 +202,7 @@ class _DocumentUploadDialogState extends State<_DocumentUploadDialog> {
             onChanged: (value) =>
                 setState(() => _wantsReminder = value ?? false),
           ),
-          if (_wantsReminder) _buildReminderPreview(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReminderPreview() {
-    final DateTime now = DateTime.now();
-    final Map<BloodTestReminderStage, DateTime> plan =
-        BloodTestReminderSchedule.plan(_testDate, now);
-    final bool alreadyDue =
-        !plan.containsKey(BloodTestReminderStage.dayBefore);
-
-    String whenOf(BloodTestReminderStage stage) {
-      final DateTime fireAt = plan[stage]!;
-      final DateTime nominal =
-          BloodTestReminderSchedule.fireTime(_testDate, stage);
-      return fireAt.isAfter(nominal)
-          ? 'Hemen'
-          : DateFormatter.formatLongDateTime(fireAt);
-    }
-
-    final List<String> lines = alreadyDue
-        ? [
-            'Bu tahlilin üzerinden 3 ay geçmiş. Hatırlatma yüklenince hemen '
-                'Sistem bildirimlerine düşer.',
-          ]
-        : [
-            '${whenOf(BloodTestReminderStage.dayBefore)} · 3 ay dolmadan '
-                '1 gün önce',
-            '${whenOf(BloodTestReminderStage.dueDay)} · 3 ay doluyor',
-          ];
-
-    final Color color = alreadyDue ? Colors.orange.shade800 : Colors.deepPurple;
-    return Container(
-      margin: const EdgeInsets.only(top: 4, bottom: 4),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            alreadyDue
-                ? Icons.warning_amber_rounded
-                : Icons.notifications_active_outlined,
-            size: 20,
-            color: color,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (!alreadyDue)
-                  Text(
-                    'Hatırlatmalar',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: color),
-                  ),
-                for (final String line in lines)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(line, style: const TextStyle(fontSize: 13)),
-                  ),
-              ],
-            ),
-          ),
+          if (_wantsReminder) BloodTestReminderPreview(testDate: _testDate),
         ],
       ),
     );

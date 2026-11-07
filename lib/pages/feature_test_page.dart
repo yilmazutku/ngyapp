@@ -1,21 +1,51 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 
-import '../providers/admin_notifications_provider.dart';
-import '../providers/blood_test_provider.dart';
+import '../models/feature_test_checklist.dart';
+import '../models/feature_test_plan.dart';
 import '../services/notification_service.dart';
 import '../tabs/admin_images_page.dart';
-import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
+import '../widgets/filter_chip_group.dart';
 import '../widgets/home_button.dart';
 import '../widgets/labeled_action_button.dart';
+import '../widgets/status_note.dart';
 import 'admin_appointments_page.dart';
 import 'admin_chat_page.dart';
 import 'admin_notifications_page.dart';
 import 'danisanlar_ozet_page.dart';
+import 'feature_test_tools.dart';
+
+const Color _passedColor = Color(0xFF2E7D32);
+const Color _failedColor = Color(0xFFC62828);
+const Color _skippedColor = Color(0xFF607D8B);
+
+IconData _resultIcon(FeatureTestResult? result) {
+  switch (result) {
+    case FeatureTestResult.passed:
+      return Icons.check_circle_rounded;
+    case FeatureTestResult.failed:
+      return Icons.cancel_rounded;
+    case FeatureTestResult.skipped:
+      return Icons.remove_circle_rounded;
+    case null:
+      return Icons.radio_button_unchecked_rounded;
+  }
+}
+
+Color _resultColor(FeatureTestResult? result) {
+  switch (result) {
+    case FeatureTestResult.passed:
+      return _passedColor;
+    case FeatureTestResult.failed:
+      return _failedColor;
+    case FeatureTestResult.skipped:
+      return _skippedColor;
+    case null:
+      return Colors.grey.shade500;
+  }
+}
 
 class FeatureTestPage extends StatefulWidget {
   const FeatureTestPage({super.key});
@@ -26,475 +56,160 @@ class FeatureTestPage extends StatefulWidget {
   State<FeatureTestPage> createState() => _FeatureTestPageState();
 }
 
-class _TestStep {
-  final String id;
-  final String action;
-  final String expected;
-
-  const _TestStep(this.id, this.action, this.expected);
-}
-
-enum _TestTool {
-  openSummary(Icons.table_chart_outlined, 'Danışanlar Özet'),
-  openUsers(Icons.people_alt_outlined, 'Kullanıcı Yönetimi'),
-  openAppointments(Icons.calendar_month_outlined, 'Randevu Yönetimi'),
-  openChats(Icons.forum_outlined, 'Tüm Sohbetler'),
-  openNotifications(Icons.notifications_outlined, 'Bildirim Merkezi'),
-  testNotification(Icons.alarm_add_rounded, '1 dk sonra deneme hatırlatması'),
-  removeTestNotifications(
-      Icons.delete_sweep_outlined, 'Deneme bildirimlerini sil'),
-  scanNow(Icons.manage_search_rounded, 'Taramayı şimdi çalıştır');
-
-  const _TestTool(this.icon, this.label);
-
-  final IconData icon;
-  final String label;
-
-  bool get isPrimary => this == testNotification || this == scanNow;
-}
-
-class _TestSection {
-  final String title;
-  final IconData icon;
-  final Color color;
-  final String? note;
-  final List<_TestStep> steps;
-  final List<_TestTool> tools;
-
-  const _TestSection({
-    required this.title,
-    required this.icon,
-    required this.color,
-    this.note,
-    required this.steps,
-    required this.tools,
-  });
-}
-
-const List<_TestSection> _sections = [
-  _TestSection(
-    title: 'Kilo Takibe Geçiş Tarihi',
-    icon: Icons.monitor_weight_outlined,
-    color: Color(0xFF00897B),
-    steps: [
-      _TestStep(
-        'kilo.ekle',
-        'Bir danışana yeni paket ekleyin, Paket Tipi olarak "Aktif/Kilo Takip" seçin.',
-        '"Kilo Takibe Geçiş Tarihi" satırı bugünün tarihiyle görünür ve tarih değiştirilebilir.',
-      ),
-      _TestStep(
-        'kilo.kart',
-        'Paketi kaydedip danışanın Paket sekmesindeki karta bakın.',
-        'Kartta "Kilo Takibe Geçiş: <tarih>" satırı görünür.',
-      ),
-      _TestStep(
-        'kilo.eski',
-        'Tarihi girilmemiş eski bir Kilo Takip paketini düzenleyin.',
-        'Bugünün tarihi önerilir, altında turuncu "kayıtlı bir tarih yok" notu çıkar; tarih seçince not kalkar ve kaydedilir.',
-      ),
-      _TestStep(
-        'kilo.ozet',
-        'Danışanlar Özet sayfasında "Aktif / Kilo Takip" sekmesini açın.',
-        '"Kilo Takibe Geçiş Tarihi" sütunu görünür; tarihi girilmemiş danışanlarda turuncu "Girilmemiş" yazar.',
-      ),
-      _TestStep(
-        'kilo.haftalik',
-        'Aynı sayfada "Aktif / Haftalık" ve "Dondurulmuş" sekmelerine bakın.',
-        'Bu sekmelerde kilo takibe geçiş sütunu yoktur.',
-      ),
-    ],
-    tools: [_TestTool.openUsers, _TestTool.openSummary],
-  ),
-  _TestSection(
-    title: 'Kan Tahlili Yükleme ve Hatırlatma',
-    icon: Icons.bloodtype_outlined,
-    color: Color(0xFFE53935),
-    steps: [
-      _TestStep(
-        'kan.sec',
-        'Bir danışanın Dokümanlar sekmesinde "Tahlil Ekle" ile bir veya birkaç dosya seçin.',
-        '"Doküman Yükle" penceresi açılır ve seçilen dosyaları listeler.',
-      ),
-      _TestStep(
-        'kan.isaret',
-        '"Bu bir kan tahlili mi?" kutusunu işaretleyin.',
-        'Tahlil tarihi ve "3 ay sonra hatırlatıcı istiyor musunuz?" seçenekleri açılır; hatırlatmaların günü ve saati (1 gün önce ve 3 ayın dolduğu gün, 09:00) yazar.',
-      ),
-      _TestStep(
-        'kan.yukle',
-        'Yükle\'ye basın.',
-        'Bilgi mesajında tahlil tarihi ve hatırlatma günü yazar; listede "Kan tahlili" ve "Hatırlatma" rozetleri görünür.',
-      ),
-      _TestStep(
-        'kan.detay',
-        'Aynı danışanın Detay sekmesine bakın.',
-        '"Danışanın kan değerleri dokümanı mevcut mu?" kartında "Evet" seçilidir.',
-      ),
-      _TestStep(
-        'kan.eski',
-        'Tahlil tarihi olarak 3 aydan eski bir gün (ör. 4 ay önce) seçip hatırlatıcı açıkken bir kan tahlili daha yükleyin.',
-        'Pencerede "üzerinden 3 ay geçmiş" uyarısı çıkar; yükleyince zilin Sistem sekmesine "Kan tahlilinin üzerinden 3 ay geçti" hemen düşer.',
-      ),
-      _TestStep(
-        'kan.normal',
-        'Kutuyu işaretlemeden normal bir doküman yükleyin.',
-        'Rozet çıkmaz, hatırlatma kurulmaz.',
-      ),
-      _TestStep(
-        'kan.sil',
-        'Hatırlatmalı bir kan tahlili dosyasını silin.',
-        'Onay mesajı hatırlatmanın da kalkacağını söyler; o tarihin başka dosyası kalmadıysa bekleyen hatırlatma silinir.',
-      ),
-    ],
-    tools: [_TestTool.openUsers, _TestTool.openNotifications],
-  ),
-  _TestSection(
-    title: 'Bildirimin Gelmesi (uygulama açık / kapalı)',
-    icon: Icons.notifications_active_outlined,
-    color: Color(0xFF5E35B1),
-    note: 'Deneme hatırlatması yalnızca sizin hesabınıza gelir, diğer adminler görmez. Hesabınızın açık olduğu bütün cihazlara gelir.',
-    steps: [
-      _TestStep(
-        'teslim.acik',
-        '"1 dk sonra deneme hatırlatması"na basın ve uygulamayı açık tutun.',
-        '1 dakika sonra mor bildirim şeridi çıkar (Android\'de telefonun kendi bildirimi); zilin sayısı artar.',
-      ),
-      _TestStep(
-        'teslim.kapali',
-        'Tekrar kurun, sonra uygulamayı arka plana alın ya da tamamen kapatın.',
-        '1 dakika sonra telefonda ve Mac\'te sistem bildirimi gelir (Windows\'ta yalnızca uygulama açıkken gelir).',
-      ),
-      _TestStep(
-        'teslim.dokun',
-        'Gelen bildirime ya da mor şeride dokunun.',
-        'Bildirim merkezi "Sistem" sekmesinde açılır ve deneme bildirimi okundu olur (kırmızı nokta kalkar).',
-      ),
-      _TestStep(
-        'teslim.cihaz',
-        'Aynı hesabın açık olduğu başka bir cihaza (ör. bilgisayar) bakın.',
-        'Deneme hatırlatması orada da zile düşer.',
-      ),
-      _TestStep(
-        'teslim.tekrar',
-        'Uygulamayı kapatıp yeniden açın.',
-        'Daha önce gösterilmiş bildirim için şerit tekrar çıkmaz.',
-      ),
-    ],
-    tools: [
-      _TestTool.testNotification,
-      _TestTool.removeTestNotifications,
-      _TestTool.openNotifications,
-    ],
-  ),
-  _TestSection(
-    title: 'Zil ve Bildirim Merkezi',
-    icon: Icons.notifications_none_rounded,
-    color: Color(0xFF8E24AA),
-    steps: [
-      _TestStep(
-        'zil.yer',
-        'Ana sayfada sağ üstteki "Bildirimler" ziline bakın.',
-        'Okunmamış bildirim varsa kırmızı sayı rozeti görünür; danışan hesabında zil yoktur.',
-      ),
-      _TestStep(
-        'zil.ac',
-        'Zile basın.',
-        'Bilgisayarda zilin altında panel, telefonda tam sayfa açılır; "Sohbet" sekmesi seçili gelir.',
-      ),
-      _TestStep(
-        'zil.foto',
-        'Simge\'nin ya da bir test danışanın hesabıyla sohbetten öğün fotoğrafı yükleyin.',
-        'Fotoğraf Sohbet sekmesinde küçük resmi, öğünü ve saatiyle görünür; solunda kırmızı nokta vardır.',
-      ),
-      _TestStep(
-        'zil.sohbet',
-        'Sohbet sekmesindeki bildirime basın.',
-        'Sohbet o fotoğrafın mesajında açılır; geri dönünce kırmızı nokta kalkar.',
-      ),
-      _TestStep(
-        'zil.dun',
-        'Ertesi gün Sohbet sekmesine bakın.',
-        'Yalnızca o günün öğün fotoğrafları listelenir.',
-      ),
-      _TestStep(
-        'zil.sistem',
-        '"Sistem" sekmesine geçin.',
-        'Bildirimler Bugün / Dün / Bu Hafta / Daha Eski diye gruplanır; okunmamışların solunda kırmızı nokta vardır.',
-      ),
-      _TestStep(
-        'zil.okundu',
-        'Bir sistem bildirimine basın, sonra "Tümünü okundu say"a basın.',
-        'Basılan bildirim okundu olur; ardından hepsi okundu olur ve zilin sayısı düşer.',
-      ),
-      _TestStep(
-        'zil.danisan',
-        'Hatırlatmadaki "Danışanı aç" çipine basın.',
-        'Danışanın sayfası açılır.',
-      ),
-    ],
-    tools: [_TestTool.openNotifications, _TestTool.openChats],
-  ),
-  _TestSection(
-    title: 'Günlük Kan Tahlili Taraması',
-    icon: Icons.assignment_late_outlined,
-    color: Color(0xFFF57C00),
-    note: 'Tarama normalde günde bir kez, saat 09:00\'dan sonra uygulaması açık olan ilk admin cihazında kendiliğinden yapılır. Buradaki düğme bu kuralı atlayıp hemen tarar.',
-    steps: [
-      _TestStep(
-        'tarama.detay',
-        'Bir danışanın Detay sekmesinde "Danışanın kan değerleri dokümanı mevcut mu?" kartında Evet ve Hayır\'a basın.',
-        'Seçim hemen kaydedilir (altta bilgi mesajı çıkar); sayfadan çıkıp girince korunur.',
-      ),
-      _TestStep(
-        'tarama.calistir',
-        '"Taramayı şimdi çalıştır"a basın.',
-        'Kaç danışanın listelendiği yazar; zilin Sistem sekmesine "Kan tahlili eksik danışanlar (N)" düşer ve isimler çip olarak görünür.',
-      ),
-      _TestStep(
-        'tarama.cip',
-        'Listedeki bir isim çipine basın.',
-        'Danışanın sayfası açılır.',
-      ),
-      _TestStep(
-        'tarama.evet',
-        'Listedeki bir danışanı "Evet" yapın ve taramayı tekrar çalıştırın.',
-        'Danışan listeden çıkar.',
-      ),
-      _TestStep(
-        'tarama.yeni',
-        'Yeni bir danışan ekleyin.',
-        'Detay\'da "Hayır" seçilidir; eklendiği günden 1 hafta geçmeden listede çıkmaz.',
-      ),
-      _TestStep(
-        'tarama.otomatik',
-        'Ertesi gün uygulamayı saat 09:00\'dan sonra açın.',
-        'Tarama kendiliğinden bir kez yapılır; yeni liste gelince önceki günün listesi okunmuş sayılır.',
-      ),
-    ],
-    tools: [_TestTool.scanNow, _TestTool.openUsers],
-  ),
-  _TestSection(
-    title: 'Takvimde Doğum Günleri',
-    icon: Icons.cake_outlined,
-    color: Color(0xFFD81B60),
-    steps: [
-      _TestStep(
-        'dg.tarih',
-        'Bir danışanın doğum tarihini bugünün gün ve ayına ayarlayın (Detay > Düzenle).',
-        'Kayıt başarıyla güncellenir.',
-      ),
-      _TestStep(
-        'dg.takvim',
-        'Randevu Yönetimi\'ni açın (açıksa "Yenile"ye basın).',
-        'Bugünün tarihinin hemen altında pembe "DG: Ad Soyad" etiketi görünür; üzerine gelince girdiği yaş yazar.',
-      ),
-      _TestStep(
-        'dg.hafta',
-        'Bilgisayarda haftalık görünüme bakın.',
-        'Doğum günü olan günün başlığı uzar; saat çizgileri bütün günlerde hizalı kalır.',
-      ),
-      _TestStep(
-        'dg.telefon',
-        'Telefonda günlük görünüme bakın.',
-        'Etiket gün başlığının ("Bugün" rozetinin) altında görünür.',
-      ),
-      _TestStep(
-        'dg.renk',
-        'Ayarlar > Randevu Arkaplan Renkleri > "Doğum Günü (DG)" rengini değiştirip kaydedin.',
-        'Takvimdeki etiketin rengi değişir.',
-      ),
-    ],
-    tools: [_TestTool.openUsers, _TestTool.openAppointments],
-  ),
-  _TestSection(
-    title: 'Sohbette Enter ile Gönderme',
-    icon: Icons.keyboard_return_rounded,
-    color: Color(0xFF1E88E5),
-    steps: [
-      _TestStep(
-        'enter.windows',
-        'Windows\'ta bir sohbette mesaj yazıp Enter\'a basın.',
-        'Mesaj gider.',
-      ),
-      _TestStep(
-        'enter.shift',
-        'Mesaj yazarken Shift+Enter\'a basın.',
-        'Mesaj gitmez, yeni satıra geçer.',
-      ),
-      _TestStep(
-        'enter.mac',
-        'Mac\'te (masaüstü uygulaması ya da App Store\'dan kurulan iPad sürümü) aynısını deneyin.',
-        'Enter gönderir, Shift+Enter yeni satır açar.',
-      ),
-      _TestStep(
-        'enter.ipad',
-        'iPad\'de klavyeyle, iPhone\'da ekran klavyesiyle deneyin.',
-        'iPad klavyesinde Enter gönderir; ekran klavyesinde Enter her zamanki gibi yeni satırdır.',
-      ),
-      _TestStep(
-        'enter.esc',
-        'Bir mesajı yanıtlarken Esc\'e basın.',
-        'Yanıt iptal olur.',
-      ),
-    ],
-    tools: [_TestTool.openChats],
-  ),
-];
-
 class _FeatureTestPageState extends State<FeatureTestPage> {
-  static const String _prefsKey = 'featureTestChecklist.v1';
   static const String _resetLabel = 'Sıfırla';
+  static const String _cancelLabel = 'Vazgeç';
+  static const String _saveLabel = 'Kaydet';
+  static const String _deleteLabel = 'Sil';
+  static const String _actionLabel = 'Yapılacak';
+  static const String _expectedLabel = 'Beklenen sonuç';
+  static const String _noteLabel = 'Not';
 
-  final Set<String> _done = {};
-
-  int get _total => _sections.fold(0, (sum, s) => sum + s.steps.length);
+  late final FeatureTestChecklist _checklist =
+      FeatureTestChecklist(platform: defaultTargetPlatform);
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _checklist.load();
   }
 
-  Future<void> _load() async {
-    try {
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      final List<String> saved = prefs.getStringList(_prefsKey) ?? const [];
-      if (!mounted) return;
-      setState(() => _done.addAll(saved));
-    } catch (e) {
-      return;
-    }
-  }
-
-  Future<void> _save() async {
-    try {
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(_prefsKey, _done.toList());
-    } catch (e) {
-      return;
-    }
-  }
-
-  void _toggle(String id) {
-    setState(() {
-      if (!_done.remove(id)) _done.add(id);
-    });
-    _save();
+  @override
+  void dispose() {
+    _checklist.dispose();
+    super.dispose();
   }
 
   Future<void> _reset() async {
     final bool confirmed = await DialogUtils.openConfirm(
       context,
-      title: 'Listeyi Sıfırla',
-      message: 'Bütün işaretler kaldırılacak. Devam etmek istiyor musunuz?',
+      title: 'Sonuçları Sıfırla',
+      message: 'Bütün sonuçlar ve notlar silinecek; eklediğiniz adımlar ve '
+          'araç ayarları kalır. Devam etmek istiyor musunuz?',
       confirmText: _resetLabel,
-      cancelText: 'Vazgeç',
+      cancelText: _cancelLabel,
     );
     if (!confirmed || !mounted) return;
-    setState(_done.clear);
-    _save();
+    _checklist.resetResults();
   }
 
-  Future<void> _runTool(_TestTool tool) async {
-    switch (tool) {
-      case _TestTool.openSummary:
-        await _push(const DanisanlarOzetPage());
-      case _TestTool.openUsers:
-        await _push(const AdminUsersPage());
-      case _TestTool.openAppointments:
-        await _push(const AdminAppointmentsPage());
-      case _TestTool.openChats:
-        await Navigator.of(context).push(AdminChatListPage.route());
-      case _TestTool.openNotifications:
+  Future<void> _copyReport() async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    await Clipboard.setData(
+        ClipboardData(text: _checklist.buildReport(now: DateTime.now())));
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Rapor panoya kopyalandı; mesaja ya da e-postaya '
+          'yapıştırabilirsiniz.'),
+    ));
+  }
+
+  Future<void> _openShortcut(FeatureTestShortcut shortcut) async {
+    final NavigatorState navigator = Navigator.of(context);
+    switch (shortcut) {
+      case FeatureTestShortcut.openUsers:
+        await navigator.push(
+            MaterialPageRoute<void>(builder: (_) => const AdminUsersPage()));
+      case FeatureTestShortcut.openSummary:
+        await navigator.push(MaterialPageRoute<void>(
+            builder: (_) => const DanisanlarOzetPage()));
+      case FeatureTestShortcut.openAppointments:
+        await navigator.push(MaterialPageRoute<void>(
+            builder: (_) => const AdminAppointmentsPage()));
+      case FeatureTestShortcut.openChats:
+        await navigator.push(AdminChatListPage.route());
+      case FeatureTestShortcut.openNotifications:
         await openAdminNotificationCenter(context);
-      case _TestTool.testNotification:
-        await _scheduleTestNotification();
-      case _TestTool.removeTestNotifications:
-        await _removeTestNotifications();
-      case _TestTool.scanNow:
-        await _scanNow();
     }
   }
 
-  Future<void> _push(Widget page) =>
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
-
-  Future<void> _scheduleTestNotification() async {
-    final AdminNotificationsProvider notifications =
-        Provider.of<AdminNotificationsProvider>(context, listen: false);
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    final DateTime fireAt = DateTime.now().add(const Duration(minutes: 1));
-    try {
-      await notifications.addTestNotification(fireAt: fireAt);
-      messenger.showSnackBar(SnackBar(
-        content: Text(
-          'Deneme hatırlatması ${DateFormatter.formatTime(fireAt)} civarında '
-          'düşecek. Uygulamayı açık tutun ya da arka plana alın.',
-        ),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Deneme hatırlatması kurulamadı: $e',
-      );
-    }
+  void _setResult(FeatureTestStep step, FeatureTestResult result) {
+    final bool newlyFailed = result == FeatureTestResult.failed &&
+        _checklist.resultOf(step.id) != FeatureTestResult.failed;
+    _checklist.setResult(step.id, result);
+    if (newlyFailed && _checklist.noteOf(step.id) == null) _editNote(step);
   }
 
-  Future<void> _removeTestNotifications() async {
-    final AdminNotificationsProvider notifications =
-        Provider.of<AdminNotificationsProvider>(context, listen: false);
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    try {
-      final int removed = await notifications.removeTestNotifications();
-      messenger.showSnackBar(SnackBar(
-        content: Text(removed == 0
-            ? 'Silinecek deneme bildirimi yok.'
-            : '$removed deneme bildirimi silindi.'),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Deneme bildirimleri silinemedi: $e',
-      );
-    }
+  Future<void> _editNote(FeatureTestStep step) async {
+    final String? current = _checklist.noteOf(step.id);
+    final List<String>? values = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => _TextFieldsDialog(
+        title: current == null ? 'Not Ekle' : 'Notu Düzenle',
+        subtitle: step.action,
+        fields: [
+          _FieldSpec(
+            label: _noteLabel,
+            hint: 'Ne oldu? Hangi cihazda, hangi danışanda?',
+            initialValue: current ?? '',
+            maxLines: 4,
+          ),
+        ],
+        clearLabel: current == null ? null : _deleteLabel,
+      ),
+    );
+    if (values == null || !mounted) return;
+    _checklist.setNote(step.id, values.first);
   }
 
-  Future<void> _scanNow() async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    final BloodTestProvider bloodTests =
-        Provider.of<BloodTestProvider>(context, listen: false);
-    final LoadingDialog loading =
-        DialogUtils.openLoading(context, message: 'Danışanlar taranıyor...');
-    try {
-      final int? count = await bloodTests.runDailyScan(
-        uid: uid,
-        now: DateTime.now(),
-        force: true,
-      );
-      loading.close();
-      if (!mounted) return;
-      await DialogUtils.openInfo(
-        context,
-        title: 'Tarama tamamlandı',
-        message: (count ?? 0) == 0
-            ? 'Kan tahlili eksik danışan bulunmadı.'
-            : '$count danışanın kan tahlili eksik. Zildeki "Sistem" '
-                'sekmesinde "Kan tahlili eksik danışanlar" bildirimine bakın.',
-      );
-    } catch (e) {
-      loading.close();
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Tarama yapılamadı: $e',
-      );
-    }
+  Future<void> _addStep(FeatureTestSection section) async {
+    final List<String>? values = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => _TextFieldsDialog(
+        title: 'Adım Ekle',
+        subtitle: section.title,
+        fields: const [
+          _FieldSpec(label: _actionLabel, maxLines: 3, required: true),
+          _FieldSpec(label: _expectedLabel, maxLines: 3),
+        ],
+      ),
+    );
+    if (values == null || !mounted) return;
+    _checklist.addCustomStep(
+      sectionId: section.id,
+      action: values[0],
+      expected: values[1],
+    );
+  }
+
+  Future<void> _editStep(FeatureTestStep step) async {
+    final List<String>? values = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => _TextFieldsDialog(
+        title: 'Adımı Düzenle',
+        fields: [
+          _FieldSpec(
+            label: _actionLabel,
+            initialValue: step.action,
+            maxLines: 3,
+            required: true,
+          ),
+          _FieldSpec(
+            label: _expectedLabel,
+            initialValue: step.expected,
+            maxLines: 3,
+          ),
+        ],
+      ),
+    );
+    if (values == null || !mounted) return;
+    _checklist.updateCustomStep(
+      stepId: step.id,
+      action: values[0],
+      expected: values[1],
+    );
+  }
+
+  Future<void> _deleteStep(FeatureTestStep step) async {
+    final bool confirmed = await DialogUtils.openConfirm(
+      context,
+      title: 'Adımı Sil',
+      message: '"${step.action}" adımı, sonucu ve notuyla birlikte silinecek. '
+          'Devam etmek istiyor musunuz?',
+      confirmText: _deleteLabel,
+      cancelText: _cancelLabel,
+    );
+    if (!confirmed || !mounted) return;
+    _checklist.removeCustomStep(step.id);
   }
 
   @override
@@ -504,66 +219,77 @@ class _FeatureTestPageState extends State<FeatureTestPage> {
         title: const Text(FeatureTestPage.title),
         actions: const [HomeButton()],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-            children: [
-              _ProgressHeader(
-                done: _done.length,
-                total: _total,
-                onReset: _done.isEmpty ? null : _reset,
-              ),
-              const SizedBox(height: 16),
-              for (final _TestSection section in _sections) ...[
+      body: ListenableBuilder(
+        listenable: _checklist,
+        builder: (context, _) {
+          if (!_checklist.isLoaded) {
+            return const StatusNote(showProgress: true, text: 'Yükleniyor...');
+          }
+          final FeatureTestSummary summary = _checklist.summary;
+          final List<Widget> sectionCards = [
+            for (final FeatureTestSection section in _checklist.sections)
+              if (_checklist.filter == FeatureTestFilter.all ||
+                  _checklist.visibleStepsOf(section).isNotEmpty) ...[
                 _SectionCard(
+                  key: ValueKey<String>(section.id),
                   section: section,
-                  done: _done,
-                  onToggle: _toggle,
-                  onTool: _runTool,
+                  checklist: _checklist,
+                  onResult: _setResult,
+                  onNote: _editNote,
+                  onAddStep: () => _addStep(section),
+                  onEditStep: _editStep,
+                  onDeleteStep: _deleteStep,
+                  onShortcut: _openShortcut,
                 ),
                 const SizedBox(height: 14),
               ],
-            ],
-          ),
-        ),
+          ];
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 820),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                children: [
+                  _ProgressHeader(
+                    summary: summary,
+                    onCopy: _copyReport,
+                    onReset: summary.done == 0 ? null : _reset,
+                  ),
+                  const SizedBox(height: 12),
+                  _ViewBar(checklist: _checklist, summary: summary),
+                  const SizedBox(height: 14),
+                  if (sectionCards.isEmpty)
+                    StatusNote(
+                      icon: Icons.task_alt_rounded,
+                      text: _checklist.filter == FeatureTestFilter.failed
+                          ? 'Hatalı adım yok.'
+                          : 'Yapılmamış adım kalmadı.',
+                    )
+                  else
+                    ...sectionCards,
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
 class _ProgressHeader extends StatelessWidget {
-  final int done;
-  final int total;
-  final VoidCallback? onReset;
-
   const _ProgressHeader({
-    required this.done,
-    required this.total,
+    required this.summary,
+    required this.onCopy,
     required this.onReset,
   });
 
-  String get _platformLabel {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-        return 'Android';
-      case TargetPlatform.iOS:
-        return 'iOS / iPadOS';
-      case TargetPlatform.macOS:
-        return 'macOS';
-      case TargetPlatform.windows:
-        return 'Windows';
-      case TargetPlatform.linux:
-        return 'Linux';
-      case TargetPlatform.fuchsia:
-        return 'Fuchsia';
-    }
-  }
+  final FeatureTestSummary summary;
+  final VoidCallback onCopy;
+  final VoidCallback? onReset;
 
   @override
   Widget build(BuildContext context) {
-    final bool allDone = done >= total;
     final bool localNotifications = NotificationService().isSupported;
     return Container(
       padding: const EdgeInsets.all(20),
@@ -588,14 +314,18 @@ class _ProgressHeader extends StatelessWidget {
           Row(
             children: [
               Icon(
-                allDone ? Icons.verified_rounded : Icons.fact_check_outlined,
+                summary.isComplete
+                    ? Icons.verified_rounded
+                    : Icons.fact_check_outlined,
                 color: Colors.white,
                 size: 30,
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  allDone ? 'Bütün testler tamam' : 'Test Kontrol Listesi',
+                  summary.isComplete
+                      ? 'Bütün adımlar test edildi'
+                      : 'Test Kontrol Listesi',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 21,
@@ -603,27 +333,20 @@ class _ProgressHeader extends StatelessWidget {
                   ),
                 ),
               ),
-              if (onReset != null)
-                LabeledActionButton(
-                  dense: true,
-                  icon: Icons.restart_alt_rounded,
-                  label: _FeatureTestPageState._resetLabel,
-                  foregroundColor: Colors.white,
-                  onPressed: onReset,
-                ),
             ],
           ),
           const SizedBox(height: 8),
           const Text(
-            'Her adımı uygulamada yapın; beklenen sonucu görünce kutuyu '
-            'işaretleyin. İşaretler bu cihazda saklanır.',
+            'Her adımı uygulamada yapın ve sonucu "Geçti", "Hatalı" ya da '
+            '"Atla" ile işaretleyin. Hatalı adımlara ne olduğunu not edin; '
+            'bitince raporu kopyalayıp gönderin. İşaretler bu cihazda saklanır.',
             style: TextStyle(color: Colors.white, fontSize: 14, height: 1.35),
           ),
           const SizedBox(height: 16),
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: LinearProgressIndicator(
-              value: total == 0 ? 0 : done / total,
+              value: summary.total == 0 ? 0 : summary.done / summary.total,
               minHeight: 10,
               backgroundColor: Colors.white24,
               valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
@@ -636,15 +359,29 @@ class _ProgressHeader extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
-                '$done / $total adım tamam',
+                '${summary.done} / ${summary.total} adım',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               _HeaderChip(
+                icon: _resultIcon(FeatureTestResult.passed),
+                text: '${summary.passed} geçti',
+              ),
+              _HeaderChip(
+                icon: _resultIcon(FeatureTestResult.failed),
+                text: '${summary.failed} hatalı',
+                highlighted: summary.failed > 0,
+              ),
+              _HeaderChip(
+                icon: _resultIcon(FeatureTestResult.skipped),
+                text: '${summary.skipped} atlandı',
+              ),
+              _HeaderChip(
                 icon: Icons.devices_rounded,
-                text: 'Bu cihaz: $_platformLabel',
+                text: 'Bu cihaz: '
+                    '${featureTestPlatformLabel(defaultTargetPlatform)}',
               ),
               _HeaderChip(
                 icon: localNotifications
@@ -656,6 +393,28 @@ class _ProgressHeader extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              LabeledActionButton(
+                dense: true,
+                icon: Icons.copy_all_rounded,
+                label: 'Raporu kopyala',
+                foregroundColor: Colors.white,
+                onPressed: onCopy,
+              ),
+              if (onReset != null)
+                LabeledActionButton(
+                  dense: true,
+                  icon: Icons.restart_alt_rounded,
+                  label: _FeatureTestPageState._resetLabel,
+                  foregroundColor: Colors.white,
+                  onPressed: onReset,
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -663,17 +422,24 @@ class _ProgressHeader extends StatelessWidget {
 }
 
 class _HeaderChip extends StatelessWidget {
+  const _HeaderChip({
+    required this.icon,
+    required this.text,
+    this.highlighted = false,
+  });
+
   final IconData icon;
   final String text;
-
-  const _HeaderChip({required this.icon, required this.text});
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
+        color: highlighted
+            ? _failedColor.withValues(alpha: 0.85)
+            : Colors.white.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -695,26 +461,109 @@ class _HeaderChip extends StatelessWidget {
   }
 }
 
-class _SectionCard extends StatelessWidget {
-  final _TestSection section;
-  final Set<String> done;
-  final ValueChanged<String> onToggle;
-  final ValueChanged<_TestTool> onTool;
+class _ViewBar extends StatelessWidget {
+  const _ViewBar({required this.checklist, required this.summary});
 
-  const _SectionCard({
-    required this.section,
-    required this.done,
-    required this.onToggle,
-    required this.onTool,
-  });
+  final FeatureTestChecklist checklist;
+  final FeatureTestSummary summary;
 
   @override
   Widget build(BuildContext context) {
-    final int completed =
-        section.steps.where((step) => done.contains(step.id)).length;
-    final bool sectionDone = completed == section.steps.length;
+    final bool allCollapsed = checklist.allCollapsed;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FilterChipGroup<FeatureTestFilter>(
+            title: 'Göster',
+            titleIcon: Icons.filter_list_rounded,
+            options: {
+              FeatureTestFilter.all:
+                  '${FeatureTestFilter.all.label} (${summary.total})',
+              FeatureTestFilter.open:
+                  '${FeatureTestFilter.open.label} (${summary.open})',
+              FeatureTestFilter.failed:
+                  '${FeatureTestFilter.failed.label} (${summary.failed})',
+            },
+            selectedValue: checklist.filter,
+            showAllOption: false,
+            horizontalScroll: false,
+            onSelected: (filter) {
+              if (filter == null) return;
+              checklist.filter = filter;
+            },
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilterChip(
+                label: Text('Yalnızca bu cihaza uygun adımlar '
+                    '(${featureTestPlatformLabel(checklist.platform)})'),
+                selected: checklist.onlyThisDevice,
+                onSelected: (value) => checklist.onlyThisDevice = value,
+              ),
+              TextButton.icon(
+                onPressed: () => checklist.setAllCollapsed(!allCollapsed),
+                icon: Icon(allCollapsed
+                    ? Icons.unfold_more_rounded
+                    : Icons.unfold_less_rounded),
+                label: Text(allCollapsed ? 'Bölümleri aç' : 'Bölümleri daralt'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({
+    super.key,
+    required this.section,
+    required this.checklist,
+    required this.onResult,
+    required this.onNote,
+    required this.onAddStep,
+    required this.onEditStep,
+    required this.onDeleteStep,
+    required this.onShortcut,
+  });
+
+  final FeatureTestSection section;
+  final FeatureTestChecklist checklist;
+  final void Function(FeatureTestStep step, FeatureTestResult result) onResult;
+  final ValueChanged<FeatureTestStep> onNote;
+  final VoidCallback onAddStep;
+  final ValueChanged<FeatureTestStep> onEditStep;
+  final ValueChanged<FeatureTestStep> onDeleteStep;
+  final ValueChanged<FeatureTestShortcut> onShortcut;
+
+  @override
+  Widget build(BuildContext context) {
     final Color color = section.color;
+    final List<FeatureTestStep> allSteps = checklist.stepsOf(section);
+    final FeatureTestSummary summary = checklist.summaryOf(allSteps);
+    final Set<String> visibleIds = {
+      for (final FeatureTestStep step in checklist.visibleStepsOf(section))
+        step.id,
+    };
+    final bool collapsed = checklist.isCollapsed(section.id);
     final String? note = section.note;
+    final Color pillColor = summary.failed > 0
+        ? _failedColor
+        : summary.isComplete
+            ? _passedColor
+            : color;
 
     return Card(
       elevation: 1.5,
@@ -723,128 +572,155 @@ class _SectionCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: sectionDone
-              ? Colors.green.shade300
-              : color.withValues(alpha: 0.25),
+          color: summary.failed > 0
+              ? _failedColor.withValues(alpha: 0.4)
+              : summary.isComplete
+                  ? _passedColor.withValues(alpha: 0.4)
+                  : color.withValues(alpha: 0.25),
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
+          Material(
             color: color.withValues(alpha: 0.07),
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(9),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.14),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(section.icon, color: color, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    section.title,
-                    style: const TextStyle(
-                      fontSize: 16.5,
-                      fontWeight: FontWeight.w800,
+            child: InkWell(
+              onTap: () => checklist.toggleCollapsed(section.id),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.14),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(section.icon, color: color, size: 22),
                     ),
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: sectionDone ? Colors.green.shade600 : color,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (sectionDone) ...[
-                        const Icon(Icons.check_rounded,
-                            size: 14, color: Colors.white),
-                        const SizedBox(width: 4),
-                      ],
-                      Text(
-                        '$completed/${section.steps.length}',
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        section.title,
+                        style: const TextStyle(
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: pillColor,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${summary.done}/${summary.total}',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    Icon(
+                      collapsed
+                          ? Icons.expand_more_rounded
+                          : Icons.expand_less_rounded,
+                      color: Colors.grey.shade700,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-          if (note != null)
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline_rounded, size: 18, color: color),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      note,
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.35,
-                        color: Colors.grey.shade800,
+          if (!collapsed) ...[
+            if (note != null)
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 18, color: color),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        note,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.35,
+                          color: Colors.grey.shade800,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+              ),
+            const SizedBox(height: 4),
+            for (int i = 0; i < allSteps.length; i++)
+              if (visibleIds.contains(allSteps[i].id))
+                _StepTile(
+                  key: ValueKey<String>(allSteps[i].id),
+                  number: i + 1,
+                  step: allSteps[i],
+                  color: color,
+                  result: checklist.resultOf(allSteps[i].id),
+                  note: checklist.noteOf(allSteps[i].id),
+                  appliesHere: allSteps[i].appliesTo(checklist.platform),
+                  onResult: (result) => onResult(allSteps[i], result),
+                  onNote: () => onNote(allSteps[i]),
+                  onEdit: () => onEditStep(allSteps[i]),
+                  onDelete: () => onDeleteStep(allSteps[i]),
+                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 16, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onAddStep,
+                  icon: const Icon(Icons.add_task_rounded, size: 18),
+                  label: const Text('Adım ekle'),
+                ),
               ),
             ),
-          const SizedBox(height: 4),
-          for (int i = 0; i < section.steps.length; i++)
-            _StepTile(
-              index: i + 1,
-              step: section.steps[i],
-              done: done.contains(section.steps[i].id),
-              color: color,
-              onTap: () => onToggle(section.steps[i].id),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final _TestTool tool in section.tools)
-                  tool.isPrimary
-                      ? FilledButton.icon(
-                          style: FilledButton.styleFrom(backgroundColor: color),
-                          onPressed: () => onTool(tool),
-                          icon: Icon(tool.icon, size: 18),
-                          label: Text(tool.label),
-                        )
-                      : OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: color,
-                            side: BorderSide(
-                                color: color.withValues(alpha: 0.5)),
-                          ),
-                          onPressed: () => onTool(tool),
-                          icon: Icon(tool.icon, size: 18),
-                          label: Text(tool.label),
+            if (section.shortcuts.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final FeatureTestShortcut shortcut
+                        in section.shortcuts)
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: color,
+                          side: BorderSide(color: color.withValues(alpha: 0.5)),
                         ),
-              ],
-            ),
-          ),
+                        onPressed: () => onShortcut(shortcut),
+                        icon: Icon(shortcut.icon, size: 18),
+                        label: Text(shortcut.label),
+                      ),
+                  ],
+                ),
+              ),
+            for (final FeatureTestTool tool in section.tools)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                child: FeatureTestToolPanel(
+                  tool: tool,
+                  color: color,
+                  checklist: checklist,
+                ),
+              ),
+            const SizedBox(height: 16),
+          ],
         ],
       ),
     );
@@ -852,70 +728,189 @@ class _SectionCard extends StatelessWidget {
 }
 
 class _StepTile extends StatelessWidget {
-  final int index;
-  final _TestStep step;
-  final bool done;
-  final Color color;
-  final VoidCallback onTap;
-
   const _StepTile({
-    required this.index,
+    super.key,
+    required this.number,
     required this.step,
-    required this.done,
     required this.color,
-    required this.onTap,
+    required this.result,
+    required this.note,
+    required this.appliesHere,
+    required this.onResult,
+    required this.onNote,
+    required this.onEdit,
+    required this.onDelete,
   });
+
+  final int number;
+  final FeatureTestStep step;
+  final Color color;
+  final FeatureTestResult? result;
+  final String? note;
+  final bool appliesHere;
+  final ValueChanged<FeatureTestResult> onResult;
+  final VoidCallback onNote;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
+    final FeatureTestResult? result = this.result;
+    final String? note = this.note;
+    final bool settled = result == FeatureTestResult.passed ||
+        result == FeatureTestResult.skipped;
+    final Color textColor = settled ? Colors.grey.shade500 : Colors.black87;
+
+    return Material(
+      color: result == FeatureTestResult.failed
+          ? _failedColor.withValues(alpha: 0.05)
+          : Colors.transparent,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(6, 6, 16, 6),
+        padding: const EdgeInsets.fromLTRB(4, 6, 12, 6),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Checkbox(
-              value: done,
-              activeColor: Colors.green.shade600,
-              onChanged: (_) => onTap(),
+            IconButton(
+              tooltip: result == FeatureTestResult.passed
+                  ? 'İşareti kaldır'
+                  : 'Geçti olarak işaretle',
+              onPressed: () => onResult(FeatureTestResult.passed),
+              icon: Icon(_resultIcon(result), color: _resultColor(result)),
             ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(top: 9),
+                padding: const EdgeInsets.only(top: 10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '$index. ${step.action}',
+                      '$number. ${step.action}',
                       style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w600,
                         height: 1.3,
-                        color: done ? Colors.grey.shade500 : Colors.black87,
+                        color: textColor,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: 'Beklenen: ',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: done ? Colors.grey.shade500 : color,
+                    if (step.expected.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: 'Beklenen: ',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: settled ? Colors.grey.shade500 : color,
+                              ),
                             ),
-                          ),
-                          TextSpan(text: step.expected),
+                            TextSpan(text: step.expected),
+                          ],
+                        ),
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.35,
+                          color: settled
+                              ? Colors.grey.shade500
+                              : Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
+                    if (step.platforms.isNotEmpty || step.isCustom) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          for (final TargetPlatform platform in step.platforms)
+                            _Tag(
+                              text: featureTestPlatformLabel(platform),
+                              color: appliesHere ? color : Colors.grey,
+                            ),
+                          if (step.isCustom)
+                            const _Tag(
+                              text: 'Kendi adımınız',
+                              color: Colors.blueGrey,
+                            ),
                         ],
                       ),
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.35,
-                        color: done
-                            ? Colors.grey.shade500
-                            : Colors.grey.shade700,
+                    ],
+                    if (note != null) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber.shade200),
+                        ),
+                        child: Text(
+                          'Not: $note',
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.35,
+                            color: Colors.brown.shade700,
+                          ),
+                        ),
                       ),
+                    ],
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        for (final FeatureTestResult option
+                            in FeatureTestResult.values)
+                          ChoiceChip(
+                            label: Text(option == FeatureTestResult.skipped
+                                ? 'Atla'
+                                : option.label),
+                            avatar: Icon(
+                              _resultIcon(option),
+                              size: 16,
+                              color: result == option
+                                  ? Colors.white
+                                  : _resultColor(option),
+                            ),
+                            selected: result == option,
+                            showCheckmark: false,
+                            selectedColor: _resultColor(option),
+                            labelStyle: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: result == option
+                                  ? Colors.white
+                                  : Colors.grey.shade800,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            onSelected: (_) => onResult(option),
+                          ),
+                        TextButton.icon(
+                          onPressed: onNote,
+                          icon: const Icon(Icons.edit_note_rounded, size: 18),
+                          label:
+                              Text(note == null ? 'Not ekle' : 'Notu düzenle'),
+                        ),
+                        if (step.isCustom) ...[
+                          IconButton(
+                            tooltip: 'Adımı düzenle',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: onEdit,
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                          ),
+                          IconButton(
+                            tooltip: 'Adımı sil',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: onDelete,
+                            icon: const Icon(Icons.delete_outline_rounded,
+                                size: 18),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
@@ -924,6 +919,159 @@ class _StepTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+class _FieldSpec {
+  const _FieldSpec({
+    required this.label,
+    this.hint,
+    this.initialValue = '',
+    this.maxLines = 1,
+    this.required = false,
+  });
+
+  final String label;
+  final String? hint;
+  final String initialValue;
+  final int maxLines;
+  final bool required;
+}
+
+class _TextFieldsDialog extends StatefulWidget {
+  const _TextFieldsDialog({
+    required this.title,
+    required this.fields,
+    this.subtitle,
+    this.clearLabel,
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<_FieldSpec> fields;
+  final String? clearLabel;
+
+  @override
+  State<_TextFieldsDialog> createState() => _TextFieldsDialogState();
+}
+
+class _TextFieldsDialogState extends State<_TextFieldsDialog> {
+  static const double _maxWidth = 480;
+
+  late final List<TextEditingController> _controllers = [
+    for (final _FieldSpec field in widget.fields)
+      TextEditingController(text: field.initialValue),
+  ];
+
+  @override
+  void dispose() {
+    for (final TextEditingController controller in _controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  bool get _isValid {
+    for (int i = 0; i < widget.fields.length; i++) {
+      if (widget.fields[i].required && _controllers[i].text.trim().isEmpty) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _close(List<String>? values) =>
+      DialogUtils.closeOwnRoute(context, values);
+
+  @override
+  Widget build(BuildContext context) {
+    final String? subtitle = widget.subtitle;
+    final String? clearLabel = widget.clearLabel;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: _maxWidth,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (subtitle != null) ...[
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 12),
+              ],
+              for (int i = 0; i < widget.fields.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                TextField(
+                  controller: _controllers[i],
+                  autofocus: i == 0,
+                  minLines: 1,
+                  maxLines: widget.fields[i].maxLines,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    labelText: widget.fields[i].label,
+                    hintText: widget.fields[i].hint,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        if (clearLabel != null)
+          TextButton(
+            onPressed: () =>
+                _close([for (int i = 0; i < widget.fields.length; i++) '']),
+            child: Text(clearLabel),
+          ),
+        TextButton(
+          onPressed: () => _close(null),
+          child: const Text(_FeatureTestPageState._cancelLabel),
+        ),
+        FilledButton(
+          onPressed: _isValid
+              ? () => _close([
+                    for (final TextEditingController controller in _controllers)
+                      controller.text,
+                  ])
+              : null,
+          child: const Text(_FeatureTestPageState._saveLabel),
+        ),
+      ],
     );
   }
 }

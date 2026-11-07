@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'count_badge.dart';
+
 /// An action button that always carries a visible label.
 ///
 /// Every toolbar / app-bar action in the app goes through this widget so no
@@ -41,18 +43,11 @@ class LabeledActionButton extends StatelessWidget {
 
   final int? badgeCount;
 
-  static const int _maxBadgeCount = 99;
-
   Widget _buildIcon() {
     final Widget iconWidget = Icon(icon, size: 18);
     final int count = badgeCount ?? 0;
     if (count <= 0) return iconWidget;
-    return Badge(
-      label: Text(count > _maxBadgeCount ? '$_maxBadgeCount+' : '$count'),
-      backgroundColor: Colors.red.shade600,
-      textColor: Colors.white,
-      child: iconWidget,
-    );
+    return CountBadge(count: count, child: iconWidget);
   }
 
   @override
