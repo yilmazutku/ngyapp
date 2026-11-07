@@ -13,6 +13,22 @@ class _FakeScheduler implements AdminNotificationScheduler {
 
   final Map<String, DateTime> scheduled = {};
 
+  final List<String> shown = [];
+
+  bool showFails = false;
+
+  @override
+  Future<bool> showNow({
+    required String docId,
+    required String title,
+    required String body,
+    String? notificationKey,
+  }) async {
+    if (showFails) return false;
+    shown.add(title);
+    return true;
+  }
+
   @override
   Future<bool> schedule({
     required String docId,
@@ -128,17 +144,19 @@ void main() {
       expect(banners, isEmpty);
     });
 
-    test('$platform: bu cihazda kurulmamış yeni bildirim açılınca duyurulur',
-        () async {
+    test('$platform: arka plandayken gelen yeni bildirim sistem bildirimi '
+        'olarak gösterilir, açılınca tekrar duyurulmaz', () async {
       final AdminNotificationDelivery d = delivery(android: android);
       await d.attach(uid);
       await d.announce(
         due: [notification('liste', now)],
         now: now,
         inForeground: false,
+        inBackground: true,
         becameDueInForeground: const {},
       );
       expect(banners, isEmpty, reason: 'arka planda şerit gösterilmez');
+      expect(scheduler.shown, ['liste']);
 
       await d.announce(
         due: [notification('liste', now)],
@@ -146,7 +164,8 @@ void main() {
         inForeground: true,
         becameDueInForeground: const {},
       );
-      expect(banners, ['liste']);
+      expect(banners, isEmpty);
+      expect(scheduler.shown, ['liste']);
     });
   }
 
@@ -322,5 +341,87 @@ void main() {
     d.detach();
     await d.syncUpcoming(const []);
     expect(scheduler.scheduled.keys, ['r']);
+  });
+
+  test('arka planda birden çok yeni bildirim tek sistem bildiriminde toplanır',
+      () async {
+    final AdminNotificationDelivery d = delivery(android: true);
+    await d.attach(uid);
+    await d.announce(
+      due: [notification('a', now), notification('b', now)],
+      now: now,
+      inForeground: false,
+      inBackground: true,
+      becameDueInForeground: const {},
+    );
+    expect(scheduler.shown, ['2 yeni sistem bildirimi']);
+  });
+
+  test('yerel bildirimi olmayan platformda arka planda gelen bildirim '
+      'açılınca şeritle duyurulur', () async {
+    scheduler = _FakeScheduler(isSupported: false);
+    final AdminNotificationDelivery d = delivery(android: false);
+    await d.attach(uid);
+    await d.announce(
+      due: [notification('liste', now)],
+      now: now,
+      inForeground: false,
+      inBackground: true,
+      becameDueInForeground: const {},
+    );
+    expect(scheduler.shown, isEmpty);
+    expect(banners, isEmpty);
+
+    await d.announce(
+      due: [notification('liste', now)],
+      now: now.add(const Duration(minutes: 3)),
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, ['liste']);
+  });
+
+  test('sistem bildirimi gösterilemezse kaybolmaz, açılınca şeritle duyurulur',
+      () async {
+    final AdminNotificationDelivery d = delivery(android: true);
+    await d.attach(uid);
+    scheduler.showFails = true;
+    await d.announce(
+      due: [notification('liste', now)],
+      now: now,
+      inForeground: false,
+      inBackground: true,
+      becameDueInForeground: const {},
+    );
+    expect(scheduler.shown, isEmpty);
+
+    await d.announce(
+      due: [notification('liste', now)],
+      now: now.add(const Duration(minutes: 1)),
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, ['liste']);
+  });
+
+  test('uygulama yalnızca kısa süre pasifken (bildirim perdesi) sistem '
+      'bildirimi gösterilmez, dönünce şerit çıkar', () async {
+    final AdminNotificationDelivery d = delivery(android: false);
+    await d.attach(uid);
+    await d.announce(
+      due: [notification('liste', now)],
+      now: now,
+      inForeground: false,
+      becameDueInForeground: const {},
+    );
+    expect(scheduler.shown, isEmpty);
+
+    await d.announce(
+      due: [notification('liste', now)],
+      now: now.add(const Duration(seconds: 20)),
+      inForeground: true,
+      becameDueInForeground: const {},
+    );
+    expect(banners, ['liste']);
   });
 }

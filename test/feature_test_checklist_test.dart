@@ -206,4 +206,26 @@ void main() {
     expect(report, contains('- Bölüm A: 2/2 (1 geçti, 1 hatalı)'));
     expect(report, endsWith('- Bölüm B: 0/1 (1 yapılmadı)'));
   });
+
+  test('hızlandırma: simüle edilen süre seçilen hızla gerçek zamana çevrilir',
+      () {
+    final DateTime start = DateTime(2026, 11, 7, 12);
+    expect(
+        FeatureTestSpeed.dayInMinute
+            .realTimeOf(start.add(const Duration(days: 3)), start),
+        start.add(const Duration(minutes: 3)));
+    expect(
+        FeatureTestSpeed.dayInTenSeconds
+            .realTimeOf(start.add(const Duration(days: 1)), start),
+        start.add(const Duration(seconds: 10)));
+    expect(
+        FeatureTestSpeed.realTime
+            .realTimeOf(start.add(const Duration(days: 2)), start),
+        start.add(const Duration(days: 2)));
+    expect(
+        FeatureTestSpeed.dayInMinute
+            .realTimeOf(start.subtract(const Duration(days: 2)), start),
+        start,
+        reason: 'geçmişte kalan an hemen düşer');
+  });
 }

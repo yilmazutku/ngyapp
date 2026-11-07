@@ -26,7 +26,7 @@ class DateFormatter {
   /// kaldığı için "gelecekte" görünen zaman bugün sayılır.
   static String formatChatListTime(DateTime date, {DateTime? now}) {
     final DateTime current = now ?? DateTime.now();
-    final int daysAgo = _calendarDaysBetween(date, current);
+    final int daysAgo = calendarDaysBetween(date, current);
 
     if (daysAgo <= 0) return formatTime(date);
     if (daysAgo == 1) return _yesterdayLabel;
@@ -40,7 +40,7 @@ class DateFormatter {
   /// "12 Eylül 2025".
   static String formatChatDayLabel(DateTime date, {DateTime? now}) {
     final DateTime current = now ?? DateTime.now();
-    final int daysAgo = _calendarDaysBetween(date, current);
+    final int daysAgo = calendarDaysBetween(date, current);
 
     if (daysAgo <= 0) return _todayLabel;
     if (daysAgo == 1) return _yesterdayLabel;
@@ -50,7 +50,7 @@ class DateFormatter {
 
   /// İki anın takvim günü farkı ([to] - [from]); saat ve yaz saati farkı
   /// sonucu değiştirmez.
-  static int _calendarDaysBetween(DateTime from, DateTime to) =>
+  static int calendarDaysBetween(DateTime from, DateTime to) =>
       DateTime.utc(to.year, to.month, to.day)
           .difference(DateTime.utc(from.year, from.month, from.day))
           .inDays;

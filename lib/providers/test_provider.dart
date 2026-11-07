@@ -10,6 +10,7 @@ class TestProvider extends ChangeNotifier {
   static const String isBloodTestField = 'isBloodTest';
   static const String bloodTestDateField = 'bloodTestDate';
   static const String bloodTestReminderField = 'bloodTestReminder';
+  static const String testsCollection = 'tests';
 
   /// Upload a test attachment (PDF or image) and write its metadata.
   ///
@@ -106,7 +107,7 @@ class TestProvider extends ChangeNotifier {
       FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
-          .collection('tests');
+          .collection(testsCollection);
 
   static Timestamp _dayOf(DateTime date) =>
       Timestamp.fromDate(DateTime(date.year, date.month, date.day));

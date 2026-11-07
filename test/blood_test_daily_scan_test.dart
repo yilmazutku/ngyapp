@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:ngy_app/models/admin_notification.dart';
 import 'package:ngy_app/models/blood_test_scan.dart';
+import 'package:ngy_app/models/blood_test_status.dart';
 import 'package:ngy_app/providers/admin_notifications_provider.dart';
 import 'package:ngy_app/providers/blood_test_provider.dart';
 import 'package:ngy_app/utils/date_formatter.dart';
@@ -203,5 +204,55 @@ void main() {
     expect(state.lastScanBy, admin);
     expect(state.lastScanAt, isNotNull);
     expect(state.presenceInitializedAt, isNotNull);
+  });
+
+  test('bütün danışanların kan tahlili durumu, gecikmişler en üstte', () async {
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    Future<void> addTest(String userId, DateTime date) => db
+        .collection('users')
+        .doc(userId)
+        .collection('tests')
+        .add({
+          'fileName': 'tahlil.pdf',
+          'isBloodTest': true,
+          'bloodTestDate': Timestamp.fromDate(date),
+        });
+
+    await addUser('ilk', name: 'İlk', surname: 'Eksik',
+        createDate: now.subtract(const Duration(days: 20)));
+    await addUser('eski', name: 'Eski', surname: 'Tahlil',
+        createDate: now.subtract(const Duration(days: 300)), present: true);
+    await addTest('eski', DateTime(today.year, today.month - 5, today.day));
+    await addTest('eski', DateTime(today.year, today.month - 4, today.day));
+    await addUser('yeni', name: 'Yeni', surname: 'Danışan',
+        createDate: now.subtract(const Duration(days: 2)), present: false);
+    await addUser('guncel', name: 'Güncel', surname: 'Danışan',
+        createDate: now.subtract(const Duration(days: 300)), present: true);
+    await addTest('guncel', today.subtract(const Duration(days: 5)));
+    await addUser('tarihsiz', name: 'Tarihsiz', surname: 'Danışan',
+        createDate: now.subtract(const Duration(days: 300)), present: true);
+    await addUser('silinecek', createDate: now, removalRequested: true);
+    await addUser('admin', role: 'admin', createDate: now);
+
+    final List<int> progress = [];
+    final BloodTestReport report = await provider.checkAllCustomers(
+      now: now,
+      onProgress: (done, total) => progress.add(done),
+    );
+    expect(report.statuses.map((s) => s.customer.userId),
+        ['eski', 'ilk', 'yeni', 'tarihsiz', 'guncel']);
+    expect(report.statuses.map((s) => s.kind), [
+      BloodTestStatusKind.expired,
+      BloodTestStatusKind.missingFirst,
+      BloodTestStatusKind.waitingFirst,
+      BloodTestStatusKind.undated,
+      BloodTestStatusKind.upToDate,
+    ]);
+    expect(report.statuses.first.lastTestDate,
+        DateTime(today.year, today.month - 4, today.day));
+    expect(report.countOf(BloodTestStatusGroup.overdue), 2);
+    expect(progress.last, 5);
+    expect(provider.lastReport, same(report));
   });
 }

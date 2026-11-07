@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../dialogs/customer_picker_dialog.dart';
 import '../models/admin_notification.dart';
 import '../models/blood_test_scan.dart';
+import '../models/blood_test_status.dart';
 import '../models/feature_test_checklist.dart';
 import '../models/feature_test_plan.dart';
 import '../models/user_model.dart';
@@ -35,6 +36,65 @@ String _customerName(UserModel user) =>
     user.fullName.isEmpty ? user.email : user.fullName;
 
 DateTime _today() => DateUtils.dateOnly(DateTime.now());
+
+Future<NotificationCustomer?> _pickCustomer(BuildContext context) async {
+  final UserProvider users = Provider.of<UserProvider>(context, listen: false);
+  final LoadingDialog loading =
+      DialogUtils.openLoading(context, message: 'Danışanlar yükleniyor...');
+  try {
+    final List<UserModel> customers = await users.fetchAllCustomers();
+    loading.close();
+    if (!context.mounted) return null;
+    final UserModel? picked =
+        await showCustomerPickerDialog(context, customers: customers);
+    if (picked == null) return null;
+    return NotificationCustomer(
+      userId: picked.userId,
+      name: _customerName(picked),
+    );
+  } catch (e) {
+    loading.close();
+    if (!context.mounted) return null;
+    await DialogUtils.openError(
+      context,
+      title: 'Hata',
+      message: 'Danışanlar yüklenemedi: $e',
+    );
+    return null;
+  }
+}
+
+Future<void> _removeTestNotifications(BuildContext context) async {
+  final AdminNotificationsProvider notifications =
+      Provider.of<AdminNotificationsProvider>(context, listen: false);
+  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+  try {
+    final int removed = await notifications.removeTestNotifications();
+    messenger.showSnackBar(SnackBar(
+      content: Text(removed == 0
+          ? 'Silinecek deneme bildirimi yok.'
+          : '$removed deneme bildirimi silindi.'),
+    ));
+  } catch (e) {
+    if (!context.mounted) return;
+    await DialogUtils.openError(
+      context,
+      title: 'Hata',
+      message: 'Deneme bildirimleri silinemedi: $e',
+    );
+  }
+}
+
+String _formatWait(Duration wait) {
+  final int days = wait.inDays;
+  final int hours = wait.inHours % 24;
+  final int minutes = wait.inMinutes % 60;
+  final int seconds = wait.inSeconds % 60;
+  if (days > 0) return '$days gün $hours sa';
+  if (hours > 0) return '$hours sa $minutes dk';
+  if (minutes > 0) return '$minutes dk $seconds sn';
+  return '$seconds sn';
+}
 
 class FeatureTestToolPanel extends StatelessWidget {
   const FeatureTestToolPanel({
@@ -100,6 +160,8 @@ class FeatureTestToolPanel extends StatelessWidget {
         return _ScanPreview(color: color);
       case FeatureTestTool.birthdayPreview:
         return _BirthdayPreview(color: color);
+      case FeatureTestTool.timeMachine:
+        return _TimeMachine(color: color);
       case FeatureTestTool.enterKeys:
         return _EnterKeyTester(color: color);
     }
@@ -228,37 +290,16 @@ class _UpcomingRemindersState extends State<_UpcomingReminders> {
   Stream<List<AdminNotification>>? _customerReminders;
   bool _showAll = false;
 
-  Future<void> _pickCustomer() async {
-    final UserProvider users =
-        Provider.of<UserProvider>(context, listen: false);
+  Future<void> _chooseCustomer() async {
     final AdminNotificationsProvider notifications =
         Provider.of<AdminNotificationsProvider>(context, listen: false);
-    final LoadingDialog loading =
-        DialogUtils.openLoading(context, message: 'Danışanlar yükleniyor...');
-    try {
-      final List<UserModel> customers = await users.fetchAllCustomers();
-      loading.close();
-      if (!mounted) return;
-      final UserModel? picked =
-          await showCustomerPickerDialog(context, customers: customers);
-      if (picked == null || !mounted) return;
-      setState(() {
-        _customer = NotificationCustomer(
-          userId: picked.userId,
-          name: _customerName(picked),
-        );
-        _customerReminders = notifications.remindersOf(picked.userId);
-        _showAll = false;
-      });
-    } catch (e) {
-      loading.close();
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Danışanlar yüklenemedi: $e',
-      );
-    }
+    final NotificationCustomer? customer = await _pickCustomer(context);
+    if (customer == null || !mounted) return;
+    setState(() {
+      _customer = customer;
+      _customerReminders = notifications.remindersOf(customer.userId);
+      _showAll = false;
+    });
   }
 
   void _clearCustomer() {
@@ -308,7 +349,7 @@ class _UpcomingRemindersState extends State<_UpcomingReminders> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             OutlinedButton.icon(
-              onPressed: _pickCustomer,
+              onPressed: _chooseCustomer,
               icon: const Icon(Icons.person_search_outlined, size: 18),
               label: Text(customer?.name ?? 'Danışan seç'),
             ),
@@ -480,35 +521,13 @@ class _NotificationSimulatorState extends State<_NotificationSimulator> {
 
   bool get _canCreate => !_busy && (!_needsCustomer || _customer != null);
 
-  Future<void> _pickCustomer() async {
-    final UserProvider users =
-        Provider.of<UserProvider>(context, listen: false);
-    final LoadingDialog loading =
-        DialogUtils.openLoading(context, message: 'Danışanlar yükleniyor...');
-    try {
-      final List<UserModel> customers = await users.fetchAllCustomers();
-      loading.close();
-      if (!mounted) return;
-      final UserModel? picked =
-          await showCustomerPickerDialog(context, customers: customers);
-      if (picked == null || !mounted) return;
-      final NotificationCustomer customer = NotificationCustomer(
-        userId: picked.userId,
-        name: _customerName(picked),
-      );
-      setState(() => _customer = customer);
-      widget.checklist
-        ..setSetting(_customerIdKey, customer.userId)
-        ..setSetting(_customerNameKey, customer.name);
-    } catch (e) {
-      loading.close();
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Danışanlar yüklenemedi: $e',
-      );
-    }
+  Future<void> _chooseCustomer() async {
+    final NotificationCustomer? customer = await _pickCustomer(context);
+    if (customer == null || !mounted) return;
+    setState(() => _customer = customer);
+    widget.checklist
+      ..setSetting(_customerIdKey, customer.userId)
+      ..setSetting(_customerNameKey, customer.name);
   }
 
   Future<void> _create() async {
@@ -555,29 +574,12 @@ class _NotificationSimulatorState extends State<_NotificationSimulator> {
   }
 
   Future<void> _removeAll() async {
-    final AdminNotificationsProvider notifications =
-        Provider.of<AdminNotificationsProvider>(context, listen: false);
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    setState(() => _busy = true);
-    try {
-      final int removed = await notifications.removeTestNotifications();
-      if (!mounted) return;
-      setState(() => _lastInfo = null);
-      messenger.showSnackBar(SnackBar(
-        content: Text(removed == 0
-            ? 'Silinecek deneme bildirimi yok.'
-            : '$removed deneme bildirimi silindi.'),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Deneme bildirimleri silinemedi: $e',
-      );
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    setState(() {
+      _busy = true;
+      _lastInfo = null;
+    });
+    await _removeTestNotifications(context);
+    if (mounted) setState(() => _busy = false);
   }
 
   @override
@@ -626,7 +628,7 @@ class _NotificationSimulatorState extends State<_NotificationSimulator> {
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
               OutlinedButton.icon(
-                onPressed: _busy ? null : _pickCustomer,
+                onPressed: _busy ? null : _chooseCustomer,
                 icon: const Icon(Icons.person_search_outlined, size: 18),
                 label: Text(_customer?.name ?? 'Danışan seç'),
               ),
@@ -1264,6 +1266,420 @@ class _BirthdayPreviewState extends State<_BirthdayPreview> {
         const _ToolHint('Etiketin rengi Ayarlar > Randevu Arkaplan Renkleri > '
             '"Doğum Günü (DG)" satırından değiştirilir.'),
       ],
+    );
+  }
+}
+
+enum _TestDateOption {
+  none('Yok'),
+  dueTomorrow('Yarın 3 ay doluyor'),
+  dueInTwoDays('2 gün sonra 3 ay doluyor'),
+  expired('3 ay çoktan dolmuş'),
+  recent('1 ay önce');
+
+  const _TestDateOption(this.label);
+
+  final String label;
+
+  DateTime? dateFor(DateTime today) {
+    DateTime dueIn(int days) => BloodTestReminderSchedule.testDateDueOnOrAfter(
+        DateTime(today.year, today.month, today.day + days));
+    switch (this) {
+      case _TestDateOption.none:
+        return null;
+      case _TestDateOption.dueTomorrow:
+        return dueIn(1);
+      case _TestDateOption.dueInTwoDays:
+        return dueIn(2);
+      case _TestDateOption.expired:
+        return BloodTestReminderSchedule.addMonths(
+            today, -(BloodTestReminderSchedule.monthsAfterTest + 1));
+      case _TestDateOption.recent:
+        return BloodTestReminderSchedule.addMonths(today, -1);
+    }
+  }
+}
+
+class _TimeMachine extends StatefulWidget {
+  const _TimeMachine({required this.color});
+
+  final Color color;
+
+  @override
+  State<_TimeMachine> createState() => _TimeMachineState();
+}
+
+class _TimeMachineState extends State<_TimeMachine> {
+  static const NotificationCustomer _virtualCustomer =
+      NotificationCustomer(userId: 'sanal-danisan', name: 'Deneme Danışan');
+  static const Map<int, String> _createdOptions = {
+    0: 'Bugün',
+    5: '5 gün önce',
+    7: '7 gün önce',
+    10: '10 gün önce',
+  };
+
+  NotificationCustomer? _realCustomer;
+  DateTime _createdAt = DateTime.now().subtract(const Duration(days: 5));
+  DateTime? _testDate;
+  FeatureTestSpeed _speed = FeatureTestSpeed.dayInMinute;
+  bool _busy = false;
+  String? _lastInfo;
+
+  NotificationCustomer get _subject => _realCustomer ?? _virtualCustomer;
+
+  int? _createdOffset(DateTime today) {
+    for (final int days in _createdOptions.keys) {
+      if (DateUtils.isSameDay(
+          today.subtract(Duration(days: days)), _createdAt)) {
+        return days;
+      }
+    }
+    return null;
+  }
+
+  _TestDateOption? _testOption(DateTime today) {
+    for (final _TestDateOption option in _TestDateOption.values) {
+      final DateTime? date = option.dateFor(today);
+      final DateTime? current = _testDate;
+      if (date == null && current == null) return option;
+      if (date != null &&
+          current != null &&
+          DateUtils.isSameDay(date, current)) {
+        return option;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _chooseCustomer() async {
+    final NotificationCustomer? customer = await _pickCustomer(context);
+    if (customer == null || !mounted) return;
+    setState(() => _realCustomer = customer);
+  }
+
+  Future<void> _pickCreatedAt() async {
+    final DateTime now = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _createdAt,
+      firstDate: DateTime(2015),
+      lastDate: now,
+      helpText: 'Eklenme tarihi',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _createdAt =
+        DateTime(picked.year, picked.month, picked.day, now.hour, now.minute));
+  }
+
+  Future<void> _pickTestDate() async {
+    final DateTime today = _today();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _testDate ?? today,
+      firstDate: DateTime(2015),
+      lastDate: today,
+      helpText: 'Kan tahlili tarihi',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _testDate = picked);
+  }
+
+  static AdminTestNotificationKind _kindOf(BloodTestTimelineEventKind kind) {
+    switch (kind) {
+      case BloodTestTimelineEventKind.dayBeforeReminder:
+        return AdminTestNotificationKind.bloodTestDayBefore;
+      case BloodTestTimelineEventKind.dueDayReminder:
+        return AdminTestNotificationKind.bloodTestDueDay;
+      case BloodTestTimelineEventKind.listedInDailyScan:
+      case BloodTestTimelineEventKind.created:
+      case BloodTestTimelineEventKind.graceEnds:
+      case BloodTestTimelineEventKind.testTaken:
+        return AdminTestNotificationKind.missingBloodTests;
+    }
+  }
+
+  String _whenText(DateTime fireAt, DateTime now) {
+    if (!fireAt.isAfter(now)) return 'hemen';
+    if (_speed == FeatureTestSpeed.realTime) {
+      return DateFormatter.formatNumericDateTime(fireAt);
+    }
+    return '≈ ${_formatWait(fireAt.difference(now))} sonra';
+  }
+
+  Future<void> _start() async {
+    final AdminNotificationsProvider notifications =
+        Provider.of<AdminNotificationsProvider>(context, listen: false);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final DateTime start = DateTime.now();
+    final List<BloodTestTimelineEvent> events = [
+      for (final BloodTestTimelineEvent event in BloodTestTimelineEvent.plan(
+          createdAt: _createdAt, lastTestDate: _testDate, now: start))
+        if (event.kind.sendsNotification) event,
+    ];
+    setState(() => _busy = true);
+    try {
+      final List<String> planned = [];
+      for (final BloodTestTimelineEvent event in events) {
+        final DateTime fireAt = _speed.realTimeOf(event.at, start);
+        await notifications.addTestNotification(
+          fireAt: fireAt,
+          kind: _kindOf(event.kind),
+          customers: [_subject],
+          testDate: _testDate,
+        );
+        planned.add('${event.kind.label}: ${_whenText(fireAt, start)}');
+      }
+      if (!mounted) return;
+      final String info = '${events.length} deneme bildirimi kuruldu.\n'
+          '${planned.join('\n')}';
+      setState(() => _lastInfo = info);
+      messenger.showSnackBar(SnackBar(
+        content: Text('${events.length} deneme bildirimi kuruldu.'),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      await DialogUtils.openError(
+        context,
+        title: 'Hata',
+        message: 'Bildirimler kurulamadı: $e',
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _removeAll() async {
+    setState(() {
+      _busy = true;
+      _lastInfo = null;
+    });
+    await _removeTestNotifications(context);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime now = DateTime.now();
+    final DateTime today = _today();
+    final DateTime? testDate = _testDate;
+    final Color selectedColor = widget.color.withValues(alpha: 0.16);
+    final List<BloodTestTimelineEvent> events = BloodTestTimelineEvent.plan(
+        createdAt: _createdAt, lastTestDate: testDate, now: now);
+    final BloodTestStatus status = BloodTestStatus.evaluate(
+      customer: _subject,
+      createdAt: _createdAt,
+      hasBloodTest: testDate != null,
+      lastTestDate: testDate,
+      now: now,
+    );
+    final String? lastInfo = _lastInfo;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _ToolHint('Danışan seçtiğiniz tarihte eklenmiş gibi kabul '
+            'edilir; uygulamanın gerçek kurallarıyla zaman çizelgesi '
+            'hesaplanır ve "Başlat" bildirimleri seçtiğiniz hızla kurar. '
+            'Danışanın kaydına dokunulmaz.'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            const Text(
+              'Danışan:',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _chooseCustomer,
+              icon: const Icon(Icons.person_search_outlined, size: 18),
+              label: Text(
+                  _realCustomer?.name ?? 'Sanal: ${_virtualCustomer.name}'),
+            ),
+            if (_realCustomer != null)
+              TextButton(
+                onPressed: () => setState(() => _realCustomer = null),
+                child: const Text('Sanal danışana dön'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        FilterChipGroup<int>(
+          title: 'Eklenme',
+          options: _createdOptions,
+          selectedValue: _createdOffset(today),
+          showAllOption: false,
+          horizontalScroll: false,
+          selectedColor: selectedColor,
+          onSelected: (days) {
+            if (days == null) return;
+            setState(() =>
+                _createdAt = DateTime.now().subtract(Duration(days: days)));
+          },
+        ),
+        TextButton.icon(
+          onPressed: _pickCreatedAt,
+          icon: const Icon(Icons.event_rounded, size: 18),
+          label: Text('Eklenme: '
+              '${DateFormatter.formatNumericDateTime(_createdAt)} · '
+              'başka tarih seç'),
+        ),
+        const SizedBox(height: 4),
+        FilterChipGroup<_TestDateOption>(
+          title: 'Kan tahlili',
+          options: {
+            for (final _TestDateOption option in _TestDateOption.values)
+              option: option.label,
+          },
+          selectedValue: _testOption(today),
+          showAllOption: false,
+          horizontalScroll: false,
+          selectedColor: selectedColor,
+          onSelected: (option) {
+            if (option == null) return;
+            setState(() => _testDate = option.dateFor(today));
+          },
+        ),
+        TextButton.icon(
+          onPressed: _pickTestDate,
+          icon: const Icon(Icons.event_rounded, size: 18),
+          label: Text(testDate == null
+              ? 'Tahlil tarihi seç'
+              : 'Tahlil: ${DateFormatter.formatNumericDate(testDate)} · '
+                  'başka tarih seç'),
+        ),
+        const SizedBox(height: 4),
+        FilterChipGroup<FeatureTestSpeed>(
+          title: 'Hız',
+          options: {
+            for (final FeatureTestSpeed speed in FeatureTestSpeed.values)
+              speed: speed.label,
+          },
+          selectedValue: _speed,
+          showAllOption: false,
+          horizontalScroll: false,
+          selectedColor: selectedColor,
+          onSelected: (speed) {
+            if (speed == null) return;
+            setState(() => _speed = speed);
+          },
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'Zaman çizelgesi',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        for (final BloodTestTimelineEvent event in events)
+          _TimelineRow(
+            event: event,
+            past: !event.at.isAfter(now),
+            color: widget.color,
+            when: event.kind.sendsNotification
+                ? _whenText(_speed.realTimeOf(event.at, now), now)
+                : null,
+          ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: widget.color.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            'Doküman Kontrol\'de bugün: ${status.kind.label}',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: widget.color),
+              onPressed: _busy ? null : _start,
+              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              label: const Text('Başlat'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _removeAll,
+              icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+              label: const Text('Deneme bildirimlerini sil'),
+            ),
+          ],
+        ),
+        if (lastInfo != null) ...[
+          const SizedBox(height: 8),
+          _ToolHint(lastInfo),
+        ],
+      ],
+    );
+  }
+}
+
+class _TimelineRow extends StatelessWidget {
+  const _TimelineRow({
+    required this.event,
+    required this.past,
+    required this.color,
+    required this.when,
+  });
+
+  final BloodTestTimelineEvent event;
+  final bool past;
+  final Color color;
+  final String? when;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? when = this.when;
+    final IconData icon = event.kind.sendsNotification
+        ? Icons.notifications_active_rounded
+        : past
+            ? Icons.check_circle_outline_rounded
+            : Icons.radio_button_unchecked_rounded;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: event.kind.sendsNotification ? color : Colors.grey.shade500,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${event.kind == BloodTestTimelineEventKind.testTaken ? DateFormatter.formatNumericDate(event.at) : DateFormatter.formatNumericDateTime(event.at)} · '
+                  '${event.kind.label}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: event.kind.sendsNotification
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                  ),
+                ),
+                if (when != null)
+                  Text(
+                    'Bildirim: $when',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

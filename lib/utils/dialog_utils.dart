@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'search_text.dart';
+
 class DialogUtils {
   /// Blank lines prefixed to an attention notice so its text does not start
   /// where the eye expects an ordinary dialog body.
@@ -9,11 +11,6 @@ class DialogUtils {
   /// How much larger than the theme's own text an attention notice is drawn.
   static const double _attentionTitleScale = 1.25;
   static const double _attentionMessageScale = 1.45;
-
-  /// Turkish-aware upper case: the default mapping turns "i" into "I" and
-  /// leaves "ı" alone, which reads wrong in Turkish.
-  static String _upperTr(String text) =>
-      text.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
 
   static TextStyle _attentionTitleStyle(BuildContext context) {
     final TextStyle base =
@@ -52,12 +49,12 @@ class DialogUtils {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          _upperTr(title),
+          toUpperTr(title),
           style: _attentionTitleStyle(context),
         ),
         content: SingleChildScrollView(
           child: Text(
-            '$_attentionLeadIn${_upperTr(message)}',
+            '$_attentionLeadIn${toUpperTr(message)}',
             style: _attentionMessageStyle(context),
           ),
         ),
@@ -84,12 +81,12 @@ class DialogUtils {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          _upperTr(title),
+          toUpperTr(title),
           style: _attentionTitleStyle(context),
         ),
         content: SingleChildScrollView(
           child: Text(
-            '$_attentionLeadIn${_upperTr(message)}',
+            '$_attentionLeadIn${toUpperTr(message)}',
             style: _attentionMessageStyle(context),
           ),
         ),
@@ -130,7 +127,7 @@ class DialogUtils {
           final ColorScheme colors = Theme.of(context).colorScheme;
           return AlertDialog(
             title: Text(
-              _upperTr(title),
+              toUpperTr(title),
               style: _attentionTitleStyle(context),
             ),
             content: SingleChildScrollView(
@@ -139,7 +136,7 @@ class DialogUtils {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    '$_attentionLeadIn${_upperTr(message)}',
+                    '$_attentionLeadIn${toUpperTr(message)}',
                     style: _attentionMessageStyle(context),
                   ),
                   for (final (T value, String label) in options)

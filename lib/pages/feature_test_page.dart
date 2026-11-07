@@ -15,6 +15,7 @@ import 'admin_appointments_page.dart';
 import 'admin_chat_page.dart';
 import 'admin_notifications_page.dart';
 import 'danisanlar_ozet_page.dart';
+import 'document_control_page.dart';
 import 'feature_test_tools.dart';
 
 const Color _passedColor = Color(0xFF2E7D32);
@@ -119,6 +120,9 @@ class _FeatureTestPageState extends State<FeatureTestPage> {
         await navigator.push(AdminChatListPage.route());
       case FeatureTestShortcut.openNotifications:
         await openAdminNotificationCenter(context);
+      case FeatureTestShortcut.openDocumentControl:
+        await navigator.push(MaterialPageRoute<void>(
+            builder: (_) => const DocumentControlPage()));
     }
   }
 

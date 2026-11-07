@@ -210,12 +210,22 @@ Kayıtlar Firestore'da `adminNotifications` koleksiyonundadır (yalnızca adminl
 okur/yazar); ana sayfanın sağ üstündeki zilde "Sistem" sekmesinde görünür.
 
 - Henüz düşmemiş olanlar her admin cihazında **yerel bildirim** olarak kurulur
-  (Android, iOS, macOS): uygulama kapalıyken de gelir.
+  (Android, iOS, macOS; en yakın 48 tanesi): uygulama kapalıyken de gelir.
+  Android bu bildirimleri arka planda birkaç dakika geciktirebilir.
 - Uygulama açıkken düşen bildirim **uygulama içi şeritle** gösterilir (Windows
   dahil). iOS/macOS'ta kurulu bildirim uygulama açıkken sistem şeridi olarak
   gösterilmez (yalnızca listeye düşer); Android'de sistem bildirimi gösterir.
-- Günlük tarama günde bir kez, saat 09:00'dan sonra açık olan ilk admin
-  cihazında yapılır (`adminState/bloodTests`).
+- Önceden kurulamayan (anında oluşan) bir bildirim uygulama arka plandayken
+  gelirse Android, iOS ve macOS'ta hemen sistem bildirimi olarak gösterilir
+  (aynı anda birden çoksa tek bildirimde toplanır); Windows'ta uygulama öne
+  gelince şeritle duyurulur. Son 24 saatte düşmüş ve okunmamış olanlar
+  duyurulur.
+- Günlük tarama günde bir kez, saat 09:00'dan sonra uygulaması çalışan ilk
+  admin cihazında yapılır (`adminState/bloodTests`): uygulama 09:00'da
+  çalışıyorsa (arka planda da olsa) o an, değilse açıldıktan yaklaşık 20 saniye
+  sonra. O gün hiçbir admin cihazı açılmazsa liste ilk açılışta oluşur; tarama
+  o anki duruma bakar, atlanan günler için ayrı liste oluşmaz.
+- Oturum kapatılınca o hesabın kurulu bildirimleri cihazdan silinir.
 
 ### Flutter Constants
 **File:** `lib/constants/app_constants.dart`
@@ -230,7 +240,8 @@ Bildirim başlık ve metinleri: `lib/models/admin_notification.dart`
 (`AdminNotification.bloodTestReminderTitle/Body`, `missingBloodTestsTitle/Body`).
 
 ### Services Using These Constants
-- `lib/services/notification_service.dart` (`scheduleAdminNotification`)
+- `lib/services/notification_service.dart` (`scheduleAdminNotification`,
+  `showAdminNotification`)
 - `lib/services/admin_notification_delivery.dart`
 
 ---

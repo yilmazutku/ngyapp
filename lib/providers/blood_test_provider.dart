@@ -5,10 +5,12 @@ import 'package:flutter/widgets.dart';
 
 import '../models/admin_notification.dart';
 import '../models/blood_test_scan.dart';
+import '../models/blood_test_status.dart';
 import '../models/user_model.dart';
 import '../utils/date_formatter.dart';
 import '../utils/search_text.dart';
 import 'admin_notifications_provider.dart';
+import 'test_provider.dart';
 
 class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   BloodTestProvider({
@@ -22,9 +24,11 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   FirebaseFirestore get _db => _dbOverride ?? FirebaseFirestore.instance;
 
-  static const Duration uploadGracePeriod = Duration(days: 7);
+  static const Duration uploadGracePeriod = BloodTestStatus.firstTestGrace;
 
-  static const int dailyScanHour = 9;
+  static const int dailyScanHour = BloodTestStatus.dailyScanHour;
+
+  static const int _checkConcurrency = 16;
 
   static const Duration _startupDelay = Duration(seconds: 20);
 
@@ -74,7 +78,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   }) {
     if (user.role != _customerRole || user.hasBloodTest) return null;
     if (removalRequested || user.isExcludedFromActiveCustomers) return null;
-    return createdAt?.add(uploadGracePeriod) ?? _listedSinceAlways;
+    return BloodTestStatus.firstTestDeadline(createdAt) ?? _listedSinceAlways;
   }
 
   static bool isMissingBloodTest(
@@ -102,12 +106,33 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     return raw is Timestamp ? raw.toDate() : null;
   }
 
+  static List<_CustomerRecord> _recordsOf(
+      QuerySnapshot<Map<String, dynamic>> snapshot) {
+    final List<_CustomerRecord> records = [];
+    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+        in snapshot.docs) {
+      final UserModel user;
+      try {
+        user = UserModel.fromDocument(doc);
+      } catch (e) {
+        continue;
+      }
+      final Map<String, dynamic> data = doc.data();
+      records.add(_CustomerRecord(
+        user: user,
+        createdAt: _createdAtOf(data),
+        removalRequested: data[_removalRequestedField] == true,
+        presenceRecorded: data.containsKey(UserModel.bloodTestPresentField),
+      ));
+    }
+    return records;
+  }
+
   String? _uid;
 
   Object? _owner;
   Timer? _timer;
   bool _scanning = false;
-  bool _inForeground = true;
 
   String? _scannedDay;
 
@@ -117,7 +142,6 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     _stopDailyScan();
     _owner = owner;
     _uid = uid;
-    _inForeground = true;
     WidgetsBinding.instance.addObserver(this);
     _timer = Timer(_startupDelay, _scanIfDue);
   }
@@ -133,12 +157,12 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     _uid = null;
     _owner = null;
     _scannedDay = null;
+    _lastReport = null;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _inForeground = state == AppLifecycleState.resumed;
-    if (_inForeground) _scanIfDue();
+    if (state == AppLifecycleState.resumed) _scanIfDue();
   }
 
   @override
@@ -152,7 +176,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (uid == null || _scanning) return;
     final DateTime now = DateTime.now();
     final String today = DateFormatter.formatIsoDate(now);
-    if (_scannedDay == today || now.hour < dailyScanHour || !_inForeground) {
+    if (_scannedDay == today || now.hour < dailyScanHour) {
       _armTimer();
       return;
     }
@@ -264,26 +288,16 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
         .where(UserModel.bloodTestPresentField, isEqualTo: false)
         .get(const GetOptions(source: Source.server));
-    final List<NotificationCustomer> missing = [];
-    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
-        in snapshot.docs) {
-      final UserModel user;
-      try {
-        user = UserModel.fromDocument(doc);
-      } catch (e) {
-        continue;
-      }
-      final Map<String, dynamic> data = doc.data();
-      if (!isMissingBloodTest(
-        user,
-        createdAt: _createdAtOf(data),
-        removalRequested: data[_removalRequestedField] == true,
-        now: now,
-      )) {
-        continue;
-      }
-      missing.add(_notificationCustomerOf(user));
-    }
+    final List<NotificationCustomer> missing = [
+      for (final _CustomerRecord record in _recordsOf(snapshot))
+        if (isMissingBloodTest(
+          record.user,
+          createdAt: record.createdAt,
+          removalRequested: record.removalRequested,
+          now: now,
+        ))
+          _notificationCustomerOf(record.user),
+    ];
     missing.sort((a, b) => compareSearchText(a.name, b.name));
     return missing;
   }
@@ -295,22 +309,13 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     final List<NotificationCustomer> missing = [];
     final List<BloodTestScanWaiting> waiting = [];
     int unrecordedCount = 0;
-    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
-        in snapshot.docs) {
-      final UserModel user;
-      try {
-        user = UserModel.fromDocument(doc);
-      } catch (e) {
-        continue;
-      }
-      final Map<String, dynamic> data = doc.data();
-      if (!data.containsKey(UserModel.bloodTestPresentField)) {
-        unrecordedCount++;
-      }
+    for (final _CustomerRecord record in _recordsOf(snapshot)) {
+      final UserModel user = record.user;
+      if (!record.presenceRecorded) unrecordedCount++;
       final DateTime? listedFrom = missingBloodTestListedFrom(
         user,
-        createdAt: _createdAtOf(data),
-        removalRequested: data[_removalRequestedField] == true,
+        createdAt: record.createdAt,
+        removalRequested: record.removalRequested,
       );
       if (listedFrom == null) continue;
       if (listedFrom.isAfter(at)) {
@@ -353,4 +358,79 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           initializedAt is Timestamp ? initializedAt.toDate() : null,
     );
   }
+
+  BloodTestReport? _lastReport;
+
+  BloodTestReport? get lastReport => _lastReport;
+
+  Future<BloodTestReport> checkAllCustomers({
+    required DateTime now,
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
+        .where(_roleField, isEqualTo: _customerRole)
+        .get(const GetOptions(source: Source.server));
+    final List<_CustomerRecord> customers = [
+      for (final _CustomerRecord record in _recordsOf(snapshot))
+        if (!record.removalRequested &&
+            !record.user.isExcludedFromActiveCustomers)
+          record,
+    ];
+
+    final List<BloodTestStatus> statuses = [];
+    onProgress?.call(0, customers.length);
+    for (int start = 0;
+        start < customers.length;
+        start += _checkConcurrency) {
+      statuses.addAll(await Future.wait([
+        for (final _CustomerRecord customer
+            in customers.skip(start).take(_checkConcurrency))
+          _statusOf(customer.user, customer.createdAt, now),
+      ]));
+      onProgress?.call(statuses.length, customers.length);
+    }
+    statuses.sort(BloodTestStatus.compare);
+    final BloodTestReport report =
+        BloodTestReport(checkedAt: now, statuses: statuses);
+    _lastReport = report;
+    notifyListeners();
+    return report;
+  }
+
+  Future<BloodTestStatus> _statusOf(
+    UserModel user,
+    DateTime? createdAt,
+    DateTime now,
+  ) async {
+    final QuerySnapshot<Map<String, dynamic>> latest = await _users
+        .doc(user.userId)
+        .collection(TestProvider.testsCollection)
+        .orderBy(TestProvider.bloodTestDateField, descending: true)
+        .limit(1)
+        .get();
+    final Object? raw = latest.docs.isEmpty
+        ? null
+        : latest.docs.first.data()[TestProvider.bloodTestDateField];
+    return BloodTestStatus.evaluate(
+      customer: _notificationCustomerOf(user),
+      createdAt: createdAt,
+      hasBloodTest: user.hasBloodTest,
+      lastTestDate: raw is Timestamp ? raw.toDate() : null,
+      now: now,
+    );
+  }
+}
+
+class _CustomerRecord {
+  const _CustomerRecord({
+    required this.user,
+    required this.createdAt,
+    required this.removalRequested,
+    required this.presenceRecorded,
+  });
+
+  final UserModel user;
+  final DateTime? createdAt;
+  final bool removalRequested;
+  final bool presenceRecorded;
 }

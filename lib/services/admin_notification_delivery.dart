@@ -179,6 +179,7 @@ class AdminNotificationDelivery {
     required DateTime now,
     required bool inForeground,
     required Set<String> becameDueInForeground,
+    bool inBackground = false,
   }) async {
     final String? uid = _uid;
     if (uid == null) return;
@@ -186,6 +187,7 @@ class AdminNotificationDelivery {
     if (_uid != uid) return;
 
     final List<AdminNotification> toShow = [];
+    final List<AdminNotification> toShowOnDevice = [];
     bool changed = false;
     for (final AdminNotification notification in due) {
       if (_announced.containsKey(notification.id)) continue;
@@ -211,12 +213,37 @@ class AdminNotificationDelivery {
 
       if (inForeground) {
         toShow.add(notification);
-        _announced[notification.id] = fireAt;
-        changed = true;
+      } else if (inBackground && _local.isSupported) {
+        toShowOnDevice.add(notification);
+      } else {
+        continue;
       }
+      _announced[notification.id] = fireAt;
+      changed = true;
     }
     if (changed) await _save();
-    if (toShow.isNotEmpty && _uid == uid) _showBanner(toShow);
+    if (_uid != uid) return;
+    if (toShow.isNotEmpty) _showBanner(toShow);
+    if (toShowOnDevice.isEmpty || await _showOnDevice(toShowOnDevice)) return;
+    if (_uid != uid) return;
+    for (final AdminNotification notification in toShowOnDevice) {
+      _announced.remove(notification.id);
+    }
+    await _save();
+  }
+
+  Future<bool> _showOnDevice(List<AdminNotification> notifications) {
+    if (notifications.length == 1) {
+      final AdminNotification only = notifications.single;
+      return _local.showNow(
+          docId: only.id, title: only.title, body: only.body);
+    }
+    return _local.showNow(
+      docId: '',
+      title: '${notifications.length}$_manyTitleSuffix',
+      body: notifications.map((n) => n.title).join(' · '),
+      notificationKey: notifications.map((n) => n.id).join(','),
+    );
   }
 
   void _showBanner(List<AdminNotification> notifications) {
@@ -260,6 +287,13 @@ abstract class AdminNotificationScheduler {
     required DateTime fireAt,
   });
 
+  Future<bool> showNow({
+    required String docId,
+    required String title,
+    required String body,
+    String? notificationKey,
+  });
+
   Future<void> cancel(String docId);
 
   Future<Set<String>> pendingDocIds();
@@ -283,6 +317,20 @@ class _DeviceNotificationScheduler implements AdminNotificationScheduler {
         title: title,
         body: body,
         fireAt: fireAt,
+      );
+
+  @override
+  Future<bool> showNow({
+    required String docId,
+    required String title,
+    required String body,
+    String? notificationKey,
+  }) =>
+      NotificationService().showAdminNotification(
+        docId: docId,
+        title: title,
+        body: body,
+        notificationKey: notificationKey,
       );
 
   @override

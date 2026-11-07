@@ -9,6 +9,7 @@ import '../providers/meal_photo_notifications_provider.dart';
 import '../providers/user_provider.dart';
 import '../utils/date_formatter.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/search_text.dart';
 import '../widgets/count_badge.dart';
 import '../widgets/customer_chip.dart';
 import '../widgets/labeled_action_button.dart';
@@ -959,7 +960,7 @@ class _SectionHeader extends StatelessWidget {
       color: Colors.grey.shade100,
       padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
       child: Text(
-        label.toUpperCase(),
+        toUpperTr(label),
         style: TextStyle(
           fontSize: 11.5,
           letterSpacing: 0.8,
