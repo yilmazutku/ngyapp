@@ -1,15 +1,19 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import '../models/test_attachment.dart';
 import '../utils/storage_upload.dart';
 
 /// Manages Test attachments (PDFs or images)
 /// Storage:  users/{userId}/tests/test_<ts>.<ext>
-/// Firestore: users/{userId}/tests/doc('pdfFiles')/collection('pdfFiles')/{test_<ts>}
+/// Firestore: users/{userId}/tests/{test_<ts>}
 class TestProvider extends ChangeNotifier {
-  static const String isBloodTestField = 'isBloodTest';
-  static const String bloodTestDateField = 'bloodTestDate';
-  static const String bloodTestReminderField = 'bloodTestReminder';
+  TestProvider({FirebaseFirestore? db}) : _dbOverride = db;
+
+  final FirebaseFirestore? _dbOverride;
+
+  FirebaseFirestore get _db => _dbOverride ?? FirebaseFirestore.instance;
+
   static const String testsCollection = 'tests';
 
   /// Upload a test attachment (PDF or image) and write its metadata.
@@ -20,119 +24,81 @@ class TestProvider extends ChangeNotifier {
     required String userId,
     required String fileName,
     required String filePath,
-    DateTime? bloodTestDate,
-    bool bloodTestReminder = false,
+    BloodTestInfo? bloodTest,
   }) async {
-    try {
-      final now = DateTime.now();
-      final ts = now.millisecondsSinceEpoch;
-      final docId = 'test_$ts';
+    final DateTime now = DateTime.now();
+    final int ts = now.millisecondsSinceEpoch;
+    final String docId = 'test_$ts';
 
-      final ext = _inferExtension(fileName); // keeps dotless ext like "pdf"
-      final contentType = _inferContentType(ext); // e.g., application/pdf, image/jpeg
-      final storagePath = 'users/$userId/tests/$docId.$ext';
+    final String ext = _inferExtension(fileName); // keeps dotless ext like "pdf"
+    final String contentType = _inferContentType(ext); // e.g., application/pdf, image/jpeg
+    final String storagePath = 'users/$userId/tests/$docId.$ext';
 
-      // 1) upload to Storage (streamed from disk when a path is available).
-      final ref = FirebaseStorage.instance.ref().child(storagePath);
-      await uploadFileToStorage(
-        ref: ref,
-        metadata: SettableMetadata(contentType: contentType),
-        filePath: filePath,
-      );
-      final downloadUrl = await ref.getDownloadURL();
+    // 1) upload to Storage (streamed from disk when a path is available).
+    final Reference ref = FirebaseStorage.instance.ref().child(storagePath);
+    await uploadFileToStorage(
+      ref: ref,
+      metadata: SettableMetadata(contentType: contentType),
+      filePath: filePath,
+    );
+    final String downloadUrl = await ref.getDownloadURL();
 
-      // 2) write Firestore metadata (kept "pdfFiles" path for backward parity with Tanita)
-      final docRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('tests')
-          .doc(docId);
+    // 2) write Firestore metadata (field names kept for compatibility)
+    await _testsOf(userId).doc(docId).set({
+      TestAttachment.urlField: downloadUrl,
+      TestAttachment.fileNameField: fileName,
+      TestAttachment.uploadTimeField: FieldValue.serverTimestamp(),
+      TestAttachment.storagePathField: storagePath,
+      TestAttachment.contentTypeField: contentType,
+      TestAttachment.isImageField: contentType.startsWith('image/'),
+      TestAttachment.extField: ext,
+      ..._categoryFields(bloodTest),
+    });
 
-      final isImage = contentType.startsWith('image/');
-
-      await docRef.set({
-        'pdfUrl': downloadUrl,          // field name kept for compatibility
-        'fileName': fileName,
-        'uploadTime': FieldValue.serverTimestamp(),
-        'storagePath': storagePath,
-        'contentType': contentType,
-        'isImage': isImage,
-        'ext': ext,
-        if (bloodTestDate != null) ...{
-          isBloodTestField: true,
-          bloodTestDateField: Timestamp.fromDate(DateTime(
-              bloodTestDate.year, bloodTestDate.month, bloodTestDate.day)),
-          bloodTestReminderField: bloodTestReminder,
-        },
-      });
-
-      notifyListeners();
-    } catch (e) {
-      rethrow;
-    }
+    notifyListeners();
   }
 
-  /// List attachments metadata
-  Future<List<Map<String, dynamic>>> fetchTestAttachmentMetadata(String userId) async {
-    try {
-      final qs = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('tests')
-          .orderBy('uploadTime', descending: true)
-          .get();
+  Future<List<TestAttachment>> fetchTestAttachments(String userId) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _testsOf(userId)
+        .orderBy(TestAttachment.uploadTimeField, descending: true)
+        .get();
+    return [
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs)
+        TestAttachment.fromMap(doc.id, doc.data()),
+    ];
+  }
 
-      return qs.docs.map((d) {
-        final data = d.data();
-        return {
-          'docId': d.id,
-          'pdfUrl': data['pdfUrl'],
-          'fileName': data['fileName'],
-          'uploadTime': data['uploadTime'],
-          'storagePath': data['storagePath'] ?? '',
-          'contentType': data['contentType'] ?? '',
-          'isImage': data['isImage'] ?? false,
-          'ext': data['ext'] ?? '',
-          isBloodTestField: data[isBloodTestField] == true,
-          bloodTestDateField: data[bloodTestDateField],
-          bloodTestReminderField: data[bloodTestReminderField] == true,
-        };
-      }).toList();
-    } catch (e) {
-      return [];
+  Future<void> updateDocumentCategory({
+    required String userId,
+    required List<String> docIds,
+    BloodTestInfo? bloodTest,
+  }) async {
+    final WriteBatch batch = _db.batch();
+    for (final String docId in docIds) {
+      batch.update(_testsOf(userId).doc(docId), {
+        ..._categoryFields(bloodTest),
+        if (bloodTest == null) ...{
+          TestAttachment.bloodTestDateField: FieldValue.delete(),
+          TestAttachment.bloodTestReminderField: FieldValue.delete(),
+        },
+      });
     }
+    await batch.commit();
+    notifyListeners();
+  }
+
+  static Map<String, Object> _categoryFields(BloodTestInfo? bloodTest) {
+    if (bloodTest == null) return {TestAttachment.isBloodTestField: false};
+    return {
+      TestAttachment.isBloodTestField: true,
+      TestAttachment.bloodTestDateField: Timestamp.fromDate(bloodTest.testDate),
+      TestAttachment.bloodTestReminderField: bloodTest.wantsReminder,
+    };
   }
 
   CollectionReference<Map<String, dynamic>> _testsOf(String userId) =>
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection(testsCollection);
-
-  static Timestamp _dayOf(DateTime date) =>
-      Timestamp.fromDate(DateTime(date.year, date.month, date.day));
-
-  Future<bool> hasBloodTestOn({
-    required String userId,
-    required DateTime testDate,
-  }) async {
-    final QuerySnapshot<Map<String, dynamic>> snapshot = await _testsOf(userId)
-        .where(bloodTestDateField, isEqualTo: _dayOf(testDate))
-        .limit(1)
-        .get();
-    return snapshot.docs.isNotEmpty;
-  }
-
-  Future<bool> hasBloodTestAfter({
-    required String userId,
-    required DateTime testDate,
-  }) async {
-    final QuerySnapshot<Map<String, dynamic>> snapshot = await _testsOf(userId)
-        .where(bloodTestDateField, isGreaterThan: _dayOf(testDate))
-        .limit(1)
-        .get();
-    return snapshot.docs.isNotEmpty;
-  }
+      _db.collection('users').doc(userId).collection(testsCollection);
 
   /// Delete attachment: removes Firestore doc and Storage blob
   Future<void> deleteTestAttachment({
@@ -140,23 +106,11 @@ class TestProvider extends ChangeNotifier {
     required String docId,
     required String storagePath,
   }) async {
-    try {
-      if (storagePath.isNotEmpty) {
-        await FirebaseStorage.instance.ref().child(storagePath).delete();
-      }
-
-      final docRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('tests')
-          .doc(docId);
-
-      await docRef.delete();
-
-      notifyListeners();
-    } catch (e) {
-      rethrow;
+    if (storagePath.isNotEmpty) {
+      await FirebaseStorage.instance.ref().child(storagePath).delete();
     }
+    await _testsOf(userId).doc(docId).delete();
+    notifyListeners();
   }
 
   // -------- helpers (no extra deps) --------

@@ -82,19 +82,36 @@ void main() {
     return DateTime(now.year, now.month, now.day - days);
   }
 
+  Future<BloodTestReminderSync> sync(
+    Map<DateTime, bool> testDates, {
+    String userId = customer,
+    String userName = 'Ayşe Yılmaz',
+  }) =>
+      provider.syncBloodTestReminders(
+        userId: userId,
+        userName: userName,
+        testDates: testDates,
+      );
+
+  Future<List<String>> ids() async =>
+      [
+        for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+            in (await notifications().get()).docs)
+          doc.id,
+      ];
+
+  String reminderId(DateTime testDate, BloodTestReminderStage stage) =>
+      AdminNotification.bloodTestReminderId(customer, testDate, stage);
+
   group('kan tahlili hatırlatmaları', () {
     test('iki hatırlatma kurulur', () async {
       final DateTime testDate = daysAgo(10);
-      await provider.addBloodTestReminders(
-        userId: customer,
-        userName: 'Ayşe Yılmaz',
-        testDate: testDate,
-      );
+      await sync({testDate: true});
 
       for (final BloodTestReminderStage stage
           in BloodTestReminderStage.values) {
-        final Map<String, dynamic>? data = await docData(
-            AdminNotification.bloodTestReminderId(customer, testDate, stage));
+        final Map<String, dynamic>? data =
+            await docData(reminderId(testDate, stage));
         expect(data, isNotNull, reason: '$stage');
         expect(data![AdminNotification.typeField],
             AdminNotificationType.bloodTestReminder.value);
@@ -106,65 +123,151 @@ void main() {
       }
     });
 
+    test('saatli tarih güne yuvarlanır', () async {
+      final DateTime testDate = daysAgo(10);
+      final BloodTestReminderSync result = await sync({
+        testDate.add(const Duration(hours: 15, minutes: 30)): true,
+      });
+      expect(result.remindFor, testDate);
+      expect(await ids(), hasLength(2));
+      expect(await docData(reminderId(testDate, BloodTestReminderStage.dueDay)),
+          isNotNull);
+    });
+
     test('aynı tarihin tahlili yeniden yüklenince hatırlatma çoğalmaz, '
         'okundu bilgisi korunur', () async {
       final DateTime testDate = daysAgo(10);
-      final String id = AdminNotification.bloodTestReminderId(
-          customer, testDate, BloodTestReminderStage.dueDay);
-      await provider.addBloodTestReminders(
-          userId: customer, userName: 'Ayşe', testDate: testDate);
+      final String id = reminderId(testDate, BloodTestReminderStage.dueDay);
+      await sync({testDate: true});
       await notifications().doc(id).update({'readBy.$admin': Timestamp.now()});
 
-      await provider.addBloodTestReminders(
-          userId: customer, userName: 'Ayşe', testDate: testDate);
+      await sync({testDate: true});
 
       final Map<String, dynamic>? data = await docData(id);
       expect((data![AdminNotification.readByField] as Map).keys, [admin]);
-      expect((await notifications().get()).docs, hasLength(2));
+      expect(await ids(), hasLength(2));
+    });
+
+    test('hatırlatmalar bir kez yazılır; yazılan sayı döner', () async {
+      final DateTime testDate = daysAgo(10);
+      expect((await sync({testDate: true})).written, 2);
+      expect((await sync({testDate: true})).written, 0);
     });
 
     test('yeni tahlil eski tahlilin bekleyen hatırlatmalarını siler, '
         'düşmüş olanlara dokunmaz', () async {
+      final DateTime oldest = daysAgo(200);
       final DateTime oldTest = daysAgo(40);
-      await provider.addBloodTestReminders(
-          userId: customer, userName: 'Ayşe', testDate: oldTest);
-      await notifications().doc('fired').set({
-        AdminNotification.typeField:
-            AdminNotificationType.bloodTestReminder.value,
-        AdminNotification.fireAtField:
-            Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 1))),
-        AdminNotification.userIdField: customer,
-        AdminNotification.testDateField: Timestamp.fromDate(daysAgo(200)),
-      });
+      await sync({oldest: true});
+      final String fired =
+          reminderId(oldest, BloodTestReminderStage.dueDay);
+      expect(await ids(), [fired]);
+      await sync({oldest: true, oldTest: true});
 
       final DateTime newTest = daysAgo(2);
-      await provider.addBloodTestReminders(
-          userId: customer, userName: 'Ayşe', testDate: newTest);
+      final BloodTestReminderSync result =
+          await sync({oldest: true, oldTest: true, newTest: true});
 
-      final List<String> ids =
-          (await notifications().get()).docs.map((d) => d.id).toList();
-      expect(ids, contains('fired'));
+      expect(result.latestTestDate, newTest);
+      expect(result.remindFor, newTest);
+      expect(result.removed, 2);
+      final List<String> left = await ids();
+      expect(left, contains(fired));
       for (final BloodTestReminderStage stage
           in BloodTestReminderStage.values) {
-        expect(ids,
-            contains(AdminNotification.bloodTestReminderId(customer, newTest, stage)));
-        expect(ids,
-            isNot(contains(AdminNotification.bloodTestReminderId(customer, oldTest, stage))));
+        expect(left, contains(reminderId(newTest, stage)));
+        expect(left, isNot(contains(reminderId(oldTest, stage))));
       }
     });
 
-    test('tahlilin hatırlatmaları silinir', () async {
+    test('dosyası kalmayan tarihin hatırlatmaları, düşmüş olsa da silinir',
+        () async {
+      final DateTime wrongDate = daysAgo(200);
+      await sync({wrongDate: true});
+      expect(await ids(), [reminderId(wrongDate, BloodTestReminderStage.dueDay)]);
+
+      final DateTime corrected = daysAgo(30);
+      final BloodTestReminderSync result = await sync({corrected: true});
+
+      expect(result.removed, 1);
+      expect(await ids(), unorderedEquals([
+        for (final BloodTestReminderStage stage
+            in BloodTestReminderStage.values)
+          reminderId(corrected, stage),
+      ]));
+    });
+
+    test('en yeni tahlil kaldırılınca önceki tahlilin hatırlatmaları '
+        'yeniden kurulur', () async {
+      final DateTime previous = daysAgo(40);
+      final DateTime wrong = daysAgo(5);
+      await sync({previous: true});
+      await sync({previous: true, wrong: true});
+      expect(await docData(reminderId(previous, BloodTestReminderStage.dueDay)),
+          isNull);
+
+      final BloodTestReminderSync result = await sync({previous: true});
+
+      expect(result.remindFor, previous);
+      expect(result.written, 2);
+      expect(await ids(), unorderedEquals([
+        for (final BloodTestReminderStage stage
+            in BloodTestReminderStage.values)
+          reminderId(previous, stage),
+      ]));
+    });
+
+    test('en yeni tahlilde hatırlatma istenmezse bekleyenler silinir, '
+        'düşmüş olan kalır', () async {
+      final DateTime expired = daysAgo(120);
+      final DateTime latest = daysAgo(10);
+      await sync({expired: true});
+      await sync({expired: true, latest: true});
+
+      final BloodTestReminderSync result =
+          await sync({expired: true, latest: false});
+
+      expect(result.latestTestDate, latest);
+      expect(result.remindFor, isNull);
+      expect(result.written, 0);
+      expect(await ids(), [reminderId(expired, BloodTestReminderStage.dueDay)]);
+    });
+
+    test('aynı tarihin dosyalarından biri hatırlatma isterse kurulur', () async {
       final DateTime testDate = daysAgo(10);
-      await provider.addBloodTestReminders(
-          userId: customer, userName: 'Ayşe', testDate: testDate);
-      await provider.removeBloodTestReminders(
-          userId: customer, testDate: testDate);
-      expect((await notifications().get()).docs, isEmpty);
+      final BloodTestReminderSync result = await sync({
+        testDate: false,
+        testDate.add(const Duration(hours: 1)): true,
+      });
+      expect(result.remindFor, testDate);
+      expect(result.written, 2);
+    });
+
+    test('kan tahlili kalmayınca hepsi silinir', () async {
+      await sync({daysAgo(10): true});
+      final BloodTestReminderSync result = await sync({});
+      expect(result.hasBloodTests, isFalse);
+      expect(result.removed, 2);
+      expect(await ids(), isEmpty);
+    });
+
+    test('başka danışanın ve simülatörün hatırlatmalarına dokunmaz', () async {
+      await sync({daysAgo(10): true}, userId: 'baska', userName: 'Can Ak');
+      await provider.addTestNotification(
+        fireAt: DateTime.now().add(const Duration(minutes: 5)),
+        kind: AdminTestNotificationKind.bloodTestDueDay,
+        customers: const [
+          NotificationCustomer(userId: customer, name: 'Ayşe Yılmaz'),
+        ],
+      );
+
+      await sync({});
+
+      expect(await ids(), hasLength(3));
     });
 
     test('silinen danışanın yalnızca bekleyen hatırlatmaları silinir', () async {
-      await provider.addBloodTestReminders(
-          userId: customer, userName: 'Ayşe', testDate: daysAgo(10));
+      await sync({daysAgo(10): true});
       await notifications().doc('fired').set({
         AdminNotification.typeField:
             AdminNotificationType.bloodTestReminder.value,
@@ -175,71 +278,14 @@ void main() {
 
       await provider.removePendingNotificationsOfUser(customer);
 
-      expect((await notifications().get()).docs.map((d) => d.id), ['fired']);
+      expect(await ids(), ['fired']);
     });
-  });
-
-  test('daha yeni tahlil, eski tahlillerin bekleyen hatırlatmalarını kaldırır',
-      () async {
-    final DateTime now = DateTime.now();
-    await provider.addBloodTestReminders(
-      userId: customer,
-      userName: 'Ayşe Yılmaz',
-      testDate: daysAgo(10),
-    );
-    await provider.addBloodTestReminders(
-      userId: customer,
-      userName: 'Ayşe Yılmaz',
-      testDate: daysAgo(120),
-    );
-    await provider.removePendingBloodTestRemindersBefore(
-      userId: customer,
-      testDate: now,
-    );
-
-    final List<String> left = [
-      for (final doc in (await notifications().get()).docs) doc.id,
-    ];
-    expect(left, [
-      AdminNotification.bloodTestReminderId(
-          customer, daysAgo(120), BloodTestReminderStage.dueDay),
-    ]);
-  });
-
-  test('hatırlatmalar bir kez yazılır; yazılan sayı döner', () async {
-    final DateTime testDate = daysAgo(10);
-    expect(
-        await provider.addBloodTestReminders(
-            userId: customer, userName: 'Ayşe Yılmaz', testDate: testDate),
-        2);
-    expect(
-        await provider.addBloodTestReminders(
-            userId: customer, userName: 'Ayşe Yılmaz', testDate: testDate),
-        0);
-  });
-
-  test('eski hatırlatmaları temizlemek simülatörün denemelerine dokunmaz',
-      () async {
-    await provider.addTestNotification(
-      fireAt: DateTime.now().add(const Duration(minutes: 5)),
-      kind: AdminTestNotificationKind.bloodTestDueDay,
-      customers: const [
-        NotificationCustomer(userId: customer, name: 'Ayşe Yılmaz'),
-      ],
-    );
-    await provider.removePendingBloodTestRemindersBefore(
-      userId: customer,
-      testDate: DateTime.now(),
-    );
-    expect((await notifications().get()).docs, hasLength(1));
   });
 
   test('danışanın hatırlatmaları zamanına göre listelenir', () async {
     final DateTime testDate = daysAgo(10);
-    await provider.addBloodTestReminders(
-        userId: customer, userName: 'Ayşe Yılmaz', testDate: testDate);
-    await provider.addBloodTestReminders(
-        userId: 'baska', userName: 'Can Ak', testDate: testDate);
+    await sync({testDate: true});
+    await sync({testDate: true}, userId: 'baska', userName: 'Can Ak');
 
     final List<AdminNotification> reminders =
         await provider.remindersOf(customer).first;

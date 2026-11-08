@@ -415,25 +415,77 @@ class AdminNotificationsProvider extends ChangeNotifier
 
   static const int _batchLimit = 450;
 
-  Future<int> addBloodTestReminders({
+  Future<BloodTestReminderSync> syncBloodTestReminders({
+    required String userId,
+    required String userName,
+    required Map<DateTime, bool> testDates,
+  }) async {
+    final DateTime now = DateTime.now();
+    final Map<DateTime, bool> days = {};
+    testDates.forEach((DateTime date, bool wantsReminder) {
+      final DateTime day = _dayOf(date);
+      days[day] = (days[day] ?? false) || wantsReminder;
+    });
+    DateTime? latest;
+    for (final DateTime day in days.keys) {
+      if (latest == null || day.isAfter(latest)) latest = day;
+    }
+    final DateTime? remindFor =
+        latest != null && days[latest] == true ? latest : null;
+
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _collection
+        .where(AdminNotification.userIdField, isEqualTo: userId)
+        .get();
+    final List<DocumentReference<Map<String, dynamic>>> stale = [];
+    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+        in snapshot.docs) {
+      final AdminNotification? n = AdminNotification.fromDocument(doc);
+      final DateTime? reminderTestDate = n?.testDate;
+      if (n == null ||
+          n.isTest ||
+          n.type != AdminNotificationType.bloodTestReminder ||
+          reminderTestDate == null) {
+        continue;
+      }
+      final DateTime day = _dayOf(reminderTestDate);
+      if (!days.containsKey(day) || (day != remindFor && !n.isDueAt(now))) {
+        stale.add(doc.reference);
+      }
+    }
+    await _deleteAll(stale);
+
+    final int written = remindFor == null
+        ? 0
+        : await _writeBloodTestReminders(
+            userId: userId,
+            userName: userName,
+            testDate: remindFor,
+            now: now,
+          );
+    return BloodTestReminderSync(
+      latestTestDate: latest,
+      remindFor: remindFor,
+      written: written,
+      removed: stale.length,
+    );
+  }
+
+  static DateTime _dayOf(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
+
+  Future<int> _writeBloodTestReminders({
     required String userId,
     required String userName,
     required DateTime testDate,
+    required DateTime now,
   }) async {
-    final DateTime now = DateTime.now();
-    final DateTime day = DateTime(testDate.year, testDate.month, testDate.day);
-    await removePendingBloodTestRemindersBefore(userId: userId, testDate: day);
-
-    final Map<BloodTestReminderStage, DateTime> plan =
-        BloodTestReminderSchedule.plan(day, now);
     final WriteBatch batch = _db.batch();
     int written = 0;
     for (final MapEntry<BloodTestReminderStage, DateTime> entry
-        in plan.entries) {
+        in BloodTestReminderSchedule.plan(testDate, now).entries) {
       final BloodTestReminderStage stage = entry.key;
-      final DateTime fireAt = entry.value;
       final DocumentReference<Map<String, dynamic>> ref = _collection
-          .doc(AdminNotification.bloodTestReminderId(userId, day, stage));
+          .doc(AdminNotification.bloodTestReminderId(userId, testDate, stage));
       if ((await ref.get()).exists) continue;
       written++;
       batch.set(ref, {
@@ -442,11 +494,11 @@ class AdminNotificationsProvider extends ChangeNotifier
         AdminNotification.titleField:
             AdminNotification.bloodTestReminderTitle(stage),
         AdminNotification.bodyField:
-            AdminNotification.bloodTestReminderBody(userName, day, stage),
-        AdminNotification.fireAtField: Timestamp.fromDate(fireAt),
+            AdminNotification.bloodTestReminderBody(userName, testDate, stage),
+        AdminNotification.fireAtField: Timestamp.fromDate(entry.value),
         AdminNotification.userIdField: userId,
         AdminNotification.userNameField: userName,
-        AdminNotification.testDateField: Timestamp.fromDate(day),
+        AdminNotification.testDateField: Timestamp.fromDate(testDate),
         AdminNotification.stageField: stage.value,
         AdminNotification.createdAtField: FieldValue.serverTimestamp(),
         AdminNotification.createdByField: _currentUid,
@@ -471,45 +523,6 @@ class AdminNotificationsProvider extends ChangeNotifier
       }
       return reminders..sort((a, b) => a.fireAt.compareTo(b.fireAt));
     });
-  }
-
-  Future<void> removeBloodTestReminders({
-    required String userId,
-    required DateTime testDate,
-  }) async {
-    final WriteBatch batch = _db.batch();
-    for (final BloodTestReminderStage stage in BloodTestReminderStage.values) {
-      batch.delete(_collection.doc(AdminNotification.bloodTestReminderId(
-          userId, DateTime(testDate.year, testDate.month, testDate.day), stage)));
-    }
-    await batch.commit();
-  }
-
-  Future<void> removePendingBloodTestRemindersBefore({
-    required String userId,
-    required DateTime testDate,
-  }) async {
-    final DateTime now = DateTime.now();
-    final DateTime day = DateTime(testDate.year, testDate.month, testDate.day);
-    final QuerySnapshot<Map<String, dynamic>> snapshot = await _collection
-        .where(AdminNotification.userIdField, isEqualTo: userId)
-        .get();
-    final List<DocumentReference<Map<String, dynamic>>> stale = [];
-    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
-        in snapshot.docs) {
-      final AdminNotification? n = AdminNotification.fromDocument(doc);
-      final DateTime? reminderTestDate = n?.testDate;
-      if (n == null ||
-          n.isTest ||
-          n.type != AdminNotificationType.bloodTestReminder ||
-          reminderTestDate == null) {
-        continue;
-      }
-      if (reminderTestDate.isBefore(day) && !n.isDueAt(now)) {
-        stale.add(doc.reference);
-      }
-    }
-    await _deleteAll(stale);
   }
 
   Future<void> removePendingNotificationsOfUser(String userId) async {
