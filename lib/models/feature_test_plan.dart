@@ -190,19 +190,44 @@ const List<FeatureTestSection> featureTestSections = [
   ),
   FeatureTestSection(
     id: 'kan',
-    title: 'Kan Tahlili Yükleme ve Hatırlatma',
+    title: 'Dokümanlar: Kan Tahlili ve Hatırlatma',
     icon: Icons.bloodtype_outlined,
     color: Color(0xFFE53935),
     steps: [
       FeatureTestStep(
+        'dok.sekme',
+        'Daha önce doküman yüklenmiş bir danışanın Dokümanlar sekmesini açın.',
+        'Üstte "Kan Tahlili (N)" ve "Diğer (N)" sekmeleri vardır. Kan tahlili sorusundan önce yüklenen bütün dokümanlar Diğer\'dedir; Diğer\'in başında "N dokümanın türü belirtilmemiş" notu, Kan Tahlili boşsa oraya yönlendiren "Diğer sekmesine git" düğmesi görünür.',
+      ),
+      FeatureTestStep(
+        'dok.kalem',
+        'Bir satırın en sağındaki kalem simgesinin üzerine gelin (telefonda basılı tutun).',
+        '"Düzenle" yazısı çıkar; kalem, Sil düğmesinin sağındadır.',
+      ),
+      FeatureTestStep(
+        'dok.evet',
+        'Diğer\'deki eski bir kan tahlilinin kalemine basın ve "Bu bir kan tahlili mi?" sorusunda "Evet"i seçin.',
+        '"Tahlilin Yapıldığı Tarih" kırmızı "Tarih seçin" olarak görünür; tarih seçilmeden "Kan Tahlili\'ne Taşı" düğmesi pasiftir. Altında 3 aylık takibin bu tarihe göre hesaplandığı, yükleme gününün kullanılmadığı yazar.',
+      ),
+      FeatureTestStep(
+        'dok.tasi',
+        'Tahlilin gerçekte yapıldığı tarihi (ör. 1 ay önce) seçip "Kan Tahlili\'ne Taşı"ya basın.',
+        'Bilgi mesajı dosyanın taşındığını ve hatırlatma gününü yazar; dosya Diğer\'den kalkar, Kan Tahlili\'nde "Tahlil tarihi" ve "Hatırlatma" rozetleriyle görünür; sekme sayıları değişir; Detay\'daki kan değerleri kartı "Evet" olur.',
+      ),
+      FeatureTestStep(
+        'dok.hayir',
+        'Diğer\'de kan tahlili olmayan eski bir dokümanın kalemine basıp "Hayır"ı seçin ve Kaydet\'e basın.',
+        'Doküman Diğer\'de kalır; "türü belirtilmemiş" notundaki sayı bir azalır (hepsi seçilince not kalkar).',
+      ),
+      FeatureTestStep(
         'kan.sec',
-        'Bir danışanın Dokümanlar sekmesinde "Tahlil Ekle" ile bir veya birkaç dosya seçin.',
-        '"Doküman Yükle" penceresi açılır ve seçilen dosyaları listeler.',
+        'Kan Tahlili sekmesinde "Kan Tahlili Yükle" ile bir veya birkaç dosya seçin.',
+        '"Kan Tahlili Yükle" penceresi dosyaları listeler; "Bu bir kan tahlili mi?" sorulmaz; tarih seçilmeden Yükle pasiftir; danışanın kayıtlı tahlil tarihleri tek dokunuşla seçilebilen çipler olarak görünür.',
       ),
       FeatureTestStep(
         'kan.isaret',
-        '"Bu bir kan tahlili mi?" kutusunu işaretleyin.',
-        'Tahlil tarihi ve "3 ay sonra hatırlatıcı istiyor musunuz?" seçenekleri açılır; hatırlatmaların günü ve saati yazar (3 ay dolmadan 1 gün önce ve 3 ayın dolduğu gün, 09:00).',
+        'Tarihi seçin ve "3 ay sonra hatırlatıcı istiyor musunuz?" kutusuna bakın.',
+        'Kutu işaretli gelir; hatırlatmaların günü ve saati yazar (3 ay dolmadan 1 gün önce ve 3 ayın dolduğu gün, 09:00).',
       ),
       FeatureTestStep(
         'kan.hesap',
@@ -217,7 +242,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'kan.yukle',
         'Yükle\'ye basın.',
-        'Bilgi mesajında tahlil tarihi ve hatırlatma günü yazar; listede "Kan tahlili" ve "Hatırlatma" rozetleri görünür; aşağıdaki "Bekleyen hatırlatmalar"da danışan seçilince iki "Bekliyor" hatırlatma (1 gün kala ve 3 ay doldu) görünür.',
+        'Bilgi mesajında tahlil tarihi ve hatırlatma günü yazar; listede "Tahlil tarihi" ve "Hatırlatma" rozetleri görünür; aşağıdaki "Bekleyen hatırlatmalar"da danışan seçilince iki "Bekliyor" hatırlatma (1 gün kala ve 3 ay doldu) görünür.',
       ),
       FeatureTestStep(
         'kan.detay',
@@ -225,9 +250,14 @@ const List<FeatureTestSection> featureTestSections = [
         '"Danışanın kan değerleri dokümanı mevcut mu?" kartında "Evet" seçilidir.',
       ),
       FeatureTestStep(
+        'dok.tarih',
+        'Hatırlatmalı bir tahlilin kalemine basıp tarihini değiştirin ve Kaydet\'e basın (birlikte yüklenen birden çok dosyası olan bir tahlille deneyin).',
+        'Pencerede "Aynı tarihli diğer N dosyaya da uygula" işaretli gelir; kaydedince bütün sayfalar yeni tarihe geçer; "Bekleyen hatırlatmalar"da eski tarihin hatırlatmaları kalkar, yeni tarihinkiler görünür.',
+      ),
+      FeatureTestStep(
         'kan.eskiyukle',
-        'Aynı danışana, bu tahlilden daha eski tarihli bir kan tahlilini hatırlatıcı açık yükleyin.',
-        'Bilgi mesajı, daha yeni tarihli tahlil olduğu için 3 ay hatırlatmasının kurulmadığını söyler; bekleyen hatırlatmalar değişmez.',
+        'Aynı danışana, en yeni tahlilden daha eski tarihli bir kan tahlilini hatırlatıcı açık yükleyin.',
+        'Bilgi mesajı, daha yeni tarihli tahlil olduğu için 3 ay hatırlatmasının kurulmadığını söyler; bekleyen hatırlatmalar değişmez; eski tahlilin satırında "Hatırlatma" rozeti çıkmaz (rozet yalnızca en yeni tahlilde görünür).',
       ),
       FeatureTestStep(
         'kan.yeniyukle',
@@ -237,17 +267,27 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'kan.eski',
         'Kan tahlili olmayan bir danışana, tarihi 3 aydan eski (ör. 4 ay önce) bir kan tahlilini hatırlatıcı açık yükleyin.',
-        'Pencerede "üzerinden 3 ay geçmiş" uyarısı çıkar; yükleyince zilin Sistem sekmesine "Kan tahlilinin üzerinden 3 ay geçti" hemen düşer.',
+        'Pencerede "üzerinden 3 ay geçmiş" uyarısı çıkar; yükleyince zilin Sistem sekmesine "Kan tahlilinin üzerinden 3 ay geçti" hemen düşer; satırda turuncu "3 ay doldu" rozeti görünür.',
       ),
       FeatureTestStep(
         'kan.normal',
-        'Kutuyu işaretlemeden normal bir doküman yükleyin.',
-        'Rozet çıkmaz, hatırlatma kurulmaz.',
+        'Diğer sekmesinde "Doküman Yükle" ile bir dosya yükleyin.',
+        'Hiçbir soru sorulmadan yüklenir; Diğer\'de rozetsiz görünür, hatırlatma kurulmaz.',
+      ),
+      FeatureTestStep(
+        'dok.geri',
+        'İki kan tahlili olan bir danışanda en yeni tahlilin kalemine basın, "Hayır"ı seçip "Diğer\'e Taşı"ya basın.',
+        'Dosya Diğer\'e geçer ve tahlil tarihi silinir; bilgi mesajı en yeni tahlilin artık bir önceki olduğunu ve 3 ay hatırlatmasının ona göre kurulduğunu söyler; Doküman Kontrol bu danışanı önceki tahlilin tarihiyle gösterir.',
       ),
       FeatureTestStep(
         'kan.sil',
         'Hatırlatmalı bir kan tahlili dosyasını silin.',
-        'Onay mesajı hatırlatmanın da kalkacağını söyler; o tarihin başka dosyası kalmadıysa hatırlatmaları "Bekleyen hatırlatmalar"dan (danışan seçiliyken) kalkar.',
+        'O tarihin başka dosyası yoksa onay mesajı hatırlatmanın da kalkacağını söyler; silince hatırlatmaları "Bekleyen hatırlatmalar"dan (danışan seçiliyken) kalkar.',
+      ),
+      FeatureTestStep(
+        'dok.son',
+        'Danışanın son kan tahlilini silin ya da Diğer\'e taşıyın.',
+        '"Kan Tahlili Kalmadı" sorusu çıkar; "Hayır" olarak işaretlenirse Detay\'daki kart "Hayır" olur, "Evet" kalsın denirse değişmez.',
       ),
     ],
     shortcuts: [

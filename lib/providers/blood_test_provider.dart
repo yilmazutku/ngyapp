@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import '../models/admin_notification.dart';
 import '../models/blood_test_scan.dart';
 import '../models/blood_test_status.dart';
+import '../models/test_attachment.dart';
 import '../models/user_model.dart';
 import '../utils/date_formatter.dart';
 import '../utils/search_text.dart';
@@ -67,6 +68,41 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     await _users.doc(userId).update({UserModel.bloodTestPresentField: present});
     _savedPresence[userId] = present;
     notifyListeners();
+  }
+
+  Future<bool> fetchBloodTestPresent(String userId) async {
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await _users.doc(userId).get();
+    return snapshot.data()?[UserModel.bloodTestPresentField] == true;
+  }
+
+  Future<BloodTestReminderSync> syncReminders({
+    required String userId,
+    required String userName,
+  }) async {
+    final BloodTestReminderSync sync =
+        await _notifications.syncBloodTestReminders(
+      userId: userId,
+      userName: userName,
+      testDates: TestAttachment.reminderWishesOf(await _bloodTestsOf(userId)),
+    );
+    if (sync.hasBloodTests) {
+      await setBloodTestPresent(userId: userId, present: true);
+    }
+    return sync;
+  }
+
+  Future<List<TestAttachment>> _bloodTestsOf(String userId) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
+        .doc(userId)
+        .collection(TestProvider.testsCollection)
+        .where(TestAttachment.isBloodTestField, isEqualTo: true)
+        .get();
+    return [
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs)
+        TestAttachment.fromMap(doc.id, doc.data()),
+    ];
   }
 
   static final DateTime _listedSinceAlways = DateTime.utc(1970);
@@ -402,20 +438,12 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     DateTime? createdAt,
     DateTime now,
   ) async {
-    final QuerySnapshot<Map<String, dynamic>> latest = await _users
-        .doc(user.userId)
-        .collection(TestProvider.testsCollection)
-        .orderBy(TestProvider.bloodTestDateField, descending: true)
-        .limit(1)
-        .get();
-    final Object? raw = latest.docs.isEmpty
-        ? null
-        : latest.docs.first.data()[TestProvider.bloodTestDateField];
     return BloodTestStatus.evaluate(
       customer: _notificationCustomerOf(user),
       createdAt: createdAt,
       hasBloodTest: user.hasBloodTest,
-      lastTestDate: raw is Timestamp ? raw.toDate() : null,
+      lastTestDate:
+          TestAttachment.latestTestDate(await _bloodTestsOf(user.userId)),
       now: now,
     );
   }

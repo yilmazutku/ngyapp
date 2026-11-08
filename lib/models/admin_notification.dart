@@ -121,6 +121,22 @@ class BloodTestReminderSchedule {
   }
 }
 
+class BloodTestReminderSync {
+  const BloodTestReminderSync({
+    required this.latestTestDate,
+    required this.remindFor,
+    required this.written,
+    required this.removed,
+  });
+
+  final DateTime? latestTestDate;
+  final DateTime? remindFor;
+  final int written;
+  final int removed;
+
+  bool get hasBloodTests => latestTestDate != null;
+}
+
 class AdminNotification {
   static const String typeField = 'type';
   static const String titleField = 'title';
