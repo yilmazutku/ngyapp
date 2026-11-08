@@ -98,6 +98,8 @@ flutter_launcher_icons:
 # The following section is specific to Flutter packages.
 flutter:
   generate: true
+  config:
+    enable-swift-package-manager: false
   assets:
     - assets/ngy.png
     - assets/utku.png
