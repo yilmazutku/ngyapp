@@ -155,7 +155,8 @@ void main() {
     expect(find.text('Bu bir kan tahlili mi?'), findsOneWidget);
     expect(filled(tester, 'Kaydet').onPressed, isNull);
 
-    await tester.tap(find.text('Evet'));
+    expect(find.text('Evet'), findsNothing);
+    await tester.tap(find.text('Kan Tahlili sekmesine taşı'));
     await tester.pumpAndSettle();
     expect(find.text('Tarih seçin'), findsOneWidget);
     expect(filled(tester, 'Kan Tahlili\'ne Taşı').onPressed, isNull);
@@ -182,6 +183,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(inFile('kan', find.byTooltip('Düzenle')));
     await tester.pumpAndSettle();
+    expect(find.text('Evet'), findsOneWidget);
+    expect(find.text('Kan Tahlili sekmesine taşı'), findsNothing);
     expect(
         find.text('Aynı tarihli (${DateFormatter.formatNumericDate(testDate)}) '
             'diğer 1 dosyaya da uygula'),

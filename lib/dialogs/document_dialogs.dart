@@ -123,14 +123,17 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
   static const String _title = 'Dokümanı Düzenle';
   static const String _question = 'Bu bir kan tahlili mi?';
   static const String _yesLabel = 'Evet';
+  static const String _moveToBloodTestLabel = 'Kan Tahlili sekmesine taşı';
   static const String _noLabel = 'Hayır';
   static const String _saveLabel = 'Kaydet';
   static const String _toBloodTestLabel = 'Kan Tahlili\'ne Taşı';
   static const String _toOtherLabel = 'Diğer\'e Taşı';
   static const String _cancelLabel = 'İptal';
+  static const double _choiceIconMinScreenWidth = 600;
   static const String _unclassifiedNote = 'Bu doküman, türü sorulmadan '
-      'yüklendiği için Diğer sekmesinde duruyor. Kan tahliliyse "Evet" deyip '
-      'tahlilin yapıldığı tarihi girin; 3 aylık takip o zaman başlar.';
+      'yüklendiği için Diğer sekmesinde duruyor. Kan tahliliyse "Kan Tahlili '
+      'sekmesine taşı"yı seçip tahlilin yapıldığı tarihi girin; 3 aylık takip '
+      'o zaman başlar.';
   static const String _toOtherNote = 'Dosya Diğer sekmesine taşınır ve tahlil '
       'tarihi silinir. Bu tarihin başka kan tahlili dosyası kalmazsa 3 ay '
       'hatırlatması da kaldırılır.';
@@ -225,26 +228,29 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
         const SizedBox(height: 16),
         Text(_question, style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment<bool>(
-              value: true,
-              label: Text(_yesLabel),
-              icon: Icon(Icons.bloodtype_rounded),
-            ),
-            ButtonSegment<bool>(
-              value: false,
-              label: Text(_noLabel),
-              icon: Icon(Icons.folder_outlined),
-            ),
-          ],
-          selected: {if (isBloodTest != null) isBloodTest},
-          emptySelectionAllowed: true,
-          showSelectedIcon: false,
-          onSelectionChanged: (Set<bool> selection) {
-            if (selection.isEmpty) return;
-            setState(() => _isBloodTest = selection.first);
+        RadioGroup<bool>(
+          groupValue: isBloodTest,
+          onChanged: (bool? value) {
+            if (value == null) return;
+            setState(() => _isBloodTest = value);
           },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildChoice(
+                value: true,
+                label: file.isBloodTest ? _yesLabel : _moveToBloodTestLabel,
+                icon: Icons.bloodtype_rounded,
+              ),
+              const SizedBox(height: 8),
+              _buildChoice(
+                value: false,
+                label: _noLabel,
+                icon: Icons.folder_outlined,
+              ),
+            ],
+          ),
         ),
         AnimatedSize(
           duration: const Duration(milliseconds: 200),
@@ -253,6 +259,42 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
           child: _buildDetails(),
         ),
       ],
+    );
+  }
+
+  Widget _buildChoice({
+    required bool value,
+    required String label,
+    required IconData icon,
+  }) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool selected = _isBloodTest == value;
+    final bool showIcon =
+        MediaQuery.sizeOf(context).width >= _choiceIconMinScreenWidth;
+    return RadioListTile<bool>(
+      value: value,
+      controlAffinity: ListTileControlAffinity.leading,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      horizontalTitleGap: 8,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(
+          color: selected ? colors.primary : colors.outlineVariant,
+        ),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      tileColor: selected ? colors.primary.withValues(alpha: 0.06) : null,
+      title: Text(
+        label,
+        style: TextStyle(
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        ),
+      ),
+      secondary: showIcon
+          ? Icon(
+              icon,
+              color: selected ? colors.primary : colors.onSurfaceVariant,
+            )
+          : null,
     );
   }
 

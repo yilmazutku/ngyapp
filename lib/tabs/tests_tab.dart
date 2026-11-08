@@ -653,8 +653,8 @@ class _TestsTabState extends State<TestsTab>
                 ? hintOther
                     ? '$_noBloodTests\n\nDiğer sekmesinde türü belirtilmemiş '
                         '$unclassified doküman var. Kan tahlili olanları '
-                        'kalem simgesine basıp "Evet" diyerek buraya '
-                        'taşıyabilirsiniz.'
+                        'kalem simgesine basıp "Kan Tahlili sekmesine '
+                        'taşı"yı seçerek buraya alabilirsiniz.'
                     : _noBloodTests
                 : _noOtherDocuments,
             action: hintOther
@@ -691,8 +691,8 @@ class _TestsTabState extends State<TestsTab>
               color: Colors.blueGrey.shade700,
               text: '$unclassified dokümanın türü belirtilmemiş (kan tahlili '
                   'sorusundan önce yüklendi). Kan tahlili olanları kalem '
-                  'simgesine basıp "Evet" diyerek taşıyın; 3 aylık takip '
-                  'tahlil tarihi girilince başlar.',
+                  'simgesine basıp "Kan Tahlili sekmesine taşı"yı seçin; '
+                  '3 aylık takip tahlil tarihi girilince başlar.',
             ),
           );
         }
