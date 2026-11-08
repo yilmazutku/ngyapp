@@ -206,7 +206,7 @@ const List<FeatureTestSection> featureTestSections = [
       ),
       FeatureTestStep(
         'dok.evet',
-        'Diğer\'deki eski bir kan tahlilinin kalemine basın ve "Bu bir kan tahlili mi?" sorusunda "Evet"i seçin.',
+        'Diğer\'deki eski bir kan tahlilinin kalemine basın ve "Bu bir kan tahlili mi?" sorusunda "Kan Tahlili sekmesine taşı"yı seçin.',
         '"Tahlilin Yapıldığı Tarih" kırmızı "Tarih seçin" olarak görünür; tarih seçilmeden "Kan Tahlili\'ne Taşı" düğmesi pasiftir. Altında 3 aylık takibin bu tarihe göre hesaplandığı, yükleme gününün kullanılmadığı yazar.',
       ),
       FeatureTestStep(
