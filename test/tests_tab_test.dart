@@ -156,6 +156,8 @@ void main() {
     expect(filled(tester, 'Kaydet').onPressed, isNull);
 
     expect(find.text('Evet'), findsNothing);
+    expect(find.text('Hayır'), findsOneWidget);
+    expect(find.text('Diğer sekmesine taşı'), findsNothing);
     await tester.tap(find.text('Kan Tahlili sekmesine taşı'));
     await tester.pumpAndSettle();
     expect(find.text('Tarih seçin'), findsOneWidget);
@@ -184,7 +186,9 @@ void main() {
     await tester.tap(inFile('kan', find.byTooltip('Düzenle')));
     await tester.pumpAndSettle();
     expect(find.text('Evet'), findsOneWidget);
+    expect(find.text('Diğer sekmesine taşı'), findsOneWidget);
     expect(find.text('Kan Tahlili sekmesine taşı'), findsNothing);
+    expect(find.text('Hayır'), findsNothing);
     expect(
         find.text('Aynı tarihli (${DateFormatter.formatNumericDate(testDate)}) '
             'diğer 1 dosyaya da uygula'),
@@ -214,7 +218,7 @@ void main() {
 
     await tester.tap(inFile('kan', find.byTooltip('Düzenle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Hayır'));
+    await tester.tap(find.text('Diğer sekmesine taşı'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Dosya Diğer sekmesine taşınır'), findsOneWidget);
     expect(

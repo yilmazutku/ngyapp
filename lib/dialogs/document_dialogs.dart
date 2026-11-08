@@ -125,6 +125,7 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
   static const String _yesLabel = 'Evet';
   static const String _moveToBloodTestLabel = 'Kan Tahlili sekmesine taşı';
   static const String _noLabel = 'Hayır';
+  static const String _moveToOtherLabel = 'Diğer sekmesine taşı';
   static const String _saveLabel = 'Kaydet';
   static const String _toBloodTestLabel = 'Kan Tahlili\'ne Taşı';
   static const String _toOtherLabel = 'Diğer\'e Taşı';
@@ -246,7 +247,7 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
               const SizedBox(height: 8),
               _buildChoice(
                 value: false,
-                label: _noLabel,
+                label: file.isBloodTest ? _moveToOtherLabel : _noLabel,
                 icon: Icons.folder_outlined,
               ),
             ],

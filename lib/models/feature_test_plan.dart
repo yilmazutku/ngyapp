@@ -276,7 +276,7 @@ const List<FeatureTestSection> featureTestSections = [
       ),
       FeatureTestStep(
         'dok.geri',
-        'İki kan tahlili olan bir danışanda en yeni tahlilin kalemine basın, "Hayır"ı seçip "Diğer\'e Taşı"ya basın.',
+        'İki kan tahlili olan bir danışanda en yeni tahlilin kalemine basın, "Diğer sekmesine taşı"yı seçip "Diğer\'e Taşı"ya basın.',
         'Dosya Diğer\'e geçer ve tahlil tarihi silinir; bilgi mesajı en yeni tahlilin artık bir önceki olduğunu ve 3 ay hatırlatmasının ona göre kurulduğunu söyler; Doküman Kontrol bu danışanı önceki tahlilin tarihiyle gösterir.',
       ),
       FeatureTestStep(
