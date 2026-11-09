@@ -411,8 +411,8 @@ class _StatusRow extends StatelessWidget {
         return 'Son tahlil ${_date(status.lastTestDate)} · 3 ay: '
             '${_date(status.deadline)}';
       case BloodTestStatusKind.undated:
-        return 'Detay sekmesinde "Evet" seçili; tahlil tarihiyle '
-            'yüklenince 3 ay takibi başlar.';
+        return 'Kan Tahlili sekmesinde tarihi girilmemiş dosya var; kalemle '
+            'tarih girilince 3 ay takibi başlar.';
     }
   }
 

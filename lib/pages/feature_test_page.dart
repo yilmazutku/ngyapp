@@ -51,7 +51,7 @@ Color _resultColor(FeatureTestResult? result) {
 class FeatureTestPage extends StatefulWidget {
   const FeatureTestPage({super.key});
 
-  static const String title = 'Yeni Özellik Testleri';
+  static const String title = 'Kan Tahlili Test';
 
   @override
   State<FeatureTestPage> createState() => _FeatureTestPageState();

@@ -173,6 +173,12 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
         : 'Aynı tarihli$date diğer ${widget.sameDateCount} dosyayı da taşı';
   }
 
+  Future<void> _askTestDate() async {
+    final DateTime? picked = await _showTestDatePicker(context, _testDate);
+    if (picked == null || !mounted) return;
+    setState(() => _testDate = picked);
+  }
+
   void _submit() {
     final DateTime? testDate = _testDate;
     DialogUtils.closeOwnRoute(
@@ -234,6 +240,7 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
           onChanged: (bool? value) {
             if (value == null) return;
             setState(() => _isBloodTest = value);
+            if (value && _testDate == null) _askTestDate();
           },
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -353,6 +360,23 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
   }
 }
 
+const String _testDateTitle = 'Tahlilin Yapıldığı Tarih';
+final DateTime _firstTestDate = DateTime(2015);
+
+Future<DateTime?> _showTestDatePicker(BuildContext context, DateTime? current) {
+  final DateTime today = DateUtils.dateOnly(DateTime.now());
+  final DateTime firstDate = current != null && current.isBefore(_firstTestDate)
+      ? current
+      : _firstTestDate;
+  return showDatePicker(
+    context: context,
+    initialDate: current == null || current.isAfter(today) ? today : current,
+    firstDate: firstDate,
+    lastDate: today,
+    helpText: _testDateTitle,
+  );
+}
+
 class _DocumentDialogFrame extends StatelessWidget {
   const _DocumentDialogFrame({
     required this.title,
@@ -466,8 +490,8 @@ class _BloodTestFields extends StatelessWidget {
     required this.onReminderChanged,
   });
 
-  static const String _testDateLabel = 'Tahlilin Yapıldığı Tarih';
-  static const String _pickDateLabel = 'Tarih seçin';
+  static const String _testDateLabel = _testDateTitle;
+  static const String _pickDateLabel = 'Tarih seçin (zorunlu)';
   static const String _dateHint = '3 aylık takip bu tarihe göre hesaplanır; '
       'dosyanın yüklendiği gün kullanılmaz.';
   static const String _knownDatesLabel = 'Bu danışanın kayıtlı tahlil tarihleri';
@@ -481,23 +505,8 @@ class _BloodTestFields extends StatelessWidget {
   final ValueChanged<DateTime> onDateChanged;
   final ValueChanged<bool> onReminderChanged;
 
-  static final DateTime _firstDate = DateTime(2015);
-
   Future<void> _pickDate(BuildContext context) async {
-    final DateTime today = DateUtils.dateOnly(DateTime.now());
-    final DateTime? current = testDate;
-    final DateTime firstDate =
-        current != null && current.isBefore(_firstDate) ? current : _firstDate;
-    final DateTime initialDate = current == null || current.isAfter(today)
-        ? today
-        : current;
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: initialDate,
-      firstDate: firstDate,
-      lastDate: today,
-      helpText: _testDateLabel,
-    );
+    final DateTime? picked = await _showTestDatePicker(context, testDate);
     if (picked != null && context.mounted) onDateChanged(picked);
   }
 

@@ -155,40 +155,6 @@ class FeatureTestSection {
 
 const List<FeatureTestSection> featureTestSections = [
   FeatureTestSection(
-    id: 'kilo',
-    title: 'Kilo Takibe Geçiş Tarihi',
-    icon: Icons.monitor_weight_outlined,
-    color: Color(0xFF00897B),
-    steps: [
-      FeatureTestStep(
-        'kilo.ekle',
-        'Bir danışana yeni paket ekleyin, Paket Tipi olarak "Aktif/Kilo Takip" seçin.',
-        '"Kilo Takibe Geçiş Tarihi" satırı bugünün tarihiyle görünür ve tarih değiştirilebilir.',
-      ),
-      FeatureTestStep(
-        'kilo.kart',
-        'Paketi kaydedip danışanın Paket sekmesindeki karta bakın.',
-        'Kartta "Kilo Takibe Geçiş: <tarih>" satırı görünür.',
-      ),
-      FeatureTestStep(
-        'kilo.eski',
-        'Tarihi girilmemiş eski bir Kilo Takip paketini düzenleyin.',
-        'Bugünün tarihi önerilir, altında turuncu "kayıtlı bir tarih yok" notu çıkar; tarih seçince not kalkar ve kaydedilir.',
-      ),
-      FeatureTestStep(
-        'kilo.ozet',
-        'Danışanlar Özet sayfasında "Aktif / Kilo Takip" sekmesini açın.',
-        '"Kilo Takibe Geçiş Tarihi" sütunu görünür; tarihi girilmemiş danışanlarda turuncu "Girilmemiş" yazar.',
-      ),
-      FeatureTestStep(
-        'kilo.haftalik',
-        'Aynı sayfada "Aktif / Haftalık" ve "Dondurulmuş" sekmelerine bakın.',
-        'Bu sekmelerde kilo takibe geçiş sütunu yoktur.',
-      ),
-    ],
-    shortcuts: [FeatureTestShortcut.openUsers, FeatureTestShortcut.openSummary],
-  ),
-  FeatureTestSection(
     id: 'kan',
     title: 'Dokümanlar: Kan Tahlili ve Hatırlatma',
     icon: Icons.bloodtype_outlined,
@@ -207,12 +173,12 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'dok.evet',
         'Diğer\'deki eski bir kan tahlilinin kalemine basın ve "Bu bir kan tahlili mi?" sorusunda "Kan Tahlili sekmesine taşı"yı seçin.',
-        '"Tahlilin Yapıldığı Tarih" kırmızı "Tarih seçin" olarak görünür; tarih seçilmeden "Kan Tahlili\'ne Taşı" düğmesi pasiftir. Altında 3 aylık takibin bu tarihe göre hesaplandığı, yükleme gününün kullanılmadığı yazar.',
+        'Tahlil tarihini soran takvim kendiliğinden açılır. Takvimi kapatırsanız tarih kırmızı "Tarih seçin (zorunlu)" kalır ve "Kan Tahlili\'ne Taşı" düğmesi tarih seçilene kadar pasiftir. Altında 3 aylık takibin bu tarihe göre hesaplandığı, yükleme gününün kullanılmadığı yazar.',
       ),
       FeatureTestStep(
         'dok.tasi',
         'Tahlilin gerçekte yapıldığı tarihi (ör. 1 ay önce) seçip "Kan Tahlili\'ne Taşı"ya basın.',
-        'Bilgi mesajı dosyanın taşındığını ve hatırlatma gününü yazar; dosya Diğer\'den kalkar, Kan Tahlili\'nde "Tahlil tarihi" ve "Hatırlatma" rozetleriyle görünür; sekme sayıları değişir; Detay\'daki kan değerleri kartı "Evet" olur.',
+        'Bilgi mesajı dosyanın seçilen tarihle taşındığını ve hatırlatma gününü yazar; dosya Diğer\'den kalkar, Kan Tahlili\'nde "Tahlil tarihi" ve "Hatırlatma" rozetleriyle görünür; sekme sayıları değişir; Detay\'daki "Kan tahlili" kartı "Yüklü" olur.',
       ),
       FeatureTestStep(
         'dok.hayir',
@@ -247,7 +213,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'kan.detay',
         'Aynı danışanın Detay sekmesine bakın.',
-        '"Danışanın kan değerleri dokümanı mevcut mu?" kartında "Evet" seçilidir.',
+        '"Kan tahlili" kartında yeşil "Yüklü" yazar; altında yüklenme zamanı ve tahlil tarihi görünür. Kartta Evet/Hayır seçeneği yoktur, durum dosyalardan okunur.',
       ),
       FeatureTestStep(
         'dok.tarih',
@@ -287,7 +253,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'dok.son',
         'Danışanın son kan tahlilini silin ya da Diğer\'e taşıyın.',
-        '"Kan Tahlili Kalmadı" sorusu çıkar; "Hayır" olarak işaretlenirse Detay\'daki kart "Hayır" olur, "Evet" kalsın denirse değişmez.',
+        'Soru sorulmaz; bilgi mesajı Kan Tahlili sekmesinde dosya kalmadığını söyler. Detay\'daki "Kan tahlili" kartı kırmızı "Yüklü değil" olur.',
       ),
     ],
     shortcuts: [
@@ -298,6 +264,137 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestTool.reminderCalculator,
       FeatureTestTool.upcomingReminders,
     ],
+  ),
+  FeatureTestSection(
+    id: 'dokuman',
+    title: 'Doküman Kontrol',
+    icon: Icons.fact_check_outlined,
+    color: Color(0xFFC62828),
+    steps: [
+      FeatureTestStep(
+        'dokuman.ac',
+        'Ana sayfadaki "Doküman Kontrol" simgesine basın.',
+        'Doküman Kontrol sayfası açılır.',
+      ),
+      FeatureTestStep(
+        'dokuman.kontrol',
+        '"Kan tahlillerini kontrol et"e basın.',
+        'İlerleme gösterilir; bitince bütün danışanlar listelenir. En üstte "Gecikmiş" olanlar (3 ayı dolan ya da 1 haftadır ilk tahlili yüklenmeyen), en çok geciken en üstte.',
+      ),
+      FeatureTestStep(
+        'dokuman.kart',
+        '"Durum" çiplerine ("Gecikmiş (N)", "Yaklaşan (N)" vb.) basın ve aramayı deneyin.',
+        'Liste seçilen duruma ve yazılan isme göre süzülür; "Tümü" yeniden hepsini gösterir.',
+      ),
+      FeatureTestStep(
+        'dokuman.ac2',
+        'Bir satıra basın.',
+        'Danışanın sayfası açılır.',
+      ),
+      FeatureTestStep(
+        'dokuman.yukle',
+        'Gecikmiş bir danışana bugünün tarihiyle kan tahlili yükleyip yeniden kontrol edin.',
+        'Danışan "Güncel"e geçer; 3 ayın dolacağı tarih ve kalan gün yazar.',
+      ),
+    ],
+    shortcuts: [
+      FeatureTestShortcut.openDocumentControl,
+      FeatureTestShortcut.openUsers,
+    ],
+  ),
+  FeatureTestSection(
+    id: 'tarama',
+    title: 'Günlük Kan Tahlili Taraması',
+    icon: Icons.assignment_late_outlined,
+    color: Color(0xFFF57C00),
+    note:
+        'Tarama normalde günde bir kez, saat 09:00\'dan sonra uygulaması açık olan ilk admin cihazında kendiliğinden yapılır. Önizleme hiçbir şeyi değiştirmez; "Gerçek taramayı çalıştır" bu kuralı atlayıp hemen tarar ve listeyi bütün adminlere gönderir.',
+    steps: [
+      FeatureTestStep(
+        'tarama.detay',
+        'Kan Tahlili sekmesinde dosyası olmayan bir danışanın Detay sekmesine bakın.',
+        '"Kan tahlili" kartında kırmızı "Yüklü değil" ve nereden yükleneceği yazar; Diğer sekmesinde türü belirtilmemiş dokümanı varsa onları taşıma notu da çıkar.',
+      ),
+      FeatureTestStep(
+        'tarama.onizle',
+        'Önizlemede gün "Bugün" iken "Önizle"ye basın.',
+        'Listeye girecek danışanlar ve 1 haftası dolmamış yeni danışanlar (listeye girecekleri günle) ayrı ayrı görünür.',
+      ),
+      FeatureTestStep(
+        'tarama.yeni',
+        'Yeni bir danışan ekleyin; önizlemeyi "Bugün" ve "8 gün sonra" için tekrarlayın.',
+        'Detay\'da "Yüklü değil" yazar; bugün bekleyenler arasında, 8 gün sonrası için listede görünür.',
+      ),
+      FeatureTestStep(
+        'tarama.yukle',
+        'Listedeki bir danışana Kan Tahlili sekmesinden tarihli bir kan tahlili yükleyip önizlemeyi yenileyin.',
+        'Danışan listeden çıkar; Detay\'da "Yüklü" yazar.',
+      ),
+      FeatureTestStep(
+        'tarama.eski',
+        'Bu güncellemeden önce Detay\'da elle "Evet" yapılmış ama Kan Tahlili sekmesinde dosyası olmayan bir danışana, güncellemeden sonraki ilk günlük taramadan sonra bakın.',
+        'Detay\'da "Yüklü değil" yazar ve 1 haftası dolduysa eksik listesinde görünür (ilk tarama eski elle seçimleri bir kez dosyalara göre düzeltir).',
+      ),
+      FeatureTestStep(
+        'tarama.bana',
+        '"Önizlemeyi bana bildir"e basın.',
+        'Zilin Sistem sekmesine "DENEME" etiketli "Kan tahlili eksik danışanlar (N)" düşer; isim çipleri danışanın sayfasını açar, 6\'dan fazla isim varsa "+N daha" çıkar.',
+      ),
+      FeatureTestStep(
+        'tarama.gercek',
+        '"Gerçek taramayı çalıştır"a basın.',
+        'Kaç danışanın listelendiği yazar ve "Son tarama" güncellenir; Sistem sekmesindeki bugünün listesi bu sonuca göre güncellenir.',
+      ),
+      FeatureTestStep(
+        'tarama.otomatik',
+        'Ertesi gün uygulamayı saat 09:00\'dan sonra açıp bu sayfaya bakın.',
+        '"Son tarama" o günün tarihine döner (tarama kendiliğinden bir kez yapılır); yeni liste gelince önceki günün listesi okunmuş sayılır.',
+      ),
+    ],
+    shortcuts: [FeatureTestShortcut.openUsers],
+    tools: [FeatureTestTool.scanPreview],
+  ),
+  FeatureTestSection(
+    id: 'zaman',
+    title: 'Zaman Makinesi (hızlandırılmış bildirim testi)',
+    icon: Icons.fast_forward_rounded,
+    color: Color(0xFF00838F),
+    note:
+        'Danışan seçtiğiniz tarihte eklenmiş (ve isterseniz kan tahlili seçtiğiniz tarihte yapılmış) gibi kabul edilir; zaman çizelgesi uygulamanın gerçek kurallarıyla hesaplanır ve bildirimler seçtiğiniz hızla kurulur. Danışanın kaydı değişmez; bildirimler yalnızca size gelir ve "DENEME" etiketlidir.',
+    steps: [
+      FeatureTestStep(
+        'zaman.liste',
+        'Eklenmeyi "5 gün önce", kan tahlilini "Yok", hızı "1 gün = 1 dk" seçip "Başlat"a basın.',
+        'Çizelgedeki "listesine girer" satırında yazan sürede (birkaç dakika) zile "DENEME" etiketli "Kan tahlili eksik danışanlar (1)" düşer.',
+      ),
+      FeatureTestStep(
+        'zaman.gecmis',
+        'Eklenmeyi "10 gün önce" seçip başlatın.',
+        'Liste hemen düşer; çizelgenin altında Doküman Kontrol durumu "İlk kan tahlili yüklenmedi" yazar.',
+      ),
+      FeatureTestStep(
+        'zaman.tahlil',
+        'Kan tahlilini "2 gün sonra 3 ay doluyor" seçip başlatın.',
+        '"Kan tahlili yarın 3 ayı dolduruyor" ve ardından "Kan tahlilinin üzerinden 3 ay geçti" çizelgedeki sürelerde düşer.',
+      ),
+      FeatureTestStep(
+        'zaman.kapali',
+        'Başlattıktan hemen sonra uygulamayı arka plana alın ya da kapatın.',
+        'Süreler dolunca telefonda ve Mac\'te sistem bildirimi gelir; Windows\'ta uygulamaya dönünce şerit çıkar.',
+      ),
+      FeatureTestStep(
+        'zaman.gercek',
+        'Gerçek bir danışan seçip başlatın; düşen hatırlatmadaki "Danışanı aç"a basın.',
+        'Seçilen danışanın sayfası açılır; danışanın kendi kayıtları değişmemiştir.',
+      ),
+      FeatureTestStep(
+        'zaman.sil',
+        '"Deneme bildirimlerini sil"e basın.',
+        'Henüz düşmemiş olanlar dahil bütün deneme bildirimleri kalkar.',
+      ),
+    ],
+    shortcuts: [FeatureTestShortcut.openNotifications],
+    tools: [FeatureTestTool.timeMachine],
   ),
   FeatureTestSection(
     id: 'teslim',
@@ -355,48 +452,6 @@ const List<FeatureTestSection> featureTestSections = [
     ],
     shortcuts: [FeatureTestShortcut.openNotifications],
     tools: [FeatureTestTool.notificationSimulator],
-  ),
-  FeatureTestSection(
-    id: 'zaman',
-    title: 'Zaman Makinesi (hızlandırılmış bildirim testi)',
-    icon: Icons.fast_forward_rounded,
-    color: Color(0xFF00838F),
-    note:
-        'Danışan seçtiğiniz tarihte eklenmiş (ve isterseniz kan tahlili seçtiğiniz tarihte yapılmış) gibi kabul edilir; zaman çizelgesi uygulamanın gerçek kurallarıyla hesaplanır ve bildirimler seçtiğiniz hızla kurulur. Danışanın kaydı değişmez; bildirimler yalnızca size gelir ve "DENEME" etiketlidir.',
-    steps: [
-      FeatureTestStep(
-        'zaman.liste',
-        'Eklenmeyi "5 gün önce", kan tahlilini "Yok", hızı "1 gün = 1 dk" seçip "Başlat"a basın.',
-        'Çizelgedeki "listesine girer" satırında yazan sürede (birkaç dakika) zile "DENEME" etiketli "Kan tahlili eksik danışanlar (1)" düşer.',
-      ),
-      FeatureTestStep(
-        'zaman.gecmis',
-        'Eklenmeyi "10 gün önce" seçip başlatın.',
-        'Liste hemen düşer; çizelgenin altında Doküman Kontrol durumu "İlk kan tahlili yüklenmedi" yazar.',
-      ),
-      FeatureTestStep(
-        'zaman.tahlil',
-        'Kan tahlilini "2 gün sonra 3 ay doluyor" seçip başlatın.',
-        '"Kan tahlili yarın 3 ayı dolduruyor" ve ardından "Kan tahlilinin üzerinden 3 ay geçti" çizelgedeki sürelerde düşer.',
-      ),
-      FeatureTestStep(
-        'zaman.kapali',
-        'Başlattıktan hemen sonra uygulamayı arka plana alın ya da kapatın.',
-        'Süreler dolunca telefonda ve Mac\'te sistem bildirimi gelir; Windows\'ta uygulamaya dönünce şerit çıkar.',
-      ),
-      FeatureTestStep(
-        'zaman.gercek',
-        'Gerçek bir danışan seçip başlatın; düşen hatırlatmadaki "Danışanı aç"a basın.',
-        'Seçilen danışanın sayfası açılır; danışanın kendi kayıtları değişmemiştir.',
-      ),
-      FeatureTestStep(
-        'zaman.sil',
-        '"Deneme bildirimlerini sil"e basın.',
-        'Henüz düşmemiş olanlar dahil bütün deneme bildirimleri kalkar.',
-      ),
-    ],
-    shortcuts: [FeatureTestShortcut.openNotifications],
-    tools: [FeatureTestTool.timeMachine],
   ),
   FeatureTestSection(
     id: 'zil',
@@ -457,93 +512,38 @@ const List<FeatureTestSection> featureTestSections = [
     tools: [FeatureTestTool.notificationStatus],
   ),
   FeatureTestSection(
-    id: 'tarama',
-    title: 'Günlük Kan Tahlili Taraması',
-    icon: Icons.assignment_late_outlined,
-    color: Color(0xFFF57C00),
-    note:
-        'Tarama normalde günde bir kez, saat 09:00\'dan sonra uygulaması açık olan ilk admin cihazında kendiliğinden yapılır. Önizleme hiçbir şeyi değiştirmez; "Gerçek taramayı çalıştır" bu kuralı atlayıp hemen tarar ve listeyi bütün adminlere gönderir.',
+    id: 'kilo',
+    title: 'Kilo Takibe Geçiş Tarihi',
+    icon: Icons.monitor_weight_outlined,
+    color: Color(0xFF00897B),
     steps: [
       FeatureTestStep(
-        'tarama.detay',
-        'Bir danışanın Detay sekmesinde "Danışanın kan değerleri dokümanı mevcut mu?" kartında Evet ve Hayır\'a basın.',
-        'Seçim hemen kaydedilir (altta bilgi mesajı çıkar); sayfadan çıkıp girince korunur.',
+        'kilo.ekle',
+        'Bir danışana yeni paket ekleyin, Paket Tipi olarak "Aktif/Kilo Takip" seçin.',
+        '"Kilo Takibe Geçiş Tarihi" satırı bugünün tarihiyle görünür ve tarih değiştirilebilir.',
       ),
       FeatureTestStep(
-        'tarama.onizle',
-        'Önizlemede gün "Bugün" iken "Önizle"ye basın.',
-        'Listeye girecek danışanlar ve 1 haftası dolmamış yeni danışanlar (listeye girecekleri günle) ayrı ayrı görünür.',
+        'kilo.kart',
+        'Paketi kaydedip danışanın Paket sekmesindeki karta bakın.',
+        'Kartta "Kilo Takibe Geçiş: <tarih>" satırı görünür.',
       ),
       FeatureTestStep(
-        'tarama.yeni',
-        'Yeni bir danışan ekleyin; önizlemeyi "Bugün" ve "8 gün sonra" için tekrarlayın.',
-        'Detay\'da "Hayır" seçilidir; bugün bekleyenler arasında, 8 gün sonrası için listede görünür.',
+        'kilo.eski',
+        'Tarihi girilmemiş eski bir Kilo Takip paketini düzenleyin.',
+        'Bugünün tarihi önerilir, altında turuncu "kayıtlı bir tarih yok" notu çıkar; tarih seçince not kalkar ve kaydedilir.',
       ),
       FeatureTestStep(
-        'tarama.evet',
-        'Listedeki bir danışanı "Evet" yapıp önizlemeyi yenileyin.',
-        'Danışan listeden çıkar.',
+        'kilo.ozet',
+        'Danışanlar Özet sayfasında "Aktif / Kilo Takip" sekmesini açın.',
+        '"Kilo Takibe Geçiş Tarihi" sütunu görünür; tarihi girilmemiş danışanlarda turuncu "Girilmemiş" yazar.',
       ),
       FeatureTestStep(
-        'tarama.bana',
-        '"Önizlemeyi bana bildir"e basın.',
-        'Zilin Sistem sekmesine "DENEME" etiketli "Kan tahlili eksik danışanlar (N)" düşer; isim çipleri danışanın sayfasını açar, 6\'dan fazla isim varsa "+N daha" çıkar.',
-      ),
-      FeatureTestStep(
-        'tarama.gercek',
-        '"Gerçek taramayı çalıştır"a basın.',
-        'Kaç danışanın listelendiği yazar ve "Son tarama" güncellenir; Sistem sekmesindeki bugünün listesi bu sonuca göre güncellenir.',
-      ),
-      FeatureTestStep(
-        'tarama.otomatik',
-        'Ertesi gün uygulamayı saat 09:00\'dan sonra açıp bu sayfaya bakın.',
-        '"Son tarama" o günün tarihine döner (tarama kendiliğinden bir kez yapılır); yeni liste gelince önceki günün listesi okunmuş sayılır.',
+        'kilo.haftalik',
+        'Aynı sayfada "Aktif / Haftalık" ve "Dondurulmuş" sekmelerine bakın.',
+        'Bu sekmelerde kilo takibe geçiş sütunu yoktur.',
       ),
     ],
-    shortcuts: [FeatureTestShortcut.openUsers],
-    tools: [FeatureTestTool.scanPreview],
-  ),
-  FeatureTestSection(
-    id: 'dokuman',
-    title: 'Doküman Kontrol',
-    icon: Icons.fact_check_outlined,
-    color: Color(0xFFC62828),
-    steps: [
-      FeatureTestStep(
-        'dokuman.ac',
-        'Ana sayfadaki "Doküman Kontrol" simgesine basın.',
-        'Doküman Kontrol sayfası açılır.',
-      ),
-      FeatureTestStep(
-        'dokuman.kontrol',
-        '"Kan tahlillerini kontrol et"e basın.',
-        'İlerleme gösterilir; bitince bütün danışanlar listelenir. En üstte "Gecikmiş" olanlar (3 ayı dolan ya da 1 haftadır ilk tahlili yüklenmeyen), en çok geciken en üstte.',
-      ),
-      FeatureTestStep(
-        'dokuman.kart',
-        '"Durum" çiplerine ("Gecikmiş (N)", "Yaklaşan (N)" vb.) basın ve aramayı deneyin.',
-        'Liste seçilen duruma ve yazılan isme göre süzülür; "Tümü" yeniden hepsini gösterir.',
-      ),
-      FeatureTestStep(
-        'dokuman.ac2',
-        'Bir satıra basın.',
-        'Danışanın sayfası açılır.',
-      ),
-      FeatureTestStep(
-        'dokuman.yukle',
-        'Gecikmiş bir danışana bugünün tarihiyle kan tahlili yükleyip yeniden kontrol edin.',
-        'Danışan "Güncel"e geçer; 3 ayın dolacağı tarih ve kalan gün yazar.',
-      ),
-      FeatureTestStep(
-        'dokuman.tarihsiz',
-        'Detay\'da "Evet" seçili ama tarihli kan tahlili yüklenmemiş bir danışana bakın.',
-        '"Tarihi bilinmiyor" grubunda görünür.',
-      ),
-    ],
-    shortcuts: [
-      FeatureTestShortcut.openDocumentControl,
-      FeatureTestShortcut.openUsers,
-    ],
+    shortcuts: [FeatureTestShortcut.openUsers, FeatureTestShortcut.openSummary],
   ),
   FeatureTestSection(
     id: 'dg',

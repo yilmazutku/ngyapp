@@ -160,7 +160,12 @@ void main() {
     expect(find.text('Diğer sekmesine taşı'), findsNothing);
     await tester.tap(find.text('Kan Tahlili sekmesine taşı'));
     await tester.pumpAndSettle();
-    expect(find.text('Tarih seçin'), findsOneWidget);
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    expect(find.text('Tahlilin Yapıldığı Tarih'), findsWidgets);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsNothing);
+    expect(find.text('Tarih seçin (zorunlu)'), findsOneWidget);
     expect(filled(tester, 'Kan Tahlili\'ne Taşı').onPressed, isNull);
     await tester.tap(find.widgetWithText(
         ChoiceChip, DateFormatter.formatNumericDate(testDate)));
@@ -227,15 +232,12 @@ void main() {
         findsOneWidget);
     await tester.tap(find.text('Diğer\'e Taşı'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('"Yüklü değil"'), findsOneWidget);
     await closeInfo(tester, '2 dosya Diğer sekmesine taşındı');
 
-    expect(find.text('Kan Tahlili Kalmadı'), findsOneWidget);
-    await tester.tap(find.text('"Hayır" olarak işaretle'));
-    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
     expect((await db.collection('users').doc(customer).get())
         .data()![UserModel.bloodTestPresentField], isFalse);
-    await tester.pump(const Duration(seconds: 3));
-    await tester.pumpAndSettle();
 
     expect(find.text('Kan Tahlili (0)'), findsOneWidget);
     expect(find.text('Diğer (3)'), findsOneWidget);
@@ -288,12 +290,13 @@ void main() {
 
     expect((await fileData('eski'))[TestAttachment.isBloodTestField], isFalse);
     expect(find.textContaining('türü belirtilmemiş'), findsNothing);
-    expect(find.text('Kan Tahlili Kalmadı'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
     expect(await reminderIds(), isEmpty);
   });
 
   testWidgets(
-      'son kan tahlili silinince hatırlatması kalkar, "Evet" kalabilir',
+      'son kan tahlili silinince hatırlatması kalkar, danışan "Yüklü değil" '
+      'olur',
       (WidgetTester tester) async {
     final DateTime testDate = daysAgo(10);
     await seedUser(present: true);
@@ -312,14 +315,13 @@ void main() {
     await tester.tap(find.descendant(
         of: find.byType(AlertDialog), matching: find.text('Sil')));
     await tester.pumpAndSettle();
+    expect(find.textContaining('"Yüklü değil"'), findsOneWidget);
     await closeInfo(tester, 'Bu tahlilin 3 ay hatırlatması kaldırıldı');
 
     expect(await reminderIds(), isEmpty);
-    expect(find.text('Kan Tahlili Kalmadı'), findsOneWidget);
-    await tester.tap(find.text('"Evet" kalsın'));
-    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
     expect((await db.collection('users').doc(customer).get())
-        .data()![UserModel.bloodTestPresentField], isTrue);
+        .data()![UserModel.bloodTestPresentField], isFalse);
     expect(find.text('Kan Tahlili (0)'), findsOneWidget);
   });
 }
