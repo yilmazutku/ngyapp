@@ -46,7 +46,7 @@ class FeatureTestChecklist extends ChangeNotifier {
   static const String _actionKey = 'action';
   static const String _expectedKey = 'expected';
 
-  static const String _reportTitle = 'Yeni Özellik Testleri · Test Raporu';
+  static const String _reportTitle = 'Kan Tahlili Test · Test Raporu';
 
   final TargetPlatform platform;
   final List<FeatureTestSection> sections;

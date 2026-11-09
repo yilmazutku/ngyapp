@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/user_model.dart';
-import '../providers/blood_test_provider.dart';
 import '../providers/chat_manager_new.dart';
 import '../providers/user_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
+import '../widgets/blood_test_status_card.dart';
 import '../widgets/labeled_action_button.dart';
 
 /// DetailsTab doesn't use filtering so it doesn't extend BaseTab
@@ -22,12 +22,6 @@ class DetailsTab extends StatefulWidget {
 
 class _DetailsTabState extends State<DetailsTab>
     with AutomaticKeepAliveClientMixin<DetailsTab> {
-  static const String _bloodTestQuestion =
-      'Danışanın kan değerleri dokümanı mevcut mu?';
-  static const String _bloodTestMissingNote =
-      'Mevcut değilse, danışan eklendiği tarihten 1 hafta sonra günlük '
-      'kan tahlili kontrolünde listelenir.';
-
   late Future<UserModel?> _userFuture;
 
   final _nameController = TextEditingController();
@@ -47,8 +41,6 @@ class _DetailsTabState extends State<DetailsTab>
 
   bool _isEditing = false;
   bool _isLoading = false;
-
-  bool? _pendingBloodTest;
 
   @override
   bool get wantKeepAlive => true;
@@ -86,43 +78,6 @@ class _DetailsTabState extends State<DetailsTab>
     _phoneController.dispose();
     _scrollCtrl.dispose();
     super.dispose();
-  }
-
-  bool _bloodTestPresentOf(UserModel user, BloodTestProvider bloodTests) =>
-      _pendingBloodTest ??
-      bloodTests.savedPresence(user.userId) ??
-      user.hasBloodTest;
-
-  Future<void> _setBloodTestPresent(UserModel user, bool present) async {
-    final BloodTestProvider bloodTests =
-        Provider.of<BloodTestProvider>(context, listen: false);
-    if (_pendingBloodTest != null ||
-        present == _bloodTestPresentOf(user, bloodTests)) {
-      return;
-    }
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    setState(() => _pendingBloodTest = present);
-    try {
-      await bloodTests.setBloodTestPresent(
-          userId: user.userId, present: present);
-      if (!mounted) return;
-      messenger.showSnackBar(SnackBar(
-        content: Text(present
-            ? 'Kan değerleri dokümanı "mevcut" olarak kaydedildi.'
-            : 'Kan değerleri dokümanı "mevcut değil" olarak kaydedildi.'),
-        duration: const Duration(seconds: 2),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _pendingBloodTest = null);
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Seçim kaydedilemedi: $e',
-      );
-    } finally {
-      if (mounted) setState(() => _pendingBloodTest = null);
-    }
   }
 
   void _populateFields(UserModel user) {
@@ -336,7 +291,7 @@ class _DetailsTabState extends State<DetailsTab>
                 if (!_isEditing) ...[
                   _buildUserCard(user),
                   if (!ChatManager.isAdminUid(user.userId))
-                    _buildBloodTestCard(user),
+                    BloodTestStatusCard(userId: user.userId),
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     child: Row(
@@ -555,114 +510,6 @@ class _DetailsTabState extends State<DetailsTab>
           ],
         ),
       ),
-      ),
-    );
-  }
-
-  Widget _buildBloodTestCard(UserModel user) {
-    final BloodTestProvider bloodTests =
-        Provider.of<BloodTestProvider>(context, listen: false);
-    return ListenableBuilder(
-      listenable: bloodTests,
-      builder: (context, _) =>
-          _buildBloodTestCardContent(user, _bloodTestPresentOf(user, bloodTests)),
-    );
-  }
-
-  Widget _buildBloodTestCardContent(UserModel user, bool present) {
-    final bool saving = _pendingBloodTest != null;
-    final Color accent = present ? Colors.green.shade700 : Colors.red.shade600;
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: accent.withValues(alpha: 0.35)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.bloodtype_rounded, color: accent),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    _bloodTestQuestion,
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                if (saving)
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 12,
-              children: [
-                _bloodTestOption(user,
-                    label: 'Evet', value: true, selected: present, enabled: !saving),
-                _bloodTestOption(user,
-                    label: 'Hayır', value: false, selected: !present, enabled: !saving),
-              ],
-            ),
-            if (!present)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 6),
-                child: Text(
-                  _bloodTestMissingNote,
-                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _bloodTestOption(
-    UserModel user, {
-    required String label,
-    required bool value,
-    required bool selected,
-    required bool enabled,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: enabled ? () => _setBloodTestPresent(user, value) : null,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Checkbox(
-            value: selected,
-            onChanged: enabled
-                ? (checked) {
-                    if (checked == true) _setBloodTestPresent(user, value);
-                  }
-                : null,
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
     );
   }

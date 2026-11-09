@@ -51,6 +51,9 @@ class _TestsTabState extends State<TestsTab>
   static const String _noBloodTests = 'Henüz kan tahlili yüklenmedi.';
   static const String _noOtherDocuments = 'Başka doküman yok.';
   static const String _goToOtherLabel = 'Diğer sekmesine git';
+  static const String _noBloodTestsLeftNote = 'Danışanın Kan Tahlili '
+      'sekmesinde dosya kalmadı; Detay sekmesinde kan tahlili "Yüklü değil" '
+      'görünür.';
 
   late final TabController _tabController =
       TabController(length: DocumentCategory.values.length, vsync: this);
@@ -334,11 +337,10 @@ class _TestsTabState extends State<TestsTab>
           '$count ${DateFormatter.formatNumericDate(bloodTest.testDate)} '
               'tarihli kan tahlili olarak güncellendi.',
       ];
-      BloodTestReminderSync? sync;
       String? reminderError;
       if (file.isBloodTest || bloodTest != null) {
         try {
-          sync = await bloodTests.syncReminders(
+          final BloodTestReminderSync sync = await bloodTests.syncReminders(
             userId: widget.userId,
             userName: widget.userName,
           );
@@ -350,6 +352,7 @@ class _TestsTabState extends State<TestsTab>
             notes.add('Bekleyen 3 ay hatırlatması kaldırıldı.');
           }
           notes.addAll(_reminderNotes(sync, edited: bloodTest));
+          if (!sync.hasBloodTests) notes.add(_noBloodTestsLeftNote);
         } catch (e) {
           reminderError = 'Doküman güncellendi fakat 3 ay hatırlatması '
               'güncellenemedi: $e';
@@ -363,9 +366,6 @@ class _TestsTabState extends State<TestsTab>
         await DialogUtils.openError(context, title: 'Uyarı', message: reminderError);
       } else {
         await DialogUtils.openInfo(context, title: 'Başarılı', message: notes.join(' '));
-      }
-      if (sync != null && !sync.hasBloodTests && file.isBloodTest) {
-        await _offerPresenceReset(bloodTests);
       }
     } finally {
       loading.close();
@@ -413,11 +413,10 @@ class _TestsTabState extends State<TestsTab>
       }
 
       final List<String> notes = ['Dosya silindi.'];
-      BloodTestReminderSync? sync;
       String? reminderError;
       if (f.isBloodTest) {
         try {
-          sync = await bloodTests.syncReminders(
+          final BloodTestReminderSync sync = await bloodTests.syncReminders(
             userId: widget.userId,
             userName: widget.userName,
           );
@@ -425,6 +424,7 @@ class _TestsTabState extends State<TestsTab>
             notes.add('Bu tahlilin 3 ay hatırlatması kaldırıldı.');
           }
           notes.addAll(_reminderNotes(sync));
+          if (!sync.hasBloodTests) notes.add(_noBloodTestsLeftNote);
         } catch (e) {
           reminderError =
               'Dosya silindi fakat 3 ay hatırlatması güncellenemedi: $e';
@@ -439,47 +439,10 @@ class _TestsTabState extends State<TestsTab>
       } else {
         await DialogUtils.openInfo(context, title: 'Başarılı', message: notes.join(' '));
       }
-      if (sync != null && !sync.hasBloodTests) {
-        await _offerPresenceReset(bloodTests);
-      }
     } finally {
       loading.close();
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<void> _offerPresenceReset(BloodTestProvider bloodTests) async {
-    final bool present;
-    try {
-      present = await bloodTests.fetchBloodTestPresent(widget.userId);
-    } catch (e) {
-      return;
-    }
-    if (!present || !mounted) return;
-    final bool reset = await DialogUtils.openConfirm(
-      context,
-      title: 'Kan Tahlili Kalmadı',
-      message: 'Danışanın Kan Tahlili sekmesinde dosya kalmadı.\n\nDetay '
-          'sekmesindeki "Danışanın kan değerleri dokümanı mevcut mu?" sorusu '
-          '"Hayır" olarak işaretlensin mi? "Hayır" olursa danışan, eklendiği '
-          'günden 1 hafta geçtiyse günlük taramada kan tahlili eksik '
-          'danışanlar listesine girer.',
-      confirmText: '"Hayır" olarak işaretle',
-      cancelText: '"Evet" kalsın',
-    );
-    if (!reset || !mounted) return;
-    try {
-      await bloodTests.setBloodTestPresent(userId: widget.userId, present: false);
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(context, title: 'Hata', message: 'Seçim kaydedilemedi: $e');
-      return;
-    }
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Kan değerleri dokümanı "mevcut değil" olarak kaydedildi.'),
-      duration: Duration(seconds: 2),
-    ));
   }
 
   void _openFile(TestAttachment f) async {

@@ -197,9 +197,11 @@ void main() {
         find.widgetWithText(TextField, 'Beklenen sonuç'), 'Tarih de silinir');
     await tester.tap(find.widgetWithText(FilledButton, 'Kaydet'));
     await tester.pumpAndSettle();
-    expect(
-        find.text('${featureTestSections.first.steps.length + 1}. Paketi sil'),
-        findsOneWidget);
+    final int kiloSteps = featureTestSections
+        .firstWhere((FeatureTestSection section) => section.id == 'kilo')
+        .steps
+        .length;
+    expect(find.text('${kiloSteps + 1}. Paketi sil'), findsOneWidget);
     expect(find.text('Kendi adımınız'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Adımı sil'));

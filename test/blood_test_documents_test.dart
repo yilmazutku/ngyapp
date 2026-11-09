@@ -69,6 +69,12 @@ void main() {
         TestAttachment.bloodTestReminderField: reminder,
       };
 
+  Future<bool?> presence() async => (await db
+          .collection('users')
+          .doc(customer)
+          .get())
+      .data()?[UserModel.bloodTestPresentField] as bool?;
+
   Future<List<String>> reminderIds() async => [
         for (final QueryDocumentSnapshot<Map<String, dynamic>> doc in (await db
                 .collection(AdminNotificationsProvider.collectionName)
@@ -144,8 +150,41 @@ void main() {
     });
   });
 
+  test('en yeni kan tahlili: en geç tarih, aynı tarihte en son yüklenen',
+      () {
+    TestAttachment file(String id, DateTime? testDate, DateTime uploadedAt,
+            {bool? mark = true}) =>
+        TestAttachment.fromMap(id, {
+          TestAttachment.uploadTimeField: Timestamp.fromDate(uploadedAt),
+          if (mark != null) TestAttachment.isBloodTestField: mark,
+          if (testDate != null)
+            TestAttachment.bloodTestDateField: Timestamp.fromDate(testDate),
+        });
+
+    expect(TestAttachment.latestBloodTest([]), isNull);
+    expect(
+        TestAttachment.latestBloodTest([
+          file('diger', null, DateTime(2026, 11, 1), mark: false),
+          file('eski', null, DateTime(2026, 11, 2), mark: null),
+        ]),
+        isNull);
+    expect(
+        TestAttachment.latestBloodTest([
+          file('tarihsiz', null, DateTime(2026, 11, 5)),
+          file('ekim1', DateTime(2026, 10, 1), DateTime(2026, 10, 2)),
+          file('ekim2', DateTime(2026, 10, 1), DateTime(2026, 10, 3)),
+          file('eylul', DateTime(2026, 9, 1), DateTime(2026, 11, 4)),
+        ])!.docId,
+        'ekim2');
+    expect(
+        TestAttachment.latestBloodTest([
+          file('tarihsiz', null, DateTime(2026, 11, 5)),
+        ])!.docId,
+        'tarihsiz');
+  });
+
   group('hatırlatma ve "doküman mevcut" eşitlemesi', () {
-    test('en yeni kan tahlilinin hatırlatması kurulur, danışan "Evet" olur',
+    test('en yeni kan tahlilinin hatırlatması kurulur, danışan "yüklü" olur',
         () async {
       final DateTime older = daysAgo(60);
       final DateTime latest = daysAgo(10);
@@ -163,7 +202,7 @@ void main() {
             in BloodTestReminderStage.values)
           AdminNotification.bloodTestReminderId(customer, latest, stage),
       ]));
-      expect(await bloodTests.fetchBloodTestPresent(customer), isTrue);
+      expect(await presence(), isTrue);
     });
 
     test('Diğer\'e taşınan tahlil takipten çıkar, önceki tahlil geri gelir',
@@ -188,7 +227,8 @@ void main() {
       ]));
     });
 
-    test('kan tahlili kalmayınca hatırlatmalar silinir, "Evet"e dokunulmaz',
+    test('kan tahlili kalmayınca hatırlatmalar silinir, danışan "yüklü değil" '
+        'olur',
         () async {
       await seed('k1', bloodTest(daysAgo(10)), uploadedAt: DateTime(2026, 1, 6));
       await bloodTests.syncReminders(userId: customer, userName: 'Ayşe');
@@ -200,7 +240,20 @@ void main() {
 
       expect(sync.hasBloodTests, isFalse);
       expect(await reminderIds(), isEmpty);
-      expect(await bloodTests.fetchBloodTestPresent(customer), isTrue);
+      expect(await presence(), isFalse);
+    });
+
+    test('Doküman Kontrol kayıttaki işarete değil dosyalara bakar', () async {
+      await db.collection('users').doc(customer).update({
+        UserModel.bloodTestPresentField: true,
+      });
+      await seed('diger', {TestAttachment.isBloodTestField: false},
+          uploadedAt: DateTime(2026, 1, 6));
+
+      final BloodTestReport report =
+          await bloodTests.checkAllCustomers(now: DateTime.now());
+
+      expect(report.statuses.single.kind, BloodTestStatusKind.missingFirst);
     });
 
     test('Doküman Kontrol, Diğer\'e taşınan tahlilin tarihine bakmaz',

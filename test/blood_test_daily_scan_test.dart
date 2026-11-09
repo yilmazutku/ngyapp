@@ -51,6 +51,13 @@ void main() {
   Future<Map<String, dynamic>> userData(String id) async =>
       (await db.collection('users').doc(id).get()).data()!;
 
+  Future<void> addBloodTest(String userId, DateTime? date) =>
+      db.collection('users').doc(userId).collection('tests').add({
+        'fileName': 'tahlil.pdf',
+        'isBloodTest': true,
+        if (date != null) 'bloodTestDate': Timestamp.fromDate(date),
+      });
+
   test('ilk tarama: eski danışanlar "yok" işaretlenir, eksikler listelenir',
       () async {
     final DateTime now = DateTime.now();
@@ -60,6 +67,7 @@ void main() {
     await addUser('yeni', createDate: now.subtract(const Duration(days: 2)),
         present: false);
     await addUser('var', createDate: old, present: true);
+    await addBloodTest('var', now.subtract(const Duration(days: 20)));
     await addUser('simge', name: 'Simge', surname: 'Erdoğan', createDate: old);
     await addUser('silinecek', createDate: old, removalRequested: true);
     await addUser('admin', role: 'admin', createDate: old);
@@ -86,6 +94,35 @@ void main() {
     expect(state['lastScanDay'], today);
     expect(state['lastScanBy'], admin);
     expect(state['presenceInitializedAt'], isA<Timestamp>());
+    expect(state['presenceFromDocumentsAt'], isA<Timestamp>());
+  });
+
+  test('ilk taramada elle verilmiş işaretler bir kez dosyalara göre düzeltilir',
+      () async {
+    final DateTime now = DateTime.now();
+    final DateTime old = now.subtract(const Duration(days: 60));
+    await addUser('elle', name: 'Elle', surname: 'Evet', createDate: old,
+        present: true);
+    await addUser('dosyali', createDate: old, present: false);
+    await addBloodTest('dosyali', now.subtract(const Duration(days: 10)));
+    await addUser('dogru', createDate: old, present: true);
+    await addBloodTest('dogru', now.subtract(const Duration(days: 40)));
+    await addUser('diger', createDate: old, present: true);
+    await db.collection('users').doc('diger').collection('tests').add({
+      'fileName': 'diyet.pdf',
+      'isBloodTest': false,
+    });
+
+    expect(await provider.runDailyScan(uid: admin, now: now), 2);
+    expect((await userData('elle'))['isBloodTestPresent'], isFalse);
+    expect((await userData('diger'))['isBloodTestPresent'], isFalse);
+    expect((await userData('dosyali'))['isBloodTestPresent'], isTrue);
+    expect((await userData('dogru'))['isBloodTestPresent'], isTrue);
+
+    await db.collection('users').doc('elle').update({'isBloodTestPresent': true});
+    await provider.runDailyScan(
+        uid: admin, now: now.add(const Duration(days: 1)));
+    expect((await userData('elle'))['isBloodTestPresent'], isTrue);
   });
 
   test('aynı gün ikinci tarama yapılmaz', () async {
@@ -102,6 +139,7 @@ void main() {
     final DateTime now = DateTime.now();
     await addUser('var',
         createDate: now.subtract(const Duration(days: 30)), present: true);
+    await addBloodTest('var', now.subtract(const Duration(days: 5)));
     expect(await provider.runDailyScan(uid: admin, now: now), 0);
     expect(
         (await db.collection(AdminNotificationsProvider.collectionName).get())
@@ -114,6 +152,7 @@ void main() {
     final DateTime now = DateTime.now();
     await addUser('eski', createDate: now.subtract(const Duration(days: 30)),
         present: true);
+    await addBloodTest('eski', now.subtract(const Duration(days: 5)));
     await provider.runDailyScan(uid: admin, now: now);
 
     await addUser('alansiz', createDate: now);
@@ -149,12 +188,12 @@ void main() {
     expect((await digestOf(tomorrow)).superseded, isFalse);
   });
 
-  test('Detay sekmesindeki seçim kaydedilir ve oturumda hatırlanır', () async {
+  test('kan tahlili işareti kaydedilir', () async {
     await addUser('d1', createDate: DateTime(2026));
     await provider.setBloodTestPresent(userId: 'd1', present: true);
     expect((await userData('d1'))['isBloodTestPresent'], isTrue);
-    expect(provider.savedPresence('d1'), isTrue);
-    expect(provider.savedPresence('d2'), isNull);
+    await provider.setBloodTestPresent(userId: 'd1', present: false);
+    expect((await userData('d1'))['isBloodTestPresent'], isFalse);
   });
 
   test('önizleme hiçbir şey yazmadan listeyi ve bekleyenleri gösterir',
@@ -232,6 +271,9 @@ void main() {
     await addTest('guncel', today.subtract(const Duration(days: 5)));
     await addUser('tarihsiz', name: 'Tarihsiz', surname: 'Danışan',
         createDate: now.subtract(const Duration(days: 300)), present: true);
+    await addBloodTest('tarihsiz', null);
+    await addUser('elle', name: 'Elle', surname: 'Evet',
+        createDate: now.subtract(const Duration(days: 300)), present: true);
     await addUser('silinecek', createDate: now, removalRequested: true);
     await addUser('admin', role: 'admin', createDate: now);
 
@@ -241,18 +283,19 @@ void main() {
       onProgress: (done, total) => progress.add(done),
     );
     expect(report.statuses.map((s) => s.customer.userId),
-        ['eski', 'ilk', 'yeni', 'tarihsiz', 'guncel']);
+        ['elle', 'eski', 'ilk', 'yeni', 'tarihsiz', 'guncel']);
     expect(report.statuses.map((s) => s.kind), [
+      BloodTestStatusKind.missingFirst,
       BloodTestStatusKind.expired,
       BloodTestStatusKind.missingFirst,
       BloodTestStatusKind.waitingFirst,
       BloodTestStatusKind.undated,
       BloodTestStatusKind.upToDate,
     ]);
-    expect(report.statuses.first.lastTestDate,
+    expect(report.statuses[1].lastTestDate,
         DateTime(today.year, today.month - 4, today.day));
-    expect(report.countOf(BloodTestStatusGroup.overdue), 2);
-    expect(progress.last, 5);
+    expect(report.countOf(BloodTestStatusGroup.overdue), 3);
+    expect(progress.last, 6);
     expect(provider.lastReport, same(report));
   });
 }

@@ -70,16 +70,21 @@ class _FeatureTestEntry extends StatelessWidget {
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        leading: const Icon(Icons.fact_check_outlined, size: 32),
+        leading: Icon(
+          Icons.bloodtype_outlined,
+          size: 32,
+          color: Colors.red.shade600,
+        ),
         title: const Text(
           FeatureTestPage.title,
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         subtitle: const Text(
-          'Kilo takibe geçiş tarihi, kan tahlili hatırlatmaları, bildirim '
-          'zili, günlük tarama, doğum günleri ve Enter ile gönderme için '
-          'adım adım test listesi; bildirim simülatörü, tarama önizlemesi, '
-          'hatırlatma hesaplayıcı ve kopyalanabilir rapor.',
+          'Kan tahlili yükleme ve düzenleme, 3 ay hatırlatmaları, Doküman '
+          'Kontrol, günlük tarama ve bildirimler için adım adım test listesi; '
+          'zaman makinesi, bildirim simülatörü, tarama önizlemesi ve '
+          'kopyalanabilir rapor. Kilo takibe geçiş, doğum günleri ve Enter '
+          'ile gönderme testleri sayfanın sonunda.',
         ),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(

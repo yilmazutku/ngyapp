@@ -45,6 +45,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _stateCollection = 'adminState';
   static const String _stateDocId = 'bloodTests';
   static const String _presenceInitializedAtField = 'presenceInitializedAt';
+  static const String _presenceFromDocumentsAtField = 'presenceFromDocumentsAt';
   static const String _lastScanDayField = 'lastScanDay';
   static const String _lastScanAtField = 'lastScanAt';
   static const String _lastScanByField = 'lastScanBy';
@@ -57,23 +58,12 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   DocumentReference<Map<String, dynamic>> get _stateDoc =>
       _db.collection(_stateCollection).doc(_stateDocId);
 
-  final Map<String, bool> _savedPresence = {};
-
-  bool? savedPresence(String userId) => _savedPresence[userId];
-
   Future<void> setBloodTestPresent({
     required String userId,
     required bool present,
   }) async {
     await _users.doc(userId).update({UserModel.bloodTestPresentField: present});
-    _savedPresence[userId] = present;
     notifyListeners();
-  }
-
-  Future<bool> fetchBloodTestPresent(String userId) async {
-    final DocumentSnapshot<Map<String, dynamic>> snapshot =
-        await _users.doc(userId).get();
-    return snapshot.data()?[UserModel.bloodTestPresentField] == true;
   }
 
   Future<BloodTestReminderSync> syncReminders({
@@ -86,18 +76,19 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       userName: userName,
       testDates: TestAttachment.reminderWishesOf(await _bloodTestsOf(userId)),
     );
-    if (sync.hasBloodTests) {
-      await setBloodTestPresent(userId: userId, present: true);
-    }
+    await setBloodTestPresent(userId: userId, present: sync.hasBloodTests);
     return sync;
   }
 
-  Future<List<TestAttachment>> _bloodTestsOf(String userId) async {
+  Future<List<TestAttachment>> _bloodTestsOf(
+    String userId, {
+    bool fromServer = false,
+  }) async {
     final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
         .doc(userId)
         .collection(TestProvider.testsCollection)
         .where(TestAttachment.isBloodTestField, isEqualTo: true)
-        .get();
+        .get(fromServer ? const GetOptions(source: Source.server) : null);
     return [
       for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
           in snapshot.docs)
@@ -255,6 +246,12 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
               .subtract(const Duration(days: 1));
       await _initializePresence(createdSince: since);
     }
+    if (state[_presenceFromDocumentsAtField] is! Timestamp) {
+      await _alignPresenceWithDocuments();
+      await _stateDoc.set({
+        _presenceFromDocumentsAtField: FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
 
     final List<NotificationCustomer> missing = await _fetchMissing(now);
     if (missing.isNotEmpty) {
@@ -315,6 +312,42 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       for (final DocumentReference<Map<String, dynamic>> ref
           in refs.skip(start).take(_batchLimit)) {
         batch.update(ref, {UserModel.bloodTestPresentField: false});
+      }
+      await batch.commit();
+    }
+  }
+
+  Future<void> _alignPresenceWithDocuments() async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
+        .where(_roleField, isEqualTo: _customerRole)
+        .get(const GetOptions(source: Source.server));
+    final List<QueryDocumentSnapshot<Map<String, dynamic>>> customers =
+        snapshot.docs;
+    final Map<DocumentReference<Map<String, dynamic>>, bool> changes = {};
+    for (int start = 0;
+        start < customers.length;
+        start += _checkConcurrency) {
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> chunk =
+          customers.skip(start).take(_checkConcurrency).toList();
+      final List<List<TestAttachment>> bloodTests = await Future.wait([
+        for (final QueryDocumentSnapshot<Map<String, dynamic>> doc in chunk)
+          _bloodTestsOf(doc.id, fromServer: true),
+      ]);
+      for (int i = 0; i < chunk.length; i++) {
+        final bool present = bloodTests[i].isNotEmpty;
+        if ((chunk[i].data()[UserModel.bloodTestPresentField] == true) !=
+            present) {
+          changes[chunk[i].reference] = present;
+        }
+      }
+    }
+    final List<DocumentReference<Map<String, dynamic>>> refs =
+        changes.keys.toList();
+    for (int start = 0; start < refs.length; start += _batchLimit) {
+      final WriteBatch batch = _db.batch();
+      for (final DocumentReference<Map<String, dynamic>> ref
+          in refs.skip(start).take(_batchLimit)) {
+        batch.update(ref, {UserModel.bloodTestPresentField: changes[ref]});
       }
       await batch.commit();
     }
@@ -438,12 +471,12 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     DateTime? createdAt,
     DateTime now,
   ) async {
+    final List<TestAttachment> bloodTests = await _bloodTestsOf(user.userId);
     return BloodTestStatus.evaluate(
       customer: _notificationCustomerOf(user),
       createdAt: createdAt,
-      hasBloodTest: user.hasBloodTest,
-      lastTestDate:
-          TestAttachment.latestTestDate(await _bloodTestsOf(user.userId)),
+      hasBloodTest: bloodTests.isNotEmpty,
+      lastTestDate: TestAttachment.latestTestDate(bloodTests),
       now: now,
     );
   }

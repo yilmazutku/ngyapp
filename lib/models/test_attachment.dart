@@ -131,6 +131,29 @@ class TestAttachment {
     return latest;
   }
 
+  static TestAttachment? latestBloodTest(List<TestAttachment> files) {
+    TestAttachment? latest;
+    for (final TestAttachment file in files) {
+      if (file.isBloodTest && (latest == null || file._isLaterThan(latest))) {
+        latest = file;
+      }
+    }
+    return latest;
+  }
+
+  bool _isLaterThan(TestAttachment other) {
+    final DateTime? testDate = bloodTestDate;
+    final DateTime? otherTestDate = other.bloodTestDate;
+    if (testDate != otherTestDate) {
+      if (testDate == null || otherTestDate == null) return otherTestDate == null;
+      return testDate.isAfter(otherTestDate);
+    }
+    final DateTime? uploaded = uploadTime;
+    final DateTime? otherUploaded = other.uploadTime;
+    if (uploaded == null || otherUploaded == null) return otherUploaded == null && uploaded != null;
+    return uploaded.isAfter(otherUploaded);
+  }
+
   static List<DateTime> testDatesOf(List<TestAttachment> files) {
     return {
       for (final TestAttachment file in files)
