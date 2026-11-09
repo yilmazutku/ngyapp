@@ -28,14 +28,22 @@ void main() {
     return DateTime(now.year, now.month, now.day - days);
   }
 
-  Future<void> seedUser({required bool present}) =>
-      db.collection('users').doc(customer).set({
-        'name': 'Ayşe',
-        'surname': 'Yılmaz',
-        'email': 'ayse@x.com',
-        'role': 'customer',
-        UserModel.bloodTestPresentField: present,
-      });
+  Future<void> seedUser({required bool present, String? package = 'active'}) async {
+    await db.collection('users').doc(customer).set({
+      'name': 'Ayşe',
+      'surname': 'Yılmaz',
+      'email': 'ayse@x.com',
+      'role': 'customer',
+      UserModel.bloodTestPresentField: present,
+    });
+    if (package != null) {
+      await db
+          .collection('users')
+          .doc(customer)
+          .collection('subscriptions')
+          .add({'status': package});
+    }
+  }
 
   CollectionReference<Map<String, dynamic>> files() =>
       db.collection('users').doc(customer).collection('tests');
@@ -292,6 +300,44 @@ void main() {
     expect(find.textContaining('türü belirtilmemiş'), findsNothing);
     expect(find.byType(AlertDialog), findsNothing);
     expect(await reminderIds(), isEmpty);
+  });
+
+  testWidgets(
+      'paketi bitmiş danışanda hatırlatma kurulmaz; pencere, rozet ve mesaj '
+      'bunu söyler', (WidgetTester tester) async {
+    final DateTime testDate = daysAgo(10);
+    await seedUser(present: false, package: 'completed');
+    await seedFile('eski', {}, uploadedAt: DateTime(2026, 1, 5));
+    await pumpTab(tester);
+
+    await tester.tap(find.text('Diğer (1)'));
+    await tester.pumpAndSettle();
+    await tester.tap(inFile('eski', find.byTooltip('Düzenle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Kan Tahlili sekmesine taşı'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('aktif paketi yok'), findsOneWidget);
+    expect(find.text('Hatırlatmalar'), findsNothing);
+
+    await tester.tap(find.text('Tahlilin Yapıldığı Tarih'));
+    await tester.pumpAndSettle();
+    final int pickedDay = testDate.day == 1 ? 2 : 1;
+    await tester.tap(find.text('$pickedDay'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Kan Tahlili\'ne Taşı'));
+    await tester.pumpAndSettle();
+    await closeInfo(tester, 'aktif paketi olmadığı için');
+
+    expect(await reminderIds(), isEmpty);
+    expect((await fileData('eski'))[TestAttachment.bloodTestReminderField],
+        isTrue);
+    await tester.tap(find.text('Kan Tahlili (1)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hatırlatma yok: aktif paket yok'), findsOneWidget);
+    expect(find.textContaining('Hatırlatma: '), findsNothing);
   });
 
   testWidgets(

@@ -236,6 +236,11 @@ const List<FeatureTestSection> featureTestSections = [
         'Pencerede "üzerinden 3 ay geçmiş" uyarısı çıkar; yükleyince zilin Sistem sekmesine "Kan tahlilinin üzerinden 3 ay geçti" hemen düşer; satırda turuncu "3 ay doldu" rozeti görünür.',
       ),
       FeatureTestStep(
+        'kan.pasif',
+        'Paketi "Tamamlandı" olan (Danışanlar Özet\'te görünmeyen) bir danışana hatırlatıcı açık kan tahlili yükleyin; sonra Paket sekmesinden ona aktif bir paket ekleyin.',
+        'Önce hatırlatma kurulmaz: pencere ve bilgi mesajı aktif paket olmadığını söyler, satırda gri "Hatırlatma yok: aktif paket yok" rozeti çıkar. Paket eklenince hatırlatma kendiliğinden kurulur ("Bekleyen hatırlatmalar"da görünür); paket yeniden "Tamamlandı" yapılınca bekleyenler kalkar.',
+      ),
+      FeatureTestStep(
         'kan.normal',
         'Diğer sekmesinde "Doküman Yükle" ile bir dosya yükleyin.',
         'Hiçbir soru sorulmadan yüklenir; Diğer\'de rozetsiz görünür, hatırlatma kurulmaz.',

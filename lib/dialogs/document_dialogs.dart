@@ -17,12 +17,14 @@ Future<BloodTestInfo?> showBloodTestUploadDialog(
   BuildContext context, {
   required List<String> fileNames,
   List<DateTime> knownTestDates = const [],
+  bool remindersAvailable = true,
 }) {
   return showDialog<BloodTestInfo>(
     context: context,
     builder: (_) => _BloodTestUploadDialog(
       fileNames: fileNames,
       knownTestDates: knownTestDates,
+      remindersAvailable: remindersAvailable,
     ),
   );
 }
@@ -32,6 +34,7 @@ Future<DocumentEdit?> showDocumentEditDialog(
   required TestAttachment file,
   int sameDateCount = 0,
   List<DateTime> knownTestDates = const [],
+  bool remindersAvailable = true,
 }) {
   return showDialog<DocumentEdit>(
     context: context,
@@ -39,6 +42,7 @@ Future<DocumentEdit?> showDocumentEditDialog(
       file: file,
       sameDateCount: sameDateCount,
       knownTestDates: knownTestDates,
+      remindersAvailable: remindersAvailable,
     ),
   );
 }
@@ -47,10 +51,12 @@ class _BloodTestUploadDialog extends StatefulWidget {
   const _BloodTestUploadDialog({
     required this.fileNames,
     required this.knownTestDates,
+    required this.remindersAvailable,
   });
 
   final List<String> fileNames;
   final List<DateTime> knownTestDates;
+  final bool remindersAvailable;
 
   @override
   State<_BloodTestUploadDialog> createState() => _BloodTestUploadDialogState();
@@ -95,6 +101,7 @@ class _BloodTestUploadDialogState extends State<_BloodTestUploadDialog> {
           testDate: testDate,
           wantsReminder: _wantsReminder,
           knownTestDates: widget.knownTestDates,
+          remindersAvailable: widget.remindersAvailable,
           onDateChanged: (DateTime date) => setState(() => _testDate = date),
           onReminderChanged: (bool value) =>
               setState(() => _wantsReminder = value),
@@ -109,11 +116,13 @@ class _DocumentEditDialog extends StatefulWidget {
     required this.file,
     required this.sameDateCount,
     required this.knownTestDates,
+    required this.remindersAvailable,
   });
 
   final TestAttachment file;
   final int sameDateCount;
   final List<DateTime> knownTestDates;
+  final bool remindersAvailable;
 
   @override
   State<_DocumentEditDialog> createState() => _DocumentEditDialogState();
@@ -329,6 +338,7 @@ class _DocumentEditDialogState extends State<_DocumentEditDialog> {
               testDate: _testDate,
               wantsReminder: _wantsReminder,
               knownTestDates: widget.knownTestDates,
+              remindersAvailable: widget.remindersAvailable,
               onDateChanged: (DateTime date) =>
                   setState(() => _testDate = date),
               onReminderChanged: (bool value) =>
@@ -486,6 +496,7 @@ class _BloodTestFields extends StatelessWidget {
     required this.testDate,
     required this.wantsReminder,
     required this.knownTestDates,
+    required this.remindersAvailable,
     required this.onDateChanged,
     required this.onReminderChanged,
   });
@@ -498,10 +509,14 @@ class _BloodTestFields extends StatelessWidget {
   static const String _reminderLabel =
       '3 ay sonra hatırlatıcı istiyor musunuz?';
   static const int _maxKnownDates = 4;
+  static const String _noActivePackageNote = 'Danışanın şu an aktif paketi '
+      'yok (Danışanlar Özet\'te görünmüyor). 3 ay hatırlatması, danışana '
+      'aktif ya da dondurulmuş bir paket eklenince kendiliğinden kurulur.';
 
   final DateTime? testDate;
   final bool wantsReminder;
   final List<DateTime> knownTestDates;
+  final bool remindersAvailable;
   final ValueChanged<DateTime> onDateChanged;
   final ValueChanged<bool> onReminderChanged;
 
@@ -569,7 +584,13 @@ class _BloodTestFields extends StatelessWidget {
           ),
           onChanged: (bool? value) => onReminderChanged(value ?? false),
         ),
-        if (wantsReminder && testDate != null)
+        if (wantsReminder && !remindersAvailable)
+          InlineNote(
+            icon: Icons.alarm_off_rounded,
+            text: _noActivePackageNote,
+            color: Colors.blueGrey.shade700,
+          )
+        else if (wantsReminder && testDate != null)
           BloodTestReminderPreview(testDate: testDate),
       ],
     );

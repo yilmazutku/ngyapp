@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/subs_model.dart';
@@ -14,6 +16,17 @@ class SubProvider extends ChangeNotifier {
   static const int USER_BATCH_SIZE = 20;
 
   bool _subChanged = false;
+
+  final StreamController<String> _packageStatusChanges =
+      StreamController<String>.broadcast();
+
+  Stream<String> get packageStatusChanges => _packageStatusChanges.stream;
+
+  @override
+  void dispose() {
+    _packageStatusChanges.close();
+    super.dispose();
+  }
 
   bool get subChanged => _subChanged;
   void resetSubChanged() => _subChanged = false;
@@ -259,7 +272,8 @@ class SubProvider extends ChangeNotifier {
 
       _subChanged = true;
       notifyListeners();
-      
+      _packageStatusChanges.add(userId);
+
       return subscriptionId;
     } catch (e) {
       rethrow;
@@ -289,6 +303,7 @@ class SubProvider extends ChangeNotifier {
 
       _subChanged = true;
       notifyListeners();
+      if (updateData.containsKey('status')) _packageStatusChanges.add(userId);
       return true;
     } catch (e) {
       rethrow;
@@ -410,6 +425,7 @@ class SubProvider extends ChangeNotifier {
 
       _subChanged = true;
       notifyListeners();
+      _packageStatusChanges.add(userId);
       return true;
     } catch (e) {
       rethrow;

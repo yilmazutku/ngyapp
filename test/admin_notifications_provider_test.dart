@@ -243,6 +243,30 @@ void main() {
       expect(result.written, 2);
     });
 
+    test('hatırlatmaya izin yoksa bekleyenler silinir, düşmüş olan kalır',
+        () async {
+      final DateTime expired = daysAgo(120);
+      final DateTime latest = daysAgo(10);
+      await sync({expired: true});
+      await sync({expired: true, latest: true});
+      expect(await provider.pendingBloodTestReminderUserIds(DateTime.now()),
+          {customer});
+
+      final BloodTestReminderSync result = await provider.syncBloodTestReminders(
+        userId: customer,
+        userName: 'Ayşe Yılmaz',
+        testDates: {expired: true, latest: true},
+        remindersAllowed: false,
+      );
+
+      expect(result.remindersAllowed, isFalse);
+      expect(result.remindFor, isNull);
+      expect(result.written, 0);
+      expect(await ids(), [reminderId(expired, BloodTestReminderStage.dueDay)]);
+      expect(await provider.pendingBloodTestReminderUserIds(DateTime.now()),
+          isEmpty);
+    });
+
     test('kan tahlili kalmayınca hepsi silinir', () async {
       await sync({daysAgo(10): true});
       final BloodTestReminderSync result = await sync({});

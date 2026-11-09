@@ -18,8 +18,14 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   BloodTestProvider({
     required AdminNotificationsProvider notifications,
     FirebaseFirestore? db,
+    Stream<String>? packageStatusChanges,
   })  : _notifications = notifications,
-        _dbOverride = db;
+        _dbOverride = db {
+    _packageStatusSubscription =
+        packageStatusChanges?.listen(_onPackageStatusChanged);
+  }
+
+  StreamSubscription<String>? _packageStatusSubscription;
 
   final AdminNotificationsProvider _notifications;
   final FirebaseFirestore? _dbOverride;
@@ -78,14 +84,50 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     required String userId,
     required String userName,
   }) async {
+    final List<TestAttachment> bloodTests = await _bloodTestsOf(userId);
     final BloodTestReminderSync sync =
         await _notifications.syncBloodTestReminders(
       userId: userId,
       userName: userName,
-      testDates: TestAttachment.reminderWishesOf(await _bloodTestsOf(userId)),
+      testDates: TestAttachment.reminderWishesOf(bloodTests),
+      remindersAllowed: await isListedInCustomerSummary(userId),
     );
     await setBloodTestPresent(userId: userId, present: sync.hasBloodTests);
     return sync;
+  }
+
+  Future<BloodTestReminderSync?> refreshRemindersOf(String userId) async {
+    final DocumentSnapshot<Map<String, dynamic>> snapshot =
+        await _users.doc(userId).get();
+    if (!snapshot.exists) return null;
+    final UserModel user = UserModel.fromDocument(snapshot);
+    if (user.role != _customerRole) return null;
+    return syncReminders(
+      userId: userId,
+      userName: _notificationCustomerOf(user).name,
+    );
+  }
+
+  Future<void> _onPackageStatusChanged(String userId) async {
+    try {
+      await refreshRemindersOf(userId);
+    } catch (e) {
+      return;
+    }
+  }
+
+  Future<void> _dropRemindersOfInactiveCustomers(DateTime now) async {
+    final List<String> userIds =
+        (await _notifications.pendingBloodTestReminderUserIds(now)).toList();
+    for (int start = 0; start < userIds.length; start += _checkConcurrency) {
+      await Future.wait([
+        for (final String userId
+            in userIds.skip(start).take(_checkConcurrency))
+          isListedInCustomerSummary(userId).then((bool listed) async {
+            if (!listed) await refreshRemindersOf(userId);
+          }),
+      ]);
+    }
   }
 
   Future<List<TestAttachment>> _bloodTestsOf(
@@ -202,6 +244,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _packageStatusSubscription?.cancel();
     _stopDailyScan();
     super.dispose();
   }
@@ -274,6 +317,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           ? null
           : AdminNotification.missingBloodTestsId(today),
     );
+    await _dropRemindersOfInactiveCustomers(now);
     await _stateDoc.set({
       _lastScanDayField: today,
       _lastScanAtField: FieldValue.serverTimestamp(),
@@ -384,7 +428,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     return missing;
   }
 
-  Future<bool> _isListedInCustomerSummary(String userId) async {
+  Future<bool> isListedInCustomerSummary(String userId) async {
     final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
         .doc(userId)
         .collection(_subscriptionsCollection)
@@ -402,7 +446,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           records.skip(start).take(_checkConcurrency).toList();
       final List<bool> flags = await Future.wait([
         for (final _CustomerRecord record in chunk)
-          _isListedInCustomerSummary(record.user.userId),
+          isListedInCustomerSummary(record.user.userId),
       ]);
       for (int i = 0; i < chunk.length; i++) {
         if (flags[i]) listed.add(chunk[i]);
@@ -526,7 +570,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     _CustomerRecord customer,
     DateTime now,
   ) async {
-    if (!await _isListedInCustomerSummary(customer.user.userId)) return null;
+    if (!await isListedInCustomerSummary(customer.user.userId)) return null;
     return _statusOf(customer.user, customer.createdAt, now);
   }
 
