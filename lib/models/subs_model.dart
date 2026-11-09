@@ -293,6 +293,9 @@ enum SubActiveStatus {
       this == SubActiveStatus.activeWeekly ||
       this == SubActiveStatus.activeWeightTracking;
 
+  bool get isListedInCustomerSummary =>
+      isActive || this == SubActiveStatus.frozen;
+
   static SubActiveStatus fromLabel(String label) {
     return SubActiveStatus.values.firstWhere((e) => e.label == label);
   }

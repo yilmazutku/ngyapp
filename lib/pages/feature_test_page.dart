@@ -666,6 +666,15 @@ class _SectionCard extends StatelessWidget {
                   ],
                 ),
               ),
+            for (final FeatureTestTool tool in section.tools)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: FeatureTestToolPanel(
+                  tool: tool,
+                  color: color,
+                  checklist: checklist,
+                ),
+              ),
             const SizedBox(height: 4),
             for (int i = 0; i < allSteps.length; i++)
               if (visibleIds.contains(allSteps[i].id))
@@ -712,15 +721,6 @@ class _SectionCard extends StatelessWidget {
                         label: Text(shortcut.label),
                       ),
                   ],
-                ),
-              ),
-            for (final FeatureTestTool tool in section.tools)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                child: FeatureTestToolPanel(
-                  tool: tool,
-                  color: color,
-                  checklist: checklist,
                 ),
               ),
             const SizedBox(height: 16),

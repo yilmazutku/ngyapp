@@ -35,6 +35,11 @@ void main() {
       'createDate': Timestamp.fromDate(DateTime(2025, 1, 1)),
       UserModel.bloodTestPresentField: false,
     });
+    await db
+        .collection('users')
+        .doc(customer)
+        .collection('subscriptions')
+        .add({'status': 'active'});
   });
 
   tearDown(() {

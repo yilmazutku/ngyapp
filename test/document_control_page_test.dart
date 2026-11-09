@@ -26,7 +26,11 @@ void main() {
           'createDate':
               Timestamp.fromDate(now.subtract(Duration(days: daysAgo))),
           if (present != null) 'isBloodTestPresent': present,
-        });
+        }).then((_) => db
+            .collection('users')
+            .doc(id)
+            .collection('subscriptions')
+            .add({'status': 'active'}));
     await user('eksik', 'Eksik', 20);
     await user('eski', 'Eski', 300, present: true);
     await db.collection('users').doc('eski').collection('tests').add({
