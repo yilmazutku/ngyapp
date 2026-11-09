@@ -169,6 +169,34 @@ void main() {
         unorderedEquals(['dondu', 'haftalik', 'kilo']));
   });
 
+  test('günlük tarama paketi bitmiş danışanların bekleyen 3 ay '
+      'hatırlatmalarını siler', () async {
+    final DateTime now = DateTime.now();
+    final DateTime old = now.subtract(const Duration(days: 60));
+    final AdminNotificationsProvider notifications =
+        AdminNotificationsProvider(db: db, currentUid: () => admin);
+    addTearDown(notifications.dispose);
+    final DateTime testDate = DateTime(now.year, now.month, now.day - 10);
+    for (final String id in ['aktif', 'bitmis']) {
+      await addUser(id, createDate: old, present: true);
+      await addBloodTest(id, testDate);
+      await notifications.syncBloodTestReminders(
+        userId: id,
+        userName: id,
+        testDates: {testDate: true},
+      );
+    }
+    await addSubscription('aktif');
+    await addSubscription('bitmis', status: 'completed');
+    expect(await notifications.pendingBloodTestReminderUserIds(now),
+        {'aktif', 'bitmis'});
+
+    await provider.runDailyScan(uid: admin, now: now);
+
+    expect(await notifications.pendingBloodTestReminderUserIds(now),
+        {'aktif'});
+  });
+
   test('aynı gün ikinci tarama yapılmaz', () async {
     final DateTime now = DateTime.now();
     await addUser('eski',

@@ -419,6 +419,7 @@ class AdminNotificationsProvider extends ChangeNotifier
     required String userId,
     required String userName,
     required Map<DateTime, bool> testDates,
+    bool remindersAllowed = true,
   }) async {
     final DateTime now = DateTime.now();
     final Map<DateTime, bool> days = {};
@@ -431,7 +432,9 @@ class AdminNotificationsProvider extends ChangeNotifier
       if (latest == null || day.isAfter(latest)) latest = day;
     }
     final DateTime? remindFor =
-        latest != null && days[latest] == true ? latest : null;
+        remindersAllowed && latest != null && days[latest] == true
+            ? latest
+            : null;
 
     final QuerySnapshot<Map<String, dynamic>> snapshot = await _collection
         .where(AdminNotification.userIdField, isEqualTo: userId)
@@ -467,7 +470,25 @@ class AdminNotificationsProvider extends ChangeNotifier
       remindFor: remindFor,
       written: written,
       removed: stale.length,
+      remindersAllowed: remindersAllowed,
     );
+  }
+
+  Future<Set<String>> pendingBloodTestReminderUserIds(DateTime now) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _collection
+        .where(AdminNotification.fireAtField,
+            isGreaterThan: Timestamp.fromDate(now))
+        .get();
+    return {
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs)
+        if (AdminNotification.fromDocument(doc)
+            case final AdminNotification n
+            when n.type == AdminNotificationType.bloodTestReminder &&
+                !n.isTest &&
+                n.userId != null)
+          n.userId!,
+    };
   }
 
   static DateTime _dayOf(DateTime date) =>

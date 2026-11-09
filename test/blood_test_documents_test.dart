@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -186,6 +188,70 @@ void main() {
           file('tarihsiz', null, DateTime(2026, 11, 5)),
         ])!.docId,
         'tarihsiz');
+  });
+
+  group('3 ay hatırlatması yalnızca aktif danışana', () {
+    Future<void> setPackages(String status) async {
+      final QuerySnapshot<Map<String, dynamic>> packages = await db
+          .collection('users')
+          .doc(customer)
+          .collection('subscriptions')
+          .get();
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in packages.docs) {
+        await doc.reference.update({'status': status});
+      }
+    }
+
+    test('paketi bitmiş danışana kurulmaz, aktif paket eklenince kurulur',
+        () async {
+      final DateTime testDate = daysAgo(10);
+      await setPackages('completed');
+      await seed('k1', bloodTest(testDate), uploadedAt: DateTime(2026, 1, 6));
+
+      final BloodTestReminderSync sync =
+          await bloodTests.syncReminders(userId: customer, userName: 'Ayşe');
+      expect(sync.remindersAllowed, isFalse);
+      expect(sync.remindFor, isNull);
+      expect(await reminderIds(), isEmpty);
+      expect(await presence(), isTrue);
+
+      await setPackages('frozen');
+      final BloodTestReminderSync? refreshed =
+          await bloodTests.refreshRemindersOf(customer);
+      expect(refreshed!.remindersAllowed, isTrue);
+      expect(await reminderIds(), unorderedEquals([
+        for (final BloodTestReminderStage stage
+            in BloodTestReminderStage.values)
+          AdminNotification.bloodTestReminderId(customer, testDate, stage),
+      ]));
+    });
+
+    test('paket durumu değişince bekleyen hatırlatmalar hemen güncellenir',
+        () async {
+      final StreamController<String> changes = StreamController<String>();
+      addTearDown(changes.close);
+      final BloodTestProvider listening = BloodTestProvider(
+        notifications: notifications,
+        db: db,
+        packageStatusChanges: changes.stream,
+      );
+      addTearDown(listening.dispose);
+      final DateTime testDate = daysAgo(10);
+      await seed('k1', bloodTest(testDate), uploadedAt: DateTime(2026, 1, 6));
+      await listening.syncReminders(userId: customer, userName: 'Ayşe');
+      expect(await reminderIds(), hasLength(2));
+
+      await setPackages('completed');
+      changes.add(customer);
+      await pumpEventQueue();
+      expect(await reminderIds(), isEmpty);
+
+      await setPackages('active_kt');
+      changes.add(customer);
+      await pumpEventQueue();
+      expect(await reminderIds(), hasLength(2));
+    });
   });
 
   group('hatırlatma ve "doküman mevcut" eşitlemesi', () {

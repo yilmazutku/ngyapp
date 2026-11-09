@@ -127,12 +127,14 @@ class BloodTestReminderSync {
     required this.remindFor,
     required this.written,
     required this.removed,
+    this.remindersAllowed = true,
   });
 
   final DateTime? latestTestDate;
   final DateTime? remindFor;
   final int written;
   final int removed;
+  final bool remindersAllowed;
 
   bool get hasBloodTests => latestTestDate != null;
 }

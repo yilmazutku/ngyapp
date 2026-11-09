@@ -64,11 +64,26 @@ class _TestsTabState extends State<TestsTab>
 
   late Future<List<TestAttachment>> _filesFuture;
   bool _busy = false;
+  bool _remindersAvailable = true;
 
   @override
   void initState() {
     super.initState();
     _filesFuture = _fetchFiles();
+    _loadReminderAvailability();
+  }
+
+  Future<void> _loadReminderAvailability() async {
+    final BloodTestProvider bloodTests =
+        Provider.of<BloodTestProvider>(context, listen: false);
+    try {
+      final bool available =
+          await bloodTests.isListedInCustomerSummary(widget.userId);
+      if (!mounted || available == _remindersAvailable) return;
+      setState(() => _remindersAvailable = available);
+    } catch (e) {
+      return;
+    }
   }
 
   @override
@@ -132,6 +147,7 @@ class _TestsTabState extends State<TestsTab>
         context,
         fileNames: [for (final PlatformFile file in result.files) file.name],
         knownTestDates: TestAttachment.testDatesOf(files),
+        remindersAvailable: _remindersAvailable,
       );
       if (bloodTest == null || !mounted) return;
     }
@@ -252,6 +268,12 @@ class _TestsTabState extends State<TestsTab>
     final DateTime? latest = sync.latestTestDate;
     final DateTime? remindFor = sync.remindFor;
     final DateTime now = DateTime.now();
+    if (edited != null && edited.wantsReminder && !sync.remindersAllowed) {
+      notes.add('Danışanın aktif paketi olmadığı için 3 ay hatırlatması '
+          'kurulmadı; danışana aktif ya da dondurulmuş bir paket eklenince '
+          'kendiliğinden kurulur.');
+      return notes;
+    }
     if (edited != null && edited.wantsReminder) {
       if (latest != null && latest.isAfter(edited.testDate)) {
         notes.add('Danışanın daha yeni tarihli '
@@ -293,6 +315,7 @@ class _TestsTabState extends State<TestsTab>
       file: file,
       sameDateCount: sameDate.length,
       knownTestDates: TestAttachment.testDatesOf(files),
+      remindersAvailable: _remindersAvailable,
     );
     if (edit == null || !mounted) return;
 
@@ -705,6 +728,7 @@ class _TestsTabState extends State<TestsTab>
                   file: f,
                   isLatest: f.bloodTestDate != null &&
                       f.bloodTestDate == latestTestDate,
+                  remindersAvailable: _remindersAvailable,
                 ),
               ],
             )
@@ -734,8 +758,13 @@ class _TestsTabState extends State<TestsTab>
 class _BloodTestBadges extends StatelessWidget {
   final TestAttachment file;
   final bool isLatest;
+  final bool remindersAvailable;
 
-  const _BloodTestBadges({required this.file, required this.isLatest});
+  const _BloodTestBadges({
+    required this.file,
+    required this.isLatest,
+    required this.remindersAvailable,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -766,11 +795,17 @@ class _BloodTestBadges extends StatelessWidget {
             text: '3 ay doldu: ${DateFormatter.formatNumericDate(dueDay)}',
             color: Colors.orange.shade800,
           )
-        else if (isLatest && file.bloodTestReminder)
+        else if (isLatest && file.bloodTestReminder && remindersAvailable)
           _badge(
             icon: Icons.alarm_rounded,
             text: 'Hatırlatma: ${DateFormatter.formatNumericDate(dueDay)}',
             color: Colors.deepPurple,
+          )
+        else if (isLatest && file.bloodTestReminder)
+          _badge(
+            icon: Icons.alarm_off_rounded,
+            text: 'Hatırlatma yok: aktif paket yok',
+            color: Colors.blueGrey.shade600,
           ),
       ],
     );

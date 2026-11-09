@@ -197,6 +197,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (ctx) => BloodTestProvider(
             notifications: ctx.read<AdminNotificationsProvider>(),
+            packageStatusChanges: ctx.read<SubProvider>().packageStatusChanges,
           ),
         ),
       ],
