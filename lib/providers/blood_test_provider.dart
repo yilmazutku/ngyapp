@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import '../models/admin_notification.dart';
 import '../models/blood_test_scan.dart';
 import '../models/blood_test_status.dart';
+import '../models/subs_model.dart';
 import '../models/test_attachment.dart';
 import '../models/user_model.dart';
 import '../utils/date_formatter.dart';
@@ -41,6 +42,13 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _createDateField = 'createDate';
   static const String _legacyCreatedAtField = 'createdAt';
   static const String _removalRequestedField = 'isUserRequestedRemoval';
+  static const String _subscriptionsCollection = 'subscriptions';
+  static const String _subscriptionStatusField = 'status';
+
+  static final List<String> _listedSubscriptionStatuses = [
+    for (final SubActiveStatus status in SubActiveStatus.values)
+      if (status.isListedInCustomerSummary) status.label,
+  ];
 
   static const String _stateCollection = 'adminState';
   static const String _stateDocId = 'bloodTests';
@@ -357,7 +365,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
         .where(UserModel.bloodTestPresentField, isEqualTo: false)
         .get(const GetOptions(source: Source.server));
-    final List<NotificationCustomer> missing = [
+    final List<_CustomerRecord> candidates = [
       for (final _CustomerRecord record in _recordsOf(snapshot))
         if (isMissingBloodTest(
           record.user,
@@ -365,10 +373,42 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           removalRequested: record.removalRequested,
           now: now,
         ))
-          _notificationCustomerOf(record.user),
+          record,
+    ];
+    final List<NotificationCustomer> missing = [
+      for (final _CustomerRecord record
+          in await _onlyListedInCustomerSummary(candidates))
+        _notificationCustomerOf(record.user),
     ];
     missing.sort((a, b) => compareSearchText(a.name, b.name));
     return missing;
+  }
+
+  Future<bool> _isListedInCustomerSummary(String userId) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
+        .doc(userId)
+        .collection(_subscriptionsCollection)
+        .where(_subscriptionStatusField, whereIn: _listedSubscriptionStatuses)
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
+  }
+
+  Future<List<_CustomerRecord>> _onlyListedInCustomerSummary(
+      List<_CustomerRecord> records) async {
+    final List<_CustomerRecord> listed = [];
+    for (int start = 0; start < records.length; start += _checkConcurrency) {
+      final List<_CustomerRecord> chunk =
+          records.skip(start).take(_checkConcurrency).toList();
+      final List<bool> flags = await Future.wait([
+        for (final _CustomerRecord record in chunk)
+          _isListedInCustomerSummary(record.user.userId),
+      ]);
+      for (int i = 0; i < chunk.length; i++) {
+        if (flags[i]) listed.add(chunk[i]);
+      }
+    }
+    return listed;
   }
 
   Future<BloodTestScanPreview> previewScan({required DateTime at}) async {
@@ -377,16 +417,28 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
         .get(const GetOptions(source: Source.server));
     final List<NotificationCustomer> missing = [];
     final List<BloodTestScanWaiting> waiting = [];
-    int unrecordedCount = 0;
-    for (final _CustomerRecord record in _recordsOf(snapshot)) {
+    final List<_CustomerRecord> records = _recordsOf(snapshot);
+    final int unrecordedCount = [
+      for (final _CustomerRecord record in records)
+        if (!record.presenceRecorded) record,
+    ].length;
+    final List<_CustomerRecord> candidates = await _onlyListedInCustomerSummary([
+      for (final _CustomerRecord record in records)
+        if (missingBloodTestListedFrom(
+              record.user,
+              createdAt: record.createdAt,
+              removalRequested: record.removalRequested,
+            ) !=
+            null)
+          record,
+    ]);
+    for (final _CustomerRecord record in candidates) {
       final UserModel user = record.user;
-      if (!record.presenceRecorded) unrecordedCount++;
-      final DateTime? listedFrom = missingBloodTestListedFrom(
+      final DateTime listedFrom = missingBloodTestListedFrom(
         user,
         createdAt: record.createdAt,
         removalRequested: record.removalRequested,
-      );
-      if (listedFrom == null) continue;
+      )!;
       if (listedFrom.isAfter(at)) {
         waiting.add(BloodTestScanWaiting(
           customer: _notificationCustomerOf(user),
@@ -447,16 +499,20 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     ];
 
     final List<BloodTestStatus> statuses = [];
+    int checked = 0;
     onProgress?.call(0, customers.length);
     for (int start = 0;
         start < customers.length;
         start += _checkConcurrency) {
-      statuses.addAll(await Future.wait([
-        for (final _CustomerRecord customer
-            in customers.skip(start).take(_checkConcurrency))
-          _statusOf(customer.user, customer.createdAt, now),
-      ]));
-      onProgress?.call(statuses.length, customers.length);
+      final List<_CustomerRecord> chunk =
+          customers.skip(start).take(_checkConcurrency).toList();
+      final List<BloodTestStatus?> results = await Future.wait([
+        for (final _CustomerRecord customer in chunk)
+          _statusIfListed(customer, now),
+      ]);
+      statuses.addAll(results.whereType<BloodTestStatus>());
+      checked += chunk.length;
+      onProgress?.call(checked, customers.length);
     }
     statuses.sort(BloodTestStatus.compare);
     final BloodTestReport report =
@@ -464,6 +520,14 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     _lastReport = report;
     notifyListeners();
     return report;
+  }
+
+  Future<BloodTestStatus?> _statusIfListed(
+    _CustomerRecord customer,
+    DateTime now,
+  ) async {
+    if (!await _isListedInCustomerSummary(customer.user.userId)) return null;
+    return _statusOf(customer.user, customer.createdAt, now);
   }
 
   Future<BloodTestStatus> _statusOf(

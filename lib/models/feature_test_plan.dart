@@ -197,7 +197,7 @@ const List<FeatureTestSection> featureTestSections = [
       ),
       FeatureTestStep(
         'kan.hesap',
-        'Aşağıdaki hesaplayıcıda pencerede seçtiğiniz tarihi seçin.',
+        'Bu bölümün başındaki "Hatırlatma hesaplayıcı" kartında pencerede seçtiğiniz tarihi seçin.',
         'Hesaplayıcı penceredeki hatırlatma günlerinin ve saatlerinin aynısını gösterir.',
       ),
       FeatureTestStep(
@@ -208,7 +208,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'kan.yukle',
         'Yükle\'ye basın.',
-        'Bilgi mesajında tahlil tarihi ve hatırlatma günü yazar; listede "Tahlil tarihi" ve "Hatırlatma" rozetleri görünür; aşağıdaki "Bekleyen hatırlatmalar"da danışan seçilince iki "Bekliyor" hatırlatma (1 gün kala ve 3 ay doldu) görünür.',
+        'Bilgi mesajında tahlil tarihi ve hatırlatma günü yazar; listede "Tahlil tarihi" ve "Hatırlatma" rozetleri görünür; bölümün başındaki "Bekleyen hatırlatmalar" kartında danışan seçilince iki "Bekliyor" hatırlatma (1 gün kala ve 3 ay doldu) görünür.',
       ),
       FeatureTestStep(
         'kan.detay',
@@ -402,11 +402,11 @@ const List<FeatureTestSection> featureTestSections = [
     icon: Icons.notifications_active_outlined,
     color: Color(0xFF5E35B1),
     note:
-        'Simülatörün kurduğu bildirimler yalnızca sizin hesabınıza gelir, diğer adminler görmez; zilde "DENEME" etiketiyle görünür. Hesabınızın açık olduğu bütün cihazlara gelir. Android, uygulama arka plandayken bildirimi birkaç dakika geciktirebilir.',
+        'Bildirim simülatörü bu bölümün başındaki karttır (zaman makinesinden ayrı bir araç): türü, danışanı ve süreyi seçip tek bir deneme bildirimi kurar. Simülatörün kurduğu bildirimler yalnızca sizin hesabınıza gelir, diğer adminler görmez; zilde "DENEME" etiketiyle görünür. Hesabınızın açık olduğu bütün cihazlara gelir. Android, uygulama arka plandayken bildirimi birkaç dakika geciktirebilir.',
     steps: [
       FeatureTestStep(
         'teslim.acik',
-        'Simülatörde bir tür ve süre seçip "Bildirimi kur"a basın; uygulamayı açık tutun.',
+        'Bölümün başındaki "Bildirim simülatörü" kartında bir tür ve süre seçip "Bildirimi kur"a basın; uygulamayı açık tutun.',
         'Süre dolunca mor bildirim şeridi çıkar (Android\'de telefonun kendi bildirimi); zilin sayısı artar.',
       ),
       FeatureTestStep(
@@ -492,7 +492,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'zil.okundu',
         'Bir sistem bildirimine basın, sonra "Tümünü okundu say"a basın.',
-        'Basılan bildirim okundu olur; ardından hepsi okundu olur ve aşağıdaki anlık durumda okunmamış sayısı 0\'a iner.',
+        'Basılan bildirim okundu olur; ardından hepsi okundu olur ve bölümün başındaki anlık durum kartında okunmamış sayısı 0\'a iner.',
       ),
       FeatureTestStep(
         'zil.danisan',
@@ -501,7 +501,7 @@ const List<FeatureTestSection> featureTestSections = [
       ),
       FeatureTestStep(
         'zil.acikken',
-        'Simülatörde 10 sn seçip bildirimi kurun; hemen "Bildirim Merkezi"ni Sohbet sekmesinde açın ve gelen bildirime dokunun.',
+        '"Bildirimin Gelmesi" bölümünün başındaki "Bildirim simülatörü" kartında 10 sn seçip bildirimi kurun; hemen "Bildirim Merkezi"ni Sohbet sekmesinde açın ve gelen bildirime dokunun.',
         'Merkez açık kalır ve Sistem sekmesine geçer; bildirim okundu olur.',
       ),
     ],
