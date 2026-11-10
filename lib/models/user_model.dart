@@ -19,6 +19,17 @@ class UserModel {
 
   static String _nameKey(String name) => searchWordsOf(name).join(' ');
 
+  static const Duration _halfDay = Duration(hours: 12);
+
+  static DateTime _birthDateFromTimestamp(Timestamp stored) {
+    final DateTime nearestUtcDay = stored.toDate().toUtc().add(_halfDay);
+    return DateTime(nearestUtcDay.year, nearestUtcDay.month, nearestUtcDay.day);
+  }
+
+  static Timestamp _birthDateToTimestamp(DateTime birthDate) =>
+      Timestamp.fromDate(
+          DateTime.utc(birthDate.year, birthDate.month, birthDate.day));
+
   final String userId;
   final String name;
   final String email;
@@ -91,7 +102,7 @@ class UserModel {
       tcNo: data['tcNo'],
       phone: data['phone'],
       birthDate: data['birthDate'] != null
-          ? (data['birthDate'] as Timestamp).toDate()
+          ? _birthDateFromTimestamp(data['birthDate'] as Timestamp)
           : null,
       medicationsAndConditions: data['medicationsAndConditions'],
       isBloodTestPresent: data[bloodTestPresentField] is bool
@@ -117,7 +128,7 @@ class UserModel {
       if (dosyaNo != null) 'dosyaNo': dosyaNo,
       if (tcNo != null) 'tcNo': tcNo,
       if (phone != null) 'phone': phone,
-      if (birthDate != null) 'birthDate': Timestamp.fromDate(birthDate!),
+      if (birthDate != null) 'birthDate': _birthDateToTimestamp(birthDate!),
       // Diğer alanların aksine null olsa da yazılır: alan boşaltıldığında
       // update() onu atlarsa Firestore'daki eski değer silinemezdi.
       'medicationsAndConditions': medicationsAndConditions,
