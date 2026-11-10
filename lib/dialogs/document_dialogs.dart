@@ -384,6 +384,7 @@ Future<DateTime?> _showTestDatePicker(BuildContext context, DateTime? current) {
     firstDate: firstDate,
     lastDate: today,
     helpText: _testDateTitle,
+    initialEntryMode: DatePickerEntryMode.input,
   );
 }
 

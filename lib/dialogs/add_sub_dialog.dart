@@ -6,6 +6,7 @@ import '../models/subs_model.dart';
 import '../providers/payment_provider.dart';
 import '../providers/sub_provider.dart';
 import '../utils/amount_input_utils.dart';
+import '../utils/calendar_day.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/date_formatter.dart';
 
@@ -623,7 +624,7 @@ class _AddSubscriptionDialogState extends State<AddSubscriptionDialog> {
           'freezeDate': _freezeDate,
         if (_isWeightTracking && _weightTrackingStartDate != null)
           SubscriptionModel.weightTrackingStartDateField:
-              _weightTrackingStartDate,
+              calendarDayToTimestamp(_weightTrackingStartDate!),
         'createDate': DateTime.now(),
         'createUser': null, // TODO: Add current user ID if available
       };

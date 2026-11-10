@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:ngy_app/models/test_attachment.dart';
 import 'package:ngy_app/providers/test_provider.dart';
+import 'package:ngy_app/utils/calendar_day.dart';
 import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/widgets/blood_test_status_card.dart';
 import 'package:provider/provider.dart';
@@ -39,7 +40,7 @@ void main() {
 
   Map<String, dynamic> bloodTest(DateTime testDate) => {
         TestAttachment.isBloodTestField: true,
-        TestAttachment.bloodTestDateField: Timestamp.fromDate(testDate),
+        TestAttachment.bloodTestDateField: calendarDayToTimestamp(testDate),
         TestAttachment.bloodTestReminderField: true,
       };
 

@@ -32,10 +32,6 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   FirebaseFirestore get _db => _dbOverride ?? FirebaseFirestore.instance;
 
-  static const Duration uploadGracePeriod = BloodTestStatus.firstTestGrace;
-
-  static const int dailyScanHour = BloodTestStatus.dailyScanHour;
-
   static const int _checkConcurrency = 16;
 
   static const Duration _startupDelay = Duration(seconds: 20);
@@ -254,7 +250,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (uid == null || _scanning) return;
     final DateTime now = DateTime.now();
     final String today = DateFormatter.formatIsoDate(now);
-    if (_scannedDay == today || now.hour < dailyScanHour) {
+    if (_scannedDay == today) {
       _armTimer();
       return;
     }
@@ -318,6 +314,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           : AdminNotification.missingBloodTestsId(today),
     );
     await _dropRemindersOfInactiveCustomers(now);
+    await _notifications.rescheduleBloodTestReminders(now);
     await _stateDoc.set({
       _lastScanDayField: today,
       _lastScanAtField: FieldValue.serverTimestamp(),
@@ -332,17 +329,9 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     _timer = null;
     if (_uid == null) return;
     final DateTime now = DateTime.now();
-    final DateTime todayRun =
-        DateTime(now.year, now.month, now.day, dailyScanHour);
-    final DateTime next;
-    if (retry) {
-      next = now.add(_retryDelay);
-    } else if (_scannedDay == DateFormatter.formatIsoDate(now) ||
-        !now.isBefore(todayRun)) {
-      next = DateTime(now.year, now.month, now.day + 1, dailyScanHour);
-    } else {
-      next = todayRun;
-    }
+    final DateTime next = retry
+        ? now.add(_retryDelay)
+        : DateTime(now.year, now.month, now.day + 1);
     _timer = Timer(next.difference(now), _scanIfDue);
   }
 

@@ -281,10 +281,15 @@ class _TestsTabState extends State<TestsTab>
             'olduğu için bu tahlile 3 ay hatırlatması kurulmadı.');
       } else if (sync.written == 0) {
         notes.add('Bu tarihli tahlilin 3 ay hatırlatması zaten kurulu.');
-      } else if (!BloodTestReminderSchedule.plan(edited.testDate, now)
-          .containsKey(BloodTestReminderStage.dayBefore)) {
-        notes.add('Tahlilin üzerinden 3 ay geçtiği için hatırlatma Sistem '
-            'bildirimlerine düştü.');
+      } else if (BloodTestReminderSchedule.isDue(edited.testDate, now)) {
+        final DateTime dueFire = BloodTestReminderSchedule.plan(
+            edited.testDate, now)[BloodTestReminderStage.dueDay]!;
+        notes.add(dueFire.isAfter(now)
+            ? '3 ay bugün doluyor; hatırlatma bugün saat '
+                '${DateFormatter.formatTime(dueFire)}\'da Sistem '
+                'bildirimlerine düşer.'
+            : 'Tahlilin üzerinden 3 ay geçtiği için hatırlatma Sistem '
+                'bildirimlerine düştü.');
       } else {
         notes.add('3 ay hatırlatması '
             '${DateFormatter.formatLongDate(BloodTestReminderSchedule.dueDay(edited.testDate))} '
@@ -777,9 +782,8 @@ class _BloodTestBadges extends StatelessWidget {
         color: Colors.orange.shade800,
       );
     }
-    final bool expired = !BloodTestReminderSchedule.fireTime(
-            testDate, BloodTestReminderStage.dueDay)
-        .isAfter(DateTime.now());
+    final bool expired =
+        BloodTestReminderSchedule.isDue(testDate, DateTime.now());
     return Wrap(
       spacing: 6,
       runSpacing: 4,

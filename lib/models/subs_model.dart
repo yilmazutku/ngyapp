@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
+import '../utils/calendar_day.dart';
+
 /// Paket tutarlarını tam liraya çevirir.
 ///
 /// `totalAmount` / `amountPaid` alanları Firestore'da geriye dönük uyumluluk
@@ -12,7 +14,8 @@ double _wholeLira(Object? raw) {
   throw FormatException('Paket tutarı sayı değil: $raw');
 }
 
-DateTime? _optionalDate(Object? raw) => raw is Timestamp ? raw.toDate() : null;
+DateTime? _optionalDay(Object? raw) =>
+    raw is Timestamp ? calendarDayFromTimestamp(raw) : null;
 
 enum SubsMeetingType {
   online('online'),
@@ -164,7 +167,7 @@ class SubscriptionModel {
       onlineMeetings: data['onlineMeetings'],
       faceToFaceMeetings: data['faceToFaceMeetings'],
       freezeDate: data['freezeDate'] != null ? (data['freezeDate'] as Timestamp).toDate() : null,
-      weightTrackingStartDate: _optionalDate(data[weightTrackingStartDateField]),
+      weightTrackingStartDate: _optionalDay(data[weightTrackingStartDateField]),
       createDate: data['createDate'] != null ? (data['createDate'] as Timestamp).toDate() : DateTime.now(),
       createUser: data['createUser'],
       updateDate: data['updateDate'] != null ? (data['updateDate'] as Timestamp).toDate() : null,
@@ -194,7 +197,7 @@ class SubscriptionModel {
       if (freezeDate != null) 'freezeDate': Timestamp.fromDate(freezeDate!),
       if (weightTrackingStartDate != null)
         weightTrackingStartDateField:
-            Timestamp.fromDate(weightTrackingStartDate!),
+            calendarDayToTimestamp(weightTrackingStartDate!),
       'createDate': Timestamp.fromDate(createDate),
       if (createUser != null) 'createUser': createUser,
       if (updateDate != null) 'updateDate': Timestamp.fromDate(updateDate!),

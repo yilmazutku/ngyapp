@@ -7,6 +7,7 @@ import 'package:ngy_app/models/blood_test_scan.dart';
 import 'package:ngy_app/models/blood_test_status.dart';
 import 'package:ngy_app/providers/admin_notifications_provider.dart';
 import 'package:ngy_app/providers/blood_test_provider.dart';
+import 'package:ngy_app/utils/calendar_day.dart';
 import 'package:ngy_app/utils/date_formatter.dart';
 
 void main() {
@@ -62,7 +63,7 @@ void main() {
       db.collection('users').doc(userId).collection('tests').add({
         'fileName': 'tahlil.pdf',
         'isBloodTest': true,
-        if (date != null) 'bloodTestDate': Timestamp.fromDate(date),
+        if (date != null) 'bloodTestDate': calendarDayToTimestamp(date),
       });
 
   test('ilk tarama: eski danışanlar "yok" işaretlenir, eksikler listelenir',
@@ -197,6 +198,43 @@ void main() {
         {'aktif'});
   });
 
+  test('günlük tarama önceden 09:00\'a kurulmuş bekleyen hatırlatmaları '
+      'aynı günün 10:30\'una taşır', () async {
+    final DateTime now = DateTime.now();
+    final DateTime testDate = DateTime(now.year, now.month, now.day - 10);
+    await addUser('aktif',
+        createDate: now.subtract(const Duration(days: 60)), present: true);
+    await addSubscription('aktif');
+    await addBloodTest('aktif', testDate);
+    final CollectionReference<Map<String, dynamic>> reminders =
+        db.collection(AdminNotificationsProvider.collectionName);
+    String idOf(BloodTestReminderStage stage) =>
+        AdminNotification.bloodTestReminderId('aktif', testDate, stage);
+    for (final BloodTestReminderStage stage in BloodTestReminderStage.values) {
+      final DateTime planned =
+          BloodTestReminderSchedule.fireTime(testDate, stage);
+      await reminders.doc(idOf(stage)).set({
+        AdminNotification.typeField:
+            AdminNotificationType.bloodTestReminder.value,
+        AdminNotification.fireAtField: Timestamp.fromDate(
+            DateTime(planned.year, planned.month, planned.day, 9)),
+        AdminNotification.userIdField: 'aktif',
+        AdminNotification.testDateField: calendarDayToTimestamp(testDate),
+        AdminNotification.stageField: stage.value,
+      });
+    }
+
+    await provider.runDailyScan(uid: admin, now: now);
+
+    for (final BloodTestReminderStage stage in BloodTestReminderStage.values) {
+      final Map<String, dynamic> data =
+          (await reminders.doc(idOf(stage)).get()).data()!;
+      expect((data[AdminNotification.fireAtField] as Timestamp).toDate(),
+          BloodTestReminderSchedule.fireTime(testDate, stage),
+          reason: stage.value);
+    }
+  });
+
   test('aynı gün ikinci tarama yapılmaz', () async {
     final DateTime now = DateTime.now();
     await addUser('eski',
@@ -294,7 +332,7 @@ void main() {
     expect(today.missing.map((c) => c.userId), ['hayir', 'eski']);
     expect(today.waiting.map((w) => w.customer.userId), ['yeni']);
     expect(today.waiting.single.listedFrom,
-        fresh.add(BloodTestProvider.uploadGracePeriod));
+        DateTime(fresh.year, fresh.month, fresh.day + 7));
     expect(today.unrecordedCount, 2);
 
     final BloodTestScanPreview later = await provider.previewScan(
@@ -335,7 +373,7 @@ void main() {
         .add({
           'fileName': 'tahlil.pdf',
           'isBloodTest': true,
-          'bloodTestDate': Timestamp.fromDate(date),
+          'bloodTestDate': calendarDayToTimestamp(date),
         });
 
     await addUser('ilk', name: 'İlk', surname: 'Eksik',

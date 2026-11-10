@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import '../models/test_attachment.dart';
+import '../utils/calendar_day.dart';
 import '../utils/storage_upload.dart';
 
 /// Manages Test attachments (PDFs or images)
@@ -92,7 +93,8 @@ class TestProvider extends ChangeNotifier {
     if (bloodTest == null) return {TestAttachment.isBloodTestField: false};
     return {
       TestAttachment.isBloodTestField: true,
-      TestAttachment.bloodTestDateField: Timestamp.fromDate(bloodTest.testDate),
+      TestAttachment.bloodTestDateField:
+          calendarDayToTimestamp(bloodTest.testDate),
       TestAttachment.bloodTestReminderField: bloodTest.wantsReminder,
     };
   }

@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 
 import '../models/admin_notification.dart';
 import '../services/admin_notification_delivery.dart';
+import '../utils/calendar_day.dart';
 import '../utils/date_formatter.dart';
 
 class AdminNotificationsProvider extends ChangeNotifier
@@ -491,6 +492,45 @@ class AdminNotificationsProvider extends ChangeNotifier
     };
   }
 
+  Future<int> rescheduleBloodTestReminders(DateTime now) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await _collection
+        .where(AdminNotification.fireAtField,
+            isGreaterThan: Timestamp.fromDate(now))
+        .get();
+    final Map<DocumentReference<Map<String, dynamic>>, DateTime> moved = {};
+    for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+        in snapshot.docs) {
+      final AdminNotification? n = AdminNotification.fromDocument(doc);
+      final DateTime? testDate = n?.testDate;
+      final BloodTestReminderStage? stage = n?.stage;
+      if (n == null ||
+          n.isTest ||
+          n.type != AdminNotificationType.bloodTestReminder ||
+          testDate == null ||
+          stage == null) {
+        continue;
+      }
+      final DateTime planned =
+          BloodTestReminderSchedule.fireTime(testDate, stage);
+      if (planned.isAfter(now) && planned != n.fireAt) {
+        moved[doc.reference] = planned;
+      }
+    }
+    final List<DocumentReference<Map<String, dynamic>>> refs =
+        moved.keys.toList();
+    for (int start = 0; start < refs.length; start += _batchLimit) {
+      final WriteBatch batch = _db.batch();
+      for (final DocumentReference<Map<String, dynamic>> ref
+          in refs.skip(start).take(_batchLimit)) {
+        batch.update(ref, {
+          AdminNotification.fireAtField: Timestamp.fromDate(moved[ref]!),
+        });
+      }
+      await batch.commit();
+    }
+    return refs.length;
+  }
+
   static DateTime _dayOf(DateTime date) =>
       DateTime(date.year, date.month, date.day);
 
@@ -519,7 +559,7 @@ class AdminNotificationsProvider extends ChangeNotifier
         AdminNotification.fireAtField: Timestamp.fromDate(entry.value),
         AdminNotification.userIdField: userId,
         AdminNotification.userNameField: userName,
-        AdminNotification.testDateField: Timestamp.fromDate(testDate),
+        AdminNotification.testDateField: calendarDayToTimestamp(testDate),
         AdminNotification.stageField: stage.value,
         AdminNotification.createdAtField: FieldValue.serverTimestamp(),
         AdminNotification.createdByField: _currentUid,
@@ -631,7 +671,7 @@ class AdminNotificationsProvider extends ChangeNotifier
               customer.name, testDate, stage),
           AdminNotification.userIdField: customer.userId,
           AdminNotification.userNameField: customer.name,
-          AdminNotification.testDateField: Timestamp.fromDate(testDate),
+          AdminNotification.testDateField: calendarDayToTimestamp(testDate),
           AdminNotification.stageField: stage.value,
         };
       case AdminTestNotificationKind.missingBloodTests:

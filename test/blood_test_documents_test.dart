@@ -11,6 +11,7 @@ import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/admin_notifications_provider.dart';
 import 'package:ngy_app/providers/blood_test_provider.dart';
 import 'package:ngy_app/providers/test_provider.dart';
+import 'package:ngy_app/utils/calendar_day.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -72,7 +73,7 @@ void main() {
 
   Map<String, dynamic> bloodTest(DateTime testDate, {bool reminder = true}) => {
         TestAttachment.isBloodTestField: true,
-        TestAttachment.bloodTestDateField: Timestamp.fromDate(testDate),
+        TestAttachment.bloodTestDateField: calendarDayToTimestamp(testDate),
         TestAttachment.bloodTestReminderField: reminder,
       };
 
@@ -139,8 +140,11 @@ void main() {
       );
       final Map<String, dynamic> marked = (await files().doc('a').get()).data()!;
       expect(marked[TestAttachment.isBloodTestField], isTrue);
-      expect((marked[TestAttachment.bloodTestDateField] as Timestamp).toDate(),
-          DateTime(2026, 10, 3));
+      expect(
+          (marked[TestAttachment.bloodTestDateField] as Timestamp)
+              .toDate()
+              .toUtc(),
+          DateTime.utc(2026, 10, 3));
       expect(marked[TestAttachment.bloodTestReminderField], isTrue);
       expect(marked[TestAttachment.fileNameField], 'a.pdf');
       expect(
@@ -165,7 +169,7 @@ void main() {
           TestAttachment.uploadTimeField: Timestamp.fromDate(uploadedAt),
           if (mark != null) TestAttachment.isBloodTestField: mark,
           if (testDate != null)
-            TestAttachment.bloodTestDateField: Timestamp.fromDate(testDate),
+            TestAttachment.bloodTestDateField: calendarDayToTimestamp(testDate),
         });
 
     expect(TestAttachment.latestBloodTest([]), isNull);
