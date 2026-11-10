@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +28,41 @@ class _FailingServer {
 }
 
 int _urlSeed = 0;
+
+Future<Uint8List> _png(int width, int height) async {
+  final ui.PictureRecorder recorder = ui.PictureRecorder();
+  Canvas(recorder).drawRect(
+    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    Paint()..color = const Color(0xFF336699),
+  );
+  final ui.Image image =
+      await recorder.endRecording().toImage(width, height);
+  final ByteData? data =
+      await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return data!.buffer.asUint8List();
+}
+
+Future<Size> _decodedSize(ImageProvider provider) {
+  final Completer<Size> done = Completer<Size>();
+  final ImageStream stream = provider.resolve(ImageConfiguration.empty);
+  late final ImageStreamListener listener;
+  listener = ImageStreamListener(
+    (image, synchronousCall) {
+      stream.removeListener(listener);
+      done.complete(Size(
+        image.image.width.toDouble(),
+        image.image.height.toDouble(),
+      ));
+    },
+    onError: (exception, stackTrace) {
+      stream.removeListener(listener);
+      done.completeError(exception, stackTrace);
+    },
+  );
+  stream.addListener(listener);
+  return done.future;
+}
 
 /// Her test kendi adresini kullanır: görsel önbelleği testler arasında
 /// paylaşılır.
@@ -104,4 +141,85 @@ void main() {
     expect(server.requests, hasLength(2));
     expect(parentTaps, 1);
   }, variant: TargetPlatformVariant.all());
+
+  test('small previews are decoded by their short side, never upscaled', () {
+    ui.TargetImageSize target(int w, int h, {required bool original,
+            int? shortSide}) =>
+        MealThumbnailProvider.targetSizeFor(w, h,
+            isOriginal: original, shortSide: shortSide);
+
+    expect(target(480, 640, original: false).width, 480);
+    expect(target(480, 640, original: false).height, 640);
+    expect(target(480, 640, original: false, shortSide: 96).width, 96);
+    expect(target(480, 640, original: false, shortSide: 96).height, isNull);
+    expect(target(640, 480, original: false, shortSide: 96).height, 96);
+    expect(target(640, 480, original: false, shortSide: 96).width, isNull);
+    expect(target(50, 80, original: false, shortSide: 96).width, 50);
+    expect(target(50, 80, original: false, shortSide: 96).height, 80);
+    expect(target(3000, 4000, original: true).width,
+        MealThumbnailProvider.maxDecodeWidth);
+    expect(target(3000, 4000, original: true, shortSide: 96).width, 96);
+    expect(target(4000, 300, original: true, shortSide: 96).width,
+        MealThumbnailProvider.maxDecodeWidth);
+    expect(target(4000, 300, original: false, shortSide: 96).height, 96);
+  });
+
+  test('the decode size is part of the cache key', () {
+    const MealThumbnailProvider full =
+        MealThumbnailProvider(url: 'u', isOriginal: false);
+    expect(full, const MealThumbnailProvider(url: 'u', isOriginal: false));
+    expect(
+        full,
+        isNot(const MealThumbnailProvider(
+            url: 'u', isOriginal: false, decodeShortSide: 96)));
+    expect(
+        const MealThumbnailProvider(
+            url: 'u', isOriginal: false, decodeShortSide: 96),
+        const MealThumbnailProvider(
+            url: 'u', isOriginal: false, decodeShortSide: 96));
+  });
+
+  test('a thumbnail is decoded small only when a decode size is given',
+      () async {
+    final Uint8List png = await _png(200, 300);
+    final MealPhotoLoader loader = MealPhotoLoader.instance;
+    loader.client =
+        MockClient((request) async => http.Response.bytes(png, 200));
+    loader.cacheDirectory = null;
+    final String url = _nextUrl();
+
+    expect(
+      await _decodedSize(MealThumbnailProvider(url: url, isOriginal: false)),
+      const Size(200, 300),
+    );
+    expect(
+      await _decodedSize(MealThumbnailProvider(
+          url: url, isOriginal: false, decodeShortSide: 64)),
+      const Size(64, 96),
+    );
+  });
+
+  testWidgets('the preview asks for its size in physical pixels',
+      (tester) async {
+    _FailingServer();
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      home: Center(
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: MealThumbnailImage(
+            url: _nextUrl(),
+            isOriginal: false,
+            decodeSize: 32,
+          ),
+        ),
+      ),
+    ));
+    final MealThumbnailProvider provider =
+        tester.widget<Image>(find.byType(Image)).image as MealThumbnailProvider;
+    expect(provider.decodeShortSide, 96);
+    await tester.pumpAndSettle();
+  });
 }

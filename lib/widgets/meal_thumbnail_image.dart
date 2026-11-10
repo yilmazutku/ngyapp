@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -32,10 +33,13 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
 
   final OriginalBytesCallback? onOriginalLoaded;
 
+  final int? decodeShortSide;
+
   const MealThumbnailProvider({
     required this.url,
     required this.isOriginal,
     this.onOriginalLoaded,
+    this.decodeShortSide,
   });
 
   /// Orijinalden çözülürken izin verilen en büyük genişlik (piksel). Kart
@@ -103,17 +107,39 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
 
     final ui.ImmutableBuffer buffer =
         await ui.ImmutableBuffer.fromUint8List(bytes);
-    if (!isOriginal) return decode(buffer);
+    if (!isOriginal && decodeShortSide == null) return decode(buffer);
 
     return decode(
       buffer,
       getTargetSize: (int intrinsicWidth, int intrinsicHeight) =>
-          intrinsicWidth <= maxDecodeWidth
-              ? ui.TargetImageSize(
-                  width: intrinsicWidth, height: intrinsicHeight)
-              // Yalnızca genişlik verilir; yükseklik orandan hesaplanır.
-              : const ui.TargetImageSize(width: maxDecodeWidth),
+          targetSizeFor(
+        intrinsicWidth,
+        intrinsicHeight,
+        isOriginal: isOriginal,
+        shortSide: decodeShortSide,
+      ),
     );
+  }
+
+  @visibleForTesting
+  static ui.TargetImageSize targetSizeFor(
+    int width,
+    int height, {
+    required bool isOriginal,
+    int? shortSide,
+  }) {
+    if (shortSide != null &&
+        shortSide > 0 &&
+        math.min(width, height) > shortSide) {
+      if (width <= height) return ui.TargetImageSize(width: shortSide);
+      if (!isOriginal || width * shortSide / height <= maxDecodeWidth) {
+        return ui.TargetImageSize(height: shortSide);
+      }
+    }
+    if (isOriginal && width > maxDecodeWidth) {
+      return const ui.TargetImageSize(width: maxDecodeWidth);
+    }
+    return ui.TargetImageSize(width: width, height: height);
   }
 
   @override
@@ -121,10 +147,11 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
       identical(this, other) ||
       other is MealThumbnailProvider &&
           other.url == url &&
-          other.isOriginal == isOriginal;
+          other.isOriginal == isOriginal &&
+          other.decodeShortSide == decodeShortSide;
 
   @override
-  int get hashCode => Object.hash(url, isOriginal);
+  int get hashCode => Object.hash(url, isOriginal, decodeShortSide);
 }
 
 /// Liste kartındaki küçük görsel: yüklenene kadar **hareketsiz** bir yer
@@ -146,12 +173,15 @@ class MealThumbnailImage extends StatefulWidget {
   final OriginalBytesCallback? onOriginalLoaded;
   final BoxFit fit;
 
+  final double? decodeSize;
+
   const MealThumbnailImage({
     super.key,
     required this.url,
     required this.isOriginal,
     this.onOriginalLoaded,
     this.fit = BoxFit.cover,
+    this.decodeSize,
   });
 
   @override
@@ -181,12 +211,16 @@ class _MealThumbnailImageState extends State<MealThumbnailImage> {
       return const _ThumbnailPlaceholder(icon: Icons.image);
     }
 
+    final double? decodeSize = widget.decodeSize;
     return Image(
       key: ValueKey<int>(_attempt),
       image: MealThumbnailProvider(
         url: widget.url,
         isOriginal: widget.isOriginal,
         onOriginalLoaded: widget.onOriginalLoaded,
+        decodeShortSide: decodeSize == null
+            ? null
+            : (decodeSize * MediaQuery.devicePixelRatioOf(context)).ceil(),
       ),
       fit: widget.fit,
       gaplessPlayback: true,

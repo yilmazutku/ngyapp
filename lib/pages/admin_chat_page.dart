@@ -778,6 +778,7 @@ class _ChatListItem extends StatelessWidget {
                 child: MealThumbnailImage(
                   url: preview,
                   isOriginal: previewIsOriginal,
+                  decodeSize: _previewSize,
                 ),
               ),
             ),

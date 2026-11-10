@@ -13,6 +13,7 @@ import '../pages/admin_notifications_page.dart';
 import '../pages/chat_page_new.dart';
 import '../news/news_list_page.dart';
 import '../providers/chat_manager_new.dart';
+import 'in_app_banner_presenter.dart';
 import 'notification_tap_gate.dart';
 import 'open_chats.dart';
 
@@ -119,8 +120,10 @@ class FcmService {
   late final NotificationTapGate _tapGate =
       NotificationTapGate(onOpen: _handleNotificationTap);
 
-  // Overlay entry for in-app notification banner
-  OverlayEntry? _currentBanner;
+  final InAppBannerPresenter _banner = InAppBannerPresenter(
+    displayDuration:
+        const Duration(seconds: NotificationConstants.notificationDisplayTime),
+  );
 
   /// Açık sohbet sayfaları; en üstteki (görünen) en sonda. Sohbet üstüne
   /// sohbet açılabilir (bir sohbetteyken başka bir danışanın bildirimine
@@ -384,8 +387,9 @@ class FcmService {
     final isNews = type == 'news';
     final isSystem = type == adminSystemType;
 
-    _currentBanner = OverlayEntry(
-      builder: (context) => _InAppNotificationBanner(
+    _banner.show(
+      overlay,
+      (context) => _InAppNotificationBanner(
         title: title,
         body: body,
         backgroundColor: isSystem
@@ -405,20 +409,10 @@ class FcmService {
         onDismiss: _dismissCurrentBanner,
       ),
     );
-
-    overlay.insert(_currentBanner!);
-
-    // Auto-dismiss after 4 seconds
-    Future.delayed(const Duration(seconds: NotificationConstants.notificationDisplayTime), () {
-      _dismissCurrentBanner();
-    });
   }
 
   /// Dismiss current notification banner
-  void _dismissCurrentBanner() {
-    _currentBanner?.remove();
-    _currentBanner = null;
-  }
+  void _dismissCurrentBanner() => _banner.dismiss();
 
   /// Handle notification tap (from background/terminated state)
   void _onNotificationTap(RemoteMessage message) {

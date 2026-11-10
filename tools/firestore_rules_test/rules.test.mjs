@@ -126,6 +126,9 @@ async function run(rulesFile) {
     await b.commit();
   });
   await check('E3 admin deletes chat message', true, () => db(ADMIN).collection('chats').doc('c4').collection('messages').doc('own2').delete());
+  const bellDayStart = TS.fromDate(new Date(new Date().setHours(0, 0, 0, 0)));
+  await check('E4 admin bell: today\'s messages of all chats (group)', true, () => db(ADMIN).collectionGroup('messages').where('createdAt', '>=', bellDayStart).get());
+  await check('E4b customer collection-group messages', false, () => db('c4').collectionGroup('messages').where('createdAt', '>=', bellDayStart).get());
 
   // F / G: unchanged areas.
   await check('F1 owner writes meal entry', true, () => db('c4').collection('users').doc('c4').collection('meals').doc('2026-09-28').collection('mealEntries').doc('lunch').set({ imageUrls: ['a'], thumbUrls: ['b'] }));

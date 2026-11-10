@@ -107,7 +107,11 @@ class MessageReplyQuote extends StatelessWidget {
                       height: _imageSize,
                       // Alıntıdaki adres küçük görsel ya da (eski mesajda)
                       // orijinal olabilir; orijinalse küçültülerek çözülür.
-                      child: MealThumbnailImage(url: image, isOriginal: true),
+                      child: MealThumbnailImage(
+                        url: image,
+                        isOriginal: true,
+                        decodeSize: _imageSize,
+                      ),
                     ),
                   ),
                 ),
