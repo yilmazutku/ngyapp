@@ -28,8 +28,9 @@ void main() {
   List<String> namesOn(DateTime day) =>
       index.on(day).map((u) => u.fullName).toList();
 
-  test('doğum günü olanlar ada göre, çalışanlar hariç', () {
-    expect(namesOn(DateTime(2026, 11, 6)), ['Ayşe Demir', 'Zeynep Kaya']);
+  test('doğum günü olanlar ada göre, çalışanlar dahil', () {
+    expect(namesOn(DateTime(2026, 11, 6)),
+        ['Ayşe Demir', 'Simge Erdoğan', 'Zeynep Kaya']);
     expect(namesOn(DateTime(2026, 11, 7)), isEmpty);
   });
 
