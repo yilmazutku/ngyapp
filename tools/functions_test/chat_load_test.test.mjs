@@ -192,9 +192,9 @@ check('U24 sınır (10) doluysa eklenmez',
     {meal: 'lunch', imageUrl: 'z', time: t2}).kind === 'limit');
 check('U25 test UID biçimi ve kapsamı',
     core.testUserUid('Run1234567890', 0) === 'loadtest_Run1234567890_001' &&
-    core.isTestUserUid('loadtest_Run1234567890_001') &&
-    !core.isTestUserUid('0MvvbZsjbmNPW4QYShRNSOOtkE43') &&
-    !core.isTestUserUid('loadtest_x_001') &&
+    core.isTestUserUidOf('loadtest_Run1234567890_001', 'Run1234567890') &&
+    !core.isTestUserUidOf('0MvvbZsjbmNPW4QYShRNSOOtkE43', 'Run1234567890') &&
+    !core.isTestUserUidOf('loadtest_x_001', 'x') &&
     core.isTestUserUidOf('loadtest_Run1234567890_012', 'Run1234567890') &&
     !core.isTestUserUidOf('loadtest_Run1234567890_012', 'Run123456789'));
 
@@ -551,6 +551,28 @@ await db.collection('chats').doc('gercekDanisan1').set({lastMessage: 'x'});
 await admin.auth().createUser({uid: 'gercekDanisan1'});
 await bucket.file('users/gercekDanisan1/mealPhotos/a.jpg')
     .save(THUMB, {resumable: false});
+
+const RUN_T = 'RunTttttttttt4';
+const runTRef = db.collection('chatLoadTests').doc(RUN_T);
+const runAData = (await db.collection('chatLoadTests').doc(RUN_A).get()).data();
+await runTRef.set({
+  ...runAData,
+  status: 'running',
+  startAt: Timestamp.now(),
+  sentCount: 0,
+  users: runAData.users.map((user, i) =>
+    i === 0 ? {...user, uid: 'gercekDanisan1'} : user),
+});
+await runTRef.collection('ticks').doc('c0_00000')
+    .set({chain: 'c0', fromIndex: 0, createdAt: Timestamp.now()});
+await sleep(6000);
+check('E42 test kaydına gerçek kullanıcı girse de ona mesaj yazılmaz',
+    (await db.collection('chats').doc('gercekDanisan1').collection('messages')
+        .get()).empty &&
+    (await runTRef.get()).get('sentCount') === 0 &&
+    (await db.collection('chats').doc(runAData.users[1].uid)
+        .collection('messages').get()).size === 2);
+await db.recursiveDelete(runTRef);
 
 async function deleteTestUsers(runId, userCount) {
   const results = [];
