@@ -13,6 +13,7 @@ import '../utils/dialog_utils.dart';
 import '../widgets/appointment_color_picker.dart';
 import '../widgets/home_button.dart';
 import '../widgets/labeled_action_button.dart';
+import 'chat_load_test_page.dart';
 import 'feature_test_page.dart';
 
 class TestingPage extends StatefulWidget {
@@ -39,6 +40,8 @@ class _TestingPageState extends State<TestingPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: const [
                 _FeatureTestEntry(),
+                SizedBox(height: 16),
+                _ChatLoadTestEntry(),
                 SizedBox(height: 16),
                 _SpecialLinesSection(),
                 SizedBox(height: 16),
@@ -90,6 +93,42 @@ class _FeatureTestEntry extends StatelessWidget {
         onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => const FeatureTestPage(),
         )),
+      ),
+    );
+  }
+}
+
+class _ChatLoadTestEntry extends StatelessWidget {
+  const _ChatLoadTestEntry();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 2,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Color(0xFFD1C4E9)),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        leading: Icon(
+          Icons.forum_outlined,
+          size: 32,
+          color: Colors.teal.shade600,
+        ),
+        title: const Text(
+          ChatLoadTestPage.title,
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        subtitle: const Text(
+          'Test kullanıcıları sunucudan aynı anda ya da ayarlanan aralıklarla '
+          'öğün fotoğrafı gönderir; Sohbetler sayfasının yük altında kasıp '
+          'kasmadığı kare süresi göstergesiyle izlenir. Test bitince tek '
+          'tuşla temizlenir.',
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.of(context).push(ChatLoadTestPage.route()),
       ),
     );
   }
