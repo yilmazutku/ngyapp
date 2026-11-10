@@ -332,14 +332,6 @@ function isTestUserUidOf(uid, runId) {
 }
 
 /**
- * @param {string} uid UID.
- * @return {boolean} Herhangi bir çalıştırmanın test kullanıcısı mı.
- */
-function isTestUserUid(uid) {
-  return typeof uid === 'string' && TEST_USER_UID_PATTERN.test(uid);
-}
-
-/**
  * @param {string} runId Çalıştırma kimliği.
  * @param {number} index Kullanıcının sırası.
  * @param {function(): number} random 0-1 arası rastgele sayı.
@@ -1047,7 +1039,8 @@ async function runLoadTestTick(runId, tick, officeUids) {
   if (!runSnap.exists || runSnap.get('status') !== STATUS.running) return;
   const run = runSnap.data();
   if (!isTimestamp(run.startAt) || !Array.isArray(run.users) ||
-      !Array.isArray(run.slots) || !Array.isArray(run.photos)) {
+      !Array.isArray(run.slots) || !Array.isArray(run.photos) ||
+      !run.users.every((user) => user && isTestUserUidOf(user.uid, runId))) {
     logger.error('Load test run is malformed', {runId});
     return;
   }
@@ -1129,7 +1122,6 @@ module.exports = {
   stepTimeMs,
   planTick,
   testUserUid,
-  isTestUserUid,
   isTestUserUidOf,
   testUserProfile,
   messageIdOf,
