@@ -12,7 +12,7 @@ class BirthdayIndex {
     final Map<int, List<UserModel>> byMonthDay = {};
     for (final UserModel user in users) {
       final DateTime? birthDate = user.birthDate;
-      if (birthDate == null || user.isExcludedFromActiveCustomers) continue;
+      if (birthDate == null) continue;
       (byMonthDay[_key(birthDate.month, birthDate.day)] ??= []).add(user);
     }
     for (final List<UserModel> group in byMonthDay.values) {
