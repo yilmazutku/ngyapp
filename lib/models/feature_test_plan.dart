@@ -582,6 +582,11 @@ const List<FeatureTestSection> featureTestSections = [
         'Etiket gün başlığının ("Bugün" rozetinin) altında görünür.',
       ),
       FeatureTestStep(
+        'dg.cihazlar',
+        'Windows\'ta bir danışanın doğum tarihini 2016 öncesi bir kış gününe ayarlayın (ör. 10.11.1990), sonra aynı danışanı telefonda ya da Mac\'te açın.',
+        'Detay\'daki doğum tarihi ve takvimdeki "DG" etiketi her cihazda aynı gündedir; telefonda bir gün önceye kaymaz.',
+      ),
+      FeatureTestStep(
         'dg.renk',
         'Ayarlar > Randevu Arkaplan Renkleri > "Doğum Günü (DG)" rengini değiştirip kaydedin, sonra bu sayfayı yeniden açın.',
         'Önizlemedeki ve takvimdeki etiketin rengi değişir; "Varsayılan"a dönünce yeniden pembe olur.',
