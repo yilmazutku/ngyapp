@@ -1521,3 +1521,50 @@ exports.deleteUserAccount = onCall(
       }
     },
 );
+
+const loadTest = require('./chat_load_test');
+
+/**
+ * Yük testi işlevlerini yalnızca admin çağırabilir.
+ * @param {object} request Callable isteği.
+ * @return {string} Çağıranın UID'si.
+ */
+function requireLoadTestAdmin(request) {
+  const callerUid = request.auth ? request.auth.uid : null;
+  if (!callerUid || !ADMIN_UIDS.has(callerUid)) {
+    throw new HttpsError(
+        'permission-denied',
+        'Bu işlem için yönetici yetkisi gereklidir.',
+    );
+  }
+  return callerUid;
+}
+
+exports.startChatLoadTest = onCall(
+    {timeoutSeconds: 300, memory: '512MiB'},
+    async (request) => loadTest.startLoadTest(
+        request.data, requireLoadTestAdmin(request)),
+);
+
+exports.runChatLoadTestTick = onDocumentCreated(
+    {
+      document: `${loadTest.RUNS_COLLECTION}/{runId}/` +
+          `${loadTest.TICKS_COLLECTION}/{tickId}`,
+      timeoutSeconds: 540,
+      memory: '512MiB',
+    },
+    async (event) => {
+      const snap = event.data;
+      if (!snap) return;
+      await loadTest.runLoadTestTick(
+          event.params.runId, snap.data() || {}, [...CHAT_OFFICE_UIDS]);
+    },
+);
+
+exports.cleanupChatLoadTests = onCall(
+    {timeoutSeconds: 540, memory: '512MiB'},
+    async (request) => {
+      requireLoadTestAdmin(request);
+      return loadTest.cleanupLoadTests(request.data);
+    },
+);
