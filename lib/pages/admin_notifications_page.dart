@@ -658,6 +658,7 @@ class _MealPhotoThumb extends StatelessWidget {
       child: MealThumbnailImage(
         url: item.imageUrl,
         isOriginal: item.imageIsOriginal,
+        decodeSize: _size,
       ),
     );
   }

@@ -8,12 +8,20 @@ import 'chat_manager_new.dart';
 
 class MealPhotoNotificationsProvider extends ChangeNotifier
     with WidgetsBindingObserver {
-  MealPhotoNotificationsProvider({FirebaseFirestore? db}) : _dbOverride = db;
+  MealPhotoNotificationsProvider({
+    FirebaseFirestore? db,
+    this.maxChatListeners = defaultMaxChatListeners,
+  }) : _dbOverride = db;
+
+  static const int defaultMaxChatListeners = 60;
 
   final FirebaseFirestore? _dbOverride;
+  final int maxChatListeners;
 
   FirebaseFirestore get _db => _dbOverride ?? FirebaseFirestore.instance;
 
+  static const String _chatsCollection = 'chats';
+  static const String _messagesCollection = 'messages';
   static const String _lastMessageAtField = 'lastMessageAt';
   static const String _adminLastReadAtField = 'adminLastReadAt';
   static const String _createdAtField = 'createdAt';
@@ -25,8 +33,11 @@ class MealPhotoNotificationsProvider extends ChangeNotifier
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _chatsSubscription;
   final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
       _messageSubscriptions = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _groupSubscription;
+  bool _groupReady = false;
+  bool _groupFailed = false;
   final Map<String, DateTime?> _lastReadAt = {};
-  final Map<String, List<MessageData>> _photosByChat = {};
+  final Map<String, Map<String, MessageData>> _photosByChat = {};
   Timer? _dayTimer;
   bool _loaded = false;
   bool _hasError = false;
@@ -39,6 +50,10 @@ class MealPhotoNotificationsProvider extends ChangeNotifier
 
   bool get isLoaded => _loaded;
   bool get hasError => _hasError;
+
+  @visibleForTesting
+  int get messageListenerCount =>
+      _messageSubscriptions.length + (_groupSubscription == null ? 0 : 1);
 
   void start(String uid, {required Object owner}) {
     _owner = owner;
@@ -73,24 +88,32 @@ class MealPhotoNotificationsProvider extends ChangeNotifier
   void _cancelSubscriptions() {
     _chatsSubscription?.cancel();
     _chatsSubscription = null;
+    _cancelChatListeners();
+    _groupSubscription?.cancel();
+    _groupSubscription = null;
+    _groupReady = false;
+    _photosByChat.clear();
+    _lastReadAt.clear();
+  }
+
+  void _cancelChatListeners() {
     for (final StreamSubscription<QuerySnapshot<Map<String, dynamic>>> sub
         in _messageSubscriptions.values) {
       sub.cancel();
     }
     _messageSubscriptions.clear();
-    _photosByChat.clear();
-    _lastReadAt.clear();
   }
 
   void _listenToday() {
     _cancelSubscriptions();
+    _groupFailed = false;
     final DateTime now = DateTime.now();
     final DateTime day = DateTime(now.year, now.month, now.day);
     _day = day;
     _items = const [];
     _loaded = false;
     _chatsSubscription = _db
-        .collection('chats')
+        .collection(_chatsCollection)
         .where(_lastMessageAtField,
             isGreaterThanOrEqualTo: Timestamp.fromDate(day))
         .snapshots()
@@ -102,8 +125,8 @@ class MealPhotoNotificationsProvider extends ChangeNotifier
 
     _dayTimer?.cancel();
     final DateTime nextDay = DateTime(day.year, day.month, day.day + 1);
-    _dayTimer = Timer(nextDay.difference(now) + const Duration(seconds: 1),
-        _listenToday);
+    _dayTimer = Timer(
+        nextDay.difference(now) + const Duration(seconds: 1), _listenToday);
   }
 
   void _onChats(QuerySnapshot<Map<String, dynamic>> snapshot) {
@@ -112,17 +135,83 @@ class MealPhotoNotificationsProvider extends ChangeNotifier
         in snapshot.docs) {
       chatIds.add(doc.id);
       _lastReadAt[doc.id] = _readAtOf(doc.data());
-      _messageSubscriptions.putIfAbsent(doc.id, () => _listenMessages(doc.id));
     }
-    for (final String chatId in _messageSubscriptions.keys.toList()) {
+    for (final String chatId in _lastReadAt.keys.toList()) {
       if (chatIds.contains(chatId)) continue;
-      _messageSubscriptions.remove(chatId)?.cancel();
-      _photosByChat.remove(chatId);
       _lastReadAt.remove(chatId);
+      _messageSubscriptions.remove(chatId)?.cancel();
+      if (!_groupReady) _photosByChat.remove(chatId);
     }
+    _syncMessageListeners();
     _loaded = true;
     _hasError = false;
     _rebuild();
+  }
+
+  void _syncMessageListeners() {
+    if (_groupSubscription != null) return;
+    if (!_groupFailed && _lastReadAt.length > maxChatListeners) {
+      _groupSubscription = _db
+          .collectionGroup(_messagesCollection)
+          .where(_createdAtField,
+              isGreaterThanOrEqualTo: Timestamp.fromDate(_day!))
+          .snapshots()
+          .listen(_onTodayMessages, onError: _onTodayMessagesError);
+      return;
+    }
+    for (final String chatId in _lastReadAt.keys) {
+      _messageSubscriptions.putIfAbsent(chatId, () => _listenMessages(chatId));
+    }
+  }
+
+  void _onTodayMessages(QuerySnapshot<Map<String, dynamic>> snapshot) {
+    if (_groupReady) {
+      for (final DocumentChange<Map<String, dynamic>> change
+          in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.removed) {
+          final String? chatId = _chatIdOf(change.doc.reference);
+          if (chatId != null) _photosByChat[chatId]?.remove(change.doc.id);
+        } else {
+          _applyTodayMessage(change.doc);
+        }
+      }
+    } else {
+      _groupReady = true;
+      _cancelChatListeners();
+      _photosByChat.clear();
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs) {
+        _applyTodayMessage(doc);
+      }
+    }
+    _rebuild();
+  }
+
+  void _onTodayMessagesError(Object error) {
+    debugPrint('MealPhotoNotificationsProvider: $error');
+    _groupFailed = true;
+    _groupSubscription?.cancel();
+    _groupSubscription = null;
+    _groupReady = false;
+    _syncMessageListeners();
+    _rebuild();
+  }
+
+  void _applyTodayMessage(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final String? chatId = _chatIdOf(doc.reference);
+    if (chatId == null) return;
+    final MessageData message = MessageData.fromSnapshot(doc);
+    if (_isCustomerMealPhoto(message, chatId)) {
+      _photosByChat.putIfAbsent(chatId, () => {})[message.id] = message;
+    } else {
+      _photosByChat[chatId]?.remove(message.id);
+    }
+  }
+
+  String? _chatIdOf(DocumentReference<Map<String, dynamic>> message) {
+    final DocumentReference<Map<String, dynamic>>? chat = message.parent.parent;
+    if (chat == null || chat.parent.path != _chatsCollection) return null;
+    return chat.id;
   }
 
   DateTime? _readAtOf(Map<String, dynamic> chatData) {
@@ -135,17 +224,18 @@ class MealPhotoNotificationsProvider extends ChangeNotifier
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>> _listenMessages(
       String chatId) {
     return _db
-        .collection('chats')
+        .collection(_chatsCollection)
         .doc(chatId)
-        .collection('messages')
+        .collection(_messagesCollection)
         .where(_createdAtField,
             isGreaterThanOrEqualTo: Timestamp.fromDate(_day!))
         .snapshots()
         .listen((snapshot) {
-      _photosByChat[chatId] = snapshot.docs
-          .map(MessageData.fromSnapshot)
-          .where((message) => _isCustomerMealPhoto(message, chatId))
-          .toList();
+      _photosByChat[chatId] = {
+        for (final MessageData message
+            in snapshot.docs.map(MessageData.fromSnapshot))
+          if (_isCustomerMealPhoto(message, chatId)) message.id: message,
+      };
       _rebuild();
     }, onError: (Object error) {});
   }
@@ -159,8 +249,9 @@ class MealPhotoNotificationsProvider extends ChangeNotifier
   void _rebuild() {
     final List<MealPhotoNotification> items = [];
     _photosByChat.forEach((chatId, photos) {
+      if (!_lastReadAt.containsKey(chatId)) return;
       final DateTime? readAt = _lastReadAt[chatId];
-      for (final MessageData photo in photos) {
+      for (final MessageData photo in photos.values) {
         final DateTime? sentAt = photo.sentAt;
         if (sentAt == null) continue;
         final String? thumbUrl = photo.thumbUrl;
