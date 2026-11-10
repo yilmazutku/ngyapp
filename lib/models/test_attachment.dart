@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/calendar_day.dart';
 import 'admin_notification.dart';
 
 enum DocumentCategory {
@@ -50,7 +51,7 @@ class TestAttachment {
     final bool? bloodTestMark = mark is bool ? mark : null;
     final Object? testDate = data[bloodTestDateField];
     final DateTime? day = bloodTestMark == true && testDate is Timestamp
-        ? testDate.toDate()
+        ? calendarDayFromTimestamp(testDate)
         : null;
     return TestAttachment(
       docId: docId,
@@ -60,7 +61,7 @@ class TestAttachment {
       storagePath: data[storagePathField] as String? ?? '',
       isImage: data[isImageField] as bool? ?? contentType.startsWith('image/'),
       bloodTestMark: bloodTestMark,
-      bloodTestDate: day == null ? null : DateTime(day.year, day.month, day.day),
+      bloodTestDate: day,
       bloodTestReminder:
           bloodTestMark == true && data[bloodTestReminderField] == true,
     );

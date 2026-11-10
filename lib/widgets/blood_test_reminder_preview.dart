@@ -14,7 +14,8 @@ class BloodTestReminderPreview extends StatelessWidget {
     final DateTime now = this.now ?? DateTime.now();
     final Map<BloodTestReminderStage, DateTime> plan =
         BloodTestReminderSchedule.plan(testDate, now);
-    final bool alreadyDue = !plan.containsKey(BloodTestReminderStage.dayBefore);
+    final bool alreadyDue =
+        !plan[BloodTestReminderStage.dueDay]!.isAfter(now);
 
     String whenOf(BloodTestReminderStage stage) {
       final DateTime fireAt = plan[stage]!;
@@ -31,8 +32,9 @@ class BloodTestReminderPreview extends StatelessWidget {
                 'Sistem bildirimlerine düşer.',
           ]
         : [
-            '${whenOf(BloodTestReminderStage.dayBefore)} · 3 ay dolmadan '
-                '1 gün önce',
+            if (plan.containsKey(BloodTestReminderStage.dayBefore))
+              '${whenOf(BloodTestReminderStage.dayBefore)} · 3 ay dolmadan '
+                  '1 gün önce',
             '${whenOf(BloodTestReminderStage.dueDay)} · 3 ay doluyor',
           ];
 

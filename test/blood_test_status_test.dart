@@ -26,8 +26,22 @@ void main() {
           evaluate(createdAt: now.subtract(const Duration(days: 8)));
       expect(status.kind, BloodTestStatusKind.missingFirst);
       expect(status.kind.group, BloodTestStatusGroup.overdue);
-      expect(status.deadline, now.subtract(const Duration(days: 1)));
+      expect(status.deadline, DateTime(2026, 11, 6));
       expect(status.daysUntilDeadline(now), -1);
+    });
+
+    test('ilk tahlil süresi eklendiği günün 7 gün sonrası; saat fark etmez', () {
+      final BloodTestStatus lateNight =
+          evaluate(createdAt: DateTime(2026, 10, 31, 23, 50));
+      expect(lateNight.kind, BloodTestStatusKind.missingFirst);
+      expect(lateNight.deadline, DateTime(2026, 11, 7));
+      expect(lateNight.daysUntilDeadline(now), 0);
+
+      final BloodTestStatus nextDay =
+          evaluate(createdAt: DateTime(2026, 11, 1, 0, 10));
+      expect(nextDay.kind, BloodTestStatusKind.waitingFirst);
+      expect(nextDay.deadline, DateTime(2026, 11, 8));
+      expect(nextDay.daysUntilDeadline(now), 1);
     });
 
     test('1 hafta dolmadıysa yaklaşan', () {
@@ -89,7 +103,7 @@ void main() {
   });
 
   group('zaman çizelgesi', () {
-    test('tahlilsiz danışan 1 hafta sonraki ilk 09:00 taramasında listelenir',
+    test('tahlilsiz danışan eklendiği günün 7 gün sonrasında listeye girer',
         () {
       final List<BloodTestTimelineEvent> events = BloodTestTimelineEvent.plan(
           createdAt: DateTime(2026, 11, 1, 15, 0), now: now);
@@ -98,14 +112,22 @@ void main() {
         BloodTestTimelineEventKind.graceEnds,
         BloodTestTimelineEventKind.listedInDailyScan,
       ]);
-      expect(events[1].at, DateTime(2026, 11, 8, 15, 0));
-      expect(events[2].at, DateTime(2026, 11, 9, 9));
+      expect(events[1].at, DateTime(2026, 11, 8));
+      expect(events[2].at, DateTime(2026, 11, 8));
     });
 
-    test('sabah eklenen danışan 7. günün taramasına girer', () {
-      final List<BloodTestTimelineEvent> events = BloodTestTimelineEvent.plan(
-          createdAt: DateTime(2026, 11, 1, 8, 0), now: now);
-      expect(events.last.at, DateTime(2026, 11, 8, 9));
+    test('sabah da gece de eklense aynı gün listeye girer', () {
+      for (final DateTime createdAt in [
+        DateTime(2026, 11, 1, 0, 5),
+        DateTime(2026, 11, 1, 8, 0),
+        DateTime(2026, 11, 1, 23, 55),
+      ]) {
+        final List<BloodTestTimelineEvent> events =
+            BloodTestTimelineEvent.plan(createdAt: createdAt, now: now);
+        expect(events.last.kind, BloodTestTimelineEventKind.listedInDailyScan,
+            reason: '$createdAt');
+        expect(events.last.at, DateTime(2026, 11, 8), reason: '$createdAt');
+      }
     });
 
     test('tahlilli danışanın 3 ay hatırlatmaları', () {
@@ -120,8 +142,8 @@ void main() {
         BloodTestTimelineEventKind.dayBeforeReminder,
         BloodTestTimelineEventKind.dueDayReminder,
       ]);
-      expect(events[2].at, DateTime(2026, 11, 29, 9));
-      expect(events[3].at, DateTime(2026, 11, 30, 9));
+      expect(events[2].at, DateTime(2026, 11, 29, 10, 30));
+      expect(events[3].at, DateTime(2026, 11, 30, 10, 30));
     });
   });
 

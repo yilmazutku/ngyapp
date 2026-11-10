@@ -21,17 +21,17 @@ void main() {
           DateTime(2027, 3, 15));
     });
 
-    test('hatırlatmalar bir gün önce ve dolduğu gün saat 09:00', () {
+    test('hatırlatmalar bir gün önce ve dolduğu gün saat 10:30', () {
       final DateTime testDate = DateTime(2026, 8, 6, 15, 30);
       expect(
         BloodTestReminderSchedule.fireTime(
             testDate, BloodTestReminderStage.dayBefore),
-        DateTime(2026, 11, 5, 9),
+        DateTime(2026, 11, 5, 10, 30),
       );
       expect(
         BloodTestReminderSchedule.fireTime(
             testDate, BloodTestReminderStage.dueDay),
-        DateTime(2026, 11, 6, 9),
+        DateTime(2026, 11, 6, 10, 30),
       );
     });
 
@@ -39,8 +39,17 @@ void main() {
       expect(
         BloodTestReminderSchedule.fireTime(
             DateTime(2026, 9, 1), BloodTestReminderStage.dayBefore),
-        DateTime(2026, 11, 30, 9),
+        DateTime(2026, 11, 30, 10, 30),
       );
+    });
+
+    test('3 ayın dolması saate değil güne bakar', () {
+      final DateTime testDate = DateTime(2026, 8, 6);
+      bool dueAt(DateTime now) =>
+          BloodTestReminderSchedule.isDue(testDate, now);
+      expect(dueAt(DateTime(2026, 11, 5, 23, 59)), isFalse);
+      expect(dueAt(DateTime(2026, 11, 6)), isTrue);
+      expect(dueAt(DateTime(2026, 11, 6, 8)), isTrue);
     });
   });
 
@@ -50,8 +59,17 @@ void main() {
     test('ikisi de ileride', () {
       final DateTime now = DateTime(2026, 8, 7, 12);
       expect(BloodTestReminderSchedule.plan(testDate, now), {
-        BloodTestReminderStage.dayBefore: DateTime(2026, 11, 5, 9),
-        BloodTestReminderStage.dueDay: DateTime(2026, 11, 6, 9),
+        BloodTestReminderStage.dayBefore: DateTime(2026, 11, 5, 10, 30),
+        BloodTestReminderStage.dueDay: DateTime(2026, 11, 6, 10, 30),
+      });
+    });
+
+    test('bir gün önceki gün 10:30 olmadan girilirse o gün 10:30\'da düşer',
+        () {
+      final DateTime now = DateTime(2026, 11, 5, 8);
+      expect(BloodTestReminderSchedule.plan(testDate, now), {
+        BloodTestReminderStage.dayBefore: DateTime(2026, 11, 5, 10, 30),
+        BloodTestReminderStage.dueDay: DateTime(2026, 11, 6, 10, 30),
       });
     });
 
@@ -59,7 +77,15 @@ void main() {
       final DateTime now = DateTime(2026, 11, 5, 14);
       expect(BloodTestReminderSchedule.plan(testDate, now), {
         BloodTestReminderStage.dayBefore: now,
-        BloodTestReminderStage.dueDay: DateTime(2026, 11, 6, 9),
+        BloodTestReminderStage.dueDay: DateTime(2026, 11, 6, 10, 30),
+      });
+    });
+
+    test('3 ayın dolduğu gün 10:30 olmadan girilirse "yarın doluyor" kurulmaz',
+        () {
+      final DateTime now = DateTime(2026, 11, 6, 8);
+      expect(BloodTestReminderSchedule.plan(testDate, now), {
+        BloodTestReminderStage.dueDay: DateTime(2026, 11, 6, 10, 30),
       });
     });
 
@@ -107,11 +133,11 @@ void main() {
           now: now,
         );
 
-    test('eklendikten 1 hafta sonra hâlâ yoksa eksik', () {
+    test('eklendiği günden 7 gün sonra hâlâ yoksa eksik; saat fark etmez', () {
       expect(missing(customer(present: false),
-          createdAt: now.subtract(const Duration(days: 7))), isTrue);
+          createdAt: DateTime(2026, 11, 13, 23, 59)), isTrue);
       expect(missing(customer(present: false),
-          createdAt: now.subtract(const Duration(days: 6, hours: 23))), isFalse);
+          createdAt: DateTime(2026, 11, 14, 0, 1)), isFalse);
     });
 
     test('alanı olmayan eski danışan "yok" sayılır', () {

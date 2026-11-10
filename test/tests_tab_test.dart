@@ -11,6 +11,7 @@ import 'package:ngy_app/providers/admin_notifications_provider.dart';
 import 'package:ngy_app/providers/blood_test_provider.dart';
 import 'package:ngy_app/providers/test_provider.dart';
 import 'package:ngy_app/tabs/tests_tab.dart';
+import 'package:ngy_app/utils/calendar_day.dart';
 import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:provider/provider.dart';
 
@@ -62,7 +63,7 @@ void main() {
 
   Map<String, dynamic> bloodTest(DateTime testDate) => {
         TestAttachment.isBloodTestField: true,
-        TestAttachment.bloodTestDateField: Timestamp.fromDate(testDate),
+        TestAttachment.bloodTestDateField: calendarDayToTimestamp(testDate),
         TestAttachment.bloodTestReminderField: true,
       };
 
@@ -126,6 +127,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> typeTestDate(WidgetTester tester, DateTime date) async {
+    final Finder dialog = find.byType(DatePickerDialog);
+    final String typed = MaterialLocalizations.of(tester.element(dialog))
+        .formatCompactDate(date);
+    await tester.enterText(
+        find.descendant(of: dialog, matching: find.byType(TextField)), typed);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets(
       'eski doküman Diğer\'de; kalemle kan tahliline taşınır, tarihi aynı '
       'tarihli dosyalarla düzeltilir, geri taşınınca "Hayır" önerilir',
@@ -170,6 +181,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsOneWidget);
     expect(find.text('Tahlilin Yapıldığı Tarih'), findsWidgets);
+    expect(find.byType(CalendarDatePicker), findsNothing);
+    expect(
+        find.descendant(
+            of: find.byType(DatePickerDialog),
+            matching: find.byType(TextField)),
+        findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsNothing);
@@ -185,8 +202,9 @@ void main() {
 
     final Map<String, dynamic> moved = await fileData('eski');
     expect(moved[TestAttachment.isBloodTestField], isTrue);
-    expect((moved[TestAttachment.bloodTestDateField] as Timestamp).toDate(),
-        testDate);
+    expect(
+        (moved[TestAttachment.bloodTestDateField] as Timestamp).toDate().toUtc(),
+        DateTime.utc(testDate.year, testDate.month, testDate.day));
     expect(find.text('Kan Tahlili (2)'), findsOneWidget);
     expect(find.text('Diğer (1)'), findsOneWidget);
     expect(find.textContaining('türü belirtilmemiş'), findsNothing);
@@ -210,11 +228,9 @@ void main() {
     await tester.tap(find.text('Tahlilin Yapıldığı Tarih'));
     await tester.pumpAndSettle();
     final int pickedDay = testDate.day == 1 ? 2 : 1;
-    await tester.tap(find.text('$pickedDay'));
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
     final DateTime corrected =
         DateTime(testDate.year, testDate.month, pickedDay);
+    await typeTestDate(tester, corrected);
     expect(find.text(DateFormatter.formatLongDate(corrected)), findsOneWidget);
     await tester.tap(find.text('Kaydet'));
     await tester.pumpAndSettle();
@@ -223,8 +239,9 @@ void main() {
     for (final String id in ['kan', 'eski']) {
       expect(
           ((await fileData(id))[TestAttachment.bloodTestDateField] as Timestamp)
-              .toDate(),
-          corrected,
+              .toDate()
+              .toUtc(),
+          DateTime.utc(corrected.year, corrected.month, corrected.day),
           reason: id);
     }
     expect(await reminderIds(), unorderedEquals(remindersOf(corrected)));
@@ -324,9 +341,8 @@ void main() {
     await tester.tap(find.text('Tahlilin Yapıldığı Tarih'));
     await tester.pumpAndSettle();
     final int pickedDay = testDate.day == 1 ? 2 : 1;
-    await tester.tap(find.text('$pickedDay'));
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
+    await typeTestDate(
+        tester, DateTime(testDate.year, testDate.month, pickedDay));
     await tester.tap(find.text('Kan Tahlili\'ne Taşı'));
     await tester.pumpAndSettle();
     await closeInfo(tester, 'aktif paketi olmadığı için');

@@ -28,11 +28,9 @@ enum BloodTestStatusKind {
 }
 
 class BloodTestStatus {
-  static const Duration firstTestGrace = Duration(days: 7);
+  static const int firstTestGraceDays = 7;
 
-  static const Duration expiringSoonWindow = Duration(days: 14);
-
-  static const int dailyScanHour = 9;
+  static const int expiringSoonDays = 14;
 
   final NotificationCustomer customer;
   final BloodTestStatusKind kind;
@@ -55,14 +53,16 @@ class BloodTestStatus {
     required DateTime? lastTestDate,
     required DateTime now,
   }) {
+    final DateTime today = DateTime(now.year, now.month, now.day);
     if (lastTestDate != null) {
       final DateTime due = BloodTestReminderSchedule.dueDay(lastTestDate);
-      final DateTime today = DateTime(now.year, now.month, now.day);
-      final BloodTestStatusKind kind = !due.isAfter(today)
-          ? BloodTestStatusKind.expired
-          : due.difference(today) <= expiringSoonWindow
-              ? BloodTestStatusKind.expiringSoon
-              : BloodTestStatusKind.upToDate;
+      final BloodTestStatusKind kind =
+          BloodTestReminderSchedule.isDue(lastTestDate, now)
+              ? BloodTestStatusKind.expired
+              : DateFormatter.calendarDaysBetween(today, due) <=
+                      expiringSoonDays
+                  ? BloodTestStatusKind.expiringSoon
+                  : BloodTestStatusKind.upToDate;
       return BloodTestStatus(
         customer: customer,
         kind: kind,
@@ -81,7 +81,7 @@ class BloodTestStatus {
     final DateTime? deadline = firstTestDeadline(createdAt);
     return BloodTestStatus(
       customer: customer,
-      kind: deadline == null || !deadline.isAfter(now)
+      kind: deadline == null || !deadline.isAfter(today)
           ? BloodTestStatusKind.missingFirst
           : BloodTestStatusKind.waitingFirst,
       createdAt: createdAt,
@@ -89,8 +89,10 @@ class BloodTestStatus {
     );
   }
 
-  static DateTime? firstTestDeadline(DateTime? createdAt) =>
-      createdAt?.add(firstTestGrace);
+  static DateTime? firstTestDeadline(DateTime? createdAt) => createdAt == null
+      ? null
+      : DateTime(createdAt.year, createdAt.month,
+          createdAt.day + firstTestGraceDays);
 
   int? daysUntilDeadline(DateTime now) {
     final DateTime? deadline = this.deadline;
@@ -112,14 +114,6 @@ class BloodTestStatus {
     }
     return compareSearchText(a.customer.name, b.customer.name);
   }
-
-  static DateTime firstDailyScanAt(DateTime moment) {
-    final DateTime sameDay =
-        DateTime(moment.year, moment.month, moment.day, dailyScanHour);
-    return sameDay.isBefore(moment)
-        ? DateTime(moment.year, moment.month, moment.day + 1, dailyScanHour)
-        : sameDay;
-  }
 }
 
 enum BloodTestTimelineEventKind {
@@ -139,6 +133,9 @@ enum BloodTestTimelineEventKind {
       this == listedInDailyScan ||
       this == dayBeforeReminder ||
       this == dueDayReminder;
+
+  bool get isWholeDay =>
+      this == graceEnds || this == listedInDailyScan || this == testTaken;
 }
 
 class BloodTestTimelineEvent {
@@ -161,9 +158,7 @@ class BloodTestTimelineEvent {
         ..add(BloodTestTimelineEvent(
             graceEnds, BloodTestTimelineEventKind.graceEnds))
         ..add(BloodTestTimelineEvent(
-          BloodTestStatus.firstDailyScanAt(graceEnds),
-          BloodTestTimelineEventKind.listedInDailyScan,
-        ));
+            graceEnds, BloodTestTimelineEventKind.listedInDailyScan));
     } else {
       events.add(BloodTestTimelineEvent(
         DateTime(lastTestDate.year, lastTestDate.month, lastTestDate.day),
@@ -178,7 +173,11 @@ class BloodTestTimelineEvent {
         ));
       });
     }
-    return events..sort((a, b) => a.at.compareTo(b.at));
+    return events
+      ..sort((a, b) {
+        final int byTime = a.at.compareTo(b.at);
+        return byTime != 0 ? byTime : a.kind.index.compareTo(b.kind.index);
+      });
   }
 }
 

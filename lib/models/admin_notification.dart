@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/calendar_day.dart';
 import '../utils/date_formatter.dart';
 
 enum AdminNotificationType {
@@ -74,7 +75,8 @@ class BloodTestReminderSchedule {
   BloodTestReminderSchedule._();
 
   static const int monthsAfterTest = 3;
-  static const int reminderHour = 9;
+  static const int reminderHour = 10;
+  static const int reminderMinute = 30;
 
   static DateTime addMonths(DateTime date, int months) {
     final int monthIndex = date.year * 12 + (date.month - 1) + months;
@@ -96,26 +98,36 @@ class BloodTestReminderSchedule {
     return testDate;
   }
 
-  static DateTime fireTime(DateTime testDate, BloodTestReminderStage stage) {
+  static DateTime _reminderDay(
+      DateTime testDate, BloodTestReminderStage stage) {
     final DateTime due = dueDay(testDate);
-    final DateTime day = stage == BloodTestReminderStage.dayBefore
+    return stage == BloodTestReminderStage.dayBefore
         ? DateTime(due.year, due.month, due.day - 1)
         : due;
-    return DateTime(day.year, day.month, day.day, reminderHour);
   }
+
+  static DateTime fireTime(DateTime testDate, BloodTestReminderStage stage) {
+    final DateTime day = _reminderDay(testDate, stage);
+    return DateTime(
+        day.year, day.month, day.day, reminderHour, reminderMinute);
+  }
+
+  static bool isDue(DateTime testDate, DateTime now) =>
+      !dueDay(testDate).isAfter(DateTime(now.year, now.month, now.day));
 
   static Map<BloodTestReminderStage, DateTime> plan(
     DateTime testDate,
     DateTime now,
   ) {
-    final DateTime due = fireTime(testDate, BloodTestReminderStage.dueDay);
-    if (!due.isAfter(now)) {
-      return {BloodTestReminderStage.dueDay: now};
+    DateTime notBefore(DateTime at) => at.isAfter(now) ? at : now;
+    final DateTime due =
+        notBefore(fireTime(testDate, BloodTestReminderStage.dueDay));
+    if (isDue(testDate, now)) {
+      return {BloodTestReminderStage.dueDay: due};
     }
-    final DateTime dayBefore =
-        fireTime(testDate, BloodTestReminderStage.dayBefore);
     return {
-      BloodTestReminderStage.dayBefore: dayBefore.isAfter(now) ? dayBefore : now,
+      BloodTestReminderStage.dayBefore:
+          notBefore(fireTime(testDate, BloodTestReminderStage.dayBefore)),
       BloodTestReminderStage.dueDay: due,
     };
   }
@@ -239,7 +251,8 @@ class AdminNotification {
       readBy: readBy,
       userId: userId is String ? userId : null,
       userName: userName is String ? userName : null,
-      testDate: testDate is Timestamp ? testDate.toDate() : null,
+      testDate:
+          testDate is Timestamp ? calendarDayFromTimestamp(testDate) : null,
       stage: BloodTestReminderStage.fromValue(data[stageField]),
       customers: customers,
       superseded: data[supersededField] == true,

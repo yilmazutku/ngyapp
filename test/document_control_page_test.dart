@@ -7,6 +7,7 @@ import 'package:ngy_app/pages/document_control_page.dart';
 import 'package:ngy_app/providers/admin_notifications_provider.dart';
 import 'package:ngy_app/providers/blood_test_provider.dart';
 import 'package:ngy_app/providers/user_provider.dart';
+import 'package:ngy_app/utils/calendar_day.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -35,7 +36,7 @@ void main() {
     await user('eski', 'Eski', 300, present: true);
     await db.collection('users').doc('eski').collection('tests').add({
       'isBloodTest': true,
-      'bloodTestDate': Timestamp.fromDate(
+      'bloodTestDate': calendarDayToTimestamp(
           DateTime(today.year, today.month - 4, today.day)),
     });
     await user('yeni', 'Yeni', 2, present: false);

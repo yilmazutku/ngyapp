@@ -1069,7 +1069,7 @@ class _ScanPreviewState extends State<_ScanPreview> {
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: _ToolHint('${waiting.customer.name} · listeye giriş: '
-                  '${DateFormatter.formatNumericDateTime(waiting.listedFrom)}'),
+                  '${DateFormatter.formatNumericDate(waiting.listedFrom)}'),
             ),
         ],
         if (preview.unrecordedCount > 0) ...[
@@ -1657,7 +1657,7 @@ class _TimelineRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${event.kind == BloodTestTimelineEventKind.testTaken ? DateFormatter.formatNumericDate(event.at) : DateFormatter.formatNumericDateTime(event.at)} · '
+                  '${event.kind.isWholeDay ? DateFormatter.formatNumericDate(event.at) : DateFormatter.formatNumericDateTime(event.at)} · '
                   '${event.kind.label}',
                   style: TextStyle(
                     fontSize: 13,

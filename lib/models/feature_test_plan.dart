@@ -173,7 +173,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'dok.evet',
         'Diğer\'deki eski bir kan tahlilinin kalemine basın ve "Bu bir kan tahlili mi?" sorusunda "Kan Tahlili sekmesine taşı"yı seçin.',
-        'Tahlil tarihini soran takvim kendiliğinden açılır. Takvimi kapatırsanız tarih kırmızı "Tarih seçin (zorunlu)" kalır ve "Kan Tahlili\'ne Taşı" düğmesi tarih seçilene kadar pasiftir. Altında 3 aylık takibin bu tarihe göre hesaplandığı, yükleme gününün kullanılmadığı yazar.',
+        'Tahlil tarihini soran pencere, Detay\'daki doğum tarihi gibi tarihin klavyeyle yazıldığı kutuyla (gg.aa.yyyy) kendiliğinden açılır; takvim görünmez. Pencereyi kapatırsanız tarih kırmızı "Tarih seçin (zorunlu)" kalır ve "Kan Tahlili\'ne Taşı" düğmesi tarih seçilene kadar pasiftir. Altında 3 aylık takibin bu tarihe göre hesaplandığı, yükleme gününün kullanılmadığı yazar.',
       ),
       FeatureTestStep(
         'dok.tasi',
@@ -193,7 +193,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'kan.isaret',
         'Tarihi seçin ve "3 ay sonra hatırlatıcı istiyor musunuz?" kutusuna bakın.',
-        'Kutu işaretli gelir; hatırlatmaların günü ve saati yazar (3 ay dolmadan 1 gün önce ve 3 ayın dolduğu gün, 09:00).',
+        'Kutu işaretli gelir; hatırlatmaların günü ve saati yazar (3 ay dolmadan 1 gün önce ve 3 ayın dolduğu gün, 10:30).',
       ),
       FeatureTestStep(
         'kan.hesap',
@@ -313,7 +313,7 @@ const List<FeatureTestSection> featureTestSections = [
     icon: Icons.assignment_late_outlined,
     color: Color(0xFFF57C00),
     note:
-        'Tarama normalde günde bir kez, saat 09:00\'dan sonra uygulaması açık olan ilk admin cihazında kendiliğinden yapılır. Önizleme hiçbir şeyi değiştirmez; "Gerçek taramayı çalıştır" bu kuralı atlayıp hemen tarar ve listeyi bütün adminlere gönderir.',
+        'Tarama normalde günde bir kez, saat beklemeden o gün uygulaması ilk açılan admin cihazında kendiliğinden yapılır. Önizleme hiçbir şeyi değiştirmez; "Gerçek taramayı çalıştır" bu kuralı atlayıp hemen tarar ve listeyi bütün adminlere gönderir.',
     steps: [
       FeatureTestStep(
         'tarama.detay',
@@ -328,7 +328,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'tarama.yeni',
         'Yeni bir danışan ekleyin; önizlemeyi "Bugün" ve "8 gün sonra" için tekrarlayın.',
-        'Detay\'da "Yüklü değil" yazar; bugün bekleyenler arasında, 8 gün sonrası için listede görünür.',
+        'Detay\'da "Yüklü değil" yazar; bugün bekleyenler arasındadır ve "listeye giriş" olarak eklendiği günün 7 gün sonrası yazar (saat yazmaz, eklendiği saat fark etmez); 8 gün sonrası için listede görünür.',
       ),
       FeatureTestStep(
         'tarama.yukle',
@@ -352,7 +352,7 @@ const List<FeatureTestSection> featureTestSections = [
       ),
       FeatureTestStep(
         'tarama.otomatik',
-        'Ertesi gün uygulamayı saat 09:00\'dan sonra açıp bu sayfaya bakın.',
+        'Ertesi gün uygulamayı (saat kaç olursa olsun) açıp bu sayfaya bakın.',
         '"Son tarama" o günün tarihine döner (tarama kendiliğinden bir kez yapılır); yeni liste gelince önceki günün listesi okunmuş sayılır.',
       ),
     ],
