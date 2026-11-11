@@ -23,7 +23,6 @@ import '../widgets/birthday_chip.dart';
 import '../widgets/labeled_action_button.dart';
 
 // Configuration constants
-const bool kIsScrollable = true; // horizontal scrolling
 const double kMainMargin = 4.0; // Margin around the day columns
 const double kDayTitleFontSize = 14.0; // Font size for the day header
 const int kDaysToShow = 6; // Pazartesi..Cumartesi (Pazar gösterilmez)
@@ -56,6 +55,7 @@ const double kDayHeaderHeight = 54.0; // Height for day title + add button
 // Same header, mobile layout (single-day view has a slimmer header).
 const double kMobileDayHeaderHeight = 36.0;
 const double kDayDividerWidth = 1; // Width of vertical dividing lines between days (editable)
+const double kScrollbarGutter = 12.0;
 
 
 
@@ -129,10 +129,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   // Scroll controllers + keys (avoid "no ScrollPosition" and preserve positions)
   late final ScrollController _verticalCtrl;
-  late final ScrollController _horizontalCtrl;
 
   static const _kVerticalKey = PageStorageKey('admin_appts_vertical');
-  static const _kHorizontalKey = PageStorageKey('admin_appts_horizontal');
 
   // Mobile daily view: selected day for single-day display
   late DateTime _selectedDay;
@@ -155,7 +153,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     _selectedDay = DateTime(now.year, now.month, now.day);
 
     _verticalCtrl = ScrollController();
-    _horizontalCtrl = ScrollController();
 
     _fetchAllAppointments();
     _fetchEvents();
@@ -169,7 +166,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   @override
   void dispose() {
     _verticalCtrl.dispose();
-    _horizontalCtrl.dispose();
     super.dispose();
   }
 
@@ -1128,11 +1124,10 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   /// Build a day column with appointments positioned by time
   Widget _buildDayColumn(DateTime day, List<AppointmentModel> dayAppointments,
-      double columnWidth, double headerHeight) {
+      double headerHeight) {
     final String dayTitle = _dayTitleFmt.format(day);
-    
+
     return Container(
-      width: columnWidth,
       decoration: BoxDecoration(
         border: Border(
           right: BorderSide(color: Colors.grey[300]!, width: kDayDividerWidth),
@@ -1193,32 +1188,53 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             ),
           ),
           // Time grid with appointments
-          SizedBox(
-            height: _timeGridHeight,
-            child: Stack(
-              children: [
-                // Hour grid lines (aligned to full hours; grid starts at 08:30)
-                ...List.generate(kEndHour - kFirstFullHour, (i) {
-                  final hour = kFirstFullHour + i;
-                  final top =
-                      (hour * 60 - kGridStartMinutes) * kPixelsPerMinute;
-                  return Positioned(
-                    top: top,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      height: 1,
-                      color: Colors.grey[300],
-                    ),
-                  );
-                }),
-                // Meetings + events, laid out in side-by-side columns so that
-                // overlapping/containing items never cover each other.
-                ..._buildPositionedItems(dayAppointments, day, columnWidth),
-              ],
-            ),
-          ),
+          _buildTimeGrid(day, dayAppointments),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTimeGrid(DateTime day, List<AppointmentModel> dayAppointments) {
+    return SizedBox(
+      height: _timeGridHeight,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
+            children: [
+              // Hour grid lines (aligned to full hours; grid starts at 08:30)
+              ...List.generate(kEndHour - kFirstFullHour, (i) {
+                final hour = kFirstFullHour + i;
+                final top = (hour * 60 - kGridStartMinutes) * kPixelsPerMinute;
+                return Positioned(
+                  top: top,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    height: 1,
+                    color: Colors.grey[300],
+                  ),
+                );
+              }),
+              // Meetings + events, laid out in side-by-side columns so that
+              // overlapping/containing items never cover each other.
+              ..._buildPositionedItems(
+                  dayAppointments, day, constraints.maxWidth),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildScrollableGrid({required double height, required Widget child}) {
+    return Scrollbar(
+      controller: _verticalCtrl,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        key: _kVerticalKey,
+        controller: _verticalCtrl,
+        padding: const EdgeInsets.only(right: kScrollbarGutter),
+        child: SizedBox(height: height, child: child),
       ),
     );
   }
@@ -1474,30 +1490,18 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   Widget _buildSingleDayView(Map<DateTime, List<AppointmentModel>> byDay) {
     final dayKey = _dateOnly(_selectedDay);
     final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
-    
-    final totalHeight = kMobileDayHeaderHeight + _timeGridHeight;
 
-    Widget gridContent = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildTimeColumn(headerHeight: kMobileDayHeaderHeight),
-        // Full-width day content (no fixed width constraint)
-        Expanded(
-          child: _buildMobileDayContent(_selectedDay, dayAppointments),
-        ),
-      ],
-    );
-
-    return Scrollbar(
-      controller: _verticalCtrl,
-      thumbVisibility: true,
-      child: SingleChildScrollView(
-        key: _kVerticalKey,
-        controller: _verticalCtrl,
-        child: SizedBox(
-          height: totalHeight,
-          child: gridContent,
-        ),
+    return _buildScrollableGrid(
+      height: kMobileDayHeaderHeight + _timeGridHeight,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildTimeColumn(headerHeight: kMobileDayHeaderHeight),
+          // Full-width day content (no fixed width constraint)
+          Expanded(
+            child: _buildMobileDayContent(_selectedDay, dayAppointments),
+          ),
+        ],
       ),
     );
   }
@@ -1540,82 +1544,31 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           ),
         ),
         // Time grid with appointments + events (full width)
-        SizedBox(
-          height: _timeGridHeight,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return Stack(
-                children: [
-                  // Hour grid lines (aligned to full hours; grid starts at 08:30)
-                  ...List.generate(kEndHour - kFirstFullHour, (i) {
-                    final hour = kFirstFullHour + i;
-                    final top =
-                        (hour * 60 - kGridStartMinutes) * kPixelsPerMinute;
-                    return Positioned(
-                      top: top,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        height: 1,
-                        color: Colors.grey[300],
-                      ),
-                    );
-                  }),
-                  // Meetings + events, laid out in side-by-side columns so that
-                  // overlapping/containing items never cover each other.
-                  ..._buildPositionedItems(
-                      dayAppointments, day, constraints.maxWidth),
-                ],
-              );
-            },
-          ),
-        ),
+        _buildTimeGrid(day, dayAppointments),
       ],
     );
   }
 
   /// Build weekly view for desktop
-  Widget _buildWeeklyView(Map<DateTime, List<AppointmentModel>> byDay, double screenWidth) {
-    final columnWidth = screenWidth / kDaysToShow;
+  Widget _buildWeeklyView(Map<DateTime, List<AppointmentModel>> byDay) {
     final List<DateTime> weekDays = List.generate(kDaysToShow, (index) => startDate!.add(Duration(days: index)));
     final double headerHeight = _dayHeaderHeightFor(weekDays);
-    final totalHeight = headerHeight + _timeGridHeight;
 
-    Widget dayColumnsRow = Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: weekDays.map((day) {
-        final dayKey = _dateOnly(day);
-        final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
-        return _buildDayColumn(day, dayAppointments, columnWidth, headerHeight);
-      }).toList(),
-    );
-
-    Widget scrollableDayColumns = SingleChildScrollView(
-      key: _kHorizontalKey,
-      controller: _horizontalCtrl,
-      scrollDirection: Axis.horizontal,
-      child: dayColumnsRow,
-    );
-
-    Widget gridContent = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildTimeColumn(headerHeight: headerHeight),
-        Expanded(child: scrollableDayColumns),
-      ],
-    );
-
-    return Scrollbar(
-      controller: _verticalCtrl,
-      thumbVisibility: true,
-      child: SingleChildScrollView(
-        key: _kVerticalKey,
-        controller: _verticalCtrl,
-        child: SizedBox(
-          height: totalHeight,
-          child: gridContent,
-        ),
+    return _buildScrollableGrid(
+      height: headerHeight + _timeGridHeight,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildTimeColumn(headerHeight: headerHeight),
+          for (final DateTime day in weekDays)
+            Expanded(
+              child: _buildDayColumn(
+                day,
+                byDay[_dateOnly(day)] ?? const <AppointmentModel>[],
+                headerHeight,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1732,57 +1685,61 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           // backgroundColor:Color(0xFF673AB7),
           // foregroundColor: Colors.white,
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final bool isMobile = constraints.maxWidth < _kMobileBreakpoint;
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final bool isMobile = constraints.maxWidth < _kMobileBreakpoint;
           
-          return Column(
-            children: [
-              // Navigation: Daily (mobile) or Weekly (desktop)
-              isMobile
-                  ? _buildMobileDayNavigation()
-                  : _buildDesktopWeekNavigation(),
-              _buildMarkLegend(),
+            return Column(
+              children: [
+                // Navigation: Daily (mobile) or Weekly (desktop)
+                isMobile
+                    ? _buildMobileDayNavigation()
+                    : _buildDesktopWeekNavigation(),
+                _buildMarkLegend(),
 
-              // Appointments display (expanded to fill remaining space)
-              Expanded(
-                child: FutureBuilder<List<AppointmentModel>>(
-                  future: _appointmentsFuture,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    } else if (snapshot.hasError) {
-                      return Center(child: Text('Randevular getirilirken hata: ${snapshot.error}'));
-                    } else {
-                      final appointments = snapshot.data ?? [];
-
-                      // Fast path: group once by day to avoid scanning the whole list per day
-                      // Use effective date (postponedDate if exists for postponed appointments)
-                      final Map<DateTime, List<AppointmentModel>> byDay = {};
-                      for (final appt in appointments) {
-                        final key = _dateOnly(_getEffectiveDate(appt));
-                        (byDay[key] ??= <AppointmentModel>[]).add(appt);
-                      }
-
-                      // Mobile: single day view
-                      if (isMobile) {
-                        return _buildSingleDayView(byDay);
-                      }
-
-                      // Desktop: weekly view
-                      if (_isCorrectDateRange) {
-                        return _buildWeeklyView(byDay, constraints.maxWidth);
+                // Appointments display (expanded to fill remaining space)
+                Expanded(
+                  child: FutureBuilder<List<AppointmentModel>>(
+                    future: _appointmentsFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      } else if (snapshot.hasError) {
+                        return Center(child: Text('Randevular getirilirken hata: ${snapshot.error}'));
                       } else {
-                        // Fallback: list all appointments (non 6-day range)
-                        return _buildAppointmentsList(appointments);
+                        final appointments = snapshot.data ?? [];
+
+                        // Fast path: group once by day to avoid scanning the whole list per day
+                        // Use effective date (postponedDate if exists for postponed appointments)
+                        final Map<DateTime, List<AppointmentModel>> byDay = {};
+                        for (final appt in appointments) {
+                          final key = _dateOnly(_getEffectiveDate(appt));
+                          (byDay[key] ??= <AppointmentModel>[]).add(appt);
+                        }
+
+                        // Mobile: single day view
+                        if (isMobile) {
+                          return _buildSingleDayView(byDay);
+                        }
+
+                        // Desktop: weekly view
+                        if (_isCorrectDateRange) {
+                          return _buildWeeklyView(byDay);
+                        } else {
+                          // Fallback: list all appointments (non 6-day range)
+                          return _buildAppointmentsList(appointments);
+                        }
                       }
-                    }
-                  },
+                    },
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }
