@@ -124,6 +124,39 @@ class AppointmentModel {
           AppointmentStatus status, DateTime? postponedDate) =>
       status == AppointmentStatus.completed && postponedDate != null;
 
+  bool get isReschedulable =>
+      status == AppointmentStatus.scheduled ||
+      status == AppointmentStatus.postponed;
+
+  AppointmentModel rescheduledTo(
+    DateTime newStart, {
+    required bool deductPostponementRight,
+    String updateUser = 'admin',
+  }) {
+    final bool countsAsPostponed =
+        status == AppointmentStatus.postponed || deductPostponementRight;
+    return AppointmentModel(
+      appointmentId: appointmentId,
+      userId: userId,
+      subscriptionId: subscriptionId,
+      meetingType: meetingType,
+      appointmentType: appointmentType,
+      appointmentDateTime: countsAsPostponed ? appointmentDateTime : newStart,
+      status: countsAsPostponed ? AppointmentStatus.postponed : status,
+      notes: notes,
+      createDate: createDate,
+      updateDate: DateTime.now(),
+      createUser: createUser,
+      updateUser: updateUser,
+      postponedDate: countsAsPostponed ? newStart : postponedDate,
+      postponedBy:
+          deductPostponementRight ? PostponeSource.user : postponedBy,
+      user: user,
+      isDeleted: isDeleted,
+      durationMinutes: durationMinutes,
+    );
+  }
+
   @override
   String toString() {
     return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, postponedDate: $postponedDate, postponedBy: $postponedBy, duration: $durationMinutes}';
@@ -247,7 +280,7 @@ class AppointmentModel {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: chipColor.withOpacity(0.1),
+        color: chipColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
@@ -265,7 +298,7 @@ class AppointmentModel {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.purple.withOpacity(0.1),
+        color: Colors.purple.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(

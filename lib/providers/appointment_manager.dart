@@ -195,6 +195,29 @@ class AppointmentManager extends ChangeNotifier {
     }
   }
 
+  Future<void> rescheduleAppointment(
+    AppointmentModel appointment,
+    DateTime newStart, {
+    required bool deductPostponementRight,
+  }) async {
+    final AppointmentModel updated = appointment.rescheduledTo(
+      newStart,
+      deductPostponementRight: deductPostponementRight,
+    );
+    await updateAppointment(updated);
+
+    final String? subscriptionId = updated.subscriptionId;
+    final bool spendsRight = updated.postponedBy == PostponeSource.user &&
+        appointment.postponedBy != PostponeSource.user;
+    if (spendsRight && subscriptionId != null && subscriptionId.isNotEmpty) {
+      await subProvider.adjustPostponementsUsed(
+        userId: updated.userId,
+        subscriptionId: subscriptionId,
+        delta: 1,
+      );
+    }
+  }
+
   /// Queues one update per subscription for the accumulated [deltas].
   /// Returns whether anything was queued, i.e. whether SubProvider must be
   /// notified after the commit.

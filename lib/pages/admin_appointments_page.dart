@@ -1,4 +1,8 @@
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -15,7 +19,9 @@ import '../providers/user_provider.dart';
 import '../dialogs/edit_appointment_dialog.dart';
 import '../dialogs/edit_event_dialog.dart';
 import '../dialogs/overlap_warning_dialog.dart';
+import '../dialogs/reschedule_appointment_dialog.dart';
 import '../utils/birthdays.dart';
+import '../utils/calendar_drag.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/postponement_notices.dart';
 import '../widgets/app_bar_with_back.dart';
@@ -34,8 +40,8 @@ const int kEndHour = 20; // grid ends at 20:00
 // Grid boundaries expressed in minutes-from-midnight.
 const int kGridStartMinutes = kStartHour * 60 + kStartMinute; // 510 (08:30)
 const int kGridEndMinutes = kEndHour * 60; // 1200 (20:00)
-// First full-hour label/line at or after the grid start (09:00 when 08:30).
-const int kFirstFullHour = kStartMinute == 0 ? kStartHour : kStartHour + 1;
+const int kSnapMinutes = 10;
+const int kTimeLabelStepMinutes = 30;
 // Total height of the time grid. This is the one number to turn when the cards
 // feel too cramped or the day needs to fit on less scrolling — everything else
 // (pixels per minute, card heights, card font sizes) is derived from it.
@@ -48,9 +54,12 @@ const int kFirstFullHour = kStartMinute == 0 ? kStartHour : kStartHour + 1;
 // 900  → 1.30 px/min, less scrolling, two lines only from ~21 min
 // 1200 → 1.74 px/min, current
 // 1980 → 2.87 px/min, large cards, a lot of scrolling
-const double kTotalGridHeight = 1600;
+const double kTotalGridHeight = 1656;
 
 const double kTimeColumnWidth = 50.0; // Width of the time labels column
+const double kTimeLabelRightPadding = 8.0;
+const double kHourLabelFontSize = 11.0;
+const double kHalfHourLabelFontSize = 9.5;
 const double kDayHeaderHeight = 54.0; // Height for day title + add button
 // Same header, mobile layout (single-day view has a slimmer header).
 const double kMobileDayHeaderHeight = 36.0;
@@ -89,10 +98,16 @@ const double kCardMaxFontSize = 11.0;
 // text is the better failure.
 const double kCardMinFontSize = 7.5;
 
+const double kDragSourceOpacity = 0.35;
+const double kDragAutoScrollEdge = 56.0;
+const double kDragAutoScrollVelocity = 40.0;
+const double kDragClickSlop = 6.0;
+
 const String kPostponedMark = '(E)';
 const String kBurnedMark = '(Y)';
 const String kPostponedMarkMeaning = 'Ertelenmiş randevu';
 const String kBurnedMarkMeaning = 'Yakılmış randevu';
+const String kDragHint = 'Randevuyu taşımak için basılı tutup sürükleyin';
 
 // Hoisted formatters (avoid re-creating in every build)
 final DateFormat _dayTitleFmt = DateFormat('d MMMM EEEE', 'tr_TR');
@@ -138,6 +153,23 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   // Threshold for mobile view (single day) vs desktop view (weekly)
   static const double _kMobileBreakpoint = 600.0;
 
+  static const String _unknownCustomer = 'Bilinmiyor';
+  static const String _reschedulingMessage = 'Randevu taşınıyor...';
+  static const String _rescheduleFailedMessage =
+      'Randevu taşınırken bir hata oluştu';
+  static const String _notDraggableTitle = 'Randevu Taşınamaz';
+
+  final GlobalKey _gridKey = GlobalKey();
+  final ValueNotifier<String?> _draggedAppointmentId =
+      ValueNotifier<String?>(null);
+  final ValueNotifier<CalendarDropTarget?> _dropTarget =
+      ValueNotifier<CalendarDropTarget?>(null);
+  _GridLayout _gridLayout =
+      const _GridLayout(days: <DateTime>[], headerHeight: kDayHeaderHeight);
+  _AppointmentDrag? _drag;
+  EdgeDraggingAutoScroller? _autoScroller;
+  bool _refreshingInPlace = false;
+
   @override
   void initState() {
     super.initState();
@@ -165,12 +197,16 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   @override
   void dispose() {
+    _clearDrag();
+    _draggedAppointmentId.dispose();
+    _dropTarget.dispose();
     _verticalCtrl.dispose();
     super.dispose();
   }
 
   /// Initiates fetching of all appointments
   void _fetchAllAppointments() {
+    _clearDrag();
     _appointmentsFuture = _fetchAppointmentsWithUsers();
   }
 
@@ -794,6 +830,174 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     return minutes >= kGridStartMinutes && minutes < kGridEndMinutes;
   }
 
+  void _startDrag(
+    AppointmentModel appt,
+    double cardHeight,
+    Offset globalPosition,
+    Offset localPosition, {
+    required bool isClickCandidate,
+  }) {
+    if (_drag != null) return;
+    final DateTime start = _effectiveTime(appt);
+    _drag = _AppointmentDrag(
+      appointment: appt,
+      originalStart: DateTime(
+          start.year, start.month, start.day, start.hour, start.minute),
+      cardHeight: cardHeight,
+      grabDy: localPosition.dy,
+      pointer: globalPosition,
+      isClickCandidate: isClickCandidate,
+    );
+    _draggedAppointmentId.value = appt.appointmentId;
+    HardwareKeyboard.instance.addHandler(_onDragKey);
+    _verticalCtrl.addListener(_updateDropTarget);
+    HapticFeedback.mediumImpact();
+    _updateDropTarget();
+  }
+
+  _AppointmentDrag? _dragOf(AppointmentModel appt) {
+    final _AppointmentDrag? drag = _drag;
+    return drag != null &&
+            drag.appointment.appointmentId == appt.appointmentId
+        ? drag
+        : null;
+  }
+
+  void _moveDrag(AppointmentModel appt, Offset globalPosition) {
+    final _AppointmentDrag? drag = _dragOf(appt);
+    if (drag == null) return;
+    drag.moveTo(globalPosition);
+    _updateDropTarget();
+    _autoScrollNearEdge();
+  }
+
+  void _updateDropTarget() {
+    final _AppointmentDrag? drag = _drag;
+    final RenderObject? grid = _gridKey.currentContext?.findRenderObject();
+    if (drag == null || grid is! RenderBox || !grid.hasSize) return;
+    final CalendarDropTarget target =
+        _gridLayout.geometry(grid.size.width).dropTarget(
+              pointer: grid.globalToLocal(drag.pointer),
+              grabDy: drag.grabDy,
+              originalMinutes: drag.originalMinutes,
+              durationMinutes: drag.appointment.durationMinutes,
+            );
+    if (target == _dropTarget.value) return;
+    if (_dropTarget.value != null) HapticFeedback.selectionClick();
+    _dropTarget.value = target;
+  }
+
+  void _autoScrollNearEdge() {
+    final _AppointmentDrag? drag = _drag;
+    final ScrollableState? scrollable = _gridKey.currentContext
+        ?.findAncestorStateOfType<ScrollableState>();
+    final RenderObject? viewport = scrollable?.context.findRenderObject();
+    if (drag == null ||
+        scrollable == null ||
+        viewport is! RenderBox ||
+        !viewport.hasSize) {
+      return;
+    }
+    _autoScroller ??= EdgeDraggingAutoScroller(
+      scrollable,
+      onScrollViewScrolled: _autoScrollNearEdge,
+      velocityScalar: kDragAutoScrollVelocity,
+    );
+    _autoScroller!.startAutoScrollIfNecessary(Rect.fromCenter(
+      center: drag.pointer,
+      width: 1,
+      height: math.min(2 * kDragAutoScrollEdge, viewport.size.height),
+    ));
+  }
+
+  bool _onDragKey(KeyEvent event) {
+    if (_drag == null ||
+        event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape) {
+      return false;
+    }
+    _clearDrag();
+    return true;
+  }
+
+  void _clearDrag() {
+    if (_drag == null) return;
+    _drag = null;
+    _autoScroller?.stopAutoScroll();
+    _autoScroller = null;
+    HardwareKeyboard.instance.removeHandler(_onDragKey);
+    _verticalCtrl.removeListener(_updateDropTarget);
+    _draggedAppointmentId.value = null;
+    _dropTarget.value = null;
+  }
+
+  void _endDrag(AppointmentModel appt) {
+    final _AppointmentDrag? drag = _dragOf(appt);
+    if (drag == null) return;
+    final CalendarDropTarget? target = _dropTarget.value;
+    final _GridLayout layout = _gridLayout;
+    _clearDrag();
+    if (target == null || target.dayIndex >= layout.days.length) return;
+    final DateTime newStart = target.onDay(layout.days[target.dayIndex]);
+    if (newStart != drag.originalStart) {
+      _rescheduleAppointment(drag.appointment, newStart);
+    } else if (drag.isClickCandidate && drag.travelled <= kDragClickSlop) {
+      _showEditAppointmentDialog(context, drag.appointment);
+    }
+  }
+
+  Future<void> _rescheduleAppointment(
+      AppointmentModel appt, DateTime newStart) async {
+    final bool? deductRight = await showRescheduleAppointmentDialog(
+      context,
+      appointment: appt,
+      newStart: newStart,
+    );
+    if (deductRight == null || !mounted) return;
+
+    final AppointmentManager appointmentManager =
+        Provider.of<AppointmentManager>(context, listen: false);
+    final LoadingDialog loading =
+        DialogUtils.openLoading(context, message: _reschedulingMessage);
+    try {
+      await appointmentManager.rescheduleAppointment(
+        appt,
+        newStart,
+        deductPostponementRight: deductRight,
+      );
+      if (mounted) {
+        setState(() {
+          _refreshingInPlace = true;
+          _fetchAllAppointments();
+        });
+        await _appointmentsFuture;
+      }
+      loading.close();
+    } catch (e) {
+      loading.close();
+      if (mounted) {
+        await DialogUtils.openError(
+          context,
+          title: 'Hata',
+          message: '$_rescheduleFailedMessage: $e',
+        );
+      }
+    } finally {
+      loading.close();
+      _refreshingInPlace = false;
+    }
+  }
+
+  void _explainNotDraggable(AppointmentModel appt) {
+    DialogUtils.openInfo(
+      context,
+      title: _notDraggableTitle,
+      message: '“${appt.status.label}” durumundaki randevular sürüklenerek '
+          'taşınamaz. Tarihini ya da saatini değiştirmek için randevuya '
+          'dokunup düzenleyin.',
+    );
+  }
+
   /// Lays out a day's meetings AND "Diğer" events with a Google-Calendar–style
   /// column-packing algorithm so overlapping items never cover each other:
   ///
@@ -1021,23 +1225,80 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   /// Total height of the time grid area
   double get _timeGridHeight => kTotalGridHeight;
 
-  /// Appointment card (lightweight build) - now fills its positioned container
   Widget _buildAppointmentCard(AppointmentModel appt, double cardHeight) {
-    final bool isPostponed = appt.status == AppointmentStatus.postponed && appt.postponedDate != null;
-    final DateTime effectiveTime = isPostponed ? appt.postponedDate! : appt.appointmentDateTime;
-    
-    // Calculate end time
-    final DateTime endTime = effectiveTime.add(Duration(minutes: appt.durationMinutes));
-    final String timeRange = '${_timeFmt.format(effectiveTime)}-${_timeFmt.format(endTime)}';
+    final Widget face =
+        _appointmentCardFace(appt, cardHeight, _effectiveTime(appt));
+    if (!appt.isReschedulable) {
+      return GestureDetector(
+        onTap: () => _showEditAppointmentDialog(context, appt),
+        onLongPress: () => _explainNotDraggable(appt),
+        child: face,
+      );
+    }
+    return MouseRegion(
+      cursor: SystemMouseCursors.grab,
+      child: Listener(
+        onPointerCancel: (_) {
+          if (_dragOf(appt) != null) _clearDrag();
+        },
+        child: GestureDetector(
+          onTap: () => _showEditAppointmentDialog(context, appt),
+          onLongPressStart: (LongPressStartDetails details) => _startDrag(
+            appt,
+            cardHeight,
+            details.globalPosition,
+            details.localPosition,
+            isClickCandidate: false,
+          ),
+          onLongPressMoveUpdate: (LongPressMoveUpdateDetails details) =>
+              _moveDrag(appt, details.globalPosition),
+          onLongPressEnd: (_) => _endDrag(appt),
+          child: GestureDetector(
+            supportedDevices: const <PointerDeviceKind>{PointerDeviceKind.mouse},
+            dragStartBehavior: DragStartBehavior.down,
+            onPanStart: (DragStartDetails details) => _startDrag(
+              appt,
+              cardHeight,
+              details.globalPosition,
+              details.localPosition,
+              isClickCandidate: true,
+            ),
+            onPanUpdate: (DragUpdateDetails details) =>
+                _moveDrag(appt, details.globalPosition),
+            onPanEnd: (_) => _endDrag(appt),
+            child: ValueListenableBuilder<String?>(
+              valueListenable: _draggedAppointmentId,
+              builder: (BuildContext context, String? draggedId,
+                      Widget? child) =>
+                  Opacity(
+                opacity:
+                    draggedId == appt.appointmentId ? kDragSourceOpacity : 1,
+                child: child,
+              ),
+              child: face,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _appointmentCardFace(
+    AppointmentModel appt,
+    double cardHeight,
+    DateTime start, {
+    bool lifted = false,
+  }) {
+    final bool isPostponed =
+        appt.status == AppointmentStatus.postponed && appt.postponedDate != null;
+    final DateTime endTime = start.add(Duration(minutes: appt.durationMinutes));
+    final String timeRange =
+        '${_timeFmt.format(start)}-${_timeFmt.format(endTime)}';
 
     // Box text: "{saat} {DosyaNo}-{Ad Soyad}". The meeting type is intentionally
     // NOT shown, and the file number + dash is omitted when the client has none.
-    final String nameSurname = appt.user!.fullName;
-    final String? dosyaNo = appt.user!.dosyaNo?.trim();
-    final String namePart = (dosyaNo != null && dosyaNo.isNotEmpty)
-        ? '$dosyaNo-$nameSurname'
-        : nameSurname;
-    final String displayText = '$timeRange $namePart';
+    final String displayText =
+        '$timeRange ${appt.user?.fileLabel ?? _unknownCustomer}';
     final String marks = [
       if (appt.wasPostponed && !isPostponed) kPostponedMark,
       if (appt.status == AppointmentStatus.burned) kBurnedMark,
@@ -1045,78 +1306,66 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     final Color cardColor = appt.appointmentType.getBgColor(appt.meetingType);
     final Color borderColor = appt.appointmentType.getBorderColor(appt.meetingType);
-    return GestureDetector(
-      onTap: () => _showEditAppointmentDialog(context, appt),
-      child: Container(
-        width: double.infinity,
-        height: double.infinity,
-        margin: const EdgeInsets.symmetric(
-          horizontal: kCardHorizontalMargin,
-          vertical: kCardVerticalMargin,
-        ),
-        padding: const EdgeInsets.all(kCardPadding),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(1),
-          border: Border.all(color: borderColor, width: kCardBorderWidth),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-                child: _cardText(displayText, cardHeight, marks: marks)),
-          ],
-        ),
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      margin: const EdgeInsets.symmetric(
+        horizontal: kCardHorizontalMargin,
+        vertical: kCardVerticalMargin,
+      ),
+      padding: const EdgeInsets.all(kCardPadding),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(1),
+        border: Border.all(color: borderColor, width: kCardBorderWidth),
+        boxShadow: lifted ? kElevationToShadow[8] : null,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: _cardText(displayText, cardHeight, marks: marks)),
+        ],
       ),
     );
   }
 
-  /// Build the time column on the left side
-  /// [headerHeight] allows adjusting the top spacer to align with different header sizes
-  Widget _buildTimeColumn({double? headerHeight}) {
-    final effectiveHeaderHeight = headerHeight ?? kDayHeaderHeight;
-    // Full-hour labels from the first full hour (09:00 when the grid starts at
-    // 08:30) up to and including kEndHour.
-    final hours =
-        List.generate(kEndHour - kFirstFullHour + 1, (i) => kFirstFullHour + i);
+  static String _clockLabel(int minutes) =>
+      '${(minutes ~/ 60).toString().padLeft(2, '0')}:'
+      '${(minutes % 60).toString().padLeft(2, '0')}';
 
-    Widget label(String text, double height) {
-      return SizedBox(
-        height: height,
-        child: Align(
-          alignment: Alignment.topRight,
-          child: Padding(
-            padding: const EdgeInsets.only(right: 8, top: 0),
-            child: Text(
-              text,
-              style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500),
-            ),
-          ),
-        ),
-      );
-    }
+  Widget _buildTimeColumn({double? headerHeight}) {
+    final double effectiveHeaderHeight = headerHeight ?? kDayHeaderHeight;
+    final int firstLabel =
+        ((kGridStartMinutes + kTimeLabelStepMinutes - 1) ~/
+                kTimeLabelStepMinutes) *
+            kTimeLabelStepMinutes;
 
     return SizedBox(
       width: kTimeColumnWidth,
-      child: Column(
+      height: effectiveHeaderHeight + _timeGridHeight,
+      child: Stack(
         children: [
-          // Header spacer to align with day headers
-          SizedBox(height: effectiveHeaderHeight),
-          // Partial first slot label (e.g. 08:30) when the grid doesn't start
-          // on a full hour.
-          if (kStartMinute != 0)
-            label(
-              '${kStartHour.toString().padLeft(2, '0')}:${kStartMinute.toString().padLeft(2, '0')}',
-              (60 - kStartMinute) * kPixelsPerMinute,
+          for (int minutes = firstLabel;
+              minutes < kGridEndMinutes;
+              minutes += kTimeLabelStepMinutes)
+            Positioned(
+              top: effectiveHeaderHeight +
+                  (minutes - kGridStartMinutes) * kPixelsPerMinute,
+              right: kTimeLabelRightPadding,
+              child: Text(
+                _clockLabel(minutes),
+                style: minutes % 60 == 0
+                    ? TextStyle(
+                        fontSize: kHourLabelFontSize,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      )
+                    : TextStyle(
+                        fontSize: kHalfHourLabelFontSize,
+                        color: Colors.grey[500],
+                      ),
+              ),
             ),
-          // Full-hour labels.
-          ...hours.map((hour) => label(
-                '${hour.toString().padLeft(2, '0')}:00',
-                hour < kEndHour ? 60 * kPixelsPerMinute : 0,
-              )),
         ],
       ),
     );
@@ -1197,36 +1446,31 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   Widget _buildTimeGrid(DateTime day, List<AppointmentModel> dayAppointments) {
     return SizedBox(
       height: _timeGridHeight,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return Stack(
-            children: [
-              // Hour grid lines (aligned to full hours; grid starts at 08:30)
-              ...List.generate(kEndHour - kFirstFullHour, (i) {
-                final hour = kFirstFullHour + i;
-                final top = (hour * 60 - kGridStartMinutes) * kPixelsPerMinute;
-                return Positioned(
-                  top: top,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    height: 1,
-                    color: Colors.grey[300],
-                  ),
-                );
-              }),
-              // Meetings + events, laid out in side-by-side columns so that
-              // overlapping/containing items never cover each other.
-              ..._buildPositionedItems(
+      child: CustomPaint(
+        painter: _TimeGridPainter(
+          hourColor: Colors.grey[400]!,
+          halfHourColor: Colors.grey[300]!,
+          minorColor: Colors.grey[200]!,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Meetings + events, laid out in side-by-side columns so that
+            // overlapping/containing items never cover each other.
+            return Stack(
+              children: _buildPositionedItems(
                   dayAppointments, day, constraints.maxWidth),
-            ],
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildScrollableGrid({required double height, required Widget child}) {
+  Widget _buildScrollableGrid({
+    required _GridLayout layout,
+    required List<Widget> columns,
+  }) {
+    _gridLayout = layout;
     return Scrollbar(
       controller: _verticalCtrl,
       thumbVisibility: true,
@@ -1234,8 +1478,106 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
         key: _kVerticalKey,
         controller: _verticalCtrl,
         padding: const EdgeInsets.only(right: kScrollbarGutter),
-        child: SizedBox(height: height, child: child),
+        child: SizedBox(
+          height: layout.headerHeight + _timeGridHeight,
+          child: Stack(
+            key: _gridKey,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: columns,
+              ),
+              Positioned.fill(child: _buildDragOverlay(layout)),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  Widget _buildDragOverlay(_GridLayout layout) {
+    return ValueListenableBuilder<CalendarDropTarget?>(
+      valueListenable: _dropTarget,
+      builder: (BuildContext context, CalendarDropTarget? target, _) {
+        final _AppointmentDrag? drag = _drag;
+        if (target == null ||
+            drag == null ||
+            target.dayIndex >= layout.days.length) {
+          return const SizedBox.shrink();
+        }
+        final ColorScheme colors = Theme.of(context).colorScheme;
+        return MouseRegion(
+          cursor: SystemMouseCursors.grabbing,
+          opaque: false,
+          child: IgnorePointer(
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final CalendarGridGeometry geometry =
+                    layout.geometry(constraints.maxWidth);
+                final double top = geometry.topOf(target.startMinutes);
+                final double left = geometry.dayLeft(target.dayIndex);
+                return Stack(
+                  children: [
+                    Positioned(
+                      left: left,
+                      top: layout.headerHeight,
+                      width: geometry.dayWidth,
+                      height: _timeGridHeight,
+                      child: ColoredBox(
+                          color: colors.primary.withValues(alpha: 0.06)),
+                    ),
+                    Positioned(
+                      left: kTimeColumnWidth,
+                      right: 0,
+                      top: top,
+                      height: 1,
+                      child: ColoredBox(color: colors.primary),
+                    ),
+                    Positioned(
+                      left: 0,
+                      top: top,
+                      width: kTimeColumnWidth,
+                      child: Align(
+                        alignment: Alignment.topRight,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: colors.primary,
+                            borderRadius: const BorderRadius.horizontal(
+                                left: Radius.circular(4)),
+                          ),
+                          child: Text(
+                            _clockLabel(target.startMinutes),
+                            style: TextStyle(
+                              fontSize: kHourLabelFontSize,
+                              height: 1.2,
+                              fontWeight: FontWeight.bold,
+                              color: colors.onPrimary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: left,
+                      top: top,
+                      width: geometry.dayWidth - kDayDividerWidth,
+                      height: drag.cardHeight,
+                      child: _appointmentCardFace(
+                        drag.appointment,
+                        drag.cardHeight,
+                        target.onDay(layout.days[target.dayIndex]),
+                        lifted: true,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1457,6 +1799,14 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           children: [
             _markLegendEntry(kPostponedMark, kPostponedMarkMeaning),
             _markLegendEntry(kBurnedMark, kBurnedMarkMeaning),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.open_with, size: 14, color: Colors.grey.shade700),
+                const SizedBox(width: 4),
+                Flexible(child: Text(kDragHint, style: _legendStyle)),
+              ],
+            ),
           ],
         ),
       ),
@@ -1474,13 +1824,15 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
           TextSpan(text: ' = $meaning'),
         ],
       ),
-      style: TextStyle(
+      style: _legendStyle,
+    );
+  }
+
+  TextStyle get _legendStyle => TextStyle(
         fontSize: 13,
         fontWeight: FontWeight.w600,
         color: Colors.grey.shade700,
-      ),
-    );
-  }
+      );
 
   // ==================== Content Views ====================
 
@@ -1492,17 +1844,17 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final dayAppointments = byDay[dayKey] ?? const <AppointmentModel>[];
 
     return _buildScrollableGrid(
-      height: kMobileDayHeaderHeight + _timeGridHeight,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildTimeColumn(headerHeight: kMobileDayHeaderHeight),
-          // Full-width day content (no fixed width constraint)
-          Expanded(
-            child: _buildMobileDayContent(_selectedDay, dayAppointments),
-          ),
-        ],
+      layout: _GridLayout(
+        days: <DateTime>[dayKey],
+        headerHeight: kMobileDayHeaderHeight,
       ),
+      columns: [
+        _buildTimeColumn(headerHeight: kMobileDayHeaderHeight),
+        // Full-width day content (no fixed width constraint)
+        Expanded(
+          child: _buildMobileDayContent(_selectedDay, dayAppointments),
+        ),
+      ],
     );
   }
 
@@ -1555,21 +1907,18 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final double headerHeight = _dayHeaderHeightFor(weekDays);
 
     return _buildScrollableGrid(
-      height: headerHeight + _timeGridHeight,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildTimeColumn(headerHeight: headerHeight),
-          for (final DateTime day in weekDays)
-            Expanded(
-              child: _buildDayColumn(
-                day,
-                byDay[_dateOnly(day)] ?? const <AppointmentModel>[],
-                headerHeight,
-              ),
+      layout: _GridLayout(days: weekDays, headerHeight: headerHeight),
+      columns: [
+        _buildTimeColumn(headerHeight: headerHeight),
+        for (final DateTime day in weekDays)
+          Expanded(
+            child: _buildDayColumn(
+              day,
+              byDay[_dateOnly(day)] ?? const <AppointmentModel>[],
+              headerHeight,
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 
@@ -1705,7 +2054,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                   child: FutureBuilder<List<AppointmentModel>>(
                     future: _appointmentsFuture,
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
+                      if (snapshot.connectionState == ConnectionState.waiting &&
+                          !(_refreshingInPlace && snapshot.hasData)) {
                         return const Center(child: CircularProgressIndicator());
                       } else if (snapshot.hasError) {
                         return Center(child: Text('Randevular getirilirken hata: ${snapshot.error}'));
@@ -1743,6 +2093,93 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       ),
     );
   }
+}
+
+class _GridLayout {
+  const _GridLayout({required this.days, required this.headerHeight});
+
+  final List<DateTime> days;
+  final double headerHeight;
+
+  CalendarGridGeometry geometry(double contentWidth) => CalendarGridGeometry(
+        contentWidth: contentWidth,
+        timeColumnWidth: kTimeColumnWidth,
+        headerHeight: headerHeight,
+        dayCount: math.max(days.length, 1),
+        gridStartMinutes: kGridStartMinutes,
+        gridEndMinutes: kGridEndMinutes,
+        pixelsPerMinute: kPixelsPerMinute,
+        snapMinutes: kSnapMinutes,
+      );
+}
+
+class _AppointmentDrag {
+  _AppointmentDrag({
+    required this.appointment,
+    required this.originalStart,
+    required this.cardHeight,
+    required this.grabDy,
+    required this.pointer,
+    required this.isClickCandidate,
+  }) : _origin = pointer;
+
+  final AppointmentModel appointment;
+  final DateTime originalStart;
+  final double cardHeight;
+  final double grabDy;
+  final bool isClickCandidate;
+  final Offset _origin;
+  Offset pointer;
+  double travelled = 0;
+
+  int get originalMinutes => originalStart.hour * 60 + originalStart.minute;
+
+  void moveTo(Offset position) {
+    pointer = position;
+    travelled = math.max(travelled, (position - _origin).distance);
+  }
+}
+
+class _TimeGridPainter extends CustomPainter {
+  const _TimeGridPainter({
+    required this.hourColor,
+    required this.halfHourColor,
+    required this.minorColor,
+  });
+
+  final Color hourColor;
+  final Color halfHourColor;
+  final Color minorColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint();
+    final int first = (kGridStartMinutes ~/ kSnapMinutes + 1) * kSnapMinutes;
+    for (int minutes = first;
+        minutes < kGridEndMinutes;
+        minutes += kSnapMinutes) {
+      paint.color = minutes % 60 == 0
+          ? hourColor
+          : minutes % kTimeLabelStepMinutes == 0
+              ? halfHourColor
+              : minorColor;
+      canvas.drawRect(
+        Rect.fromLTWH(
+          0,
+          (minutes - kGridStartMinutes) * kPixelsPerMinute,
+          size.width,
+          1,
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_TimeGridPainter oldDelegate) =>
+      oldDelegate.hourColor != hourColor ||
+      oldDelegate.halfHourColor != halfHourColor ||
+      oldDelegate.minorColor != minorColor;
 }
 
 /// One positioned calendar item (a meeting or a "Diğer" event) used by the
