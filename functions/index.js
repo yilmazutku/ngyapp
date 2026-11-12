@@ -862,17 +862,34 @@ const BUSY_SLOTS_COLLECTION = 'busySlots';
 /** backfillBusySlots'ta aynı anda eşitlenen randevu sayısı. */
 const BUSY_SLOT_SYNC_CHUNK = 100;
 
+const POSTPONED_STATUS = 'Ertelendi';
+
+/**
+ * @param {*} value Alan değeri.
+ * @return {boolean} Değer bir Firestore zamanı mı.
+ */
+function isTimestamp(value) {
+  return Boolean(value) && typeof value.toMillis === 'function';
+}
+
 /**
  * Bir randevunun busySlots aynası; saat seçicide yer kaplamıyorsa null.
- * Seçici durumuna bakmaz (Ertelendi, Yapıldı da dolu sayılır); yalnızca saati
- * olmayan kayıt yer kaplamaz. Süre yoksa uygulama 30 dakika sayar
- * (AppointmentModel.fromDocument), burada boş bırakılır.
+ * Randevu takvimde nerede duruyorsa orayı kaplar
+ * (AppointmentModel.calendarDateTime): "Ertelendi" ve yeni tarihi seçilmişse
+ * ertelendiği tarih, değilse kendi tarihi. Diğer durumlar da (Yapıldı,
+ * Yakıldı) dolu sayılır; yalnızca saati olmayan kayıt yer kaplamaz. Süre yoksa
+ * uygulama 30 dakika sayar (AppointmentModel.fromDocument), burada boş
+ * bırakılır.
  * @param {Object|undefined} data Randevu dokümanı.
  * @return {Object|null} Ayna dokümanı.
  */
 function busySlotOf(data) {
-  const start = data && data.appointmentDateTime;
-  if (!start || typeof start.toMillis !== 'function') return null;
+  if (!data) return null;
+  const start = data.status === POSTPONED_STATUS &&
+      isTimestamp(data.postponedDate) ?
+    data.postponedDate :
+    data.appointmentDateTime;
+  if (!isTimestamp(start)) return null;
   const slot = {appointmentDateTime: start};
   if (typeof data.durationMinutes === 'number') {
     slot.durationMinutes = data.durationMinutes;
@@ -930,8 +947,8 @@ function syncBusySlot(db, userId, appointmentId) {
 }
 
 /**
- * Randevu yazıldıkça aynayı günceller. Saati ve süresi değişmeyen yazım (ör.
- * durum, not) aynaya dokunmaz.
+ * Randevu yazıldıkça aynayı günceller. Kapladığı saati ve süresi değişmeyen
+ * yazım (ör. not, ya da saati değiştirmeyen durum) aynaya dokunmaz.
  *
  * Path: users/{userId}/appointments/{appointmentId}
  */

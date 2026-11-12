@@ -536,23 +536,18 @@ class AppointmentManager extends ChangeNotifier {
     final DateTime dayStart = DateTime(start.year, start.month, start.day);
     final DateTime newEnd = start.add(Duration(minutes: durationMinutes));
 
-    DateTime effectiveStart(AppointmentModel a) =>
-        (a.status == AppointmentStatus.postponed && a.postponedDate != null)
-            ? a.postponedDate!
-            : a.appointmentDateTime;
-
     final dayAppointments = await fetchAppointmentsWithUsers(
       startDate: dayStart,
       endDate: dayStart,
     );
 
     final overlapping = dayAppointments.where((a) {
-      final effStart = effectiveStart(a);
+      final effStart = a.calendarDateTime;
       final effEnd = effStart.add(Duration(minutes: a.durationMinutes));
       // Half-open interval overlap test.
       return start.isBefore(effEnd) && effStart.isBefore(newEnd);
     }).toList()
-      ..sort((a, b) => effectiveStart(a).compareTo(effectiveStart(b)));
+      ..sort((a, b) => a.calendarDateTime.compareTo(b.calendarDateTime));
 
     return overlapping;
   }

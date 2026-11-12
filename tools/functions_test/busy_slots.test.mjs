@@ -41,6 +41,8 @@ async function waitSlot(uid, id, predicate, timeoutMs = 20000) {
 const at = (iso) => Timestamp.fromDate(new Date(iso));
 const T1 = at('2030-01-10T09:00:00Z');
 const T2 = at('2030-01-10T11:30:00Z');
+const T3 = at('2030-01-12T14:00:00Z');
+const T4 = at('2030-01-13T10:20:00Z');
 
 /** İmzasız ID token: Functions emülatörü callable'larda doğrulamadan çözer. */
 function fakeIdToken(uid) {
@@ -192,6 +194,55 @@ check('B8 tekrar çalıştırınca bir şey değişmez',
 const all = await db.collection('busySlots').get();
 check('B9 her saatli randevunun tek aynası var (c2/b1, c3/x1, c3/x2)',
     all.size === 3, `size=${all.size}`);
+
+// --- Ertelenmiş randevu ------------------------------------------------------
+const slotAt = (uid, id, t) => waitSlot(uid, id, (s) => s.exists &&
+    s.data().appointmentDateTime.isEqual(t));
+
+await appointmentRef('c4', 'p1').set({userId: 'c4', appointmentDateTime: T1,
+  durationMinutes: 30, status: 'Planlandı'});
+snap = await slotAt('c4', 'p1', T1);
+check('P1 planlanan randevunun aynası kendi tarihinde',
+    snap.exists && snap.data().appointmentDateTime.isEqual(T1));
+
+await appointmentRef('c4', 'p1').update({status: 'Ertelendi',
+  postponedDate: T3, postponedBy: 'user'});
+snap = await slotAt('c4', 'p1', T3);
+check('P2 ertelenince ayna ertelendiği tarihe taşınır, eski saat boşalır',
+    snap.exists && snap.data().appointmentDateTime.isEqual(T3) &&
+    snap.data().durationMinutes === 30);
+
+await appointmentRef('c4', 'p1').update({postponedDate: T4});
+snap = await slotAt('c4', 'p1', T4);
+check('P3 ertelendiği tarih değişince ayna da taşınır',
+    snap.exists && snap.data().appointmentDateTime.isEqual(T4));
+
+await appointmentRef('c4', 'p1').update({status: 'Planlandı',
+  postponedDate: null, postponedBy: null});
+snap = await slotAt('c4', 'p1', T1);
+check('P4 tekrar Planlandı olunca ayna kendi tarihine döner',
+    snap.exists && snap.data().appointmentDateTime.isEqual(T1));
+
+await appointmentRef('c4', 'p2').set({userId: 'c4', appointmentDateTime: T2,
+  durationMinutes: 20, status: 'Ertelendi', postponedDate: null,
+  postponedBy: 'admin'});
+snap = await slotAt('c4', 'p2', T2);
+check('P5 yeni tarihi seçilmemiş ertelenmiş randevu kendi tarihinde kalır',
+    snap.exists && snap.data().appointmentDateTime.isEqual(T2));
+
+await appointmentRef('c5', 'q1').set({userId: 'c5', appointmentDateTime: T1,
+  durationMinutes: 45, status: 'Ertelendi', postponedDate: T3,
+  postponedBy: 'user'});
+await slotAt('c5', 'q1', T3);
+await slotRef('c5', 'q1').set({appointmentDateTime: T1, durationMinutes: 45});
+res = await callBackfill(ADMIN_UID);
+check('P6 eski işlevin ilk tarihe yazdığı ayna yalnızca o eşitlenir',
+    res.status === 200 && res.body.result.written === 1 &&
+    res.body.result.deleted === 0, JSON.stringify(res.body));
+snap = await slotRef('c5', 'q1').get();
+check('P7 eşitlenen ayna ertelendiği tarihte',
+    snap.exists && snap.data().appointmentDateTime.isEqual(T3) &&
+    snap.data().durationMinutes === 45);
 
 if (failures > 0) {
   console.error(`\n${failures} beklenti karşılanmadı`);

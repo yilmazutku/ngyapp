@@ -28,11 +28,7 @@ Future<bool> showOverlapWarningDialog(
             const Text('Bu saatte mevcut görüşme(ler) var:'),
             const SizedBox(height: 8),
             ...conflicts.map((a) {
-              final DateTime start =
-                  (a.status == AppointmentStatus.postponed &&
-                          a.postponedDate != null)
-                      ? a.postponedDate!
-                      : a.appointmentDateTime;
+              final DateTime start = a.calendarDateTime;
               final DateTime end =
                   start.add(Duration(minutes: a.durationMinutes));
               final String who = a.user?.fileLabel ?? '';

@@ -689,13 +689,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     );
   }
 
-  /// Get the effective date for sorting/grouping (postponedDate if exists, otherwise appointmentDateTime)
-  DateTime _getEffectiveDate(AppointmentModel appt) {
-    return (appt.status == AppointmentStatus.postponed && appt.postponedDate != null)
-        ? appt.postponedDate!
-        : appt.appointmentDateTime;
-  }
-
   /// Apply client-side sorting to appointments (filtering now done on Firebase)
   /// Kept client-side because Firebase doesn't support complex multi-field sorting
   List<AppointmentModel> _applySorting(List<AppointmentModel> appointments) {
@@ -704,9 +697,9 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     appointments.sort((a, b) {
       switch (sortOption) {
         case 'Tarih Artan':
-          return _getEffectiveDate(a).compareTo(_getEffectiveDate(b));
+          return a.calendarDateTime.compareTo(b.calendarDateTime);
         case 'Tarih Azalan':
-          return _getEffectiveDate(b).compareTo(_getEffectiveDate(a));
+          return b.calendarDateTime.compareTo(a.calendarDateTime);
         case 'İsim A-Z':
           return (a.user?.fullName ?? '').compareTo(b.user?.fullName ?? '');
         case 'İsim Z-A':
@@ -818,12 +811,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     return minutes * kPixelsPerMinute;
   }
 
-  /// Effective start time of an appointment (postponed date wins when set).
-  DateTime _effectiveTime(AppointmentModel appt) =>
-      (appt.status == AppointmentStatus.postponed && appt.postponedDate != null)
-          ? appt.postponedDate!
-          : appt.appointmentDateTime;
-
   /// Whether the given time falls within the visible grid window.
   bool _isWithinGrid(DateTime t) {
     final minutes = t.hour * 60 + t.minute;
@@ -838,7 +825,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     required bool isClickCandidate,
   }) {
     if (_drag != null) return;
-    final DateTime start = _effectiveTime(appt);
+    final DateTime start = appt.calendarDateTime;
     _drag = _AppointmentDrag(
       appointment: appt,
       originalStart: DateTime(
@@ -1014,7 +1001,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
     // Meetings (appointments).
     for (final appt in dayAppointments) {
-      final start = _effectiveTime(appt);
+      final start = appt.calendarDateTime;
       if (!_isWithinGrid(start)) continue;
       // "Tartım" visits keep their real (short) duration for overlap packing
       // but render at a taller minimum height so the label stays readable.
@@ -1227,7 +1214,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
 
   Widget _buildAppointmentCard(AppointmentModel appt, double cardHeight) {
     final Widget face =
-        _appointmentCardFace(appt, cardHeight, _effectiveTime(appt));
+        _appointmentCardFace(appt, cardHeight, appt.calendarDateTime);
     if (!appt.isReschedulable) {
       return GestureDetector(
         onTap: () => _showEditAppointmentDialog(context, appt),
@@ -2066,7 +2053,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
                         // Use effective date (postponedDate if exists for postponed appointments)
                         final Map<DateTime, List<AppointmentModel>> byDay = {};
                         for (final appt in appointments) {
-                          final key = _dateOnly(_getEffectiveDate(appt));
+                          final key = _dateOnly(appt.calendarDateTime);
                           (byDay[key] ??= <AppointmentModel>[]).add(appt);
                         }
 

@@ -5,7 +5,11 @@ import '../models/event_model.dart';
 
 class EventProvider extends ChangeNotifier {
   static CollectionReference get eventsCollection =>
-      FirebaseFirestore.instance.collection('admininput').doc('events').collection('items');
+      eventsCollectionOf(FirebaseFirestore.instance);
+
+  static CollectionReference<Map<String, dynamic>> eventsCollectionOf(
+          FirebaseFirestore db) =>
+      db.collection('admininput').doc('events').collection('items');
 
   Future<List<EventModel>> fetchEventsForDateRange(
       DateTime startDate, DateTime endDate) async {
