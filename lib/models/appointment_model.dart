@@ -116,6 +116,11 @@ class AppointmentModel {
           ? postponedDate!
           : displayDateTime;
 
+  DateTime get calendarDateTime =>
+      (status == AppointmentStatus.postponed && postponedDate != null)
+          ? postponedDate!
+          : appointmentDateTime;
+
   DateTime get displayDateTime => isHeldOnPostponedDate(status, postponedDate)
       ? postponedDate!
       : appointmentDateTime;

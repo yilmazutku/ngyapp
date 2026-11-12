@@ -29,7 +29,7 @@ class BusySlot {
   }
 
   factory BusySlot.ofAppointment(AppointmentModel appointment) => BusySlot(
-        start: appointment.appointmentDateTime,
+        start: appointment.calendarDateTime,
         durationMinutes: appointment.durationMinutes,
       );
 

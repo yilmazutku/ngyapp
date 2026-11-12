@@ -14,7 +14,23 @@ import 'event_provider.dart';
 import 'user_provider.dart';
 
 class TimeslotManager extends ChangeNotifier {
-  TimeslotManager();
+  TimeslotManager({FirebaseFirestore? db, String? Function()? currentUid})
+      : _dbOverride = db,
+        _currentUidOverride = currentUid;
+
+  static const String _appointmentDateField = 'appointmentDateTime';
+  static const String _postponedDateField = 'postponedDate';
+  static const String _statusField = 'status';
+  static const String _isDeletedField = 'isDeleted';
+
+  final FirebaseFirestore? _dbOverride;
+  final String? Function()? _currentUidOverride;
+
+  FirebaseFirestore get _db => _dbOverride ?? FirebaseFirestore.instance;
+
+  String? get _currentUid => _currentUidOverride != null
+      ? _currentUidOverride()
+      : FirebaseAuth.instance.currentUser?.uid;
 
   /// `busySlots` aynasını eski randevularla dolduran admin işlevi (bkz.
   /// functions/index.js).
@@ -30,7 +46,7 @@ class TimeslotManager extends ChangeNotifier {
   Future<List<String>> getAdminTimeSlotsAsStrings(DateTime date) async {
     try {
       final dateString = DateFormat('yyyy-MM-dd').format(date);
-      final timeslotDoc = await FirebaseFirestore.instance
+      final timeslotDoc = await _db
           .collection('admininput')
           .doc('timeslots')
           .collection('dates')
@@ -153,7 +169,7 @@ class TimeslotManager extends ChangeNotifier {
   Future<void> saveTimeSlots(DateTime date, List<String> timeSlots) async {
     try {
       final dateString = DateFormat('yyyy-MM-dd').format(date);
-      final docRef = FirebaseFirestore.instance
+      final docRef = _db
           .collection('admininput')
           .doc('timeslots')
           .collection('dates')
@@ -178,7 +194,7 @@ class TimeslotManager extends ChangeNotifier {
   Future<void> updateTimeSlots(DateTime date, List<String> timeSlots) async {
     try {
       final dateString = DateFormat('yyyy-MM-dd').format(date);
-      final docRef = FirebaseFirestore.instance
+      final docRef = _db
           .collection('admininput')
           .doc('timeslots')
           .collection('dates')
@@ -204,7 +220,7 @@ class TimeslotManager extends ChangeNotifier {
       }) async {
     try {
       final dateString = DateFormat('yyyy-MM-dd').format(date);
-      final docRef = FirebaseFirestore.instance
+      final docRef = _db
           .collection('admininput')
           .doc('timeslots')
           .collection('dates')
@@ -222,7 +238,7 @@ class TimeslotManager extends ChangeNotifier {
         // time must not write the same slot twice.
         final bookedTimeSlots = <String>{};
         for (var appointment in appointments) {
-          bookedTimeSlots.add(_slotKey(appointment.appointmentDateTime));
+          bookedTimeSlots.add(_slotKey(appointment.calendarDateTime));
         }
 
         if (bookedTimeSlots.isNotEmpty) {
@@ -257,7 +273,7 @@ class TimeslotManager extends ChangeNotifier {
 
       // Stored slots, appointments and events are independent reads, so they
       // are issued together rather than one after the other.
-      final slotDocFuture = FirebaseFirestore.instance
+      final slotDocFuture = _db
           .collection('admininput')
           .doc('timeslots')
           .collection('dates')
@@ -295,7 +311,7 @@ class TimeslotManager extends ChangeNotifier {
 
       // Ensure each appointment's own start-time slot exists in storedTimes
       for (var appointment in activeAppointments) {
-        final timeSlot = _slotKey(appointment.appointmentDateTime);
+        final timeSlot = _slotKey(appointment.calendarDateTime);
         if (storedTimeSet.add(timeSlot)) {
           storedTimes.add(timeSlot);
         }
@@ -398,7 +414,7 @@ class TimeslotManager extends ChangeNotifier {
       DateTime startDate,
       DateTime endDate,
       ) async {
-    final snapshot = await EventProvider.eventsCollection
+    final snapshot = await EventProvider.eventsCollectionOf(_db)
         .where('startDateTime', isGreaterThanOrEqualTo: startDate)
         .where('startDateTime', isLessThan: endDate)
         .get();
@@ -410,7 +426,7 @@ class TimeslotManager extends ChangeNotifier {
   Future<Map<String, UserModel>> _fetchUsersByIds(Set<String> userIds) async {
     if (userIds.isEmpty) return const {};
 
-    final usersCollection = FirebaseFirestore.instance.collection('users');
+    final usersCollection = _db.collection('users');
     final ids = userIds.toList();
     final snapshots = await Future.wait(
       ids.map((id) => usersCollection.doc(id).get().then<DocumentSnapshot<Map<String, dynamic>>?>(
@@ -439,7 +455,7 @@ class TimeslotManager extends ChangeNotifier {
       DateTime startDate,
       DateTime endDate,
       ) async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    final String? uid = _currentUid;
     final List<List<BusySlot>> parts = await Future.wait([
       _fetchMirroredBusySlots(startDate, endDate),
       if (uid != null) _fetchOwnBusySlots(uid, startDate, endDate),
@@ -454,7 +470,7 @@ class TimeslotManager extends ChangeNotifier {
       DateTime endDate,
       ) async {
     try {
-      final snapshot = await FirebaseFirestore.instance
+      final snapshot = await _db
           .collection(BusySlot.collection)
           .where(BusySlot.startField, isGreaterThanOrEqualTo: startDate)
           .where(BusySlot.startField, isLessThan: endDate)
@@ -473,17 +489,19 @@ class TimeslotManager extends ChangeNotifier {
       DateTime startDate,
       DateTime endDate,
       ) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('appointments')
-        .where(BusySlot.startField, isGreaterThanOrEqualTo: startDate)
-        .where(BusySlot.startField, isLessThan: endDate)
-        .get();
-    return snapshot.docs
-        .where((doc) => doc.data()[BusySlot.startField] is Timestamp)
-        .map(BusySlot.fromDocument)
-        .toList();
+    final CollectionReference<Map<String, dynamic>> appointments =
+        _db.collection('users').doc(uid).collection('appointments');
+    final List<AppointmentModel> own = await _appointmentsOnCalendar(
+      byAppointmentDate: appointments
+          .where(_appointmentDateField, isGreaterThanOrEqualTo: startDate)
+          .where(_appointmentDateField, isLessThan: endDate),
+      byPostponedDate: appointments
+          .where(_postponedDateField, isGreaterThanOrEqualTo: startDate)
+          .where(_postponedDateField, isLessThan: endDate),
+      startDate: startDate,
+      endDate: endDate,
+    );
+    return own.map(BusySlot.ofAppointment).toList();
   }
 
   /// Internal helper: fetch appointments across all users for a date range.
@@ -491,21 +509,45 @@ class TimeslotManager extends ChangeNotifier {
   Future<List<AppointmentModel>> _fetchAppointmentsForDateRange(
       DateTime startDate,
       DateTime endDate,
-      ) async {
-    try {
-      Query query = FirebaseFirestore.instance
-          .collectionGroup('appointments')
-          .where('appointmentDateTime', isGreaterThanOrEqualTo: startDate)
-          .where('appointmentDateTime', isLessThan: endDate);
+      ) {
+    final Query<Map<String, dynamic>> appointments =
+        _db.collectionGroup('appointments');
+    return _appointmentsOnCalendar(
+      byAppointmentDate: appointments
+          .where(_appointmentDateField, isGreaterThanOrEqualTo: startDate)
+          .where(_appointmentDateField, isLessThan: endDate),
+      byPostponedDate: appointments
+          .where(_isDeletedField, isNull: true)
+          .where(_statusField, isEqualTo: AppointmentStatus.postponed.label)
+          .where(_postponedDateField, isGreaterThanOrEqualTo: startDate)
+          .where(_postponedDateField, isLessThan: endDate),
+      startDate: startDate,
+      endDate: endDate,
+    );
+  }
 
-      final snapshot = await query.get();
-      final appointments = snapshot.docs
-          .map((doc) => AppointmentModel.fromDocument(doc))
-          .toList();
-
-      return appointments;
-    } catch (e) {
-      rethrow;
+  Future<List<AppointmentModel>> _appointmentsOnCalendar({
+    required Query<Map<String, dynamic>> byAppointmentDate,
+    required Query<Map<String, dynamic>> byPostponedDate,
+    required DateTime startDate,
+    required DateTime endDate,
+  }) async {
+    final List<QuerySnapshot<Map<String, dynamic>>> snapshots =
+        await Future.wait(<Future<QuerySnapshot<Map<String, dynamic>>>>[
+      byAppointmentDate.get(),
+      byPostponedDate.get(),
+    ]);
+    final Map<String, AppointmentModel> byPath = <String, AppointmentModel>{};
+    for (final QuerySnapshot<Map<String, dynamic>> snapshot in snapshots) {
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> doc
+          in snapshot.docs) {
+        if (doc.data()[_appointmentDateField] is! Timestamp) continue;
+        final AppointmentModel appointment = AppointmentModel.fromDocument(doc);
+        final DateTime start = appointment.calendarDateTime;
+        if (start.isBefore(startDate) || !start.isBefore(endDate)) continue;
+        byPath[doc.reference.path] = appointment;
+      }
     }
+    return byPath.values.toList();
   }
 }
