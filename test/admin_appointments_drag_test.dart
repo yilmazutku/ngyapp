@@ -482,20 +482,21 @@ void main() {
   });
 
   group('fareyle sürükleme', () {
-    testWidgets('yarım saniye basılı tutulunca sürüklenir; bırakınca onay '
-        'sorulur', (WidgetTester tester) async {
+    testWidgets('beklemeden sürüklenir; bırakınca onay sorulur',
+        (WidgetTester tester) async {
       final _FakeAppointmentManager manager =
           await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
       final double columnWidth = _columnWidth(tester);
 
-      final TestGesture gesture = await _pickUp(
-          tester, '10:00-10:30 Ali Veli',
-          kind: PointerDeviceKind.mouse);
-      expect(
-          _sourceOpacity(tester, '10:00-10:30 Ali Veli'), kDragSourceOpacity);
+      final TestGesture gesture = await tester.startGesture(
+        tester.getCenter(_card('10:00-10:30 Ali Veli')),
+        kind: PointerDeviceKind.mouse,
+      );
       await gesture.moveBy(Offset(2 * columnWidth, 90 * kPixelsPerMinute));
       await tester.pump();
       expect(_card('11:30-12:00 Ali Veli'), findsOneWidget);
+      expect(
+          _sourceOpacity(tester, '10:00-10:30 Ali Veli'), kDragSourceOpacity);
 
       await gesture.up();
       await tester.pumpAndSettle();
@@ -508,30 +509,7 @@ void main() {
       expect(_card('11:30-12:00 Ali Veli'), findsOneWidget);
     }, variant: TargetPlatformVariant.all());
 
-    testWidgets('basılı tutmadan sürüklenen fare randevuyu taşımaz',
-        (WidgetTester tester) async {
-      final _FakeAppointmentManager manager =
-          await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
-      final double columnWidth = _columnWidth(tester);
-
-      final TestGesture gesture = await tester.startGesture(
-        tester.getCenter(_card('10:00-10:30 Ali Veli')),
-        kind: PointerDeviceKind.mouse,
-      );
-      await gesture.moveBy(Offset(2 * columnWidth, 90 * kPixelsPerMinute));
-      await tester.pump();
-      await tester.pump(_hold);
-      expect(_card('11:30-12:00 Ali Veli'), findsNothing);
-      expect(_sourceOpacity(tester, '10:00-10:30 Ali Veli'), 1);
-
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(find.byType(RescheduleAppointmentDialog), findsNothing);
-      expect(find.byType(EditAppointmentDialog), findsNothing);
-      expect(manager.moves, isEmpty);
-    }, variant: TargetPlatformVariant.all());
-
-    testWidgets('yarım saniyeden kısa basılı tutup sürüklemek taşımaz',
+    testWidgets('tıklarken birkaç piksel kayan fare yine düzenlemeyi açar',
         (WidgetTester tester) async {
       final _FakeAppointmentManager manager =
           await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
@@ -540,15 +518,12 @@ void main() {
         tester.getCenter(_card('10:00-10:30 Ali Veli')),
         kind: PointerDeviceKind.mouse,
       );
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(_sourceOpacity(tester, '10:00-10:30 Ali Veli'), 1);
-      await gesture.moveBy(const Offset(0, 60 * kPixelsPerMinute));
+      await gesture.moveBy(const Offset(3, 2));
       await tester.pump();
-      await tester.pump(_hold);
-      expect(_card('11:00-11:30 Ali Veli'), findsNothing);
-
       await gesture.up();
       await tester.pumpAndSettle();
+
+      expect(find.byType(EditAppointmentDialog), findsOneWidget);
       expect(find.byType(RescheduleAppointmentDialog), findsNothing);
       expect(manager.moves, isEmpty);
     }, variant: TargetPlatformVariant.all());
@@ -583,13 +558,33 @@ void main() {
       expect(_sourceOpacity(tester, '10:00-10:30 Ali Veli'), 1);
     }, variant: TargetPlatformVariant.all());
 
-    testWidgets('Esc sürüklemeyi iptal eder', (WidgetTester tester) async {
+    testWidgets('basılı tutup sonra sürüklemek de taşır',
+        (WidgetTester tester) async {
       final _FakeAppointmentManager manager =
           await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
 
       final TestGesture gesture = await _pickUp(
           tester, '10:00-10:30 Ali Veli',
           kind: PointerDeviceKind.mouse);
+      await gesture.moveBy(const Offset(0, 60 * kPixelsPerMinute));
+      await tester.pump();
+      expect(_card('11:00-11:30 Ali Veli'), findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await _choose(tester, _moveOnlyOption);
+      await _confirmMove(tester);
+
+      expect(manager.moves.single.newStart, _at(_weekDay(0), 11));
+    }, variant: TargetPlatformVariant.all());
+
+    testWidgets('Esc sürüklemeyi iptal eder', (WidgetTester tester) async {
+      final _FakeAppointmentManager manager =
+          await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
+
+      final TestGesture gesture = await tester.startGesture(
+        tester.getCenter(_card('10:00-10:30 Ali Veli')),
+        kind: PointerDeviceKind.mouse,
+      );
       await gesture.moveBy(const Offset(0, 120));
       await tester.pump();
       expect(_card('10:50-11:20 Ali Veli'), findsOneWidget);
