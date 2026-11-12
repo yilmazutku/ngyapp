@@ -35,12 +35,7 @@ Future<bool> showOverlapWarningDialog(
                       : a.appointmentDateTime;
               final DateTime end =
                   start.add(Duration(minutes: a.durationMinutes));
-              final String? dosyaNo = a.user?.dosyaNo?.trim();
-              final String name =
-                  '${a.user?.name ?? ''} ${a.user?.surname ?? ''}'.trim();
-              final String who = (dosyaNo != null && dosyaNo.isNotEmpty)
-                  ? '$dosyaNo-$name'
-                  : name;
+              final String who = a.user?.fileLabel ?? '';
               return Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(

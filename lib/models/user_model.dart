@@ -133,6 +133,13 @@ class UserModel {
   /// missing one of them never renders a stray space.
   String get fullName => '$name $surname'.trim();
 
+  String get fileLabel {
+    final String? fileNo = dosyaNo?.trim();
+    return (fileNo != null && fileNo.isNotEmpty)
+        ? '$fileNo-$fullName'
+        : fullName;
+  }
+
   bool get isExcludedFromActiveCustomers =>
       _excludedFromActiveCustomerKeys.contains(_nameKey(fullName));
 
