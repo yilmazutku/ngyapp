@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -101,7 +100,6 @@ const double kCardMinFontSize = 7.5;
 const double kDragSourceOpacity = 0.35;
 const double kDragAutoScrollEdge = 56.0;
 const double kDragAutoScrollVelocity = 40.0;
-const double kDragClickSlop = 6.0;
 
 const String kPostponedMark = '(E)';
 const String kBurnedMark = '(Y)';
@@ -821,9 +819,8 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     AppointmentModel appt,
     double cardHeight,
     Offset globalPosition,
-    Offset localPosition, {
-    required bool isClickCandidate,
-  }) {
+    Offset localPosition,
+  ) {
     if (_drag != null) return;
     final DateTime start = appt.calendarDateTime;
     _drag = _AppointmentDrag(
@@ -833,7 +830,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       cardHeight: cardHeight,
       grabDy: localPosition.dy,
       pointer: globalPosition,
-      isClickCandidate: isClickCandidate,
     );
     _draggedAppointmentId.value = appt.appointmentId;
     HardwareKeyboard.instance.addHandler(_onDragKey);
@@ -853,7 +849,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   void _moveDrag(AppointmentModel appt, Offset globalPosition) {
     final _AppointmentDrag? drag = _dragOf(appt);
     if (drag == null) return;
-    drag.moveTo(globalPosition);
+    drag.pointer = globalPosition;
     _updateDropTarget();
     _autoScrollNearEdge();
   }
@@ -928,8 +924,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final DateTime newStart = target.onDay(layout.days[target.dayIndex]);
     if (newStart != drag.originalStart) {
       _rescheduleAppointment(drag.appointment, newStart);
-    } else if (drag.isClickCandidate && drag.travelled <= kDragClickSlop) {
-      _showEditAppointmentDialog(context, drag.appointment);
     }
   }
 
@@ -1235,35 +1229,20 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
             cardHeight,
             details.globalPosition,
             details.localPosition,
-            isClickCandidate: false,
           ),
           onLongPressMoveUpdate: (LongPressMoveUpdateDetails details) =>
               _moveDrag(appt, details.globalPosition),
           onLongPressEnd: (_) => _endDrag(appt),
-          child: GestureDetector(
-            supportedDevices: const <PointerDeviceKind>{PointerDeviceKind.mouse},
-            dragStartBehavior: DragStartBehavior.down,
-            onPanStart: (DragStartDetails details) => _startDrag(
-              appt,
-              cardHeight,
-              details.globalPosition,
-              details.localPosition,
-              isClickCandidate: true,
+          child: ValueListenableBuilder<String?>(
+            valueListenable: _draggedAppointmentId,
+            builder: (BuildContext context, String? draggedId,
+                    Widget? child) =>
+                Opacity(
+              opacity:
+                  draggedId == appt.appointmentId ? kDragSourceOpacity : 1,
+              child: child,
             ),
-            onPanUpdate: (DragUpdateDetails details) =>
-                _moveDrag(appt, details.globalPosition),
-            onPanEnd: (_) => _endDrag(appt),
-            child: ValueListenableBuilder<String?>(
-              valueListenable: _draggedAppointmentId,
-              builder: (BuildContext context, String? draggedId,
-                      Widget? child) =>
-                  Opacity(
-                opacity:
-                    draggedId == appt.appointmentId ? kDragSourceOpacity : 1,
-                child: child,
-              ),
-              child: face,
-            ),
+            child: face,
           ),
         ),
       ),
@@ -2107,24 +2086,15 @@ class _AppointmentDrag {
     required this.cardHeight,
     required this.grabDy,
     required this.pointer,
-    required this.isClickCandidate,
-  }) : _origin = pointer;
+  });
 
   final AppointmentModel appointment;
   final DateTime originalStart;
   final double cardHeight;
   final double grabDy;
-  final bool isClickCandidate;
-  final Offset _origin;
   Offset pointer;
-  double travelled = 0;
 
   int get originalMinutes => originalStart.hour * 60 + originalStart.minute;
-
-  void moveTo(Offset position) {
-    pointer = position;
-    travelled = math.max(travelled, (position - _origin).distance);
-  }
 }
 
 class _TimeGridPainter extends CustomPainter {
