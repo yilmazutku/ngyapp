@@ -33,8 +33,8 @@ Future<XFile?> showPhotoEditPage(BuildContext context, XFile photo) {
 /// Fotoğraf ekranda düzenlenebilecek bir ölçüye küçültülerek çözülür
 /// ([_PhotoEditPageState._maxDecodeSide]); yüklemede zaten daha küçük bir
 /// ölçüye indirildiği için kalite kaybı olmaz. Düzenlenen fotoğraf o yükleme
-/// ölçüsünde ([kUploadImageMinSide]) yazılır. Çözülemezse düzenleme atlanır ve
-/// fotoğraf olduğu gibi döner.
+/// ölçüsünde ([UploadImageProfile.minSide]) yazılır. Çözülemezse düzenleme
+/// atlanır ve fotoğraf olduğu gibi döner.
 class PhotoEditPage extends StatefulWidget {
   final XFile photo;
 
@@ -378,7 +378,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   }
 
   /// Döndürülmüş fotoğrafın kırpılan kısmını, kısa kenarı en fazla
-  /// [kUploadImageMinSide] olacak ölçüde çizip düzenleme klasörüne
+  /// [UploadImageProfile.minSide] olacak ölçüde çizip düzenleme klasörüne
   /// ([TempPhotoFiles.photoEditDirectory]) yazar.
   Future<XFile?> _export(ui.Image image) async {
     ui.Image? output;
@@ -390,8 +390,10 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         _crop.right * rotated.width,
         _crop.bottom * rotated.height,
       );
-      final double scale =
-          math.min(1.0, kUploadImageMinSide / crop.shortestSide);
+      final double scale = math.min(
+        1.0,
+        UploadImageProfile.current.minSide / crop.shortestSide,
+      );
       final int width = math.max(1, (crop.width * scale).round());
       final int height = math.max(1, (crop.height * scale).round());
 
