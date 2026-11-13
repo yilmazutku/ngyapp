@@ -35,12 +35,20 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
 
   final int? decodeShortSide;
 
+  final bool immediate;
+
   const MealThumbnailProvider({
     required this.url,
     required this.isOriginal,
     this.onOriginalLoaded,
     this.decodeShortSide,
-  });
+  }) : immediate = false;
+
+  const MealThumbnailProvider.fullSize(this.url)
+      : isOriginal = false,
+        onOriginalLoaded = null,
+        decodeShortSide = null,
+        immediate = true;
 
   /// Orijinalden çözülürken izin verilen en büyük genişlik (piksel). Kart
   /// ~200 mantıksal px; 640, 3x yoğunlukta bile net kalır.
@@ -73,8 +81,11 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
   @override
   ImageStreamCompleter loadImage(
       MealThumbnailProvider key, ImageDecoderCallback decode) {
+    final StreamController<ImageChunkEvent> chunkEvents =
+        StreamController<ImageChunkEvent>();
     return MultiFrameImageStreamCompleter(
-      codec: _loadCodec(key, decode),
+      codec: _loadCodec(key, decode, chunkEvents),
+      chunkEvents: chunkEvents.stream,
       scale: 1.0,
       debugLabel: url,
       informationCollector: () => <DiagnosticsNode>[
@@ -84,9 +95,12 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
   }
 
   Future<ui.Codec> _loadCodec(
-      MealThumbnailProvider key, ImageDecoderCallback decode) async {
+    MealThumbnailProvider key,
+    ImageDecoderCallback decode,
+    StreamController<ImageChunkEvent> chunkEvents,
+  ) async {
     try {
-      return await _fetchAndDecode(decode);
+      return await _fetchAndDecode(decode, chunkEvents);
     } catch (e) {
       // NetworkImage'daki gibi: hatalı sonuç önbellekte kalırsa adres uygulama
       // yeniden açılana kadar bozuk görünür. Önbellekten çıkarılır ki sonraki
@@ -94,11 +108,25 @@ class MealThumbnailProvider extends ImageProvider<MealThumbnailProvider> {
       // olabilir; bu yüzden mikro görevde).
       scheduleMicrotask(() => PaintingBinding.instance.imageCache.evict(key));
       rethrow;
+    } finally {
+      unawaited(chunkEvents.close());
     }
   }
 
-  Future<ui.Codec> _fetchAndDecode(ImageDecoderCallback decode) async {
-    final Uint8List bytes = await MealPhotoLoader.instance.fetch(url);
+  Future<ui.Codec> _fetchAndDecode(
+    ImageDecoderCallback decode,
+    StreamController<ImageChunkEvent> chunkEvents,
+  ) async {
+    final Uint8List bytes = await MealPhotoLoader.instance.fetch(
+      url,
+      immediate: immediate,
+      onProgress: (int received, int? total) => chunkEvents.add(
+        ImageChunkEvent(
+          cumulativeBytesLoaded: received,
+          expectedTotalBytes: total,
+        ),
+      ),
+    );
 
     if (isOriginal && onOriginalLoaded != null) {
       // Gösterimi bekletmez; üretim arka planda sürer.
@@ -234,6 +262,85 @@ class _MealThumbnailImageState extends State<MealThumbnailImage> {
         onPointerCancel: (event) => _downPosition = null,
         child: const _ThumbnailPlaceholder(icon: Icons.broken_image_outlined),
       ),
+    );
+  }
+}
+
+class MealOriginalImage extends StatelessWidget {
+  static const String loadErrorText = 'Görsel yüklenemedi';
+
+  final String url;
+  final String? thumbUrl;
+  final BoxFit fit;
+  final Color? progressColor;
+  final Color? errorColor;
+
+  const MealOriginalImage({
+    super.key,
+    required this.url,
+    this.thumbUrl,
+    this.fit = BoxFit.contain,
+    this.progressColor,
+    this.errorColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String thumbUrl = this.thumbUrl ?? '';
+    final Widget placeholder = thumbUrl.isEmpty
+        ? const SizedBox.shrink()
+        : Image(
+            image: MealThumbnailProvider(url: thumbUrl, isOriginal: false),
+            fit: fit,
+            gaplessPlayback: true,
+            errorBuilder: (context, error, stackTrace) =>
+                const SizedBox.shrink(),
+          );
+
+    return Image(
+      image: MealThumbnailProvider.fullSize(url),
+      fit: fit,
+      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) =>
+          frame == null ? placeholder : child,
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        final int? total = loadingProgress.expectedTotalBytes;
+        return Stack(
+          fit: StackFit.passthrough,
+          alignment: Alignment.center,
+          children: [
+            child,
+            UnconstrainedBox(
+              child: CircularProgressIndicator(
+                color: progressColor,
+                value: total != null && total > 0
+                    ? loadingProgress.cumulativeBytesLoaded / total
+                    : null,
+              ),
+            ),
+          ],
+        );
+      },
+      errorBuilder: (context, error, stackTrace) {
+        final Color color = errorColor ?? Colors.grey.shade600;
+        return Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.broken_image_outlined, color: color, size: 48),
+                const SizedBox(height: 8),
+                Text(
+                  loadErrorText,
+                  maxLines: 1,
+                  style: TextStyle(color: color),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

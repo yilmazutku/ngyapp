@@ -33,13 +33,15 @@ class MealPhotoLoader {
   /// daha fazlası bant genişliğini bölüştürüp hepsini geciktirir.
   static const int maxConcurrent = 6;
 
-  /// Tek bir indirme için üst sınır. Küçük görseller saniyeler içinde iner;
-  /// süre, küçük görseli henüz olmayan tam boy fotoğrafın yavaş bağlantıda
-  /// da tamamlanabilmesi için geniş tutuldu.
+  /// İndirme bu süre boyunca hiç ilerlemezse (yanıt ya da yeni veri gelmezse)
+  /// bırakılır. İlerleyen indirme kesilmez: tam boy fotoğraf yavaş bağlantıda
+  /// da tamamlanır.
   static const Duration _timeout = Duration(seconds: 90);
 
   /// Disk önbelleğinin üst sınırı. Küçük görseller ~50 KB: binlercesi sığar.
   static const int diskCacheMaxBytes = 150 * 1024 * 1024;
+
+  static const int diskCacheMaxFileBytes = 3 * 1024 * 1024;
 
   /// Sınır aşılınca önbellek bu orana kadar boşaltılır; her yeni dosyada
   /// yeniden temizlik gerekmesin.
@@ -75,8 +77,15 @@ class MealPhotoLoader {
       _cacheDirectory = Future<Directory?>.value(directory);
 
   /// [url] adresindeki dosyayı verir: önce bellekte ve diskte arar, yoksa
-  /// indirir (sıra doluysa bekler) ve diske yazar.
-  Future<Uint8List> fetch(String url) async {
+  /// indirir (sıra doluysa bekler) ve diske yazar. [immediate] ise sıra
+  /// beklenmez (kullanıcının açtığı tek bir fotoğraf, liste dolarken de hemen
+  /// inmeye başlar) ve [diskCacheMaxFileBytes]'tan büyük dosya diske
+  /// yazılmaz. İndirme ilerledikçe [onProgress] çağrılır.
+  Future<Uint8List> fetch(
+    String url, {
+    bool immediate = false,
+    void Function(int received, int? total)? onProgress,
+  }) async {
     final Uint8List? remembered = _remembered[url];
     if (remembered != null) return remembered;
 
@@ -86,20 +95,39 @@ class MealPhotoLoader {
       if (bytes != null) return bytes;
     }
 
-    await _acquire();
+    if (!immediate) await _acquire();
     final Uint8List bytes;
     try {
-      final http.Response response =
-          await _client.get(Uri.parse(url)).timeout(_timeout);
-      if (response.statusCode != 200) {
-        throw PhotoDownloadException(url, response.statusCode);
-      }
-      bytes = response.bodyBytes;
+      bytes = await _download(url, onProgress);
     } finally {
-      _release();
+      if (!immediate) _release();
     }
-    if (cached != null) unawaited(_writeCached(cached, bytes));
+    if (cached != null &&
+        (!immediate || bytes.length <= diskCacheMaxFileBytes)) {
+      unawaited(_writeCached(cached, bytes));
+    }
     return bytes;
+  }
+
+  Future<Uint8List> _download(
+    String url,
+    void Function(int received, int? total)? onProgress,
+  ) async {
+    final http.StreamedResponse response = await _client
+        .send(http.Request('GET', Uri.parse(url)))
+        .timeout(_timeout);
+    if (response.statusCode != 200) {
+      unawaited(response.stream.drain<void>().catchError((Object e) {}));
+      throw PhotoDownloadException(url, response.statusCode);
+    }
+
+    final int? total = response.contentLength;
+    final BytesBuilder builder = BytesBuilder(copy: false);
+    await for (final List<int> chunk in response.stream.timeout(_timeout)) {
+      builder.add(chunk);
+      onProgress?.call(builder.length, total);
+    }
+    return builder.takeBytes();
   }
 
   /// Cihazda üretilip [url] adresine yüklenen dosyanın baytları: indirilmeden

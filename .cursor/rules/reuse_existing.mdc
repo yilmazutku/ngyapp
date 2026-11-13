@@ -10,4 +10,5 @@ alwaysApply: true
   - Listelerde ve küçük önizlemelerde `MealThumbnailImage` (küçük görsel, indirme sırası, çözülürken küçültme).
   - Öğün fotoğrafının büyük görseli için `showMealImageDetailsDialog` (gerekirse `footerBuilder` ile alt satır).
   - Tam ekran için `showFullScreenImage` / `FullScreenImagePage`.
-  - Yüklemede küçültme ve küçük görsel için `uploadImageWithThumbnail` (`prepareImageForUpload`, `generateThumbnail`).
+  - Fotoğrafın orijinalini göstermek için `MealOriginalImage` (inerken küçük görsel ve ilerleme, cihazda önbellek); `Image.network` kullanılmaz.
+  - Yüklemede küçültme ve küçük görsel için `uploadImageWithThumbnail` (`prepareImageForUpload`, `uploadPreparedImage`, `generateThumbnail`); çizilmiş bir görseli JPEG'e çevirmek için `encodeJpeg`.
