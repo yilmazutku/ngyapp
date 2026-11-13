@@ -3,10 +3,15 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart'
+    show FlutterImageCompressPlatform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart' show XFile;
+import 'package:ngy_app/utils/storage_upload.dart';
 import 'package:ngy_app/widgets/photo_edit_page.dart';
 import 'package:path/path.dart' as p;
+
+import 'fake_image_compress.dart';
 
 const Color _red = Color(0xFFFF0000);
 const Color _blue = Color(0xFF0000FF);
@@ -42,8 +47,13 @@ Future<Uint8List> _halfRedHalfBluePng(int width, int height) async {
 
 Future<({int width, int height, Color topLeft, Color bottomRight})> _read(
   XFile file,
+) async =>
+    _readBytes(await file.readAsBytes());
+
+Future<({int width, int height, Color topLeft, Color bottomRight})> _readBytes(
+  Uint8List bytes,
 ) async {
-  final ui.Codec codec = await ui.instantiateImageCodec(await file.readAsBytes());
+  final ui.Codec codec = await ui.instantiateImageCodec(bytes);
   final ui.Image image = (await codec.getNextFrame()).image;
   final ByteData data =
       (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
@@ -69,6 +79,8 @@ Future<({int width, int height, Color topLeft, Color bottomRight})> _read(
 
 void main() {
   late Directory tempDir;
+  final FlutterImageCompressPlatform compress =
+      FlutterImageCompressPlatform.instance;
 
   setUp(() {
     tempDir = Directory.systemTemp.createTempSync('photo_edit_test');
@@ -80,6 +92,7 @@ void main() {
   });
 
   tearDown(() {
+    FlutterImageCompressPlatform.instance = compress;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
       const MethodChannel('plugins.flutter.io/path_provider'),
@@ -92,10 +105,14 @@ void main() {
   Future<_Closing> pumpEditor(
     WidgetTester tester, {
     EdgeInsets systemGestureInsets = EdgeInsets.zero,
+    int sourceWidth = 40,
+    int sourceHeight = 20,
   }) async {
     final File source = File('${tempDir.path}/source.png');
     await tester.runAsync(() async {
-      source.writeAsBytesSync(await _halfRedHalfBluePng(40, 20));
+      source.writeAsBytesSync(
+        await _halfRedHalfBluePng(sourceWidth, sourceHeight),
+      );
     });
 
     final _Closing closing = _Closing();
@@ -145,9 +162,15 @@ void main() {
     WidgetTester tester,
     Future<void> Function() edit, {
     EdgeInsets systemGestureInsets = EdgeInsets.zero,
+    int sourceWidth = 40,
+    int sourceHeight = 20,
   }) async {
-    final _Closing closing =
-        await pumpEditor(tester, systemGestureInsets: systemGestureInsets);
+    final _Closing closing = await pumpEditor(
+      tester,
+      systemGestureInsets: systemGestureInsets,
+      sourceWidth: sourceWidth,
+      sourceHeight: sourceHeight,
+    );
     await edit();
     await tester.tap(find.byTooltip('Gönder'));
     await waitUntilClosed(tester, closing);
@@ -171,6 +194,54 @@ void main() {
     final read = await tester.runAsync(() => _read(result));
     expect(read!.width, 20);
     expect(read.height, 40);
+    expect(read.topLeft, _red);
+    expect(read.bottomRight, _blue);
+  });
+
+  testWidgets('sıkıştırıcı varsa düzenlenen fotoğraf JPEG olarak yazılır',
+      (tester) async {
+    final FakeImageCompress fake =
+        FakeImageCompress(Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xD9]));
+    FlutterImageCompressPlatform.instance = fake;
+
+    final XFile? result = await openEditor(tester, () async {
+      await tester.tap(find.byTooltip('Sağa döndür'));
+      await tester.pump();
+    });
+
+    expect(result!.path, endsWith('.jpg'));
+    expect(p.dirname(result.path), p.join(tempDir.path, 'photo_edit'));
+    expect(File(result.path).readAsBytesSync(), fake.result);
+    expect(fake.minWidth, 20);
+    expect(fake.minHeight, 40);
+
+    final read = await tester.runAsync(() => _readBytes(fake.input!));
+    expect(read!.width, 20);
+    expect(read.height, 40);
+    expect(read.topLeft, _red);
+    expect(read.bottomRight, _blue);
+  });
+
+  testWidgets('büyük fotoğraf yükleme ölçüsüne küçültülerek yazılır',
+      (tester) async {
+    final FakeImageCompress fake = FakeImageCompress(Uint8List.fromList([1]));
+    FlutterImageCompressPlatform.instance = fake;
+
+    await openEditor(
+      tester,
+      () async {
+        await tester.tap(find.byTooltip('Sağa döndür'));
+        await tester.pump();
+      },
+      sourceWidth: 2400,
+      sourceHeight: 2000,
+    );
+
+    expect(fake.minWidth, kUploadImageMinSide);
+    expect(fake.minHeight, 1920);
+    final read = await tester.runAsync(() => _readBytes(fake.input!));
+    expect(read!.width, kUploadImageMinSide);
+    expect(read.height, 1920);
     expect(read.topLeft, _red);
     expect(read.bottomRight, _blue);
   });

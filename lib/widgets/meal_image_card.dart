@@ -7,7 +7,6 @@ import 'package:provider/provider.dart';
 
 import '../models/meal_model.dart';
 import '../providers/meal_state_and_upload_manager.dart';
-import 'chat_image_preview.dart';
 import 'meal_thumbnail_image.dart';
 import 'reaction_badge.dart';
 
@@ -402,9 +401,9 @@ Future<T?> showMealImageDetailsDialog<T>(
                         child: InteractiveViewer(
                           minScale: 1.0,
                           maxScale: 4.0,
-                          child: ChatImagePreview(
-                            imageUrl: images.first,
-                            fit: BoxFit.contain,
+                          child: MealOriginalImage(
+                            url: images.first,
+                            thumbUrl: meal.thumbUrlAt(0),
                           ),
                         ),
                       ),
@@ -425,9 +424,9 @@ Future<T?> showMealImageDetailsDialog<T>(
                           child: InteractiveViewer(
                             minScale: 1.0,
                             maxScale: 4.0,
-                            child: ChatImagePreview(
-                              imageUrl: url,
-                              fit: BoxFit.contain,
+                            child: MealOriginalImage(
+                              url: url,
+                              thumbUrl: meal.thumbUrlAt(idx),
                             ),
                           ),
                         ),

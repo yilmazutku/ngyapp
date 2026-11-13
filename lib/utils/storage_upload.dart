@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
@@ -85,6 +86,10 @@ Future<PreparedUploadImage> prepareImageForUpload({
       minWidth: kUploadImageMinSide,
       minHeight: kUploadImageMinSide,
       quality: kUploadImageQuality,
+      inSampleSize: decodeSampleSizeFor(
+        await readImagePixelSize(bytes),
+        kUploadImageMinSide,
+      ),
       format: fic.CompressFormat.jpeg,
       keepExif: false,
     );
@@ -103,6 +108,65 @@ Future<PreparedUploadImage> prepareImageForUpload({
     // Masaüstünde eklenti yok; orijinal dosya yüklenir.
     return original;
   }
+}
+
+Future<Uint8List?> encodeJpeg(ui.Image image, {required int quality}) async {
+  try {
+    final ByteData? raw =
+        await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    if (raw == null) return null;
+    final Uint8List jpeg = await fic.FlutterImageCompress.compressWithList(
+      _bmpFromRgba(
+        raw.buffer.asUint8List(raw.offsetInBytes, raw.lengthInBytes),
+        image.width,
+        image.height,
+      ),
+      minWidth: image.width,
+      minHeight: image.height,
+      quality: quality,
+      format: fic.CompressFormat.jpeg,
+    );
+    return jpeg.isEmpty ? null : jpeg;
+  } catch (e) {
+    return null;
+  }
+}
+
+const int _bmpHeaderBytes = 54;
+const int _bmpInfoHeaderBytes = 40;
+const int _bmpBitsPerPixel = 24;
+const int _bmpPixelsPerMeter = 2835;
+
+Uint8List _bmpFromRgba(Uint8List rgba, int width, int height) {
+  final int rowBytes = (width * 3 + 3) & ~3;
+  final int pixelBytes = rowBytes * height;
+  final Uint8List bmp = Uint8List(_bmpHeaderBytes + pixelBytes);
+  ByteData.sublistView(bmp)
+    ..setUint8(0, 0x42)
+    ..setUint8(1, 0x4D)
+    ..setUint32(2, bmp.length, Endian.little)
+    ..setUint32(10, _bmpHeaderBytes, Endian.little)
+    ..setUint32(14, _bmpInfoHeaderBytes, Endian.little)
+    ..setInt32(18, width, Endian.little)
+    ..setInt32(22, height, Endian.little)
+    ..setUint16(26, 1, Endian.little)
+    ..setUint16(28, _bmpBitsPerPixel, Endian.little)
+    ..setUint32(34, pixelBytes, Endian.little)
+    ..setInt32(38, _bmpPixelsPerMeter, Endian.little)
+    ..setInt32(42, _bmpPixelsPerMeter, Endian.little);
+
+  for (int y = 0; y < height; y++) {
+    int source = y * width * 4;
+    int target = _bmpHeaderBytes + (height - 1 - y) * rowBytes;
+    for (int x = 0; x < width; x++) {
+      bmp[target] = rgba[source + 2];
+      bmp[target + 1] = rgba[source + 1];
+      bmp[target + 2] = rgba[source];
+      source += 4;
+      target += 3;
+    }
+  }
+  return bmp;
 }
 
 /// Bir görsel yüklemesini izleyen ve iptal edebilen taraf (ör. sohbette
@@ -177,12 +241,22 @@ Future<UploadedImage> uploadImageWithThumbnail({
   String? mimeType,
   required Reference Function(String fileName) refFor,
   UploadObserver? observer,
+}) async =>
+    uploadPreparedImage(
+      prepared: await prepareImageForUpload(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: mimeType,
+      ),
+      refFor: refFor,
+      observer: observer,
+    );
+
+Future<UploadedImage> uploadPreparedImage({
+  required PreparedUploadImage prepared,
+  required Reference Function(String fileName) refFor,
+  UploadObserver? observer,
 }) async {
-  final PreparedUploadImage prepared = await prepareImageForUpload(
-    bytes: bytes,
-    fileName: fileName,
-    mimeType: mimeType,
-  );
   if (observer?.isCancelled ?? false) throw const UploadCancelledException();
 
   final Reference ref = refFor(prepared.fileName);

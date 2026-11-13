@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -60,6 +61,16 @@ Future<ImagePixelSize?> readImageFilePixelSize(XFile file) async {
   }
 }
 
+int decodeSampleSizeFor(ImagePixelSize? size, int targetShortSide) {
+  if (size == null || targetShortSide <= 0) return 1;
+  final int shortSide = math.min(size.width, size.height);
+  int sample = 1;
+  while (shortSide ~/ (sample * 2) >= targetShortSide) {
+    sample *= 2;
+  }
+  return sample;
+}
+
 /// Üretilmiş küçük görsel.
 class ThumbnailData {
   final Uint8List bytes;
@@ -96,6 +107,10 @@ Future<ThumbnailData?> generateThumbnail(Uint8List bytes) async {
       minWidth: kThumbnailShortSide,
       minHeight: kThumbnailShortSide,
       quality: kThumbnailJpegQuality,
+      inSampleSize: decodeSampleSizeFor(
+        await readImagePixelSize(bytes),
+        kThumbnailShortSide,
+      ),
       format: fic.CompressFormat.jpeg,
       keepExif: false,
     );

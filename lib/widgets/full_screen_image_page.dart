@@ -87,7 +87,6 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
 
   /// Üst çubukta çarpı, başlık ve sağdaki işlem arasındaki boşluk.
   static const double _topBarGap = 12;
-  static const String _loadErrorText = 'Görsel yüklenemedi';
 
   /// Başlık (öğün ve saat) fotoğrafın üstünde dikkat çeksin diye kalın ve
   /// koyu zeminde.
@@ -197,7 +196,14 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
                       maxScale: _maxScale,
                       panEnabled: _zoomed,
                       onInteractionEnd: (_) => _updateZoomed(),
-                      child: Center(child: _buildImage()),
+                      child: Center(
+                        child: MealOriginalImage(
+                          url: widget.imageUrl,
+                          thumbUrl: widget.thumbUrl,
+                          progressColor: Colors.white,
+                          errorColor: Colors.white70,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -272,50 +278,6 @@ class _FullScreenImagePageState extends State<FullScreenImagePage>
             ],
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildImage() {
-    final String? thumbUrl = widget.thumbUrl;
-    // Küçük görsel listede/sohbette zaten inmiş olur: aynı sağlayıcıyla
-    // önbellekten gelir, yeniden indirilmez.
-    final Widget placeholder = thumbUrl == null
-        ? const SizedBox.shrink()
-        : Image(
-            image: MealThumbnailProvider(url: thumbUrl, isOriginal: false),
-            fit: BoxFit.contain,
-            gaplessPlayback: true,
-            errorBuilder: (context, error, stackTrace) =>
-                const SizedBox.shrink(),
-          );
-
-    return Image.network(
-      widget.imageUrl,
-      fit: BoxFit.contain,
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) return child;
-        final int? total = loadingProgress.expectedTotalBytes;
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            placeholder,
-            CircularProgressIndicator(
-              color: Colors.white,
-              value: total != null
-                  ? loadingProgress.cumulativeBytesLoaded / total
-                  : null,
-            ),
-          ],
-        );
-      },
-      errorBuilder: (context, error, stackTrace) => const Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.broken_image_outlined, color: Colors.white70, size: 48),
-          SizedBox(height: 8),
-          Text(_loadErrorText, style: TextStyle(color: Colors.white70)),
-        ],
       ),
     );
   }

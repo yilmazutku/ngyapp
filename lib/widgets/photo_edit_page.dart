@@ -5,11 +5,11 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart' as fic;
 import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:path/path.dart' as p;
 
 import '../utils/dialog_utils.dart';
+import '../utils/storage_upload.dart';
 import '../utils/temp_photo_files.dart';
 
 /// Kameradan çekilen fotoğrafı göndermeden önce kırpma ve 90 derecelik
@@ -32,7 +32,8 @@ Future<XFile?> showPhotoEditPage(BuildContext context, XFile photo) {
 ///
 /// Fotoğraf ekranda düzenlenebilecek bir ölçüye küçültülerek çözülür
 /// ([_PhotoEditPageState._maxDecodeSide]); yüklemede zaten daha küçük bir
-/// ölçüye indirildiği için kalite kaybı olmaz. Çözülemezse düzenleme atlanır ve
+/// ölçüye indirildiği için kalite kaybı olmaz. Düzenlenen fotoğraf o yükleme
+/// ölçüsünde ([kUploadImageMinSide]) yazılır. Çözülemezse düzenleme atlanır ve
 /// fotoğraf olduğu gibi döner.
 class PhotoEditPage extends StatefulWidget {
   final XFile photo;
@@ -376,7 +377,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     }
   }
 
-  /// Döndürülmüş fotoğrafın kırpılan kısmını çizip düzenleme klasörüne
+  /// Döndürülmüş fotoğrafın kırpılan kısmını, kısa kenarı en fazla
+  /// [kUploadImageMinSide] olacak ölçüde çizip düzenleme klasörüne
   /// ([TempPhotoFiles.photoEditDirectory]) yazar.
   Future<XFile?> _export(ui.Image image) async {
     ui.Image? output;
@@ -388,26 +390,30 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         _crop.right * rotated.width,
         _crop.bottom * rotated.height,
       );
-      final int width = math.max(1, crop.width.round());
-      final int height = math.max(1, crop.height.round());
+      final double scale =
+          math.min(1.0, kUploadImageMinSide / crop.shortestSide);
+      final int width = math.max(1, (crop.width * scale).round());
+      final int height = math.max(1, (crop.height * scale).round());
 
       final ui.PictureRecorder recorder = ui.PictureRecorder();
       final Canvas canvas = Canvas(recorder);
+      canvas.scale(scale);
       canvas.translate(-crop.left, -crop.top);
       _applyRotation(canvas, image);
-      canvas.drawImage(image, Offset.zero, Paint());
+      canvas.drawImage(
+        image,
+        Offset.zero,
+        Paint()
+          ..filterQuality =
+              scale < 1 ? FilterQuality.medium : FilterQuality.none,
+      );
       final ui.Picture picture = recorder.endRecording();
       output = await picture.toImage(width, height);
       picture.dispose();
 
-      final ByteData? png =
-          await output.toByteData(format: ui.ImageByteFormat.png);
-      if (png == null) return null;
-      final ({Uint8List bytes, String extension}) encoded = await _encode(
-        png.buffer.asUint8List(png.offsetInBytes, png.lengthInBytes),
-        width,
-        height,
-      );
+      final ({Uint8List bytes, String extension})? encoded =
+          await _encode(output);
+      if (encoded == null) return null;
 
       final Directory directory = await TempPhotoFiles.photoEditDirectory();
       final String path = p.join(
@@ -440,25 +446,21 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     }
   }
 
-  /// JPEG'e çevirir; eklenti yoksa (masaüstü) PNG olarak kalır.
-  static Future<({Uint8List bytes, String extension})> _encode(
-    Uint8List png,
-    int width,
-    int height,
+  /// JPEG'e çevirir ([encodeJpeg]); çevrilemezse (masaüstünde eklenti yok)
+  /// PNG olarak kalır.
+  static Future<({Uint8List bytes, String extension})?> _encode(
+    ui.Image image,
   ) async {
-    try {
-      final Uint8List jpeg = await fic.FlutterImageCompress.compressWithList(
-        png,
-        minWidth: width,
-        minHeight: height,
-        quality: _jpegQuality,
-        format: fic.CompressFormat.jpeg,
-      );
-      if (jpeg.isNotEmpty) return (bytes: jpeg, extension: '.jpg');
-    } catch (e) {
-      // PNG yüklenir; yüklemede yine küçültülür.
-    }
-    return (bytes: png, extension: '.png');
+    final Uint8List? jpeg = await encodeJpeg(image, quality: _jpegQuality);
+    if (jpeg != null) return (bytes: jpeg, extension: '.jpg');
+
+    final ByteData? png =
+        await image.toByteData(format: ui.ImageByteFormat.png);
+    if (png == null) return null;
+    return (
+      bytes: png.buffer.asUint8List(png.offsetInBytes, png.lengthInBytes),
+      extension: '.png',
+    );
   }
 
   @override

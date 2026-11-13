@@ -382,14 +382,27 @@ Future<String?> uploadMealImg({
       return posted.data()?['imageUrl'] as String? ?? '';
     }
 
+    final Future<PreparedUploadImage> prepared = image.readAsBytes().then(
+          (Uint8List bytes) => prepareImageForUpload(
+            bytes: bytes,
+            fileName: image.name,
+            mimeType: image.mimeType,
+          ),
+        );
+    prepared.ignore();
+
     try {
-      final String? alreadyPosted = await postedImageUrl();
+      final Future<String?> posted = postedImageUrl();
+      final Future<bool> canAdd =
+          canAddMealImage(userId: userId, meal: meal, date: referenceDate)
+              .timeout(_preUploadReadTimeout);
+      canAdd.ignore();
+
+      final String? alreadyPosted = await posted;
       if (alreadyPosted != null) return alreadyPosted;
 
       // Sınır doluysa hiç yüklenmez. Kayıt okunamazsa deneme başarısız olur.
-      if (!await canAddMealImage(
-              userId: userId, meal: meal, date: referenceDate)
-          .timeout(_preUploadReadTimeout)) {
+      if (!await canAdd) {
         // Sınırı dolduran, bu fotoğrafın süren önceki denemesi olabilir.
         return await postedImageUrl();
       }
@@ -397,10 +410,8 @@ Future<String?> uploadMealImg({
       throw const UploadFailure(PendingUpload.timeoutText);
     }
 
-    final UploadedImage uploaded = await uploadImageWithThumbnail(
-      bytes: await image.readAsBytes(),
-      fileName: image.name,
-      mimeType: image.mimeType,
+    final UploadedImage uploaded = await uploadPreparedImage(
+      prepared: await prepared,
       // Ad benzersiz olur: aynı dosya aynı öğüne ikinci kez yüklense de
       // öncekinin üstüne yazılmaz.
       refFor: (fileName) => FirebaseStorage.instance.ref(
