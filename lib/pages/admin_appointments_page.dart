@@ -1276,8 +1276,6 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     DateTime start, {
     bool lifted = false,
   }) {
-    final bool isPostponed =
-        appt.status == AppointmentStatus.postponed && appt.postponedDate != null;
     final DateTime endTime = start.add(Duration(minutes: appt.durationMinutes));
     final String timeRange =
         '${_timeFmt.format(start)}-${_timeFmt.format(endTime)}';
@@ -1287,7 +1285,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
     final String displayText =
         '$timeRange ${appt.user?.fileLabel ?? _unknownCustomer}';
     final String marks = [
-      if (appt.wasPostponed && !isPostponed) kPostponedMark,
+      if (appt.wasPostponed) kPostponedMark,
       if (appt.status == AppointmentStatus.burned) kBurnedMark,
     ].join(' ');
 

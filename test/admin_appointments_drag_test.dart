@@ -275,8 +275,9 @@ void main() {
 
   group('basılı tutup sürükleme (dokunmatik)', () {
     testWidgets(
-        'başka güne ve saate taşınan randevu onaydan sonra ertelenir, '
-        'sayfa yeni yerini gösterir', (WidgetTester tester) async {
+        'başka güne ve saate taşınan randevu onaydan sonra ertelenir; '
+        'sayfa yeni yerini gösterir, kartta (E) yazar',
+        (WidgetTester tester) async {
       final _FakeAppointmentManager manager =
           await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
       final double columnWidth = _columnWidth(tester);
@@ -311,15 +312,18 @@ void main() {
       expect(manager.fetches, fetchesBefore + 1);
       expect(find.byType(RescheduleAppointmentDialog), findsNothing);
       expect(find.text(_loadingMessage), findsNothing);
+      expect(manager.appointments.single.status, AppointmentStatus.postponed);
+      expect(manager.appointments.single.postponedBy, PostponeSource.user);
       expect(_card('10:00-10:30 Ali Veli'), findsNothing);
-      expect(_card('11:00-11:30 Ali Veli'), findsOneWidget);
-      final double cardLeft =
-          tester.getTopLeft(_card('11:00-11:30 Ali Veli')).dx;
+      expect(_card('11:00-11:30 Ali Veli'), findsNothing);
+      const String movedCard = '11:00-11:30 Ali Veli $kPostponedMark';
+      expect(_card(movedCard), findsOneWidget);
+      final double cardLeft = tester.getTopLeft(_card(movedCard)).dx;
       final double tuesdayLeft =
           tester.getTopLeft(find.text(_dayTitle.format(_weekDay(1)))).dx;
       expect(cardLeft, greaterThanOrEqualTo(tuesdayLeft - kMainMargin));
       expect(cardLeft, lessThan(tuesdayLeft + columnWidth));
-      expect(_sourceOpacity(tester, '11:00-11:30 Ali Veli'), 1);
+      expect(_sourceOpacity(tester, movedCard), 1);
       expect(tester.takeException(), isNull);
     }, variant: TargetPlatformVariant.all());
 
@@ -506,7 +510,8 @@ void main() {
       expect(manager.moves, <_Move>[
         (id: 'a1', newStart: _at(_weekDay(2), 11, 30), deductRight: true),
       ]);
-      expect(_card('11:30-12:00 Ali Veli'), findsOneWidget);
+      expect(_card('11:30-12:00 Ali Veli $kPostponedMark'), findsOneWidget);
+      expect(_card('11:30-12:00 Ali Veli'), findsNothing);
     }, variant: TargetPlatformVariant.all());
 
     testWidgets('tıklarken birkaç piksel kayan fare yine düzenlemeyi açar',
@@ -541,13 +546,13 @@ void main() {
       expect(find.byType(EditAppointmentDialog), findsOneWidget);
     }, variant: TargetPlatformVariant.all());
 
-    testWidgets('basılı tutup yerinde bırakmak ne düzenlemeyi açar ne onay '
+    testWidgets(
+        'basılı tutup yerinde bırakmak ne düzenlemeyi açar ne onay '
         'sorar', (WidgetTester tester) async {
       final _FakeAppointmentManager manager =
           await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
 
-      final TestGesture gesture = await _pickUp(
-          tester, '10:00-10:30 Ali Veli',
+      final TestGesture gesture = await _pickUp(tester, '10:00-10:30 Ali Veli',
           kind: PointerDeviceKind.mouse);
       await gesture.up();
       await tester.pumpAndSettle();
@@ -563,8 +568,7 @@ void main() {
       final _FakeAppointmentManager manager =
           await _pumpPage(tester, [_appointment(_at(_weekDay(0), 10))]);
 
-      final TestGesture gesture = await _pickUp(
-          tester, '10:00-10:30 Ali Veli',
+      final TestGesture gesture = await _pickUp(tester, '10:00-10:30 Ali Veli',
           kind: PointerDeviceKind.mouse);
       await gesture.moveBy(const Offset(0, 60 * kPixelsPerMinute));
       await tester.pump();
@@ -732,7 +736,8 @@ void main() {
         ),
       ]);
 
-      final TestGesture gesture = await _pickUp(tester, '10:00-10:30 Ali Veli');
+      final TestGesture gesture =
+          await _pickUp(tester, '10:00-10:30 Ali Veli $kPostponedMark');
       await gesture.moveBy(const Offset(0, 120 * kPixelsPerMinute));
       await tester.pump();
       await gesture.up();
@@ -746,7 +751,60 @@ void main() {
       ]);
       expect(
           manager.appointments.single.appointmentDateTime, _at(_weekDay(0), 9));
-      expect(_card('12:00-12:30 Ali Veli'), findsOneWidget);
+      expect(_card('12:00-12:30 Ali Veli $kPostponedMark'), findsOneWidget);
+    });
+
+    testWidgets(
+        'ofis kaynaklı ertelenmiş randevunun kartında da (E) yazar; hak '
+        'düşülmeden taşınınca da kalır', (WidgetTester tester) async {
+      final _FakeAppointmentManager manager = await _pumpPage(tester, [
+        _appointment(
+          _at(_weekDay(0), 9),
+          status: AppointmentStatus.postponed,
+          postponedDate: _at(_weekDay(1), 10),
+          postponedBy: PostponeSource.admin,
+        ),
+      ]);
+      expect(_card('10:00-10:30 Ali Veli'), findsNothing);
+
+      final TestGesture gesture =
+          await _pickUp(tester, '10:00-10:30 Ali Veli $kPostponedMark');
+      await gesture.moveBy(const Offset(0, 60 * kPixelsPerMinute));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await _choose(tester, _moveOnlyOption);
+      await _confirmMove(tester);
+
+      expect(manager.appointments.single.postponedBy, PostponeSource.admin);
+      expect(_card('11:00-11:30 Ali Veli $kPostponedMark'), findsOneWidget);
+    });
+
+    testWidgets(
+        'yeni tarihi seçilmemiş ertelenmiş randevu ilk tarihinde (E) '
+        'ile durur; sürüklenince yeni yerinde de (E) yazar',
+        (WidgetTester tester) async {
+      final _FakeAppointmentManager manager = await _pumpPage(tester, [
+        _appointment(
+          _at(_weekDay(0), 9),
+          status: AppointmentStatus.postponed,
+          postponedBy: PostponeSource.user,
+        ),
+      ]);
+      final double columnWidth = _columnWidth(tester);
+
+      final TestGesture gesture =
+          await _pickUp(tester, '09:00-09:30 Ali Veli $kPostponedMark');
+      await gesture.moveBy(Offset(2 * columnWidth, 60 * kPixelsPerMinute));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.text(_deductOption), findsNothing);
+      await _confirmMove(tester);
+
+      expect(manager.appointments.single.postponedDate, _at(_weekDay(2), 10));
+      expect(_card('10:00-10:30 Ali Veli $kPostponedMark'), findsOneWidget);
+      expect(_card('09:00-09:30 Ali Veli $kPostponedMark'), findsNothing);
     });
 
     for (final AppointmentStatus status in const <AppointmentStatus>[
@@ -812,7 +870,8 @@ void main() {
       expect(manager.moves, <_Move>[
         (id: 'a1', newStart: _at(_today(), 10, 30), deductRight: true),
       ]);
-      expect(_card('10:30-11:00 Ali Veli'), findsOneWidget);
+      expect(_card('10:30-11:00 Ali Veli $kPostponedMark'), findsOneWidget);
+      expect(_card('10:30-11:00 Ali Veli'), findsNothing);
       expect(tester.takeException(), isNull);
     }, variant: TargetPlatformVariant.all());
   });
