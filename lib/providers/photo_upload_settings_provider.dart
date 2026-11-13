@@ -39,11 +39,20 @@ class PhotoUploadSettingsProvider extends ChangeNotifier {
   Future<void> ensureLoaded() =>
       _loaded.future.timeout(loadTimeout, onTimeout: () {});
 
-  static UploadImageProfile profileOf(Map<String, dynamic>? data) {
-    final Object? compact = data?[compactField];
-    return (compact is bool ? compact : defaultCompact)
-        ? UploadImageProfile.compact
-        : UploadImageProfile.standard;
+  static UploadImageProfile profileOf(Map<String, dynamic>? data) =>
+      (_asBool(data?[compactField]) ?? defaultCompact)
+          ? UploadImageProfile.compact
+          : UploadImageProfile.standard;
+
+  static bool? _asBool(Object? value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is! String) return null;
+    return switch (value.trim().toLowerCase()) {
+      'true' || '1' => true,
+      'false' || '0' => false,
+      _ => null,
+    };
   }
 
   void _apply(DocumentSnapshot<Map<String, dynamic>> snapshot) {

@@ -988,17 +988,18 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Sohbette yukarı kaydırılınca yüklenen eski mesaj sayfası
-  /// ([fetchMessagesBefore] gibi, en yeni başta).
+  /// ([fetchMessagesBefore] gibi, en yeni başta); en fazla [limit] mesaj.
   ///
   /// Sunucuya ulaşılamazsa (çevrimdışı) cihazdaki önbellekten okunur ve
   /// `fromCache` true döner: sayfa eksik olabilir, kısa gelmesi "sohbetin
   /// başı" sayılmamalı; daha eskisi bağlantı gelince yüklenir.
   Future<({List<MessageData> messages, bool fromCache})> fetchOlderPage(
     String chatId,
-    Timestamp before,
-  ) async {
+    Timestamp before, {
+    int limit = messagesPageSize,
+  }) async {
     final Query<Map<String, dynamic>> query =
-        _newestFirst(chatId).startAfter([before]).limit(messagesPageSize);
+        _newestFirst(chatId).startAfter([before]).limit(limit);
     try {
       final QuerySnapshot<Map<String, dynamic>> snap =
           await query.get(const GetOptions(source: Source.server));
@@ -1141,39 +1142,13 @@ class ChatManager extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  /// Returns a live stream of every photo the *user* (chatId == userId) has
-  /// uploaded to their chat, newest first.
-  ///
-  /// Includes both direct chat images and meal photos, since both are stored as
-  /// messages with `senderId == userId` and a non-empty `imageUrl`. The admin's
-  /// own uploaded images are intentionally excluded.
-  ///
-  /// Implementation note: this filters by `senderId` only — a single-field
-  /// equality that Firestore indexes automatically — and sorts client-side, so
-  /// it needs NO composite index.
-  Stream<List<MessageData>> userUploadedImagesStream(String userId) {
-    return _chatDoc(userId)
+  Future<int> countImageMessages(String chatId) async {
+    final AggregateQuerySnapshot snapshot = await _chatDoc(chatId)
         .collection('messages')
-        .where('senderId', isEqualTo: userId)
-        .snapshots()
-        .map((snap) {
-      final images = snap.docs
-          .map((d) => MessageData.fromSnapshot(d))
-          .where((m) => (m.imageUrl ?? '').isNotEmpty)
-          .toList();
-
-      // Newest first; messages still awaiting a server timestamp sink to the end.
-      images.sort((a, b) {
-        final at = a.createdAt ?? a.clientCreatedAt;
-        final bt = b.createdAt ?? b.clientCreatedAt;
-        if (at == null && bt == null) return 0;
-        if (at == null) return 1;
-        if (bt == null) return -1;
-        return bt.compareTo(at);
-      });
-
-      return images;
-    });
+        .where('imageUrl', isGreaterThan: '')
+        .count()
+        .get();
+    return snapshot.count ?? 0;
   }
 
   /// Sohbet dokümanına `set(merge: true)` ile yazılan özet ve sayaçlar;

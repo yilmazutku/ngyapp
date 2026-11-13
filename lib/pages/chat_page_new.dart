@@ -22,6 +22,7 @@ import 'package:ngy_app/providers/meal_state_and_upload_manager.dart';
 import 'package:ngy_app/widgets/chat/chat_bubble_style.dart';
 import 'package:ngy_app/widgets/chat/chat_date_separator.dart';
 import 'package:ngy_app/widgets/chat/chat_input_keys.dart';
+import 'package:ngy_app/widgets/chat/history_edge.dart';
 import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/chat/message_reply_quote.dart';
 import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
@@ -1054,42 +1055,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// Listenin en üstündeki satır: eski mesajlar yüklenirken gösterge,
   /// yüklenemediyse "Tekrar dene", sohbetin başına gelindiyse küçük bir not.
   Widget? _buildHistoryEdge() {
-    if (_loadingOlder) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: Center(
-          child: SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ),
-      );
-    }
+    if (_loadingOlder) return const HistoryEdge.loading();
     if (_olderLoadFailed) {
-      return Center(
-        child: TextButton.icon(
-          onPressed: _retryOlderMessages,
-          icon: const Icon(Icons.refresh, size: 18),
-          label: Text(
-            '${_olderOffline ? _olderOfflineText : _olderLoadErrorText} '
+      return HistoryEdge.retry(
+        text: '${_olderOffline ? _olderOfflineText : _olderLoadErrorText} '
             '$_retryLabel',
-            textAlign: TextAlign.center,
-          ),
-        ),
+        onRetry: _retryOlderMessages,
       );
     }
-    if (_atHistoryStart) {
-      return Padding(
-        padding: const EdgeInsets.all(12),
-        child: Center(
-          child: Text(
-            _historyStartText,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-          ),
-        ),
-      );
-    }
+    if (_atHistoryStart) return const HistoryEdge.note(_historyStartText);
     return null;
   }
 

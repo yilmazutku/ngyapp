@@ -1,13 +1,14 @@
 // lib/pages/user_media_gallery_page.dart
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/models/user_model.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
+import 'package:ngy_app/providers/user_photo_gallery_provider.dart';
 import 'package:ngy_app/providers/user_provider.dart';
 import 'package:ngy_app/utils/menu_utils.dart';
+import 'package:ngy_app/widgets/chat/history_edge.dart';
 import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
 
@@ -19,13 +20,18 @@ import 'package:ngy_app/widgets/meal_image_card.dart';
 /// elsewhere), this shows ONLY chat-uploaded photos.
 ///
 /// Architecture:
-/// - Source: [ChatManager.userUploadedImagesStream] (messages the user sent
-///   with an image). chatId == userId, so this is exactly the user's photos.
+/// - Source: [UserPhotoGalleryProvider] (messages the user sent with an
+///   image). chatId == userId, so this is exactly the user's photos. Son
+///   mesajlardaki fotoğraflar canlı dinlenir; ızgara en üste yaklaştıkça eski
+///   sayfalar yüklenir (sohbet sayfasındaki düzen), bütün mesajlar bir kerede
+///   okunmaz. Üstteki sayı yalnızca yüklenenlerin değil, fotoğrafların
+///   toplamıdır ([UserPhotoGalleryProvider.totalCount]).
 /// - Each chat image is adapted to a [MealModel] and rendered with the shared
 ///   [MealImageCard] so the layout matches the images tab (tap to enlarge with
 ///   meal type + upload date & time). Sütun sayısı genişliğe göre değişir:
 ///   telefonda 3, geniş ekranda 5 (bkz. [UserMediaGalleryGrid]).
-/// - Sorted oldest→newest so the most recent photo sits at the very bottom.
+/// - Sorted oldest→newest so the most recent photo sits at the very bottom;
+///   galeri en yeni fotoğraftan açılır.
 /// - Bir fotoğrafa dokununca büyük görsel diyaloğu açılır; altındaki
 ///   "Sohbette göster" sayfayı fotoğrafın mesaj kimliğiyle kapatır, sohbet o
 ///   mesaja gider. Danışan kendi galerisinde yanındaki "Fotoğrafı Sil" ile
@@ -52,32 +58,42 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
   static const String _emptyText = 'Bu kişi sohbette henüz fotoğraf yüklemedi.';
   static const String _ownEmptyText = 'Sohbette henüz fotoğraf yüklemediniz.';
   static const String _goToChatLabel = 'Sohbette göster';
+  static const String _loadErrorText =
+      'Fotoğraflar yüklenemedi. Lütfen tekrar deneyin.';
+  static const String _olderLoadErrorText = 'Eski fotoğraflar yüklenemedi.';
+  static const String _olderOfflineText =
+      'Bağlantı yok; eski fotoğraflar yüklenemedi.';
+  static const String _retryLabel = 'Tekrar dene';
+  static const String _countSuffix = 'fotoğraf';
 
   /// Büyük görsel diyaloğundaki düğmelerin arası.
   static const double _footerButtonGap = 8;
 
   /// Owns the grid scroll position so the [Scrollbar] can attach to it
-  /// (shared-controller rule) and so we can jump to the bottom on open.
+  /// (shared-controller rule).
   final ScrollController _scrollController = ScrollController();
 
-  /// Live stream of the user's chat-uploaded photos.
-  Stream<List<MessageData>>? _imagesStream;
+  late final UserPhotoGalleryProvider _gallery;
 
   /// One-shot fetch of the user's profile for the app bar title.
   Future<UserModel?>? _userFuture;
 
   late final bool _isOwnGallery;
 
-  /// Ensures the one-time "scroll to newest (bottom)" happens only once.
-  bool _didAutoScroll = false;
+  bool _opened = false;
+
+  bool _complete = false;
+
+  bool _layoutPending = false;
 
   @override
   void initState() {
     super.initState();
     final chat = Provider.of<ChatManager>(context, listen: false);
-    _imagesStream = chat.userUploadedImagesStream(widget.userId);
-    _isOwnGallery =
-        FirebaseAuth.instance.currentUser?.uid == widget.userId;
+    _gallery = UserPhotoGalleryProvider(chat: chat, userId: widget.userId)
+      ..addListener(_onGalleryChanged)
+      ..start();
+    _isOwnGallery = chat.auth.currentUser?.uid == widget.userId;
     if (!_isOwnGallery) {
       _userFuture = Provider.of<UserProvider>(context, listen: false)
           .fetchUserDetails(userId: widget.userId);
@@ -86,8 +102,71 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
 
   @override
   void dispose() {
+    _gallery
+      ..removeListener(_onGalleryChanged)
+      ..dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onGalleryChanged() {
+    if (!_opened && !_gallery.isLoading && !_gallery.hasFailed) {
+      _opened = true;
+      _complete = _gallery.atStart;
+    }
+    _layoutPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _layoutPending = false;
+      if (!mounted) return;
+      _showCompleteIfWholeGalleryFits();
+      _loadOlderIfNearOldest();
+    });
+  }
+
+  ScrollPosition? get _gridPosition {
+    if (!_scrollController.hasClients) return null;
+    final ScrollPosition position = _scrollController.position;
+    return position.hasContentDimensions ? position : null;
+  }
+
+  void _showCompleteIfWholeGalleryFits() {
+    final ScrollPosition? position = _gridPosition;
+    if (_complete ||
+        !_gallery.atStart ||
+        position == null ||
+        position.maxScrollExtent > 0) {
+      return;
+    }
+    setState(() => _complete = true);
+  }
+
+  void _loadOlderIfNearOldest() {
+    final ScrollPosition? position = _gridPosition;
+    if (_layoutPending || position == null) return;
+    if (position.maxScrollExtent - position.pixels <=
+        UserMediaGalleryGrid.loadOlderThreshold) {
+      _gallery.loadOlder();
+    }
+  }
+
+  String _countLabel(int loaded) {
+    final int? total = _gallery.totalCount;
+    if (total != null) return '$total $_countSuffix';
+    return _gallery.totalCountUnavailable ? '$loaded+ $_countSuffix' : '';
+  }
+
+  String get _olderErrorText =>
+      _gallery.olderOffline ? _olderOfflineText : _olderLoadErrorText;
+
+  Widget? _buildTopEdge() {
+    if (_gallery.isLoadingOlder) return const HistoryEdge.loading();
+    if (_gallery.olderLoadFailed) {
+      return HistoryEdge.retry(
+        text: '$_olderErrorText $_retryLabel',
+        onRetry: _gallery.retryOlder,
+      );
+    }
+    return null;
   }
 
   /// Derive the meal type of a chat-uploaded photo (see
@@ -198,18 +277,10 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
       case _PhotoAction.deletePhoto:
         final Future<void> Function(MessageData message)? onDeletePhoto =
             widget.onDeletePhoto;
-        if (onDeletePhoto != null) await onDeletePhoto(message);
+        if (onDeletePhoto == null) return;
+        await onDeletePhoto(message);
+        if (mounted) await _gallery.refreshMessage(message.id);
     }
-  }
-
-  /// Jump to the bottom once so the newest photo is visible on open.
-  void _scheduleScrollToBottom() {
-    if (_didAutoScroll) return;
-    _didAutoScroll = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-    });
   }
 
   @override
@@ -218,58 +289,61 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
       appBar: AppBar(
         title: _buildTitle(),
       ),
-      body: StreamBuilder<List<MessageData>>(
-        stream: _imagesStream,
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+      body: ListenableBuilder(
+        listenable: _gallery,
+        builder: (context, _) {
+          if (_gallery.isLoading) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (snap.hasError) {
+          if (_gallery.hasFailed) {
             return const _CenteredNote(
               icon: Icons.error_outline,
-              message: 'Fotoğraflar yüklenemedi. Lütfen tekrar deneyin.',
+              message: _loadErrorText,
               isError: true,
             );
           }
 
-          final messages = snap.data ?? const <MessageData>[];
-          if (messages.isEmpty) {
+          final List<MessageData> photos = _gallery.photos;
+          if (photos.isEmpty) {
+            if (_gallery.olderLoadFailed) {
+              return _CenteredNote(
+                icon: Icons.error_outline,
+                message: _olderErrorText,
+                isError: true,
+                actionLabel: _retryLabel,
+                onAction: _gallery.retryOlder,
+              );
+            }
+            if (!_gallery.atStart) {
+              return const Center(child: CircularProgressIndicator());
+            }
             return _CenteredNote(
               icon: Icons.photo_library_outlined,
               message: _isOwnGallery ? _ownEmptyText : _emptyText,
             );
           }
-          final Map<String, MessageData> messagesById = {
-            for (final MessageData message in messages) message.id: message,
-          };
-
-          // Oldest first so the newest photo sits at the very bottom.
-          final meals = messages.map(_toMeal).toList()
-            ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-          _scheduleScrollToBottom();
 
           return Column(
             children: [
-              _PhotoCountHeader(count: meals.length),
+              _PhotoCountHeader(label: _countLabel(photos.length)),
               Expanded(
                 child: UserMediaGalleryGrid(
                   controller: _scrollController,
-                  itemCount: meals.length,
+                  itemCount: photos.length,
+                  complete: _complete,
+                  topEdge: _buildTopEdge(),
+                  onNearOldest: _loadOlderIfNearOldest,
                   itemBuilder: (context, i, dialogImageHeight) {
-                    final MessageData? message = messagesById[meals[i].mealId];
+                    final MessageData message = photos[i];
+                    final MealModel photo = _toMeal(message);
                     return MealImageCard(
-                      meal: meals[i],
+                      meal: photo,
                       dialogImageHeight: dialogImageHeight,
-                      onTap: message == null
-                          ? null
-                          : () =>
-                              _openPhoto(meals[i], message, dialogImageHeight),
-                      onMenu: message == null
-                          ? null
-                          : (globalPosition) =>
-                              _openPhotoMenu(message, globalPosition),
+                      onTap: () =>
+                          _openPhoto(photo, message, dialogImageHeight),
+                      onMenu: (globalPosition) =>
+                          _openPhotoMenu(message, globalPosition),
                     );
                   },
                 ),
@@ -307,12 +381,21 @@ enum _PhotoAction { goToChat, deletePhoto }
 /// [_minCardWidth] genişlikte kalır (telefonda 3 sütun), geniş ekranda en
 /// fazla [_maxColumns]. Kart oranı, Öğün Fotoğrafları şeridindeki kartla
 /// aynı: görsel, altındaki öğün/saat satırından sonra da kareye yakın kalır.
+///
+/// Fotoğraflar en yeni başta verilir ([itemBuilder]'ın dizini) ve eskiden
+/// yeniye, soldan sağa, yukarıdan aşağı dizilir; ızgara en yeniden (alttan)
+/// açılır ve eski fotoğraflar üste eklenir, ekrandaki kartlar yer değiştirmez.
+/// [complete] ise (galerinin tamamı) ilk fotoğraf sol üstten başlar; değilse
+/// en yeni fotoğraf sağ alttadır ve eksik hücreler en üst satırın solunda
+/// kalır.
 class UserMediaGalleryGrid extends StatelessWidget {
   static const int _minColumns = 2;
   static const int _maxColumns = 5;
   static const double _minCardWidth = 110.0;
   static const double _gridGap = 6.0;
   static const double _cardAspectRatio = 0.85;
+
+  static const double loadOlderThreshold = 400.0;
 
   /// Izgaranın kaydırma konumu; [Scrollbar] ile paylaşılır.
   final ScrollController controller;
@@ -327,12 +410,47 @@ class UserMediaGalleryGrid extends StatelessWidget {
     double dialogImageHeight,
   ) itemBuilder;
 
+  final bool complete;
+
+  final Widget? topEdge;
+
+  final VoidCallback? onNearOldest;
+
   const UserMediaGalleryGrid({
     super.key,
     required this.controller,
     required this.itemCount,
     required this.itemBuilder,
+    this.complete = false,
+    this.topEdge,
+    this.onNearOldest,
   });
+
+  static int cellCountFor(int itemCount, int columns) =>
+      (itemCount / columns).ceil() * columns;
+
+  static int? itemIndexAt(
+    int cell, {
+    required int itemCount,
+    required int columns,
+    required bool complete,
+  }) {
+    final int cells = cellCountFor(itemCount, columns);
+    final int rowFromTop = cells ~/ columns - 1 - cell ~/ columns;
+    final int cellFromFirst = rowFromTop * columns + cell % columns;
+    final int index = (complete ? itemCount : cells) - 1 - cellFromFirst;
+    return index < 0 || index >= itemCount ? null : index;
+  }
+
+  bool _reportIfNearOldest(ScrollMetrics metrics, int depth) {
+    final VoidCallback? onNearOldest = this.onNearOldest;
+    if (depth == 0 &&
+        onNearOldest != null &&
+        metrics.maxScrollExtent - metrics.pixels <= loadOlderThreshold) {
+      Future<void>.microtask(onNearOldest);
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -347,22 +465,56 @@ class UserMediaGalleryGrid extends StatelessWidget {
         // Küçük karta dokununca da büyük görsel kullanışlı boyda açılsın.
         final double dialogImageHeight =
             (cellWidth * kMealDialogMultiplier).clamp(240.0, 480.0);
+        final Widget? topEdge = this.topEdge;
 
-        return Scrollbar(
-          controller: controller,
-          thumbVisibility: true,
-          child: GridView.builder(
-            controller: controller,
-            padding: const EdgeInsets.all(_gridGap),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              childAspectRatio: _cardAspectRatio,
-              crossAxisSpacing: _gridGap,
-              mainAxisSpacing: _gridGap,
+        return NotificationListener<ScrollMetricsNotification>(
+          onNotification: (notification) =>
+              _reportIfNearOldest(notification.metrics, notification.depth),
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) =>
+                _reportIfNearOldest(notification.metrics, notification.depth),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Scrollbar(
+                controller: controller,
+                thumbVisibility: true,
+                child: CustomScrollView(
+                  controller: controller,
+                  reverse: true,
+                  shrinkWrap: true,
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.all(_gridGap),
+                      sliver: SliverGrid(
+                        gridDelegate:
+                            SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          childAspectRatio: _cardAspectRatio,
+                          crossAxisSpacing: _gridGap,
+                          mainAxisSpacing: _gridGap,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, cell) {
+                            final int? index = itemIndexAt(
+                              cell,
+                              itemCount: itemCount,
+                              columns: columns,
+                              complete: complete,
+                            );
+                            return index == null
+                                ? const SizedBox.shrink()
+                                : itemBuilder(
+                                    context, index, dialogImageHeight);
+                          },
+                          childCount: cellCountFor(itemCount, columns),
+                        ),
+                      ),
+                    ),
+                    if (topEdge != null) SliverToBoxAdapter(child: topEdge),
+                  ],
+                ),
+              ),
             ),
-            itemCount: itemCount,
-            itemBuilder: (context, i) =>
-                itemBuilder(context, i, dialogImageHeight),
           ),
         );
       },
@@ -372,9 +524,9 @@ class UserMediaGalleryGrid extends StatelessWidget {
 
 /// Small header above the grid showing how many photos the user uploaded.
 class _PhotoCountHeader extends StatelessWidget {
-  final int count;
+  final String label;
 
-  const _PhotoCountHeader({required this.count});
+  const _PhotoCountHeader({required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -384,7 +536,7 @@ class _PhotoCountHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       alignment: Alignment.centerLeft,
       child: Text(
-        '$count fotoğraf',
+        label,
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),
@@ -398,11 +550,15 @@ class _CenteredNote extends StatelessWidget {
   final IconData icon;
   final String message;
   final bool isError;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   const _CenteredNote({
     required this.icon,
     required this.message,
     this.isError = false,
+    this.actionLabel,
+    this.onAction,
   });
 
   @override
@@ -421,6 +577,14 @@ class _CenteredNote extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: color),
             ),
+            if (actionLabel != null) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: Text(actionLabel!),
+              ),
+            ],
           ],
         ),
       ),
