@@ -135,6 +135,10 @@ async function run(rulesFile) {
   await check('F2 other user reads meal entry', false, () => db('c5').collection('users').doc('c4').collection('meals').doc('2026-09-28').get());
   await seed((f) => f.collection('admininput').doc('appVersion').set({ v: 1 }));
   await check('G1 signed-out reads appVersion', true, () => db(null).collection('admininput').doc('appVersion').get());
+  await check('G2 admin creates photo upload setting', true, () => db(ADMIN).collection('admininput').doc('photoUpload').set({ compact: true }, { merge: true }));
+  await check('G3 customer reads photo upload setting', true, () => db('c4').collection('admininput').doc('photoUpload').get());
+  await check('G4 customer changes photo upload setting', false, () => db('c4').collection('admininput').doc('photoUpload').set({ compact: false }, { merge: true }));
+  await check('G5 signed-out reads photo upload setting', false, () => db(null).collection('admininput').doc('photoUpload').get());
 
   // H: yetki yükseltme denemeleri (kullanıcı dokümanı ve admin'in alt koleksiyonları).
   const slotStart = TS.fromDate(new Date('2026-10-22T10:00:00'));

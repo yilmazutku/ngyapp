@@ -64,6 +64,7 @@ import 'providers/meal_state_and_upload_manager.dart';
 import 'providers/meas_provider.dart';
 import 'providers/mock_test_data_provider.dart';
 import 'providers/payment_provider.dart';
+import 'providers/photo_upload_settings_provider.dart';
 import 'providers/appointment_colors_provider.dart';
 import 'providers/appointment_durations_provider.dart';
 import 'providers/special_lines_provider.dart';
@@ -194,6 +195,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SummaryColorsProvider()),
         ChangeNotifierProvider(create: (_) => AppUpdateProvider()),
         ChangeNotifierProvider(create: (_) => MealPhotoNotificationsProvider()),
+        ChangeNotifierProvider(create: (_) => PhotoUploadSettingsProvider()),
         ChangeNotifierProvider(
           create: (ctx) => BloodTestProvider(
             notifications: ctx.read<AdminNotificationsProvider>(),
@@ -581,7 +583,10 @@ class _HomePageState extends State<HomePage> {
     }
     
     final chatManager = context.read<ChatManager>();
-    
+
+    Provider.of<PhotoUploadSettingsProvider>(context, listen: false)
+        .start(seedsDefault: FcmService.isAdmin(userId));
+
     if (ChatManager.isChatOfficeUid(userId)) {
       // Chat office: count of chats with unread messages
       _unreadChatsStream = chatManager.totalUnreadChatsStream();
@@ -611,8 +616,11 @@ class _HomePageState extends State<HomePage> {
   Future<void> _restorePendingUploads(String userId) async {
     final ChatManager chatManager = context.read<ChatManager>();
     final MealManager mealManager = context.read<MealManager>();
+    final PhotoUploadSettingsProvider uploadSettings =
+        Provider.of<PhotoUploadSettingsProvider>(context, listen: false);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
 
+    await uploadSettings.ensureLoaded();
     final ({int restored, int missing}) result =
         await chatManager.restorePendingUploads(
       userId: userId,

@@ -22,14 +22,23 @@ const int kMaxUploadBytes = 50 * 1024 * 1024;
 /// Human-readable form of [kMaxUploadBytes] for user-facing messages.
 const String kMaxUploadSizeLabel = '50 MB';
 
-/// Öğün fotoğrafı yüklenirken hedeflenen en küçük kenar (piksel).
-///
-/// Sohbet görselleriyle aynı değer kullanılır (bkz. ChatManager'daki sıkıştırma
-/// adımı): 1600 px, diyetisyenin tabağı incelemesi için fazlasıyla yeterli.
-const int kUploadImageMinSide = 1600;
+class UploadImageProfile {
+  /// Öğün fotoğrafı yüklenirken hedeflenen en küçük kenar (piksel).
+  final int minSide;
 
-/// Öğün fotoğrafı sıkıştırma kalitesi (JPEG).
-const int kUploadImageQuality = 85;
+  /// Öğün fotoğrafı sıkıştırma kalitesi (JPEG).
+  final int quality;
+
+  const UploadImageProfile({required this.minSide, required this.quality});
+
+  static const UploadImageProfile standard =
+      UploadImageProfile(minSide: 1600, quality: 85);
+
+  static const UploadImageProfile compact =
+      UploadImageProfile(minSide: 1200, quality: 80);
+
+  static UploadImageProfile current = compact;
+}
 
 /// Bu boyutun altındaki görseller olduğu gibi yüklenir: kazanç, yeniden
 /// kodlamanın maliyetini ve kalite kaybını hak etmiyor.
@@ -57,8 +66,8 @@ class PreparedUploadImage {
 /// Neden: fotoğraflar telefondan tam kamera çözünürlüğünde (4-6 MB) geliyordu;
 /// yönetici tarafındaki toplu görünümler bu dosyaların tamamını indirmek
 /// zorunda kaldığı için yavaş açılıyordu. En küçük kenar
-/// [kUploadImageMinSide] pikselle sınırlanınca dosya tipik olarak 5-10 kat
-/// küçülür, öğün yine net görünür.
+/// [UploadImageProfile.minSide] pikselle sınırlanınca dosya tipik olarak 5-10
+/// kat küçülür, öğün yine net görünür.
 ///
 /// Güvenli davranış: sıkıştırma yapılamazsa (eklentinin desteklemediği
 /// platform, bozuk dosya, sonuç orijinalden büyük) **orijinal baytlar** aynen
@@ -80,15 +89,16 @@ Future<PreparedUploadImage> prepareImageForUpload({
 
   if (bytes.length <= kUploadImageSkipBytes) return original;
 
+  final UploadImageProfile profile = UploadImageProfile.current;
   try {
     final Uint8List compressed = await fic.FlutterImageCompress.compressWithList(
       bytes,
-      minWidth: kUploadImageMinSide,
-      minHeight: kUploadImageMinSide,
-      quality: kUploadImageQuality,
+      minWidth: profile.minSide,
+      minHeight: profile.minSide,
+      quality: profile.quality,
       inSampleSize: decodeSampleSizeFor(
         await readImagePixelSize(bytes),
-        kUploadImageMinSide,
+        profile.minSide,
       ),
       format: fic.CompressFormat.jpeg,
       keepExif: false,

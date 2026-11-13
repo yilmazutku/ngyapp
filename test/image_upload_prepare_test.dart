@@ -61,7 +61,19 @@ void main() {
 
   final FlutterImageCompressPlatform original =
       FlutterImageCompressPlatform.instance;
-  tearDown(() => FlutterImageCompressPlatform.instance = original);
+  final UploadImageProfile defaultProfile = UploadImageProfile.current;
+  tearDown(() {
+    FlutterImageCompressPlatform.instance = original;
+    UploadImageProfile.current = defaultProfile;
+  });
+
+  test('varsayılan ölçü küçük olandır', () {
+    expect(defaultProfile, UploadImageProfile.compact);
+    expect(UploadImageProfile.compact.minSide, 1200);
+    expect(UploadImageProfile.compact.quality, 80);
+    expect(UploadImageProfile.standard.minSide, 1600);
+    expect(UploadImageProfile.standard.quality, 85);
+  });
 
   test('örnekleme katsayısı kısa kenarı hedefin altına düşürmez', () {
     int sample(int width, int height, int target) =>
@@ -81,36 +93,50 @@ void main() {
     expect(sample(4000, 3000, 0), 1);
   });
 
-  test('çok büyük fotoğraf küçültülerek çözdürülür', () async {
-    final FakeImageCompress fake = FakeImageCompress(Uint8List.fromList([1, 2, 3]));
-    FlutterImageCompressPlatform.instance = fake;
+  for (final ({
+    UploadImageProfile profile,
+    int hugeSample,
+    int twelveMpSample
+  }) scenario in [
+    (profile: UploadImageProfile.standard, hugeSample: 2, twelveMpSample: 1),
+    (profile: UploadImageProfile.compact, hugeSample: 4, twelveMpSample: 2),
+  ]) {
+    final String label = 'kısa kenar ${scenario.profile.minSide}';
 
-    final PreparedUploadImage prepared = await prepareImageForUpload(
-      bytes: await _pngClaiming(8160, 6120, kUploadImageSkipBytes + 1),
-      fileName: 'tabak.png',
-    );
+    test('$label: fotoğraf geçerli ölçü ve kaliteyle küçültülür', () async {
+      UploadImageProfile.current = scenario.profile;
+      final FakeImageCompress fake =
+          FakeImageCompress(Uint8List.fromList([1, 2, 3]));
+      FlutterImageCompressPlatform.instance = fake;
 
-    expect(fake.inSampleSize, 2);
-    expect(fake.minWidth, kUploadImageMinSide);
-    expect(fake.minHeight, kUploadImageMinSide);
-    expect(fake.quality, kUploadImageQuality);
-    expect(prepared.compressed, isTrue);
-    expect(prepared.bytes, [1, 2, 3]);
-    expect(prepared.fileName, 'tabak.jpg');
-    expect(prepared.contentType, 'image/jpeg');
-  });
+      final PreparedUploadImage prepared = await prepareImageForUpload(
+        bytes: await _pngClaiming(8160, 6120, kUploadImageSkipBytes + 1),
+        fileName: 'tabak.png',
+      );
 
-  test('12 MP fotoğraf tam boyutunda çözdürülür', () async {
-    final FakeImageCompress fake = FakeImageCompress(Uint8List.fromList([1]));
-    FlutterImageCompressPlatform.instance = fake;
+      expect(fake.inSampleSize, scenario.hugeSample);
+      expect(fake.minWidth, scenario.profile.minSide);
+      expect(fake.minHeight, scenario.profile.minSide);
+      expect(fake.quality, scenario.profile.quality);
+      expect(prepared.compressed, isTrue);
+      expect(prepared.bytes, [1, 2, 3]);
+      expect(prepared.fileName, 'tabak.jpg');
+      expect(prepared.contentType, 'image/jpeg');
+    });
 
-    await prepareImageForUpload(
-      bytes: await _pngClaiming(4000, 3000, kUploadImageSkipBytes + 1),
-      fileName: 'tabak.png',
-    );
+    test('$label: 12 MP fotoğrafın örnekleme katsayısı', () async {
+      UploadImageProfile.current = scenario.profile;
+      final FakeImageCompress fake = FakeImageCompress(Uint8List.fromList([1]));
+      FlutterImageCompressPlatform.instance = fake;
 
-    expect(fake.inSampleSize, 1);
-  });
+      await prepareImageForUpload(
+        bytes: await _pngClaiming(4000, 3000, kUploadImageSkipBytes + 1),
+        fileName: 'tabak.png',
+      );
+
+      expect(fake.inSampleSize, scenario.twelveMpSample);
+    });
+  }
 
   test('küçük görsel üretilirken de örnekleme katsayısı verilir', () async {
     final FakeImageCompress fake = FakeImageCompress(Uint8List.fromList([9]));

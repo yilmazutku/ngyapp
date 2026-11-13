@@ -91,8 +91,11 @@ void main() {
     );
   });
 
+  final UploadImageProfile defaultProfile = UploadImageProfile.current;
+
   tearDown(() {
     FlutterImageCompressPlatform.instance = compress;
+    UploadImageProfile.current = defaultProfile;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
       const MethodChannel('plugins.flutter.io/path_provider'),
@@ -222,29 +225,36 @@ void main() {
     expect(read.bottomRight, _blue);
   });
 
-  testWidgets('büyük fotoğraf yükleme ölçüsüne küçültülerek yazılır',
-      (tester) async {
-    final FakeImageCompress fake = FakeImageCompress(Uint8List.fromList([1]));
-    FlutterImageCompressPlatform.instance = fake;
+  for (final ({UploadImageProfile profile, int longSide}) scenario in [
+    (profile: UploadImageProfile.standard, longSide: 1920),
+    (profile: UploadImageProfile.compact, longSide: 1440),
+  ]) {
+    testWidgets(
+        'büyük fotoğraf yükleme ölçüsüne (kısa kenar '
+        '${scenario.profile.minSide}) küçültülerek yazılır', (tester) async {
+      UploadImageProfile.current = scenario.profile;
+      final FakeImageCompress fake = FakeImageCompress(Uint8List.fromList([1]));
+      FlutterImageCompressPlatform.instance = fake;
 
-    await openEditor(
-      tester,
-      () async {
-        await tester.tap(find.byTooltip('Sağa döndür'));
-        await tester.pump();
-      },
-      sourceWidth: 2400,
-      sourceHeight: 2000,
-    );
+      await openEditor(
+        tester,
+        () async {
+          await tester.tap(find.byTooltip('Sağa döndür'));
+          await tester.pump();
+        },
+        sourceWidth: 2400,
+        sourceHeight: 2000,
+      );
 
-    expect(fake.minWidth, kUploadImageMinSide);
-    expect(fake.minHeight, 1920);
-    final read = await tester.runAsync(() => _readBytes(fake.input!));
-    expect(read!.width, kUploadImageMinSide);
-    expect(read.height, 1920);
-    expect(read.topLeft, _red);
-    expect(read.bottomRight, _blue);
-  });
+      expect(fake.minWidth, scenario.profile.minSide);
+      expect(fake.minHeight, scenario.longSide);
+      final read = await tester.runAsync(() => _readBytes(fake.input!));
+      expect(read!.width, scenario.profile.minSide);
+      expect(read.height, scenario.longSide);
+      expect(read.topLeft, _red);
+      expect(read.bottomRight, _blue);
+    });
+  }
 
   testWidgets('sola döndürünce sağ yarı üste gelir', (tester) async {
     final XFile? result = await openEditor(tester, () async {
