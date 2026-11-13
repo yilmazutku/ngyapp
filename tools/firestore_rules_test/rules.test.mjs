@@ -108,6 +108,10 @@ async function run(rulesFile) {
   await check('C7 customer deletes own chat', false, () => db('c4').collection('chats').doc('c4').delete());
 
   // D: other customers / spoofing.
+  await check('D0a customer lists own photo messages (gallery count)', true, () => db('c4').collection('chats').doc('c4').collection('messages').where('imageUrl', '>', '').get());
+  await check('D0b customer pages own older messages (gallery page)', true, () => db('c4').collection('chats').doc('c4').collection('messages').orderBy('createdAt', 'desc').startAfter(TS.now()).limit(120).get());
+  await check('D0c admin lists customer photo messages', true, () => db(ADMIN).collection('chats').doc('c4').collection('messages').where('imageUrl', '>', '').get());
+  await check('D0d other customer lists photo messages', false, () => db('c5').collection('chats').doc('c4').collection('messages').where('imageUrl', '>', '').get());
   await check('D1 other customer reads chat doc', false, () => db('c5').collection('chats').doc('c4').get());
   await check('D1b other customer lists messages', false, () => db('c5').collection('chats').doc('c4').collection('messages').get());
   await check('D1c other customer reads missing chat', false, () => db('c5').collection('chats').doc('c7').get());

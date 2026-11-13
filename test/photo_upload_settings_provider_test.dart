@@ -40,8 +40,21 @@ void main() {
     expect(of({}), UploadImageProfile.compact);
     expect(of({'compact': true}), UploadImageProfile.compact);
     expect(of({'compact': false}), UploadImageProfile.standard);
-    expect(of({'compact': 'false'}), UploadImageProfile.compact);
-    expect(of({'compact': 0}), UploadImageProfile.compact);
+  });
+
+  test('değer metin ya da sayı olarak girilse de seçilen ölçü uygulanır', () {
+    UploadImageProfile of(Object? value) =>
+        PhotoUploadSettingsProvider.profileOf({'compact': value});
+
+    for (final Object value in ['true', 'True', ' TRUE ', '1', 1, 1.0]) {
+      expect(of(value), UploadImageProfile.compact, reason: '$value');
+    }
+    for (final Object value in ['false', 'False', ' FALSE ', '0', 0, 0.0]) {
+      expect(of(value), UploadImageProfile.standard, reason: '$value');
+    }
+    for (final Object? value in ['', 'belki', null, <String>[]]) {
+      expect(of(value), UploadImageProfile.compact, reason: '$value');
+    }
   });
 
   test('alan elle değiştirilince ölçü uygulama yeniden açılmadan değişir',
@@ -88,14 +101,14 @@ void main() {
     expect(UploadImageProfile.current, UploadImageProfile.standard);
   });
 
-  test('admin oturumu yanlış türde girilmiş alanın üstüne yazmaz', () async {
+  test('admin oturumu metin olarak girilmiş değerin üstüne yazmaz', () async {
     await doc.set({'compact': 'false'});
     provider.start(seedsDefault: true);
     await provider.ensureLoaded();
     await settle();
 
     expect((await doc.get()).data(), {'compact': 'false'});
-    expect(UploadImageProfile.current, UploadImageProfile.compact);
+    expect(UploadImageProfile.current, UploadImageProfile.standard);
   });
 
   test('danışan oturumu Firestore\'a yazmaz', () async {
