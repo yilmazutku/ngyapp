@@ -161,10 +161,35 @@ AppointmentModel _appointment(
       createDate: start,
     );
 
+const String _openPageLabel = 'takvimi aç';
+
+Widget _appOpeningPageAsRoute() => MaterialApp(
+      builder: (BuildContext context, Widget? child) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: child,
+      ),
+      home: Builder(
+        builder: (BuildContext context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                    builder: (_) => const AdminAppointmentsPage()),
+              ),
+              child: const Text(_openPageLabel),
+            ),
+          ),
+        ),
+      ),
+    );
+
 Future<_FakeAppointmentManager> _pumpPage(
   WidgetTester tester,
   List<AppointmentModel> appointments, {
   Size size = const Size(1280, 900),
+  bool asPushedRoute = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -183,9 +208,15 @@ Future<_FakeAppointmentManager> _pumpPage(
           create: (_) =>
               AppointmentColorsProvider(db: FakeFirebaseFirestore())),
     ],
-    child: const MaterialApp(home: AdminAppointmentsPage()),
+    child: asPushedRoute
+        ? _appOpeningPageAsRoute()
+        : const MaterialApp(home: AdminAppointmentsPage()),
   ));
   await tester.pumpAndSettle();
+  if (asPushedRoute) {
+    await tester.tap(find.text(_openPageLabel));
+    await tester.pumpAndSettle();
+  }
   expect(tester.takeException(), isNull);
   return manager;
 }
@@ -811,8 +842,9 @@ void main() {
       AppointmentStatus.completed,
       AppointmentStatus.burned,
     ]) {
-      testWidgets('${status.label} randevu sürüklenemez; nedeni söylenir',
-          (WidgetTester tester) async {
+      testWidgets(
+          '${status.label} randevu sürüklenemez; fareyle sürüklenince de '
+          'basılı tutulunca da nedeni söylenir', (WidgetTester tester) async {
         final _FakeAppointmentManager manager = await _pumpPage(
             tester, [_appointment(_at(_weekDay(0), 10), status: status)]);
         final Finder card = find.textContaining('10:00-10:30 Ali Veli');
@@ -824,9 +856,17 @@ void main() {
         await mouse.moveBy(const Offset(0, 120));
         await tester.pump();
         expect(find.textContaining('10:50-11:20'), findsNothing);
+        expect(find.text(_notDraggableTitle), findsNothing);
         await mouse.up();
         await tester.pumpAndSettle();
+        expect(find.text(_notDraggableTitle), findsOneWidget);
+        expect(find.textContaining('“${status.label}” durumundaki'),
+            findsOneWidget);
         expect(find.byType(RescheduleAppointmentDialog), findsNothing);
+        expect(find.byType(EditAppointmentDialog), findsNothing);
+        await tester.tap(find.text('Tamam'));
+        await tester.pumpAndSettle();
+        expect(find.text(_notDraggableTitle), findsNothing);
 
         final TestGesture touch =
             await tester.startGesture(tester.getCenter(card));
@@ -842,7 +882,42 @@ void main() {
             findsOneWidget);
         expect(find.byType(RescheduleAppointmentDialog), findsNothing);
         expect(manager.moves, isEmpty);
-      });
+      }, variant: TargetPlatformVariant.all());
+
+      testWidgets(
+          '${status.label} randevuda tıklarken birkaç piksel kayan fare '
+          'düzenlemeyi açar, uyarı göstermez', (WidgetTester tester) async {
+        await _pumpPage(
+            tester, [_appointment(_at(_weekDay(0), 10), status: status)]);
+
+        final TestGesture mouse = await tester.startGesture(
+          tester.getCenter(find.textContaining('10:00-10:30 Ali Veli')),
+          kind: PointerDeviceKind.mouse,
+        );
+        await mouse.moveBy(const Offset(3, 2));
+        await tester.pump();
+        await mouse.up();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(EditAppointmentDialog), findsOneWidget);
+        expect(find.text(_notDraggableTitle), findsNothing);
+      }, variant: TargetPlatformVariant.all());
+
+      testWidgets('${status.label} randevuya fareyle tıklamak düzenlemeyi açar',
+          (WidgetTester tester) async {
+        await _pumpPage(
+            tester, [_appointment(_at(_weekDay(0), 10), status: status)]);
+
+        final TestGesture mouse = await tester.startGesture(
+          tester.getCenter(find.textContaining('10:00-10:30 Ali Veli')),
+          kind: PointerDeviceKind.mouse,
+        );
+        await mouse.up();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(EditAppointmentDialog), findsOneWidget);
+        expect(find.text(_notDraggableTitle), findsNothing);
+      }, variant: TargetPlatformVariant.all());
     }
   });
 
@@ -874,6 +949,79 @@ void main() {
       expect(_card('10:30-11:00 Ali Veli'), findsNothing);
       expect(tester.takeException(), isNull);
     }, variant: TargetPlatformVariant.all());
+  });
+
+  group('Mac ve iPad (fare, izleme dörtgeni)', () {
+    const TargetPlatformVariant applePlatforms = TargetPlatformVariant(
+        <TargetPlatform>{TargetPlatform.macOS, TargetPlatform.iOS});
+
+    testWidgets(
+        'sayfa uygulamadaki gibi açıldığında imleç kartın üstüne gelip '
+        'küçük adımlarla sürükleyince randevu taşınır, sayfa geri kaymaz',
+        (WidgetTester tester) async {
+      final _FakeAppointmentManager manager = await _pumpPage(
+          tester, [_appointment(_at(_weekDay(0), 10))],
+          asPushedRoute: true);
+      final double columnWidth = _columnWidth(tester);
+      final Rect card = tester.getRect(_card('10:00-10:30 Ali Veli'));
+      final Offset grab = Offset(card.left + 2, card.center.dy);
+
+      final TestGesture mouse =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: const Offset(700, 500));
+      await mouse.moveTo(grab - const Offset(0, 30));
+      await tester.pump();
+      await mouse.moveTo(grab);
+      await tester.pump();
+      await mouse.down(grab);
+      await tester.pump(const Duration(milliseconds: 30));
+      const int steps = 100;
+      final Offset step =
+          Offset(2 * columnWidth / steps, 60 * kPixelsPerMinute / steps);
+      for (int i = 0; i < steps; i++) {
+        await mouse.moveBy(step);
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(_card('11:00-11:30 Ali Veli'), findsOneWidget);
+      await mouse.up();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdminAppointmentsPage), findsOneWidget);
+      expect(find.byType(RescheduleAppointmentDialog), findsOneWidget);
+      await _choose(tester, _deductOption);
+      await _confirmMove(tester);
+
+      expect(manager.moves, <_Move>[
+        (id: 'a1', newStart: _at(_weekDay(2), 11), deductRight: true),
+      ]);
+      expect(_card('11:00-11:30 Ali Veli $kPostponedMark'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }, variant: applePlatforms);
+
+    testWidgets(
+        'kartın üstünde iki parmakla kaydırmak sayfayı kaydırır, randevuyu '
+        'taşımaz', (WidgetTester tester) async {
+      final _FakeAppointmentManager manager = await _pumpPage(
+          tester, [_appointment(_at(_weekDay(0), 10))],
+          asPushedRoute: true);
+      final Offset onCard = tester.getCenter(_card('10:00-10:30 Ali Veli'));
+      expect(_scrollPosition(tester).pixels, 0);
+
+      final TestGesture trackpad =
+          await tester.createGesture(kind: PointerDeviceKind.trackpad);
+      await trackpad.panZoomStart(onCard);
+      for (int i = 1; i <= 10; i++) {
+        await trackpad.panZoomUpdate(onCard, pan: Offset(0, -30.0 * i));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await trackpad.panZoomEnd();
+      await tester.pumpAndSettle();
+
+      expect(_scrollPosition(tester).pixels, greaterThan(100));
+      expect(find.byType(RescheduleAppointmentDialog), findsNothing);
+      expect(find.byType(EditAppointmentDialog), findsNothing);
+      expect(manager.moves, isEmpty);
+    }, variant: applePlatforms);
   });
 
   testWidgets('sürükleme ipucu sayfada yazar', (WidgetTester tester) async {
