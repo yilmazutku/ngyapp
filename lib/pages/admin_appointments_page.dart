@@ -167,6 +167,7 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
   _GridLayout _gridLayout =
       const _GridLayout(days: <DateTime>[], headerHeight: kDayHeaderHeight);
   _AppointmentDrag? _drag;
+  _PointerTravel? _refusedDrag;
   EdgeDraggingAutoScroller? _autoScroller;
   bool _refreshingInPlace = false;
 
@@ -980,9 +981,20 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       context,
       title: _notDraggableTitle,
       message: '“${appt.status.label}” durumundaki randevular sürüklenerek '
-          'taşınamaz. Tarihini ya da saatini değiştirmek için randevuya '
-          'dokunup düzenleyin.',
+          'taşınamaz. Tarihini ya da saatini değiştirmek için randevuyu '
+          'açıp düzenleyin.',
     );
+  }
+
+  void _endRefusedDrag(AppointmentModel appt) {
+    final _PointerTravel? travel = _refusedDrag;
+    _refusedDrag = null;
+    if (travel == null) return;
+    if (travel.distance <= kDragClickSlop) {
+      _showEditAppointmentDialog(context, appt);
+    } else {
+      _explainNotDraggable(appt);
+    }
   }
 
   /// Lays out a day's meetings AND "Diğer" events with a Google-Calendar–style
@@ -1219,7 +1231,17 @@ class _AdminAppointmentsPageState extends State<AdminAppointmentsPage> {
       return GestureDetector(
         onTap: () => _showEditAppointmentDialog(context, appt),
         onLongPress: () => _explainNotDraggable(appt),
-        child: face,
+        child: GestureDetector(
+          supportedDevices: const <PointerDeviceKind>{PointerDeviceKind.mouse},
+          dragStartBehavior: DragStartBehavior.down,
+          onPanStart: (DragStartDetails details) =>
+              _refusedDrag = _PointerTravel(details.globalPosition),
+          onPanUpdate: (DragUpdateDetails details) =>
+              _refusedDrag?.moveTo(details.globalPosition),
+          onPanEnd: (_) => _endRefusedDrag(appt),
+          onPanCancel: () => _refusedDrag = null,
+          child: face,
+        ),
       );
     }
     return MouseRegion(
@@ -2106,22 +2128,34 @@ class _AppointmentDrag {
     required this.grabDy,
     required this.pointer,
     required this.isClickCandidate,
-  }) : _origin = pointer;
+  }) : _travel = _PointerTravel(pointer);
 
   final AppointmentModel appointment;
   final DateTime originalStart;
   final double cardHeight;
   final double grabDy;
   final bool isClickCandidate;
-  final Offset _origin;
+  final _PointerTravel _travel;
   Offset pointer;
-  double travelled = 0;
+
+  double get travelled => _travel.distance;
 
   int get originalMinutes => originalStart.hour * 60 + originalStart.minute;
 
   void moveTo(Offset position) {
     pointer = position;
-    travelled = math.max(travelled, (position - _origin).distance);
+    _travel.moveTo(position);
+  }
+}
+
+class _PointerTravel {
+  _PointerTravel(this._origin);
+
+  final Offset _origin;
+  double distance = 0;
+
+  void moveTo(Offset position) {
+    distance = math.max(distance, (position - _origin).distance);
   }
 }
 
