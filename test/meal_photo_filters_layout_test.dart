@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ngy_app/models/meal_model.dart';
 import 'package:ngy_app/pages/admin_meal_photos_page.dart';
+import 'package:ngy_app/widgets/count_badge.dart';
 import 'package:ngy_app/widgets/filter_chip_group.dart';
 import 'package:ngy_app/widgets/search_field.dart';
 
@@ -46,6 +47,7 @@ class _FiltersHostState extends State<_FiltersHost> {
             searchController: _controller,
             searchLabel: 'Danışan ara (ad soyad / e-posta)',
             onSearchChanged: (_) {},
+            activeFilterCount: (meal != null ? 1 : 0) + (unreactedOnly ? 1 : 0),
             filters: [
               FilterChipGroup<Meals>(
                 key: const ValueKey('meal'),
@@ -94,30 +96,63 @@ Future<void> _tapChip(WidgetTester tester, String label) async {
   await tester.pump();
 }
 
+Future<void> _toggleFiltersPanel(WidgetTester tester) async {
+  await tester.tap(find.text(MealPhotoFiltersLayout.filtersLabel));
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  const ValueKey<String> mealKey = ValueKey('meal');
+  const ValueKey<String> reactionKey = ValueKey('reaction');
+
   for (final double width in const [360.0, 393.0, 430.0]) {
-    testWidgets('filters stack vertically without overflow at $width dp',
-        (tester) async {
+    testWidgets(
+        'dar ekranda filtreler kapalı başlar, "Filtreler" kutusuna dokununca '
+        'aramanın altında taşmadan açılır ($width dp)', (tester) async {
       await _pumpAt(tester, width);
       expect(tester.takeException(), isNull);
 
-      final Rect search = tester.getRect(find.byType(SearchField));
-      final Rect meals = tester.getRect(find.byKey(const ValueKey('meal')));
-      final Rect reactions =
-          tester.getRect(find.byKey(const ValueKey('reaction')));
       final double available = width - 2 * _sidePadding;
+      final Rect search = tester.getRect(find.byType(SearchField));
+      final Rect panel = tester.getRect(find.byType(ExpansionTile));
 
-      // Tam genişlikte arama, altında öğün, onun altında ifade filtresi.
+      // Tam genişlikte arama, hemen altında aynı genişlikte "Filtreler"
+      // kutusu; filtreler ve seçili filtre rozeti görünmez.
       expect(search.width, moreOrLessEquals(available));
-      expect(meals.width, moreOrLessEquals(available));
-      expect(reactions.width, moreOrLessEquals(available));
-      expect(meals.top, greaterThanOrEqualTo(search.bottom));
+      expect(panel.width, moreOrLessEquals(available));
+      expect(panel.top, greaterThanOrEqualTo(search.bottom));
+      expect(find.byKey(mealKey), findsNothing);
+      expect(find.byKey(reactionKey), findsNothing);
+      expect(find.byType(CountBadge), findsNothing);
+
+      await _toggleFiltersPanel(tester);
+      expect(tester.takeException(), isNull);
+
+      // Kutunun içinde, "Filtreler" satırının altında öğün, onun altında
+      // ifade filtresi.
+      final Rect openPanel = tester.getRect(find.byType(ExpansionTile));
+      final Rect header = tester.getRect(
+        find.descendant(
+          of: find.byType(ExpansionTile),
+          matching: find.byType(ListTile),
+        ),
+      );
+      final Rect meals = tester.getRect(find.byKey(mealKey));
+      final Rect reactions = tester.getRect(find.byKey(reactionKey));
+      expect(openPanel.top, moreOrLessEquals(panel.top));
+      expect(meals.top, greaterThanOrEqualTo(header.bottom));
       expect(reactions.top, greaterThanOrEqualTo(meals.bottom));
+      for (final Rect group in [meals, reactions]) {
+        expect(group.left, greaterThan(openPanel.left));
+        expect(group.right, lessThan(openPanel.right));
+        expect(group.bottom, lessThanOrEqualTo(openPanel.bottom));
+      }
 
       final _FiltersHostState host =
           tester.state<_FiltersHostState>(find.byType(_FiltersHost));
 
-      // Sığmayan seçenekler yatay kaydırılarak seçilir.
+      // Sığmayan seçenekler yatay kaydırılarak seçilir; seçim sonrası
+      // yeniden çizimde kutu açık kalır.
       for (final Meals option in _mealOptions.reversed) {
         await _tapChip(tester, option.displayLabel);
         expect(host.meal, option);
@@ -126,6 +161,20 @@ void main() {
       await _tapChip(tester, 'İfade bırakılmayanlar');
       expect(host.unreactedOnly, isTrue);
       expect(tester.takeException(), isNull);
+
+      // Kutu kapanınca filtreler gizlenir; seçili iki filtre rozette kalır.
+      await _toggleFiltersPanel(tester);
+      expect(find.byKey(mealKey), findsNothing);
+      expect(find.byKey(reactionKey), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(CountBadge),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+      expect(host.meal, Meals.br);
+      expect(host.unreactedOnly, isTrue);
     });
   }
 
@@ -134,10 +183,12 @@ void main() {
     await _pumpAt(tester, 1280);
     expect(tester.takeException(), isNull);
 
+    // Geniş ekranda filtreler hep açık; "Filtreler" kutusu yok.
+    expect(find.text(MealPhotoFiltersLayout.filtersLabel), findsNothing);
+
     final Rect search = tester.getRect(find.byType(SearchField));
-    final Rect meals = tester.getRect(find.byKey(const ValueKey('meal')));
-    final Rect reactions =
-        tester.getRect(find.byKey(const ValueKey('reaction')));
+    final Rect meals = tester.getRect(find.byKey(mealKey));
+    final Rect reactions = tester.getRect(find.byKey(reactionKey));
 
     expect(search.width, moreOrLessEquals(SearchField.defaultMaxWidth));
     expect(meals.left, greaterThan(search.right));
