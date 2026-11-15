@@ -17,6 +17,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/menu_utils.dart';
 import '../utils/search_text.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/count_badge.dart';
 import '../widgets/filter_chip_group.dart';
 import '../widgets/labeled_action_button.dart';
 import '../widgets/meal_image_card.dart';
@@ -1085,8 +1086,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
       ),
       // Üst alan (başlık, uyarı, filtreler) sayfanın en fazla bir kısmını
       // kaplar, sığmazsa kendi içinde kayar: telefonda klavye açıkken de sonuç
-      // listesine yer kalır. Klavye kapalıyken sınır gevşektir, filtreler
-      // telefonda da kaydırmadan görünür.
+      // listesine yer kalır. Klavye kapalıyken sınır gevşektir, telefonda
+      // açılan filtreler de kaydırmadan görünür.
       body: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
@@ -1259,6 +1260,8 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
           _searchQuery = value;
           _applyFilters();
         }),
+        activeFilterCount:
+            (_mealFilter != null ? 1 : 0) + (_unreactedOnly ? 1 : 0),
         filters: [
           FilterChipGroup<Meals>(
             title: _mealFilterTitle,
@@ -1365,15 +1368,29 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
 }
 
 /// Arama kutusu ve filtre gruplarının yerleşimi. Geniş ekranda arama solda,
-/// filtreler sağda; dar ekranda (telefon) yan yana sığmazlar: tam genişlikte
-/// arama, altında filtreler alt alta (seçenekleri yatay kayar).
+/// filtreler sağda ve hep açık. Dar ekranda (telefon) yan yana sığmazlar:
+/// tam genişlikte arama, hemen altında "Filtreler" kutusu. Filtreler
+/// varsayılan olarak kapalıdır, kutuya dokununca kutunun içinde alt alta
+/// açılır (seçenekleri yatay kayar); böylece sonuç listesine yer kalır.
 class MealPhotoFiltersLayout extends StatelessWidget {
   /// Bu genişliğin altında alanlar alt alta dizilir.
   static const double narrowBreakpoint = 600.0;
 
+  /// Dar ekranda filtreleri açıp kapatan kutunun yazısı.
+  static const String filtersLabel = 'Filtreler';
+
   static const double _searchGap = 24.0;
   static const double _stackedSearchGap = 12.0;
   static const double _filterGap = 8.0;
+
+  /// Filtre kutusunun iç kenar boşluğu: simge ve yazı, üstteki arama
+  /// kutusunun büyüteci ve etiketiyle aynı hizaya gelir.
+  static const double _panelPadding = 12.0;
+
+  /// Filtre kutusunun köşesi; arama kutusunun çerçevesiyle
+  /// ([OutlineInputBorder]) aynı.
+  static const BorderRadius _panelRadius =
+      BorderRadius.all(Radius.circular(4.0));
 
   final TextEditingController searchController;
   final String searchLabel;
@@ -1382,12 +1399,18 @@ class MealPhotoFiltersLayout extends StatelessWidget {
   /// Filtre grupları; üstten alta bu sırayla dizilir.
   final List<Widget> filters;
 
+  /// "Tümü" dışında seçili filtre sayısı. Dar ekranda "Filtreler" yazısının
+  /// yanında rozet olarak görünür: kutu kapalıyken de listenin süzüldüğü
+  /// fark edilsin.
+  final int activeFilterCount;
+
   const MealPhotoFiltersLayout({
     super.key,
     required this.searchController,
     required this.searchLabel,
     required this.onSearchChanged,
     required this.filters,
+    this.activeFilterCount = 0,
   });
 
   @override
@@ -1408,12 +1431,6 @@ class MealPhotoFiltersLayout extends StatelessWidget {
           ],
         ];
 
-        final Widget filtersColumn = Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: filterChildren,
-        );
-
         // İki düzen de aynı Flex'tir ve arama hep ilk çocuktur: ekran
         // döndürülünce ya da pencere eşiği geçince arama kutusu yeniden
         // kurulmaz, odak ve klavye kaybolmaz.
@@ -1428,10 +1445,62 @@ class MealPhotoFiltersLayout extends StatelessWidget {
               width: narrow ? 0 : _searchGap,
               height: narrow ? _stackedSearchGap : 0,
             ),
-            if (narrow) filtersColumn else Expanded(child: filtersColumn),
+            if (narrow)
+              _buildCollapsibleFilters(context, filterChildren)
+            else
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: filterChildren,
+                ),
+              ),
           ],
         );
       },
+    );
+  }
+
+  /// Dar ekrandaki "Filtreler" kutusu: kapalı başlar, dokununca filtreler
+  /// kutunun içinde aşağı açılır, yeniden dokununca kapanır.
+  Widget _buildCollapsibleFilters(
+    BuildContext context,
+    List<Widget> filterChildren,
+  ) {
+    final ShapeBorder border = RoundedRectangleBorder(
+      side: BorderSide(color: Theme.of(context).colorScheme.outline),
+      borderRadius: _panelRadius,
+    );
+
+    return ExpansionTile(
+      shape: border,
+      collapsedShape: border,
+      minTileHeight: kMinInteractiveDimension,
+      tilePadding: const EdgeInsets.symmetric(horizontal: _panelPadding),
+      childrenPadding: const EdgeInsets.fromLTRB(
+        _panelPadding,
+        0,
+        _panelPadding,
+        _panelPadding,
+      ),
+      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+      leading: const Icon(Icons.filter_alt_outlined),
+      title: Row(
+        children: [
+          const Flexible(
+            child: Text(
+              filtersLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (activeFilterCount > 0) ...[
+            const SizedBox(width: _filterGap),
+            CountBadge(count: activeFilterCount),
+          ],
+        ],
+      ),
+      children: filterChildren,
     );
   }
 }
