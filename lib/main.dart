@@ -207,13 +207,20 @@ class MyApp extends StatelessWidget {
         child: MaterialApp(
           navigatorKey: navKey, // <-- IMPORTANT for notification tap navigation
           debugShowCheckedModeBanner: false,
+          // The update check sits above the navigator rather than in front of
+          // the auth flow: AuthWrapper is built immediately and restores the
+          // saved session while the check runs, so neither one waits on the
+          // other.
           // Tapping anywhere outside a text field closes the keyboard, on every
           // screen. Done once here rather than per page: a field that forgets it
           // leaves the on-screen keyboard covering the page with no way back.
-          builder: (context, child) => GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-            child: child,
+          builder: (context, child) => AppUpdateGate(
+            navigatorKey: navKey,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+              child: child,
+            ),
           ),
           theme: ThemeData(
             primarySwatch: Colors.purple,
@@ -251,10 +258,7 @@ class MyApp extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          // The update check sits above the auth flow rather than in front of
-          // it: AuthWrapper is built immediately and restores the saved
-          // session while the check runs, so neither one waits on the other.
-          home: const AppUpdateGate(child: AuthWrapper()),
+          home: const AuthWrapper(),
         ),
       ),
     );

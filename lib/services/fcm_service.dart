@@ -43,8 +43,8 @@ class FcmService {
     return _messagingInstance!;
   }
   
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  late final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  late final FirebaseAuth _auth = FirebaseAuth.instance;
 
   /// Registered once. saveFcmToken() runs again on every login, so subscribing
   /// from there stacked a new listener per login and wrote the refreshed token
