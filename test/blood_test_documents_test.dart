@@ -207,8 +207,8 @@ void main() {
       }
     }
 
-    test('paketi bitmiş danışana kurulmaz, aktif paket eklenince kurulur',
-        () async {
+    test('paketi bitmiş ya da dondurulmuş danışana kurulmaz, paket aktif '
+        'olunca kurulur', () async {
       final DateTime testDate = daysAgo(10);
       await setPackages('completed');
       await seed('k1', bloodTest(testDate), uploadedAt: DateTime(2026, 1, 6));
@@ -221,6 +221,13 @@ void main() {
       expect(await presence(), isTrue);
 
       await setPackages('frozen');
+      final BloodTestReminderSync? frozen =
+          await bloodTests.refreshRemindersOf(customer);
+      expect(frozen!.remindersAllowed, isFalse);
+      expect(frozen.remindFor, isNull);
+      expect(await reminderIds(), isEmpty);
+
+      await setPackages('active');
       final BloodTestReminderSync? refreshed =
           await bloodTests.refreshRemindersOf(customer);
       expect(refreshed!.remindersAllowed, isTrue);
@@ -255,6 +262,11 @@ void main() {
       changes.add(customer);
       await pumpEventQueue();
       expect(await reminderIds(), hasLength(2));
+
+      await setPackages('frozen');
+      changes.add(customer);
+      await pumpEventQueue();
+      expect(await reminderIds(), isEmpty);
     });
   });
 

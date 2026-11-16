@@ -77,8 +77,7 @@ class _TestsTabState extends State<TestsTab>
     final BloodTestProvider bloodTests =
         Provider.of<BloodTestProvider>(context, listen: false);
     try {
-      final bool available =
-          await bloodTests.isListedInCustomerSummary(widget.userId);
+      final bool available = await bloodTests.hasActivePackage(widget.userId);
       if (!mounted || available == _remindersAvailable) return;
       setState(() => _remindersAvailable = available);
     } catch (e) {
@@ -270,8 +269,8 @@ class _TestsTabState extends State<TestsTab>
     final DateTime now = DateTime.now();
     if (edited != null && edited.wantsReminder && !sync.remindersAllowed) {
       notes.add('Danışanın aktif paketi olmadığı için 3 ay hatırlatması '
-          'kurulmadı; danışana aktif ya da dondurulmuş bir paket eklenince '
-          'kendiliğinden kurulur.');
+          'kurulmadı; danışanın aktif bir paketi olunca kendiliğinden '
+          'kurulur.');
       return notes;
     }
     if (edited != null && edited.wantsReminder) {

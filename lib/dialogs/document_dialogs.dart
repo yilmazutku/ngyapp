@@ -511,8 +511,8 @@ class _BloodTestFields extends StatelessWidget {
       '3 ay sonra hatırlatıcı istiyor musunuz?';
   static const int _maxKnownDates = 4;
   static const String _noActivePackageNote = 'Danışanın şu an aktif paketi '
-      'yok (Danışanlar Özet\'te görünmüyor). 3 ay hatırlatması, danışana '
-      'aktif ya da dondurulmuş bir paket eklenince kendiliğinden kurulur.';
+      'yok (dondurulmuş ya da tamamlanmış paket aktif sayılmaz). 3 ay '
+      'hatırlatması, danışanın aktif bir paketi olunca kendiliğinden kurulur.';
 
   final DateTime? testDate;
   final bool wantsReminder;
