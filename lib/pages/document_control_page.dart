@@ -51,8 +51,8 @@ class _DocumentControlPageState extends State<DocumentControlPage> {
   static const String _searchLabel = 'Danışan ara (ad soyad)';
   static const String _noMatchText = 'Bu seçimde danışan yok.';
   static const String _notCheckedText =
-      'Henüz kontrol yapılmadı. "Kan tahlillerini kontrol et"e basınca bütün '
-      'danışanlar tahlil tarihleriyle listelenir.';
+      'Henüz kontrol yapılmadı. "Kan tahlillerini kontrol et"e basınca aktif '
+      'paketi olan danışanlar tahlil tarihleriyle listelenir.';
 
   late final BloodTestProvider _bloodTests =
       Provider.of<BloodTestProvider>(context, listen: false);
@@ -246,7 +246,8 @@ class _CheckCard extends StatelessWidget {
                       ),
                       SizedBox(height: 4),
                       Text(
-                        'Bütün danışanların kan tahlili tarihlerini kontrol '
+                        'Aktif paketi (Aktif/Haftalık ya da Aktif/Kilo Takip) '
+                        'olan danışanların kan tahlili tarihlerini kontrol '
                         'eder. Üzerinden 3 ay geçen tahliller ve eklenmesinin '
                         'üzerinden 1 hafta geçtiği hâlde ilk tahlili '
                         'yüklenmeyen danışanlar en üstte listelenir.',

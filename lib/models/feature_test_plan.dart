@@ -237,8 +237,8 @@ const List<FeatureTestSection> featureTestSections = [
       ),
       FeatureTestStep(
         'kan.pasif',
-        'Paketi "Tamamlandı" olan (Danışanlar Özet\'te görünmeyen) bir danışana hatırlatıcı açık kan tahlili yükleyin; sonra Paket sekmesinden ona aktif bir paket ekleyin.',
-        'Önce hatırlatma kurulmaz: pencere ve bilgi mesajı aktif paket olmadığını söyler, satırda gri "Hatırlatma yok: aktif paket yok" rozeti çıkar. Paket eklenince hatırlatma kendiliğinden kurulur ("Bekleyen hatırlatmalar"da görünür); paket yeniden "Tamamlandı" yapılınca bekleyenler kalkar.',
+        'Paketi "Donduruldu" ya da "Tamamlandı" olan (aktif paketi olmayan) bir danışana hatırlatıcı açık kan tahlili yükleyin; sonra Paket sekmesinden paketini aktif yapın ya da ona aktif bir paket ekleyin.',
+        'Önce hatırlatma kurulmaz: pencere ve bilgi mesajı aktif paket olmadığını söyler, satırda gri "Hatırlatma yok: aktif paket yok" rozeti çıkar. Paket aktif olunca hatırlatma kendiliğinden kurulur ("Bekleyen hatırlatmalar"da görünür); paket yeniden "Donduruldu" ya da "Tamamlandı" yapılınca bekleyenler kalkar.',
       ),
       FeatureTestStep(
         'kan.normal',
@@ -284,7 +284,7 @@ const List<FeatureTestSection> featureTestSections = [
       FeatureTestStep(
         'dokuman.kontrol',
         '"Kan tahlillerini kontrol et"e basın.',
-        'İlerleme gösterilir; bitince bütün danışanlar listelenir. En üstte "Gecikmiş" olanlar (3 ayı dolan ya da 1 haftadır ilk tahlili yüklenmeyen), en çok geciken en üstte.',
+        'İlerleme gösterilir; bitince aktif paketi (Aktif/Haftalık ya da Aktif/Kilo Takip) olan danışanlar listelenir; paketi dondurulmuş, tamamlanmış ya da hiç paketi olmayanlar listede yoktur. En üstte "Gecikmiş" olanlar (3 ayı dolan ya da 1 haftadır ilk tahlili yüklenmeyen), en çok geciken en üstte.',
       ),
       FeatureTestStep(
         'dokuman.kart',
@@ -334,6 +334,11 @@ const List<FeatureTestSection> featureTestSections = [
         'tarama.yukle',
         'Listedeki bir danışana Kan Tahlili sekmesinden tarihli bir kan tahlili yükleyip önizlemeyi yenileyin.',
         'Danışan listeden çıkar; Detay\'da "Yüklü" yazar.',
+      ),
+      FeatureTestStep(
+        'tarama.aktif',
+        'Kan tahlili olmayan, eklenmesinin üzerinden 1 haftadan fazla geçmiş ve paketi "Donduruldu" olan bir danışanla önizlemeye bakın; sonra paketini "Aktif/Haftalık" yapıp önizlemeyi yenileyin.',
+        'Paketi dondurulmuşken listede yoktur (Doküman Kontrol\'de de görünmez); paketi aktif olunca listeye girer. Yalnızca aktif paketi (Aktif/Haftalık ya da Aktif/Kilo Takip) olan danışanlar taranır.',
       ),
       FeatureTestStep(
         'tarama.eski',

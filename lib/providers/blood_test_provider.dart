@@ -47,9 +47,9 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _subscriptionsCollection = 'subscriptions';
   static const String _subscriptionStatusField = 'status';
 
-  static final List<String> _listedSubscriptionStatuses = [
+  static final List<String> _activeSubscriptionStatuses = [
     for (final SubActiveStatus status in SubActiveStatus.values)
-      if (status.isListedInCustomerSummary) status.label,
+      if (status.isActive) status.label,
   ];
 
   static const String _stateCollection = 'adminState';
@@ -57,6 +57,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _presenceInitializedAtField = 'presenceInitializedAt';
   static const String _presenceFromDocumentsAtField = 'presenceFromDocumentsAt';
   static const String _lastScanDayField = 'lastScanDay';
+  static const String _activePackageScanDayField = 'activePackageScanDay';
   static const String _lastScanAtField = 'lastScanAt';
   static const String _lastScanByField = 'lastScanBy';
 
@@ -86,7 +87,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       userId: userId,
       userName: userName,
       testDates: TestAttachment.reminderWishesOf(bloodTests),
-      remindersAllowed: await isListedInCustomerSummary(userId),
+      remindersAllowed: await hasActivePackage(userId),
     );
     await setBloodTestPresent(userId: userId, present: sync.hasBloodTests);
     return sync;
@@ -119,8 +120,8 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       await Future.wait([
         for (final String userId
             in userIds.skip(start).take(_checkConcurrency))
-          isListedInCustomerSummary(userId).then((bool listed) async {
-            if (!listed) await refreshRemindersOf(userId);
+          hasActivePackage(userId).then((bool active) async {
+            if (!active) await refreshRemindersOf(userId);
           }),
       ]);
     }
@@ -277,7 +278,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     final DocumentSnapshot<Map<String, dynamic>> stateSnapshot =
         await _stateDoc.get(const GetOptions(source: Source.server));
     final Map<String, dynamic> state = stateSnapshot.data() ?? const {};
-    if (!force && state[_lastScanDayField] == today) return null;
+    if (!force && state[_activePackageScanDayField] == today) return null;
 
     final Object? initializedAt = state[_presenceInitializedAtField];
     if (initializedAt is! Timestamp) {
@@ -317,6 +318,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     await _notifications.rescheduleBloodTestReminders(now);
     await _stateDoc.set({
       _lastScanDayField: today,
+      _activePackageScanDayField: today,
       _lastScanAtField: FieldValue.serverTimestamp(),
       _lastScanByField: uid,
     }, SetOptions(merge: true));
@@ -410,38 +412,38 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     ];
     final List<NotificationCustomer> missing = [
       for (final _CustomerRecord record
-          in await _onlyListedInCustomerSummary(candidates))
+          in await _onlyWithActivePackage(candidates))
         _notificationCustomerOf(record.user),
     ];
     missing.sort((a, b) => compareSearchText(a.name, b.name));
     return missing;
   }
 
-  Future<bool> isListedInCustomerSummary(String userId) async {
+  Future<bool> hasActivePackage(String userId) async {
     final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
         .doc(userId)
         .collection(_subscriptionsCollection)
-        .where(_subscriptionStatusField, whereIn: _listedSubscriptionStatuses)
+        .where(_subscriptionStatusField, whereIn: _activeSubscriptionStatuses)
         .limit(1)
         .get();
     return snapshot.docs.isNotEmpty;
   }
 
-  Future<List<_CustomerRecord>> _onlyListedInCustomerSummary(
+  Future<List<_CustomerRecord>> _onlyWithActivePackage(
       List<_CustomerRecord> records) async {
-    final List<_CustomerRecord> listed = [];
+    final List<_CustomerRecord> active = [];
     for (int start = 0; start < records.length; start += _checkConcurrency) {
       final List<_CustomerRecord> chunk =
           records.skip(start).take(_checkConcurrency).toList();
       final List<bool> flags = await Future.wait([
         for (final _CustomerRecord record in chunk)
-          isListedInCustomerSummary(record.user.userId),
+          hasActivePackage(record.user.userId),
       ]);
       for (int i = 0; i < chunk.length; i++) {
-        if (flags[i]) listed.add(chunk[i]);
+        if (flags[i]) active.add(chunk[i]);
       }
     }
-    return listed;
+    return active;
   }
 
   Future<BloodTestScanPreview> previewScan({required DateTime at}) async {
@@ -455,7 +457,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       for (final _CustomerRecord record in records)
         if (!record.presenceRecorded) record,
     ].length;
-    final List<_CustomerRecord> candidates = await _onlyListedInCustomerSummary([
+    final List<_CustomerRecord> candidates = await _onlyWithActivePackage([
       for (final _CustomerRecord record in records)
         if (missingBloodTestListedFrom(
               record.user,
@@ -541,7 +543,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           customers.skip(start).take(_checkConcurrency).toList();
       final List<BloodTestStatus?> results = await Future.wait([
         for (final _CustomerRecord customer in chunk)
-          _statusIfListed(customer, now),
+          _statusIfActive(customer, now),
       ]);
       statuses.addAll(results.whereType<BloodTestStatus>());
       checked += chunk.length;
@@ -555,11 +557,11 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     return report;
   }
 
-  Future<BloodTestStatus?> _statusIfListed(
+  Future<BloodTestStatus?> _statusIfActive(
     _CustomerRecord customer,
     DateTime now,
   ) async {
-    if (!await isListedInCustomerSummary(customer.user.userId)) return null;
+    if (!await hasActivePackage(customer.user.userId)) return null;
     return _statusOf(customer.user, customer.createdAt, now);
   }
 

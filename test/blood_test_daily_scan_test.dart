@@ -120,7 +120,7 @@ void main() {
     await addUser('dogru', createDate: old, present: true);
     await addBloodTest('dogru', now.subtract(const Duration(days: 40)));
     await addUser('diger', createDate: old, present: true);
-    await addSubscription('diger', status: 'frozen');
+    await addSubscription('diger', status: 'active_kt');
     await db.collection('users').doc('diger').collection('tests').add({
       'fileName': 'diyet.pdf',
       'isBloodTest': false,
@@ -138,8 +138,9 @@ void main() {
     expect((await userData('elle'))['isBloodTestPresent'], isTrue);
   });
 
-  test('yalnızca Danışanlar Özet\'te görünen danışanlar taranır: aktif, '
-      'kilo takip ve dondurulmuş paketi olanlar', () async {
+  test('yalnızca aktif paketi (Aktif/Haftalık ya da Aktif/Kilo Takip) olan '
+      'danışanlar taranır; dondurulmuş, tamamlanmış ve paketsiz danışanlar '
+      'taranmaz', () async {
     final DateTime now = DateTime.now();
     final DateTime old = now.subtract(const Duration(days: 60));
     await addUser('haftalik', name: 'Haftalık', surname: 'Paket',
@@ -156,29 +157,38 @@ void main() {
     await addUser('paketsiz', name: 'Paketsiz', surname: 'Danışan',
         createDate: old);
 
-    expect(await provider.runDailyScan(uid: admin, now: now), 3);
+    final BloodTestScanPreview preview = await provider.previewScan(at: now);
+    expect(preview.missing.map((c) => c.userId), ['haftalik', 'kilo']);
+    expect(preview.waiting, isEmpty);
+
+    expect(await provider.runDailyScan(uid: admin, now: now), 2);
     final AdminNotification digest = AdminNotification.fromDocument(await db
         .collection(AdminNotificationsProvider.collectionName)
         .doc(AdminNotification.missingBloodTestsId(
             DateFormatter.formatIsoDate(now)))
         .get())!;
-    expect(digest.customers.map((c) => c.userId),
-        ['dondu', 'haftalik', 'kilo']);
+    expect(digest.customers.map((c) => c.userId), ['haftalik', 'kilo']);
 
     final BloodTestReport report = await provider.checkAllCustomers(now: now);
     expect(report.statuses.map((s) => s.customer.userId),
-        unorderedEquals(['dondu', 'haftalik', 'kilo']));
+        unorderedEquals(['haftalik', 'kilo']));
+
+    expect(await provider.hasActivePackage('haftalik'), isTrue);
+    expect(await provider.hasActivePackage('kilo'), isTrue);
+    expect(await provider.hasActivePackage('dondu'), isFalse);
+    expect(await provider.hasActivePackage('bitti'), isFalse);
+    expect(await provider.hasActivePackage('paketsiz'), isFalse);
   });
 
-  test('günlük tarama paketi bitmiş danışanların bekleyen 3 ay '
-      'hatırlatmalarını siler', () async {
+  test('günlük tarama paketi bitmiş ya da dondurulmuş danışanların bekleyen '
+      '3 ay hatırlatmalarını siler', () async {
     final DateTime now = DateTime.now();
     final DateTime old = now.subtract(const Duration(days: 60));
     final AdminNotificationsProvider notifications =
         AdminNotificationsProvider(db: db, currentUid: () => admin);
     addTearDown(notifications.dispose);
     final DateTime testDate = DateTime(now.year, now.month, now.day - 10);
-    for (final String id in ['aktif', 'bitmis']) {
+    for (final String id in ['aktif', 'kilo', 'bitmis', 'dondu']) {
       await addUser(id, createDate: old, present: true);
       await addBloodTest(id, testDate);
       await notifications.syncBloodTestReminders(
@@ -188,14 +198,59 @@ void main() {
       );
     }
     await addSubscription('aktif');
+    await addSubscription('kilo', status: 'active_kt');
     await addSubscription('bitmis', status: 'completed');
+    await addSubscription('dondu', status: 'frozen');
     expect(await notifications.pendingBloodTestReminderUserIds(now),
-        {'aktif', 'bitmis'});
+        {'aktif', 'kilo', 'bitmis', 'dondu'});
 
     await provider.runDailyScan(uid: admin, now: now);
 
     expect(await notifications.pendingBloodTestReminderUserIds(now),
-        {'aktif'});
+        {'aktif', 'kilo'});
+  });
+
+  test('bugün eski kurala göre yapılmış tarama, güncellemeden sonra aynı gün '
+      'bir kez daha yapılır ve dondurulmuş danışan listeden çıkar', () async {
+    final DateTime now = DateTime.now();
+    final DateTime old = now.subtract(const Duration(days: 60));
+    final String today = DateFormatter.formatIsoDate(now);
+    final AdminNotificationsProvider notifications =
+        AdminNotificationsProvider(db: db, currentUid: () => admin);
+    addTearDown(notifications.dispose);
+    await addUser('haftalik', name: 'Haftalık', surname: 'Paket',
+        createDate: old, present: false);
+    await addSubscription('haftalik');
+    await addUser('dondu', name: 'Dondurulmuş', surname: 'Paket',
+        createDate: old, present: false);
+    await addSubscription('dondu', status: 'frozen');
+    await db.collection('adminState').doc('bloodTests').set({
+      'presenceInitializedAt': Timestamp.fromDate(old),
+      'presenceFromDocumentsAt': Timestamp.fromDate(old),
+      'lastScanDay': today,
+      'lastScanAt': Timestamp.fromDate(now),
+      'lastScanBy': 'eski-surum',
+    });
+    await notifications.saveMissingBloodTestList(
+      day: today,
+      customers: const [
+        NotificationCustomer(userId: 'dondu', name: 'Dondurulmuş Paket'),
+        NotificationCustomer(userId: 'haftalik', name: 'Haftalık Paket'),
+      ],
+      at: now,
+    );
+
+    expect(await provider.runDailyScan(uid: admin, now: now), 1);
+    final AdminNotification digest = AdminNotification.fromDocument(await db
+        .collection(AdminNotificationsProvider.collectionName)
+        .doc(AdminNotification.missingBloodTestsId(today))
+        .get())!;
+    expect(digest.customers.map((c) => c.userId), ['haftalik']);
+    expect(digest.title, AdminNotification.missingBloodTestsTitle(1));
+    expect(digest.superseded, isFalse);
+    expect((await provider.fetchScanState()).lastScanBy, admin);
+
+    expect(await provider.runDailyScan(uid: admin, now: now), isNull);
   });
 
   test('günlük tarama önceden 09:00\'a kurulmuş bekleyen hatırlatmaları '
@@ -318,7 +373,9 @@ void main() {
     await addSubscription('eski');
     await addUser('hayir',
         name: 'Ayşe', surname: 'Demir', createDate: old, present: false);
-    await addSubscription('hayir', status: 'frozen');
+    await addSubscription('hayir');
+    await addUser('dondu', createDate: old, present: false);
+    await addSubscription('dondu', status: 'frozen');
     await addUser('yeni',
         name: 'Can', surname: 'Ak', createDate: fresh, present: false);
     await addSubscription('yeni', status: 'active_kt');
@@ -334,6 +391,7 @@ void main() {
     expect(today.waiting.single.listedFrom,
         DateTime(fresh.year, fresh.month, fresh.day + 7));
     expect(today.unrecordedCount, 2);
+    expect(today.missing.map((c) => c.userId), isNot(contains('dondu')));
 
     final BloodTestScanPreview later = await provider.previewScan(
         at: now.add(const Duration(days: 8)));
@@ -363,7 +421,7 @@ void main() {
     expect(state.presenceInitializedAt, isNotNull);
   });
 
-  test('bütün danışanların kan tahlili durumu, gecikmişler en üstte', () async {
+  test('aktif danışanların kan tahlili durumu, gecikmişler en üstte', () async {
     final DateTime now = DateTime.now();
     final DateTime today = DateTime(now.year, now.month, now.day);
     Future<void> addTest(String userId, DateTime date) => db
