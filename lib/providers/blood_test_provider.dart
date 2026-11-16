@@ -47,17 +47,12 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _subscriptionsCollection = 'subscriptions';
   static const String _subscriptionStatusField = 'status';
 
-  static final List<String> _activeSubscriptionStatuses = [
-    for (final SubActiveStatus status in SubActiveStatus.values)
-      if (status.isActive) status.label,
-  ];
-
   static const String _stateCollection = 'adminState';
   static const String _stateDocId = 'bloodTests';
   static const String _presenceInitializedAtField = 'presenceInitializedAt';
   static const String _presenceFromDocumentsAtField = 'presenceFromDocumentsAt';
   static const String _lastScanDayField = 'lastScanDay';
-  static const String _activePackageScanDayField = 'activePackageScanDay';
+  static const String _activeWeeklyScanDayField = 'activeWeeklyScanDay';
   static const String _lastScanAtField = 'lastScanAt';
   static const String _lastScanByField = 'lastScanBy';
 
@@ -87,7 +82,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       userId: userId,
       userName: userName,
       testDates: TestAttachment.reminderWishesOf(bloodTests),
-      remindersAllowed: await hasActivePackage(userId),
+      remindersAllowed: await hasActiveWeeklyPackage(userId),
     );
     await setBloodTestPresent(userId: userId, present: sync.hasBloodTests);
     return sync;
@@ -120,7 +115,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       await Future.wait([
         for (final String userId
             in userIds.skip(start).take(_checkConcurrency))
-          hasActivePackage(userId).then((bool active) async {
+          hasActiveWeeklyPackage(userId).then((bool active) async {
             if (!active) await refreshRemindersOf(userId);
           }),
       ]);
@@ -278,7 +273,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     final DocumentSnapshot<Map<String, dynamic>> stateSnapshot =
         await _stateDoc.get(const GetOptions(source: Source.server));
     final Map<String, dynamic> state = stateSnapshot.data() ?? const {};
-    if (!force && state[_activePackageScanDayField] == today) return null;
+    if (!force && state[_activeWeeklyScanDayField] == today) return null;
 
     final Object? initializedAt = state[_presenceInitializedAtField];
     if (initializedAt is! Timestamp) {
@@ -318,7 +313,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     await _notifications.rescheduleBloodTestReminders(now);
     await _stateDoc.set({
       _lastScanDayField: today,
-      _activePackageScanDayField: today,
+      _activeWeeklyScanDayField: today,
       _lastScanAtField: FieldValue.serverTimestamp(),
       _lastScanByField: uid,
     }, SetOptions(merge: true));
@@ -412,24 +407,25 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     ];
     final List<NotificationCustomer> missing = [
       for (final _CustomerRecord record
-          in await _onlyWithActivePackage(candidates))
+          in await _onlyWithActiveWeeklyPackage(candidates))
         _notificationCustomerOf(record.user),
     ];
     missing.sort((a, b) => compareSearchText(a.name, b.name));
     return missing;
   }
 
-  Future<bool> hasActivePackage(String userId) async {
+  Future<bool> hasActiveWeeklyPackage(String userId) async {
     final QuerySnapshot<Map<String, dynamic>> snapshot = await _users
         .doc(userId)
         .collection(_subscriptionsCollection)
-        .where(_subscriptionStatusField, whereIn: _activeSubscriptionStatuses)
+        .where(_subscriptionStatusField,
+            isEqualTo: SubActiveStatus.activeWeekly.label)
         .limit(1)
         .get();
     return snapshot.docs.isNotEmpty;
   }
 
-  Future<List<_CustomerRecord>> _onlyWithActivePackage(
+  Future<List<_CustomerRecord>> _onlyWithActiveWeeklyPackage(
       List<_CustomerRecord> records) async {
     final List<_CustomerRecord> active = [];
     for (int start = 0; start < records.length; start += _checkConcurrency) {
@@ -437,7 +433,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           records.skip(start).take(_checkConcurrency).toList();
       final List<bool> flags = await Future.wait([
         for (final _CustomerRecord record in chunk)
-          hasActivePackage(record.user.userId),
+          hasActiveWeeklyPackage(record.user.userId),
       ]);
       for (int i = 0; i < chunk.length; i++) {
         if (flags[i]) active.add(chunk[i]);
@@ -457,7 +453,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
       for (final _CustomerRecord record in records)
         if (!record.presenceRecorded) record,
     ].length;
-    final List<_CustomerRecord> candidates = await _onlyWithActivePackage([
+    final List<_CustomerRecord> candidates = await _onlyWithActiveWeeklyPackage([
       for (final _CustomerRecord record in records)
         if (missingBloodTestListedFrom(
               record.user,
@@ -543,7 +539,7 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
           customers.skip(start).take(_checkConcurrency).toList();
       final List<BloodTestStatus?> results = await Future.wait([
         for (final _CustomerRecord customer in chunk)
-          _statusIfActive(customer, now),
+          _statusIfActiveWeekly(customer, now),
       ]);
       statuses.addAll(results.whereType<BloodTestStatus>());
       checked += chunk.length;
@@ -557,11 +553,11 @@ class BloodTestProvider extends ChangeNotifier with WidgetsBindingObserver {
     return report;
   }
 
-  Future<BloodTestStatus?> _statusIfActive(
+  Future<BloodTestStatus?> _statusIfActiveWeekly(
     _CustomerRecord customer,
     DateTime now,
   ) async {
-    if (!await hasActivePackage(customer.user.userId)) return null;
+    if (!await hasActiveWeeklyPackage(customer.user.userId)) return null;
     return _statusOf(customer.user, customer.createdAt, now);
   }
 

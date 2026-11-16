@@ -24,9 +24,9 @@ class _BloodTestStatusCardState extends State<BloodTestStatusCard> {
   static const String _testDateLabel = 'Tahlil tarihi';
   static const String _unknownValue = 'Girilmedi';
   static const String _missingNote = 'Kan tahlili, Dokümanlar sekmesindeki '
-      'Kan Tahlili bölümünden yüklenir. Yüklenmezse danışan, aktif paketi '
-      'varsa eklendiği günden 1 hafta sonra günlük kan tahlili taramasında '
-      'listelenir.';
+      'Kan Tahlili bölümünden yüklenir. Yüklenmezse danışan, paketi '
+      'Aktif/Haftalık ise eklendiği günden 1 hafta sonra günlük kan tahlili '
+      'taramasında listelenir.';
   static const String _loadError = 'Kan tahlili bilgisi okunamadı.';
   static const String _retryTooltip = 'Yenile';
   static const double _contentIndent = 52;
