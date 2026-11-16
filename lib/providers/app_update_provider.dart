@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -20,12 +19,19 @@ import '../models/app_update_info.dart';
 /// deal with: no network, missing document, denied read, timeout or malformed
 /// data all leave the app running as before.
 class AppUpdateProvider extends ChangeNotifier {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  AppUpdateProvider({FirebaseFirestore? db}) : _dbOverride = db;
+
+  final FirebaseFirestore? _dbOverride;
+
+  FirebaseFirestore get _firestore => _dbOverride ?? FirebaseFirestore.instance;
 
   /// Whether this platform ships through a store we can send the user to.
   /// Windows and macOS builds are installed by hand, so there is nothing to
   /// link them to.
-  static bool get isSupported => Platform.isAndroid || Platform.isIOS;
+  static bool get isSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
   DocumentReference<Map<String, dynamic>> get _docRef => _firestore
       .collection(AppUpdateConstants.collection)
@@ -47,7 +53,7 @@ class AppUpdateProvider extends ChangeNotifier {
       return AppUpdateInfo.resolve(
         data: snapshot.data(),
         currentVersion: installedVersion,
-        isIos: Platform.isIOS,
+        isIos: defaultTargetPlatform == TargetPlatform.iOS,
       );
     } catch (_) {
       // Deliberately swallowed: the check is an extra, never a gate the user

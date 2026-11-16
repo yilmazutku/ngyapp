@@ -29,9 +29,14 @@ import '../utils/dialog_utils.dart';
 /// [AppUpdateProvider.checkForUpdate] so that no desktop code path can reach
 /// a prompt even if the widget is reused elsewhere.
 class AppUpdateGate extends StatefulWidget {
+  final GlobalKey<NavigatorState> navigatorKey;
   final Widget child;
 
-  const AppUpdateGate({super.key, required this.child});
+  const AppUpdateGate({
+    super.key,
+    required this.navigatorKey,
+    required this.child,
+  });
 
   @override
   State<AppUpdateGate> createState() => _AppUpdateGateState();
@@ -41,6 +46,8 @@ class _AppUpdateGateState extends State<AppUpdateGate>
     with WidgetsBindingObserver {
   /// Set while a mandatory update is pending; painted over [widget.child].
   AppUpdateInfo? _blockingUpdate;
+
+  bool _storeOpenFailed = false;
 
   /// True between opening and closing the optional-update dialog, so a second
   /// check cannot stack another one on top of it.
@@ -103,7 +110,10 @@ class _AppUpdateGateState extends State<AppUpdateGate>
 
       // Nothing mandatory any more: let a previously blocked user through.
       if (_blockingUpdate != null) {
-        setState(() => _blockingUpdate = null);
+        setState(() {
+          _blockingUpdate = null;
+          _storeOpenFailed = false;
+        });
       }
       try {
         if (info != null) {
@@ -119,35 +129,38 @@ class _AppUpdateGateState extends State<AppUpdateGate>
 
   /// Offers the update but lets the user carry on with the current version.
   Future<void> _promptOptionalUpdate(AppUpdateInfo info) async {
-    if (_promptOpen || !mounted) return;
+    final BuildContext? navigatorContext = widget.navigatorKey.currentContext;
+    if (_promptOpen || navigatorContext == null) return;
     _promptOpen = true;
     try {
-      final accepted = await DialogUtils.openConfirm(
-        context,
+      final bool accepted = await DialogUtils.openConfirm(
+        navigatorContext,
         title: AppUpdateConstants.optionalTitle,
         message: info.userMessage,
         confirmText: AppUpdateConstants.updateButton,
         cancelText: AppUpdateConstants.laterButton,
       );
-      if (!mounted) return;
       if (!accepted) return;
-      await _openStore(info);
+      final bool opened = await _openStore(info);
+      if (opened || !navigatorContext.mounted) return;
+      await DialogUtils.openError(
+        navigatorContext,
+        title: AppUpdateConstants.storeErrorTitle,
+        message: AppUpdateConstants.storeErrorMessage,
+      );
     } finally {
       _promptOpen = false;
     }
   }
 
-  Future<void> _openStore(AppUpdateInfo info) async {
-    final opened =
-        await _launchFirstReachable([info.storeUri, info.webStoreUri]);
+  Future<void> _openStoreFromBlockingScreen(AppUpdateInfo info) async {
+    final bool opened = await _openStore(info);
     if (!mounted) return;
-    if (opened) return;
-    await DialogUtils.openError(
-      context,
-      title: AppUpdateConstants.storeErrorTitle,
-      message: AppUpdateConstants.storeErrorMessage,
-    );
+    setState(() => _storeOpenFailed = !opened);
   }
+
+  Future<bool> _openStore(AppUpdateInfo info) =>
+      _launchFirstReachable([info.storeUri, info.webStoreUri]);
 
   /// Tries each address in turn: the native store scheme opens the store app
   /// directly, the https listing covers devices that cannot handle it.
@@ -172,14 +185,15 @@ class _AppUpdateGateState extends State<AppUpdateGate>
     return Stack(
       fit: StackFit.expand,
       children: [
-        widget.child,
+        ExcludeFocus(excluding: blocking != null, child: widget.child),
         if (blocking != null) ...[
           // Swallows taps aimed at the app underneath, which keeps running so
           // the session finishes restoring while the user updates.
           const ModalBarrier(dismissible: false),
           _ForcedUpdateView(
             info: blocking,
-            onUpdate: () => _openStore(blocking),
+            storeOpenFailed: _storeOpenFailed,
+            onUpdate: () => _openStoreFromBlockingScreen(blocking),
           ),
         ],
       ],
@@ -197,9 +211,14 @@ class _ForcedUpdateView extends StatelessWidget {
   static const double _iconSize = 64;
 
   final AppUpdateInfo info;
+  final bool storeOpenFailed;
   final VoidCallback onUpdate;
 
-  const _ForcedUpdateView({required this.info, required this.onUpdate});
+  const _ForcedUpdateView({
+    required this.info,
+    required this.storeOpenFailed,
+    required this.onUpdate,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -242,6 +261,15 @@ class _ForcedUpdateView extends StatelessWidget {
                       label: const Text(AppUpdateConstants.updateButton),
                     ),
                   ),
+                  if (storeOpenFailed) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      AppUpdateConstants.storeErrorMessage,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: theme.colorScheme.error),
+                    ),
+                  ],
                 ],
               ),
             ),
