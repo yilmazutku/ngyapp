@@ -320,10 +320,10 @@ void main() {
   });
 
   testWidgets(
-      'paketi bitmiş danışanda hatırlatma kurulmaz; pencere, rozet ve mesaj '
-      'bunu söyler', (WidgetTester tester) async {
+      'paketi Kilo Takip olan danışanda hatırlatma kurulmaz; pencere, rozet ve '
+      'mesaj bunu söyler', (WidgetTester tester) async {
     final DateTime testDate = daysAgo(10);
-    await seedUser(present: false, package: 'completed');
+    await seedUser(present: false, package: 'active_kt');
     await seedFile('eski', {}, uploadedAt: DateTime(2026, 1, 5));
     await pumpTab(tester);
 
@@ -335,7 +335,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('aktif paketi yok'), findsOneWidget);
+    expect(find.textContaining('Aktif/Haftalık paketi yok'), findsOneWidget);
     expect(find.text('Hatırlatmalar'), findsNothing);
 
     await tester.tap(find.text('Tahlilin Yapıldığı Tarih'));
@@ -345,14 +345,14 @@ void main() {
         tester, DateTime(testDate.year, testDate.month, pickedDay));
     await tester.tap(find.text('Kan Tahlili\'ne Taşı'));
     await tester.pumpAndSettle();
-    await closeInfo(tester, 'aktif paketi olmadığı için');
+    await closeInfo(tester, 'Aktif/Haftalık paketi olmadığı için');
 
     expect(await reminderIds(), isEmpty);
     expect((await fileData('eski'))[TestAttachment.bloodTestReminderField],
         isTrue);
     await tester.tap(find.text('Kan Tahlili (1)'));
     await tester.pumpAndSettle();
-    expect(find.text('Hatırlatma yok: aktif paket yok'), findsOneWidget);
+    expect(find.text('Hatırlatma yok: Aktif/Haftalık paket yok'), findsOneWidget);
     expect(find.textContaining('Hatırlatma: '), findsNothing);
   });
 

@@ -77,7 +77,8 @@ class _TestsTabState extends State<TestsTab>
     final BloodTestProvider bloodTests =
         Provider.of<BloodTestProvider>(context, listen: false);
     try {
-      final bool available = await bloodTests.hasActivePackage(widget.userId);
+      final bool available =
+          await bloodTests.hasActiveWeeklyPackage(widget.userId);
       if (!mounted || available == _remindersAvailable) return;
       setState(() => _remindersAvailable = available);
     } catch (e) {
@@ -268,9 +269,9 @@ class _TestsTabState extends State<TestsTab>
     final DateTime? remindFor = sync.remindFor;
     final DateTime now = DateTime.now();
     if (edited != null && edited.wantsReminder && !sync.remindersAllowed) {
-      notes.add('Danışanın aktif paketi olmadığı için 3 ay hatırlatması '
-          'kurulmadı; danışanın aktif bir paketi olunca kendiliğinden '
-          'kurulur.');
+      notes.add('Danışanın Aktif/Haftalık paketi olmadığı için 3 ay '
+          'hatırlatması kurulmadı; paketi Aktif/Haftalık olunca '
+          'kendiliğinden kurulur.');
       return notes;
     }
     if (edited != null && edited.wantsReminder) {
@@ -807,7 +808,7 @@ class _BloodTestBadges extends StatelessWidget {
         else if (isLatest && file.bloodTestReminder)
           _badge(
             icon: Icons.alarm_off_rounded,
-            text: 'Hatırlatma yok: aktif paket yok',
+            text: 'Hatırlatma yok: Aktif/Haftalık paket yok',
             color: Colors.blueGrey.shade600,
           ),
       ],

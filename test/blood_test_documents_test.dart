@@ -194,7 +194,7 @@ void main() {
         'tarihsiz');
   });
 
-  group('3 ay hatırlatması yalnızca aktif danışana', () {
+  group('3 ay hatırlatması yalnızca paketi Aktif/Haftalık olan danışana', () {
     Future<void> setPackages(String status) async {
       final QuerySnapshot<Map<String, dynamic>> packages = await db
           .collection('users')
@@ -207,8 +207,8 @@ void main() {
       }
     }
 
-    test('paketi bitmiş ya da dondurulmuş danışana kurulmaz, paket aktif '
-        'olunca kurulur', () async {
+    test('paketi bitmiş, dondurulmuş ya da kilo takip olan danışana kurulmaz, '
+        'paket Aktif/Haftalık olunca kurulur', () async {
       final DateTime testDate = daysAgo(10);
       await setPackages('completed');
       await seed('k1', bloodTest(testDate), uploadedAt: DateTime(2026, 1, 6));
@@ -225,6 +225,12 @@ void main() {
           await bloodTests.refreshRemindersOf(customer);
       expect(frozen!.remindersAllowed, isFalse);
       expect(frozen.remindFor, isNull);
+      expect(await reminderIds(), isEmpty);
+
+      await setPackages('active_kt');
+      final BloodTestReminderSync? weightTracking =
+          await bloodTests.refreshRemindersOf(customer);
+      expect(weightTracking!.remindersAllowed, isFalse);
       expect(await reminderIds(), isEmpty);
 
       await setPackages('active');
@@ -258,7 +264,17 @@ void main() {
       await pumpEventQueue();
       expect(await reminderIds(), isEmpty);
 
+      await setPackages('active');
+      changes.add(customer);
+      await pumpEventQueue();
+      expect(await reminderIds(), hasLength(2));
+
       await setPackages('active_kt');
+      changes.add(customer);
+      await pumpEventQueue();
+      expect(await reminderIds(), isEmpty);
+
+      await setPackages('active');
       changes.add(customer);
       await pumpEventQueue();
       expect(await reminderIds(), hasLength(2));
