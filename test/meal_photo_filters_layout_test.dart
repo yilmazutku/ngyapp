@@ -79,12 +79,21 @@ class _FiltersHostState extends State<_FiltersHost> {
   }
 }
 
-Future<void> _pumpAt(WidgetTester tester, double width) async {
+/// [density] verilmezse temanınki (telefonda standart) kullanılır;
+/// masaüstü temaları sıkı ([VisualDensity.compact]) yoğunluktadır.
+Future<void> _pumpAt(
+  WidgetTester tester,
+  double width, {
+  VisualDensity? density,
+}) async {
   tester.view.physicalSize = Size(width, 800);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-    const MaterialApp(home: Scaffold(body: _FiltersHost())),
+    MaterialApp(
+      theme: ThemeData(visualDensity: density),
+      home: const Scaffold(body: _FiltersHost()),
+    ),
   );
 }
 
@@ -116,10 +125,11 @@ void main() {
       final Rect search = tester.getRect(find.byType(SearchField));
       final Rect panel = tester.getRect(find.byType(ExpansionTile));
 
-      // Tam genişlikte arama, hemen altında aynı genişlikte "Filtreler"
-      // kutusu; filtreler ve seçili filtre rozeti görünmez.
+      // Tam genişlikte arama, hemen altında aynı genişlikte ve boyda
+      // "Filtreler" kutusu; filtreler ve seçili filtre rozeti görünmez.
       expect(search.width, moreOrLessEquals(available));
       expect(panel.width, moreOrLessEquals(available));
+      expect(panel.height, moreOrLessEquals(search.height));
       expect(panel.top, greaterThanOrEqualTo(search.bottom));
       expect(find.byKey(mealKey), findsNothing);
       expect(find.byKey(reactionKey), findsNothing);
@@ -178,22 +188,83 @@ void main() {
     });
   }
 
-  testWidgets('wide screens keep search on the left, filters on the right',
+  for (final VisualDensity density in const [
+    VisualDensity.standard,
+    VisualDensity.compact,
+  ]) {
+    testWidgets(
+        'geniş ekranda arama solda, "Filtreler" kutusu sağında aynı boyda; '
+        'filtreler kapalı başlar, tıklayınca kaydırmadan seçilir '
+        '(yoğunluk: $density)', (tester) async {
+      const double width = 1280;
+      await _pumpAt(tester, width, density: density);
+      expect(tester.takeException(), isNull);
+
+      final Rect search = tester.getRect(find.byType(SearchField));
+      final Rect panel = tester.getRect(find.byType(ExpansionTile));
+
+      // Tek satır: arama solda, kutu sağında aynı hizada ve aynı boyda;
+      // filtreler görünmez.
+      expect(search.width, moreOrLessEquals(SearchField.defaultMaxWidth));
+      expect(panel.left, greaterThan(search.right));
+      expect(panel.right, moreOrLessEquals(width - _sidePadding));
+      expect(panel.top, moreOrLessEquals(search.top));
+      expect(panel.height, moreOrLessEquals(search.height));
+      expect(find.byKey(mealKey), findsNothing);
+      expect(find.byKey(reactionKey), findsNothing);
+
+      await _toggleFiltersPanel(tester);
+      expect(tester.takeException(), isNull);
+
+      // Kutu aşağı açılır, arama yerinde kalır; seçenekler kutuya sığar.
+      expect(tester.getRect(find.byType(SearchField)), search);
+      final Rect openPanel = tester.getRect(find.byType(ExpansionTile));
+      final Rect header = tester.getRect(
+        find.descendant(
+          of: find.byType(ExpansionTile),
+          matching: find.byType(ListTile),
+        ),
+      );
+      final Rect meals = tester.getRect(find.byKey(mealKey));
+      final Rect reactions = tester.getRect(find.byKey(reactionKey));
+      expect(meals.top, greaterThanOrEqualTo(header.bottom));
+      expect(reactions.top, greaterThanOrEqualTo(meals.bottom));
+      final Rect lastChip = tester.getRect(
+        find.widgetWithText(FilterChip, _mealOptions.last.displayLabel),
+      );
+      expect(lastChip.right, lessThan(openPanel.right));
+
+      final _FiltersHostState host =
+          tester.state<_FiltersHostState>(find.byType(_FiltersHost));
+      await tester.tap(
+        find.widgetWithText(FilterChip, _mealOptions.last.displayLabel),
+      );
+      await tester.pump();
+      expect(host.meal, _mealOptions.last);
+      expect(
+        find.descendant(
+          of: find.byType(CountBadge),
+          matching: find.text('1'),
+        ),
+        findsOneWidget,
+      );
+    });
+  }
+
+  testWidgets('dar ve geniş düzen arasında geçince "Filtreler" kutusu açık kalır',
       (tester) async {
-    await _pumpAt(tester, 1280);
+    await _pumpAt(tester, 400);
+    await _toggleFiltersPanel(tester);
+    expect(find.byKey(mealKey), findsOneWidget);
+
+    tester.view.physicalSize = const Size(900, 800);
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    expect(find.byKey(mealKey), findsOneWidget);
 
-    // Geniş ekranda filtreler hep açık; "Filtreler" kutusu yok.
-    expect(find.text(MealPhotoFiltersLayout.filtersLabel), findsNothing);
-
-    final Rect search = tester.getRect(find.byType(SearchField));
-    final Rect meals = tester.getRect(find.byKey(mealKey));
-    final Rect reactions = tester.getRect(find.byKey(reactionKey));
-
-    expect(search.width, moreOrLessEquals(SearchField.defaultMaxWidth));
-    expect(meals.left, greaterThan(search.right));
-    expect(reactions.left, moreOrLessEquals(meals.left));
-    expect(reactions.top, greaterThanOrEqualTo(meals.bottom));
+    tester.view.physicalSize = const Size(400, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(mealKey), findsOneWidget);
   });
 
   testWidgets('dar ve geniş düzen arasında geçince arama kutusu odağını korur',

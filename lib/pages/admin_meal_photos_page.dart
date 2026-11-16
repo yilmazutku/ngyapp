@@ -1367,16 +1367,18 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   }
 }
 
-/// Arama kutusu ve filtre gruplarının yerleşimi. Geniş ekranda arama solda,
-/// filtreler sağda ve hep açık. Dar ekranda (telefon) yan yana sığmazlar:
-/// tam genişlikte arama, hemen altında "Filtreler" kutusu. Filtreler
-/// varsayılan olarak kapalıdır, kutuya dokununca kutunun içinde alt alta
-/// açılır (seçenekleri yatay kayar); böylece sonuç listesine yer kalır.
+/// Arama kutusu ve filtre gruplarının yerleşimi. Filtreler her ekranda
+/// "Filtreler" kutusundadır: varsayılan olarak kapalıdır, kutuya dokununca
+/// (tıklayınca) kutunun içinde alt alta açılır. Böylece sabit üst alan küçük
+/// kalır, liste kaydırılırken danışanlar filtrelerin altında kaybolmaz.
+/// Geniş ekranda arama solda, kutu sağında (tek satır); dar ekranda
+/// (telefon) tam genişlikte arama, hemen altında kutu (seçenekleri yatay
+/// kayar).
 class MealPhotoFiltersLayout extends StatelessWidget {
   /// Bu genişliğin altında alanlar alt alta dizilir.
   static const double narrowBreakpoint = 600.0;
 
-  /// Dar ekranda filtreleri açıp kapatan kutunun yazısı.
+  /// Filtreleri açıp kapatan kutunun yazısı.
   static const String filtersLabel = 'Filtreler';
 
   static const double _searchGap = 24.0;
@@ -1399,9 +1401,9 @@ class MealPhotoFiltersLayout extends StatelessWidget {
   /// Filtre grupları; üstten alta bu sırayla dizilir.
   final List<Widget> filters;
 
-  /// "Tümü" dışında seçili filtre sayısı. Dar ekranda "Filtreler" yazısının
-  /// yanında rozet olarak görünür: kutu kapalıyken de listenin süzüldüğü
-  /// fark edilsin.
+  /// "Tümü" dışında seçili filtre sayısı. "Filtreler" yazısının yanında
+  /// rozet olarak görünür: kutu kapalıyken de listenin süzüldüğü fark
+  /// edilsin.
   final int activeFilterCount;
 
   const MealPhotoFiltersLayout({
@@ -1431,76 +1433,86 @@ class MealPhotoFiltersLayout extends StatelessWidget {
           ],
         ];
 
-        // İki düzen de aynı Flex'tir ve arama hep ilk çocuktur: ekran
-        // döndürülünce ya da pencere eşiği geçince arama kutusu yeniden
-        // kurulmaz, odak ve klavye kaybolmaz.
+        // İki düzen de aynı Flex'tir; arama hep ilk, kutu hep üçüncü
+        // çocuktur (dar ekranda esnemeyen bir Flexible): ekran döndürülünce
+        // ya da pencere eşiği geçince ikisi de yeniden kurulmaz, aramanın
+        // odağı ve klavyesi, kutunun açık/kapalı durumu korunur.
         return Flex(
           direction: narrow ? Axis.vertical : Axis.horizontal,
           mainAxisSize: narrow ? MainAxisSize.min : MainAxisSize.max,
           crossAxisAlignment:
-              narrow ? CrossAxisAlignment.stretch : CrossAxisAlignment.end,
+              narrow ? CrossAxisAlignment.stretch : CrossAxisAlignment.start,
           children: [
             search,
             SizedBox(
               width: narrow ? 0 : _searchGap,
               height: narrow ? _stackedSearchGap : 0,
             ),
-            if (narrow)
-              _buildCollapsibleFilters(context, filterChildren)
-            else
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: filterChildren,
-                ),
-              ),
+            Flexible(
+              flex: narrow ? 0 : 1,
+              fit: FlexFit.tight,
+              child: _buildCollapsibleFilters(context, filterChildren),
+            ),
           ],
         );
       },
     );
   }
 
-  /// Dar ekrandaki "Filtreler" kutusu: kapalı başlar, dokununca filtreler
-  /// kutunun içinde aşağı açılır, yeniden dokununca kapanır.
+  /// "Filtreler" kutusu: kapalı başlar, dokununca filtreler kutunun içinde
+  /// aşağı açılır, yeniden dokununca kapanır.
   Widget _buildCollapsibleFilters(
     BuildContext context,
     List<Widget> filterChildren,
   ) {
+    final ThemeData theme = Theme.of(context);
+    final BorderSide side = BorderSide(color: theme.colorScheme.outline);
     final ShapeBorder border = RoundedRectangleBorder(
-      side: BorderSide(color: Theme.of(context).colorScheme.outline),
+      side: side,
       borderRadius: _panelRadius,
     );
 
-    return ExpansionTile(
-      shape: border,
-      collapsedShape: border,
-      minTileHeight: kMinInteractiveDimension,
-      tilePadding: const EdgeInsets.symmetric(horizontal: _panelPadding),
-      childrenPadding: const EdgeInsets.fromLTRB(
-        _panelPadding,
-        0,
-        _panelPadding,
-        _panelPadding,
-      ),
-      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
-      leading: const Icon(Icons.filter_alt_outlined),
-      title: Row(
-        children: [
-          const Flexible(
-            child: Text(
-              filtersLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+    // Kapalı kutu, arama kutusuyla (yoğun, çerçeveli metin alanı) aynı
+    // boydadır, geniş ekranda yan yana hizalı durur. İkisi de ekran
+    // yoğunluğuyla (masaüstünde sıkı) küçülür. Çerçeve bu boya dahildir;
+    // satırın yazı için bıraktığı en az dikey pay kaldırılır, yoksa sıkı
+    // yoğunlukta kutu aramadan uzun kalır.
+    final double tileHeight = kMinInteractiveDimension +
+        theme.visualDensity.baseSizeAdjustment.dy -
+        2 * side.width;
+
+    return ListTileTheme.merge(
+      minVerticalPadding: 0,
+      child: ExpansionTile(
+        shape: border,
+        collapsedShape: border,
+        minTileHeight: tileHeight,
+        tilePadding: const EdgeInsets.symmetric(horizontal: _panelPadding),
+        childrenPadding: const EdgeInsets.fromLTRB(
+          _panelPadding,
+          0,
+          _panelPadding,
+          _panelPadding,
+        ),
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        leading: const Icon(Icons.filter_alt_outlined),
+        title: Row(
+          children: [
+            const Flexible(
+              child: Text(
+                filtersLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          if (activeFilterCount > 0) ...[
-            const SizedBox(width: _filterGap),
-            CountBadge(count: activeFilterCount),
+            if (activeFilterCount > 0) ...[
+              const SizedBox(width: _filterGap),
+              CountBadge(count: activeFilterCount),
+            ],
           ],
-        ],
+        ),
+        children: filterChildren,
       ),
-      children: filterChildren,
     );
   }
 }
