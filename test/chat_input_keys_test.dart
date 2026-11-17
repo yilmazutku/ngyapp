@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -66,7 +67,12 @@ void main() {
     }
   });
 
-  Future<({List<String> sent, ValueNotifier<String?> reply})> pumpInput(
+  Future<
+      ({
+        List<String> sent,
+        ValueNotifier<String?> reply,
+        TextEditingController controller,
+      })> pumpInput(
     WidgetTester tester,
   ) async {
     final TextEditingController controller =
@@ -98,7 +104,7 @@ void main() {
     );
     await tester.tap(find.byType(TextField));
     await tester.pump();
-    return (sent: sent, reply: reply);
+    return (sent: sent, reply: reply, controller: controller);
   }
 
   testWidgets('Enter mesajı gönderir', (tester) async {
@@ -125,5 +131,90 @@ void main() {
     final bool handlesKeys = sendingPlatforms.contains(defaultTargetPlatform);
     expect(input.reply.value, handlesKeys ? isNull : 'yanıt');
     expect(input.sent, isEmpty);
+  }, variant: TargetPlatformVariant.all());
+
+  testWidgets('boş harf birleştirme aralığı Enter\'ı engellemez',
+      (tester) async {
+    final input = await pumpInput(tester);
+    input.controller.value = const TextEditingValue(
+      text: 'merhaba',
+      selection: TextSelection.collapsed(offset: 7),
+      composing: TextRange.collapsed(7),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+
+    final bool sends = sendingPlatforms.contains(defaultTargetPlatform);
+    expect(input.sent, sends ? ['merhaba'] : isEmpty);
+  }, variant: TargetPlatformVariant.all());
+
+  testWidgets('kutuda harf birleştirilirken Enter göndermez', (tester) async {
+    final input = await pumpInput(tester);
+    input.controller.value = const TextEditingValue(
+      text: 'merhaba',
+      selection: TextSelection.collapsed(offset: 7),
+      composing: TextRange(start: 5, end: 7),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+
+    expect(input.sent, isEmpty);
+  }, variant: TargetPlatformVariant.all());
+
+  Future<FocusNode> pumpComposer(
+    WidgetTester tester, {
+    required bool sendInTapRegion,
+  }) async {
+    final TextEditingController controller =
+        TextEditingController(text: 'merhaba');
+    final FocusNode focusNode = FocusNode();
+    addTearDown(controller.dispose);
+    addTearDown(focusNode.dispose);
+    final Widget send = IconButton(
+      icon: const Icon(Icons.send_rounded),
+      onPressed: () {},
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Row(
+            children: [
+              Expanded(
+                child: TextField(controller: controller, focusNode: focusNode),
+              ),
+              if (sendInTapRegion) TextFieldTapRegion(child: send) else send,
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(TextField), kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    return focusNode;
+  }
+
+  testWidgets('fareyle gönder düğmesine basınca kutu odakta kalır',
+      (tester) async {
+    final FocusNode focusNode =
+        await pumpComposer(tester, sendInTapRegion: true);
+    expect(focusNode.hasFocus, isTrue);
+
+    await tester.tap(find.byIcon(Icons.send_rounded),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump();
+
+    expect(focusNode.hasFocus, isTrue);
+  }, variant: TargetPlatformVariant.all());
+
+  testWidgets('kutunun bölgesi dışındaki düğmeye fareyle basmak odağı alır',
+      (tester) async {
+    final FocusNode focusNode =
+        await pumpComposer(tester, sendInTapRegion: false);
+    expect(focusNode.hasFocus, isTrue);
+
+    await tester.tap(find.byIcon(Icons.send_rounded),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump();
+
+    expect(focusNode.hasFocus, isFalse);
   }, variant: TargetPlatformVariant.all());
 }

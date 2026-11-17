@@ -68,9 +68,10 @@ class _DietUserViewPageState extends State<DietUserViewPage> {
                   weekday: DietMenu.fromSubtitles(diet.subtitles),
                   weekend: DietMenu.fromSubtitles(diet.weekendSubtitles),
                   goals: diet.goals,
-                  onRecipeTap: diet.hasRecipe
-                      ? () => openPdfUrl(context, diet.recipePdfUrl)
-                      : null,
+                  onRecipeLink: openRecipeLinks(
+                    context,
+                    fallback: diet.legacyRecipe,
+                  ),
                 ),
               ],
             ),

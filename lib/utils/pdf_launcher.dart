@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/diet_recipe.dart';
 import 'dialog_utils.dart';
+import 'recipe_links.dart';
 
 /// Opens [url] (typically an attachment such as a recipe PDF or the imported
 /// Word document) in the device's external browser or default viewer.
@@ -59,3 +61,14 @@ Future<void> openFileUrl(
 /// Opens a recipe / attachment PDF. Thin wrapper over [openFileUrl].
 Future<void> openPdfUrl(BuildContext context, String? url) =>
     openFileUrl(context, url, fileLabel: 'PDF');
+
+RecipeLinkHandler openRecipeLinks(
+  BuildContext context, {
+  DietRecipe? fallback,
+}) {
+  return (DietRecipe? recipe) {
+    final DietRecipe? target = recipe ?? fallback;
+    if (target == null) return null;
+    return () => openPdfUrl(context, target.url);
+  };
+}

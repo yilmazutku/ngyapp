@@ -1,8 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'diet_goals.dart';
+import 'diet_recipe.dart';
+import 'meal_model.dart';
 
 class DietDocument {
+  static const String recipesPerLineField = 'recipesPerLine';
+
   final String docId;
   final String userId;
   final String displayName;
@@ -26,9 +30,10 @@ class DietDocument {
 
   /// Download URL of the recipe PDF attached to this diet, if any.
   ///
-  /// Set when the imported diet contained the "*tarifi ektedir" reference and
-  /// the admin attached a recipe PDF. The user opens it by tapping the recipe
-  /// link shown on their plan.
+  /// Older diets keep their only recipe PDF here and every "*tarifi ektedir"
+  /// link opens it. Diets with [recipesPerLine] keep each link's PDF on its
+  /// content line; for them this is just the first recipe, written for older
+  /// app versions.
   final String? recipePdfUrl;
 
   /// Cloud Storage path of the attached recipe PDF (used for cleanup).
@@ -36,6 +41,8 @@ class DietDocument {
 
   /// Original file name of the attached recipe PDF (for display).
   final String? recipePdfName;
+
+  final bool recipesPerLine;
 
   final String? sourceFileUrl;
 
@@ -64,6 +71,7 @@ class DietDocument {
     this.recipePdfUrl,
     this.recipePdfPath,
     this.recipePdfName,
+    this.recipesPerLine = false,
     this.sourceFileUrl,
     this.sourceFilePath,
     this.sourceFileName,
@@ -75,8 +83,66 @@ class DietDocument {
   bool get hasWeekend =>
       weekendSubtitles != null && weekendSubtitles!.isNotEmpty;
 
+  DietRecipe? get legacyRecipe => recipesPerLine || (recipePdfUrl ?? '').isEmpty
+      ? null
+      : DietRecipe(url: recipePdfUrl!, path: recipePdfPath, name: recipePdfName);
+
+  late final List<DietRecipe> recipes = _collectRecipes();
+
   /// Whether this diet has an attached recipe PDF.
-  bool get hasRecipe => (recipePdfUrl ?? '').isNotEmpty;
+  bool get hasRecipe => recipes.isNotEmpty;
+
+  List<DietRecipe> _collectRecipes() {
+    final Set<String> seen = <String>{};
+    final DietRecipe? legacy = legacyRecipe;
+    return <DietRecipe>[
+      for (final DietRecipe recipe in <DietRecipe>[
+        if (legacy != null) legacy,
+        ..._lineRecipesOf(subtitles),
+        ..._lineRecipesOf(weekendSubtitles),
+      ])
+        if (seen.add(recipe.url)) recipe,
+    ];
+  }
+
+  static Set<String> attachmentPathsOf(Map<String, dynamic>? data) {
+    final Set<String> paths = <String>{};
+    void add(String? path) {
+      final String trimmed = (path ?? '').trim();
+      if (trimmed.isNotEmpty) paths.add(trimmed);
+    }
+
+    add(data?['recipePdfPath'] as String?);
+    add(data?['sourceFilePath'] as String?);
+    for (final String field in const <String>['subtitles', 'weekendSubtitles']) {
+      for (final DietRecipe recipe in _lineRecipesOf(data?[field])) {
+        add(recipe.path);
+      }
+    }
+    return paths;
+  }
+
+  static Iterable<DietRecipe> _lineRecipesOf(Object? subtitles) sync* {
+    if (subtitles is! Map) return;
+    final List<Object?> mealKeys = <Object?>[
+      for (final Meals meal in Meals.values)
+        if (subtitles.containsKey(meal.name)) meal.name,
+      for (final Object? key in subtitles.keys)
+        if (Meals.fromName('$key') == null) key,
+    ];
+    for (final Object? key in mealKeys) {
+      final Object? meal = subtitles[key];
+      final Object? content = meal is Map ? meal['content'] : null;
+      if (content is! List) continue;
+      for (final Object? item in content) {
+        if (item is! Map) continue;
+        for (final DietRecipe? recipe
+            in DietRecipe.listFrom(item[DietRecipe.lineField])) {
+          if (recipe != null) yield recipe;
+        }
+      }
+    }
+  }
 
   bool get hasSourceFile => (sourceFileUrl ?? '').isNotEmpty;
 
@@ -100,6 +166,7 @@ class DietDocument {
       recipePdfUrl: data?['recipePdfUrl'] as String?,
       recipePdfPath: data?['recipePdfPath'] as String?,
       recipePdfName: data?['recipePdfName'] as String?,
+      recipesPerLine: data?[recipesPerLineField] == true,
       sourceFileUrl: data?['sourceFileUrl'] as String?,
       sourceFilePath: data?['sourceFilePath'] as String?,
       sourceFileName: data?['sourceFileName'] as String?,
@@ -123,6 +190,7 @@ class DietDocument {
       if (recipePdfUrl != null) 'recipePdfUrl': recipePdfUrl,
       if (recipePdfPath != null) 'recipePdfPath': recipePdfPath,
       if (recipePdfName != null) 'recipePdfName': recipePdfName,
+      if (recipesPerLine) recipesPerLineField: true,
       if (sourceFileUrl != null) 'sourceFileUrl': sourceFileUrl,
       if (sourceFilePath != null) 'sourceFilePath': sourceFilePath,
       if (sourceFileName != null) 'sourceFileName': sourceFileName,

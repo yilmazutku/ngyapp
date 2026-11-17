@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/diet_goals.dart';
+import '../models/diet_recipe.dart';
 import '../models/diet_section.dart';
 import '../models/meal_model.dart';
 import '../utils/diet_menu_parser.dart';
 import '../utils/meal_formatter.dart';
+import '../utils/recipe_links.dart';
 
 const double kDietMealTitleFontSize = 14.0;
 const double kDietMealContentFontSize = 13.0;
@@ -163,7 +165,8 @@ class DietMealTile extends StatelessWidget {
   final Widget? subtitle;
   final double titleFontSize;
   final double contentFontSize;
-  final VoidCallback? onRecipeTap;
+  final List<List<DietRecipe?>> lineRecipes;
+  final RecipeLinkHandler? onRecipeLink;
 
   const DietMealTile({
     super.key,
@@ -178,7 +181,8 @@ class DietMealTile extends StatelessWidget {
     this.subtitle,
     this.titleFontSize = kDietMealTitleFontSize,
     this.contentFontSize = kDietMealContentFontSize,
-    this.onRecipeTap,
+    this.lineRecipes = const <List<DietRecipe?>>[],
+    this.onRecipeLink,
   });
 
   Color get _accentColor {
@@ -287,9 +291,16 @@ class DietMealTile extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: MealFormatter.formatMealContentWithOptions(
-                contents.map((line) => {'content': line}).toList(),
+                <Map<String, Object>>[
+                  for (int i = 0; i < contents.length; i++)
+                    <String, Object>{
+                      'content': contents[i],
+                      if (i < lineRecipes.length && lineRecipes[i].isNotEmpty)
+                        DietRecipe.lineField: lineRecipes[i],
+                    },
+                ],
                 fontSize: contentFontSize,
-                onRecipeTap: onRecipeTap,
+                onRecipeLink: onRecipeLink,
               ),
             ),
           ],
@@ -306,9 +317,10 @@ class DietPlanView extends StatefulWidget {
   final DietMenu weekday;
   final DietMenu weekend;
 
-  /// Opens the diet's attached recipe PDF when a content line references one
-  /// ("*tarifi ektedir"). Null renders the phrase as plain text.
-  final VoidCallback? onRecipeTap;
+  /// Gives the tap action of each recipe link ("*tarifi ektedir") from the
+  /// PDF attached to it (see [MealFormatter.formatMealContentWithOptions]).
+  /// Null renders every phrase as plain text.
+  final RecipeLinkHandler? onRecipeLink;
 
   /// Date used to decide which section is marked as "Bugün".
   final DateTime? referenceDate;
@@ -322,7 +334,7 @@ class DietPlanView extends StatefulWidget {
     super.key,
     required this.weekday,
     this.weekend = const DietMenu.empty(),
-    this.onRecipeTap,
+    this.onRecipeLink,
     this.referenceDate,
     this.goals = const DietGoals.empty(),
     this.emptyMessage = 'Henüz öğün planı oluşturulmamış',
@@ -443,7 +455,8 @@ class _DietPlanViewState extends State<DietPlanView> {
           onExpansionChanged: (isExpanded) =>
               setState(() => _expandedMeals[key] = isExpanded),
           tone: tone,
-          onRecipeTap: widget.onRecipeTap,
+          lineRecipes: menu.recipesOf(meal),
+          onRecipeLink: widget.onRecipeLink,
         );
       }).toList(),
     );

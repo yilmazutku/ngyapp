@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../models/diet_recipe.dart';
 import '../models/diet_section.dart';
 import '../models/meal_model.dart';
 
@@ -14,11 +15,18 @@ class DietMenu {
   /// ([formatMealTime]).
   final Map<Meals, TimeOfDay> times;
 
-  const DietMenu({required this.contents, required this.times});
+  final Map<Meals, List<List<DietRecipe?>>> recipes;
+
+  const DietMenu({
+    required this.contents,
+    required this.times,
+    this.recipes = const <Meals, List<List<DietRecipe?>>>{},
+  });
 
   const DietMenu.empty()
       : contents = const <Meals, List<String>>{},
-        times = const <Meals, TimeOfDay>{};
+        times = const <Meals, TimeOfDay>{},
+        recipes = const <Meals, List<List<DietRecipe?>>>{};
 
   bool get hasContent => contents.values.any((lines) => lines.isNotEmpty);
 
@@ -27,6 +35,9 @@ class DietMenu {
       .toList();
 
   List<String> linesOf(Meals meal) => contents[meal] ?? const <String>[];
+
+  List<List<DietRecipe?>> recipesOf(Meals meal) =>
+      recipes[meal] ?? const <List<DietRecipe?>>[];
 
   /// Öğünün diyetteki saati; diyette yazılı değilse null.
   TimeOfDay? timeOf(Meals meal) => times[meal];
@@ -45,6 +56,8 @@ class DietMenu {
   factory DietMenu.fromSubtitles(Map<String, dynamic>? subtitles) {
     final Map<Meals, List<String>> contents = <Meals, List<String>>{};
     final Map<Meals, TimeOfDay> times = <Meals, TimeOfDay>{};
+    final Map<Meals, List<List<DietRecipe?>>> recipes =
+        <Meals, List<List<DietRecipe?>>>{};
 
     if (subtitles == null) return DietMenu(contents: contents, times: times);
 
@@ -58,19 +71,29 @@ class DietMenu {
       }
 
       final rawContent = mealData['content'];
-      contents[meal] = rawContent is List
-          ? rawContent
-              .map((item) => item is Map
-                  ? (item['content'] ?? '').toString()
-                  : item.toString())
-              .where((line) => line.isNotEmpty)
-              .toList()
-          : <String>[];
+      final List<String> lines = <String>[];
+      final List<List<DietRecipe?>> lineRecipes = <List<DietRecipe?>>[];
+      if (rawContent is List) {
+        for (final Object? item in rawContent) {
+          final String line = item is Map
+              ? (item['content'] ?? '').toString()
+              : item.toString();
+          if (line.isEmpty) continue;
+          lines.add(line);
+          lineRecipes.add(item is Map
+              ? DietRecipe.listFrom(item[DietRecipe.lineField])
+              : const <DietRecipe?>[]);
+        }
+      }
+      contents[meal] = lines;
+      if (lineRecipes.any((List<DietRecipe?> line) => line.isNotEmpty)) {
+        recipes[meal] = lineRecipes;
+      }
       final TimeOfDay? time = parseMealTime(mealData['time']?.toString());
       if (time != null) times[meal] = time;
     }
 
-    return DietMenu(contents: contents, times: times);
+    return DietMenu(contents: contents, times: times, recipes: recipes);
   }
 }
 

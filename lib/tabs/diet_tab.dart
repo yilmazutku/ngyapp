@@ -520,16 +520,16 @@ class DietCard extends StatelessWidget {
                 ],
               ),
             ),
-            // Attached recipe PDF, shown directly under the diet so the link is
-            // clearly associated with this diet.
-            if (dietDoc.hasRecipe) ...[
-              const SizedBox(height: 12),
+            // Attached recipe PDFs, shown directly under the diet so the links
+            // are clearly associated with this diet.
+            for (int i = 0; i < dietDoc.recipes.length; i++) ...[
+              SizedBox(height: i == 0 ? 12 : 8),
               _buildAttachmentRow(
                 icon: Icons.picture_as_pdf,
                 color: Colors.red,
                 title: recipeLabel,
-                fileName: dietDoc.recipePdfName,
-                onTap: () => openPdfUrl(context, dietDoc.recipePdfUrl),
+                fileName: dietDoc.recipes[i].name,
+                onTap: () => openPdfUrl(context, dietDoc.recipes[i].url),
               ),
             ],
             if (dietDoc.hasSourceFile) ...[

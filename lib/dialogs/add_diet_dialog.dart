@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 // Replace with your actual imports
 import '../models/diet_goals.dart'; // Su / Spor hedefi satırları
+import '../models/diet_recipe.dart';
 import '../models/diet_section.dart'; // Hafta İçi / Hafta Sonu split
 import '../models/meal_model.dart'; // For Meals enum
 import '../models/special_line_model.dart'; // SpecialLinesRegistry / detect
@@ -17,7 +18,7 @@ import '../providers/diet_provider.dart'; // Add diet provider import
 import '../providers/special_lines_provider.dart';
 import '../utils/diet_menu_parser.dart';
 import '../utils/dialog_utils.dart';
-import '../utils/meal_formatter.dart';
+import '../utils/recipe_links.dart';
 import '../utils/storage_upload.dart';
 import '../widgets/diet_plan_view.dart';
 
@@ -54,6 +55,20 @@ class _AddDietDialogState extends State<AddDietDialog> {
       'dosyayı tekrar seçin. Saat tahmin edilmez: parantez içinde olmayan '
       'bir sayı ("ARA 200gr üzüm", "ARA 15:30") saat sayılmaz.';
 
+  static const String kRecipeFoundTitle = '"tarifi ektedir" ifadesi bulundu';
+  static const String kRecipeAttachHint =
+      'Kullanıcının bu ifadeye tıkladığında göreceği tarif PDF\'ini ekleyin.';
+  static const String kRecipesAttachHint =
+      'Her ifadeye, kullanıcının o ifadeye tıkladığında göreceği tarif '
+      'PDF\'ini ayrı ayrı ekleyin.';
+  static const String kRecipeNotSelected = 'PDF seçilmedi';
+  static const String kRecipeLinkInfo =
+      'Kullanıcı bu bağlantıya dokunduğunda, yukarıdaki listede bu bağlantı '
+      'için seçtiğiniz tarif PDF\'i açılır.';
+  static const String kRecipeMissingTitle = 'Tarif PDF\'i Seçilmedi';
+  static const String kRecipeUploadErrorText =
+      'Diyet listesi yüklenmedi. Lütfen tekrar deneyin.';
+
   // Weekday (Hafta İçi) meal list. Always present.
   List<Map<String, dynamic>> weekdaySubtitles = [];
 
@@ -78,12 +93,11 @@ class _AddDietDialogState extends State<AddDietDialog> {
   // Track upload state
   bool _isUploading = false;
 
-  // Recipe attachment: set true when the parsed diet contains the
-  // "*tarifi ektedir" reference, in which case the admin is asked to attach a
-  // recipe PDF that the user can open from their plan.
-  bool _hasRecipeMarker = false;
-  Uint8List? _recipePdfBytes;
-  String? _recipePdfName;
+  // Recipe links: every "*tarifi ektedir" reference of the parsed diet. The
+  // admin attaches a separate recipe PDF to each one (keyed by
+  // [RecipeLinkSlot.key]); the user opens it from that link on their plan.
+  List<RecipeLinkSlot> _recipeSlots = const <RecipeLinkSlot>[];
+  final Map<String, PlatformFile> _recipeFiles = <String, PlatformFile>{};
   String? _sourceFileName;
 
   // "Su Hedefi:" / "Spor Hedefi:" lines captured verbatim from the document.
@@ -346,19 +360,24 @@ class _AddDietDialogState extends State<AddDietDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildPreviewInfoBar(),
-        if (_hasRecipeMarker) _buildRecipeAttachSection(),
         const SizedBox(height: 8),
         Expanded(
           child: Scrollbar(
             controller: _scrollController,
             child: SingleChildScrollView(
               controller: _scrollController,
-              child: DietPlanView(
-                weekday: _weekdayMenu,
-                weekend: _weekendMenu,
-                goals: _goals,
-                onRecipeTap: _showRecipeLinkInfo,
-                emptyMessage: 'Bu dosyadan öğün içeriği çıkarılamadı.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_recipeSlots.isNotEmpty) _buildRecipeAttachSection(),
+                  DietPlanView(
+                    weekday: _weekdayMenu,
+                    weekend: _weekendMenu,
+                    goals: _goals,
+                    onRecipeLink: (_) => _showRecipeLinkInfo,
+                    emptyMessage: 'Bu dosyadan öğün içeriği çıkarılamadı.',
+                  ),
+                ],
               ),
             ),
           ),
@@ -420,24 +439,24 @@ class _AddDietDialogState extends State<AddDietDialog> {
     await DialogUtils.openInfo(
       context,
       title: 'Tarif Bağlantısı',
-      message: 'Kullanıcı bu bağlantıya dokunduğunda eklediğiniz tarif '
-          'PDF\'i açılır.',
+      message: kRecipeLinkInfo,
     );
   }
 
-  /// Prompt shown in the preview when the diet references a recipe
+  /// Prompt shown in the preview when the diet references recipes
   /// ("*tarifi ektedir"), asking the admin to attach the recipe PDF the user
-  /// will open from their plan.
+  /// will open from each reference on their plan.
   Widget _buildRecipeAttachSection() {
-    final hasPdf = _recipePdfBytes != null;
+    final bool complete = _recipeSlotsWithoutPdf.isEmpty;
+    final bool single = _recipeSlots.length == 1;
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8.0),
+      margin: const EdgeInsets.only(bottom: 8.0),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: hasPdf ? Colors.green.shade50 : Colors.orange.shade50,
+        color: complete ? Colors.green.shade50 : Colors.orange.shade50,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: hasPdf ? Colors.green.shade300 : Colors.orange.shade300,
+          color: complete ? Colors.green.shade300 : Colors.orange.shade300,
         ),
       ),
       child: Column(
@@ -446,47 +465,88 @@ class _AddDietDialogState extends State<AddDietDialog> {
           Row(
             children: [
               Icon(
-                hasPdf ? Icons.check_circle : Icons.picture_as_pdf,
+                complete ? Icons.check_circle : Icons.picture_as_pdf,
                 size: 20,
-                color: hasPdf ? Colors.green.shade700 : Colors.orange.shade800,
+                color: complete ? Colors.green.shade700 : Colors.orange.shade800,
               ),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  '"tarifi ektedir" ifadesi bulundu',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  single
+                      ? kRecipeFoundTitle
+                      : '${_recipeSlots.length} $kRecipeFoundTitle',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Kullanıcının bu ifadeye tıkladığında göreceği tarif PDF\'ini ekleyin.',
-            style: TextStyle(fontSize: 12),
+          Text(
+            single ? kRecipeAttachHint : kRecipesAttachHint,
+            style: const TextStyle(fontSize: 12),
           ),
-          const SizedBox(height: 8),
-          Row(
+          for (final RecipeLinkSlot slot in _recipeSlots)
+            _buildRecipeSlotRow(slot),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecipeSlotRow(RecipeLinkSlot slot) {
+    final PlatformFile? file = _recipeFiles[slot.key];
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _recipeSlotTitle(slot),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+          Text(
+            slot.line,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               OutlinedButton.icon(
-                onPressed: _pickRecipePdf,
+                onPressed: () => _pickRecipePdf(slot),
                 icon: const Icon(Icons.attach_file, size: 18),
-                label: Text(hasPdf ? 'PDF Değiştir' : 'PDF Seç'),
+                label: Text(file == null ? 'PDF Seç' : 'PDF Değiştir'),
               ),
-              const SizedBox(width: 8),
-              if (_recipePdfName != null)
-                Expanded(
-                  child: Text(
-                    _recipePdfName!,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12),
-                  ),
+              Text(
+                file?.name ?? kRecipeNotSelected,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: file == null ? Colors.orange.shade900 : null,
                 ),
+              ),
             ],
           ),
         ],
       ),
     );
   }
+
+  String _recipeSlotTitle(RecipeLinkSlot slot) {
+    final String section =
+        _weekendHasContent ? ' — ${slot.section.label}' : '';
+    final String order =
+        slot.linkCount > 1 ? ' • ${slot.linkIndex + 1}. bağlantı' : '';
+    return '${slot.mealName}$section$order';
+  }
+
+  List<RecipeLinkSlot> get _recipeSlotsWithoutPdf => _recipeSlots
+      .where((RecipeLinkSlot slot) => !_recipeFiles.containsKey(slot.key))
+      .toList();
 
   /// 3) Actions once we have preview: "Vazgeç" or "Onayla"
   List<Widget> _buildParsedButtons() {
@@ -522,9 +582,8 @@ class _AddDietDialogState extends State<AddDietDialog> {
     _localFilePath = null;
     _hasParsedPreview = false;
     // Reset any previously detected/attached recipe.
-    _hasRecipeMarker = false;
-    _recipePdfBytes = null;
-    _recipePdfName = null;
+    _recipeSlots = const <RecipeLinkSlot>[];
+    _recipeFiles.clear();
     _sourceFileName = null;
     _waterGoal = null;
     _sportGoal = null;
@@ -580,8 +639,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
     });
     // Now parse the text into subtitles
     _extractSubtitles(text);
-    // Detect the "*tarifi ektedir" reference so the admin can attach a recipe.
-    _hasRecipeMarker = _detectRecipeMarker();
+    // Find every "*tarifi ektedir" reference so the admin can attach a recipe
+    // to each one.
+    _recipeSlots = _findRecipeSlots();
     // Show the preview
     setState(() {
       _rebuildPreviewMenus();
@@ -599,27 +659,16 @@ class _AddDietDialogState extends State<AddDietDialog> {
         : const DietMenu.empty();
   }
 
-  /// Scans the parsed weekday + weekend menus for the "*tarifi ektedir"
-  /// reference. Returns true as soon as any content line references a recipe.
-  bool _detectRecipeMarker() {
-    for (final list in [weekdaySubtitles, weekendSubtitles]) {
-      for (final meal in list) {
-        final content = meal['content'];
-        if (content is List) {
-          for (final item in content) {
-            final text = item is Map
-                ? (item['content']?.toString() ?? '')
-                : item.toString();
-            if (lineHasRecipeMarker(text)) return true;
-          }
-        }
-      }
-    }
-    return false;
-  }
+  /// Every "*tarifi ektedir" reference of the parsed weekday + weekend menus,
+  /// in menu order (a line with several references yields one per reference).
+  List<RecipeLinkSlot> _findRecipeSlots() => <RecipeLinkSlot>[
+        ...RecipeLinkSlot.findIn(weekdaySubtitles, DietSection.weekday),
+        if (_weekendHasContent)
+          ...RecipeLinkSlot.findIn(weekendSubtitles, DietSection.weekend),
+      ];
 
-  /// Lets the admin pick the recipe PDF to attach to this diet.
-  Future<void> _pickRecipePdf() async {
+  /// Lets the admin pick the recipe PDF of one recipe reference.
+  Future<void> _pickRecipePdf(RecipeLinkSlot slot) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
@@ -642,8 +691,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
       }
       return;
     }
-    final bytes = file.bytes;
-    if (bytes == null) {
+    if (file.bytes == null) {
       if (mounted) {
         await DialogUtils.openError(
           context,
@@ -654,9 +702,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
-      _recipePdfBytes = bytes;
-      _recipePdfName = file.name;
+      _recipeFiles[slot.key] = file;
     });
   }
 
@@ -856,7 +904,11 @@ class _AddDietDialogState extends State<AddDietDialog> {
   /// Converts a parsed meal [list] (entries of `{name, time, content}`) into
   /// the enum-keyed map (`{br: {time, content}, ...}`) the diet document stores.
   /// Entries whose meal name cannot be resolved to a [Meals] enum are skipped.
-  Map<String, dynamic> _buildSubtitlesMap(List<Map<String, dynamic>> list) {
+  Map<String, dynamic> _buildSubtitlesMap(
+    List<Map<String, dynamic>> list, {
+    List<Map<String, String>?>? Function(String mealName, int lineIndex)?
+        recipesOf,
+  }) {
     final Map<String, dynamic> subtitlesMap = {};
 
     for (var subtitle in list) {
@@ -900,12 +952,16 @@ class _AddDietDialogState extends State<AddDietDialog> {
 
       // Format content items correctly
       List<Map<String, dynamic>> formattedContent = [];
-      for (var item in subtitle['content']) {
-        if (item is Map) {
-          formattedContent.add(Map<String, dynamic>.from(item));
-        } else {
-          formattedContent.add({'content': item.toString()});
-        }
+      final List content = subtitle['content'];
+      for (int i = 0; i < content.length; i++) {
+        final item = content[i];
+        final Map<String, dynamic> entry = item is Map
+            ? Map<String, dynamic>.from(item)
+            : {'content': item.toString()};
+        final List<Map<String, String>?>? recipes =
+            recipesOf?.call('$mealName', i);
+        if (recipes != null) entry[DietRecipe.lineField] = recipes;
+        formattedContent.add(entry);
       }
 
       // Add the properly structured entry
@@ -934,15 +990,21 @@ class _AddDietDialogState extends State<AddDietDialog> {
     if (await _showMissingTimeError()) return;
     if (!mounted) return;
 
-    // If the diet references a recipe but no PDF was attached, confirm before
-    // continuing so the admin has a chance to add it.
-    if (_hasRecipeMarker && _recipePdfBytes == null) {
+    // If some recipe references have no PDF attached, confirm before
+    // continuing so the admin has a chance to add them.
+    final List<RecipeLinkSlot> slotsWithoutPdf = _recipeSlotsWithoutPdf;
+    if (slotsWithoutPdf.isNotEmpty) {
       final proceed = await DialogUtils.openConfirm(
         context,
-        title: 'Tarif PDF\'i Seçilmedi',
-        message: 'Bu diyette "tarifi ektedir" ifadesi var ancak bir tarif '
-            'PDF\'i seçmediniz. Kullanıcı tarifi göremeyecek. Yine de '
-            'yüklensin mi?',
+        title: kRecipeMissingTitle,
+        message: _recipeSlots.length == 1
+            ? 'Bu diyette "tarifi ektedir" ifadesi var ancak bir tarif '
+                'PDF\'i seçmediniz. Kullanıcı tarifi göremeyecek. Yine de '
+                'yüklensin mi?'
+            : 'Bu diyetteki ${_recipeSlots.length} "tarifi ektedir" '
+                'ifadesinden ${slotsWithoutPdf.length} tanesine tarif PDF\'i '
+                'seçmediniz. Kullanıcı bu ifadelerde tarifi göremeyecek. Yine '
+                'de yüklensin mi?',
         confirmText: 'Yine de Yükle',
         cancelText: 'Vazgeç',
       );
@@ -954,36 +1016,60 @@ class _AddDietDialogState extends State<AddDietDialog> {
       _isUploading = true;
     });
 
+    final dietProvider = Provider.of<DietProvider>(context, listen: false);
+    final Map<String, DietRecipe> uploadedRecipes = <String, DietRecipe>{};
+    String? sourcePath;
+    String? docId;
+
+    Future<void> deleteUploadedFiles() async {
+      for (final DietRecipe recipe in uploadedRecipes.values) {
+        await dietProvider.deleteStorageFile(recipe.path);
+      }
+      await dietProvider.deleteStorageFile(sourcePath);
+    }
+
     try {
-      // Convert both menus into the enum-keyed map format the provider expects.
-      final Map<String, dynamic> subtitlesMap =
-          _buildSubtitlesMap(weekdaySubtitles);
-      final Map<String, dynamic>? weekendMap =
-          _weekendHasContent ? _buildSubtitlesMap(weekendSubtitles) : null;
-
-      // Use DietProvider to upload the diet
-      final dietProvider = Provider.of<DietProvider>(context, listen: false);
-
-      // Upload the attached recipe PDF (if any) first, so its URL can be saved
-      // together with the diet document.
-      String? recipeUrl;
-      String? recipePath;
-      String? recipeName;
-      if (_hasRecipeMarker && _recipePdfBytes != null) {
-        final info = await dietProvider.uploadRecipePdf(
+      // Upload the PDF of every recipe reference first, so each link's URL
+      // can be saved on its own content line together with the diet.
+      for (final RecipeLinkSlot slot in _recipeSlots) {
+        final PlatformFile? file = _recipeFiles[slot.key];
+        if (file == null) continue;
+        final DietRecipe? recipe = await dietProvider.uploadRecipePdf(
           userId: widget.userId,
-          fileName: _recipePdfName ?? 'tarif.pdf',
-          fileBytes: _recipePdfBytes!,
+          fileName: file.name,
+          fileBytes: file.bytes,
         );
-        if (info != null) {
-          recipeUrl = info['url'];
-          recipePath = info['path'];
-          recipeName = info['name'];
+        if (recipe == null) {
+          await deleteUploadedFiles();
+          if (!mounted) return;
+          setState(() {
+            _isUploading = false;
+          });
+          await DialogUtils.openError(
+            context,
+            title: 'Hata',
+            message: 'Tarif PDF\'i yüklenemedi: ${file.name}\n\n'
+                '$kRecipeUploadErrorText',
+          );
+          return;
         }
+        uploadedRecipes[slot.key] = recipe;
       }
 
+      // Convert both menus into the enum-keyed map format the provider expects.
+      final Map<String, dynamic> subtitlesMap = _buildSubtitlesMap(
+        weekdaySubtitles,
+        recipesOf: _uploadedRecipesOf(DietSection.weekday, uploadedRecipes),
+      );
+      final Map<String, dynamic>? weekendMap = _weekendHasContent
+          ? _buildSubtitlesMap(
+              weekendSubtitles,
+              recipesOf:
+                  _uploadedRecipesOf(DietSection.weekend, uploadedRecipes),
+            )
+          : null;
+
       String? sourceUrl;
-      String? sourcePath;
       String? sourceName;
       if ((_localFilePath ?? '').isNotEmpty) {
         final info = await dietProvider.uploadSourceFile(
@@ -998,14 +1084,17 @@ class _AddDietDialogState extends State<AddDietDialog> {
         }
       }
 
-      final String? docId = await dietProvider.uploadDiet(
+      final DietRecipe? firstRecipe =
+          uploadedRecipes.isEmpty ? null : uploadedRecipes.values.first;
+      docId = await dietProvider.uploadDiet(
         userId: widget.userId,
         subtitles: subtitlesMap,
         weekendSubtitles: weekendMap,
         subscriptionId: _selectedSubscription?.subscriptionId,
-        recipePdfUrl: recipeUrl,
-        recipePdfPath: recipePath,
-        recipePdfName: recipeName,
+        recipePdfUrl: firstRecipe?.url,
+        recipePdfPath: firstRecipe?.path,
+        recipePdfName: firstRecipe?.name,
+        recipesPerLine: _recipeSlots.isNotEmpty,
         sourceFileUrl: sourceUrl,
         sourceFilePath: sourcePath,
         sourceFileName: sourceName,
@@ -1014,8 +1103,7 @@ class _AddDietDialogState extends State<AddDietDialog> {
       );
 
       if (docId == null) {
-        await dietProvider.deleteStorageFile(recipePath);
-        await dietProvider.deleteStorageFile(sourcePath);
+        await deleteUploadedFiles();
       }
 
       // Check if widget is still mounted before updating state
@@ -1043,6 +1131,9 @@ class _AddDietDialogState extends State<AddDietDialog> {
         );
       }
     } catch (e) {
+      if (docId == null) {
+        await deleteUploadedFiles();
+      }
       // Check if widget is still mounted before updating state
       if (!mounted) return;
       
@@ -1056,6 +1147,20 @@ class _AddDietDialogState extends State<AddDietDialog> {
         message: 'Diyet listesi yüklenirken bir hata oluştu: $e',
       );
     }
+  }
+
+  List<Map<String, String>?>? Function(String mealName, int lineIndex)
+      _uploadedRecipesOf(
+    DietSection section,
+    Map<String, DietRecipe> uploadedRecipes,
+  ) {
+    return (String mealName, int lineIndex) => RecipeLinkSlot.recipesOfLine(
+          slots: _recipeSlots,
+          recipes: uploadedRecipes,
+          section: section,
+          mealName: mealName,
+          lineIndex: lineIndex,
+        );
   }
 
   /// Helper for user feedback

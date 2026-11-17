@@ -1293,8 +1293,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       replyTo: replyTarget == null ? null : MessageReply.of(replyTarget),
     );
     _showLatest();
-    // Masaüstünde gönder düğmesine tıklamak kutunun odağını alır; yazmaya
-    // devam edebilmek için odak kutuya döner.
+    // Masaüstünde gönderdikten sonra yazmaya devam edebilmek için odak kutuya
+    // döner (kutu odakta değilken gönder düğmesine basıldıysa da).
     if (_isDesktopPlatform) _inputFocusNode.requestFocus();
 
     try {
@@ -3094,19 +3094,21 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                 const SizedBox(width: 4),
 
                 // Gönder: kutu boşken pasif görünür.
-                ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: widget.controller,
-                  builder: (context, value, _) {
-                    final bool canSend = value.text.trim().isNotEmpty;
-                    return IconButton(
-                      tooltip: _sendTooltip,
-                      icon: Icon(
-                        Icons.send_rounded,
-                        color: canSend ? colorScheme.primary : null,
-                      ),
-                      onPressed: canSend ? widget.onSend : null,
-                    );
-                  },
+                TextFieldTapRegion(
+                  child: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: widget.controller,
+                    builder: (context, value, _) {
+                      final bool canSend = value.text.trim().isNotEmpty;
+                      return IconButton(
+                        tooltip: _sendTooltip,
+                        icon: Icon(
+                          Icons.send_rounded,
+                          color: canSend ? colorScheme.primary : null,
+                        ),
+                        onPressed: canSend ? widget.onSend : null,
+                      );
+                    },
+                  ),
                 ),
               ],
             ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/diet_model.dart';
+import '../models/diet_recipe.dart';
 import '../models/diet_section.dart';
 import '../models/meal_model.dart';
 import '../models/special_line_model.dart';
@@ -9,6 +10,7 @@ import '../providers/special_lines_provider.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/diet_menu_parser.dart';
 import '../utils/meal_formatter.dart';
+import '../utils/recipe_links.dart';
 import '../utils/pdf_launcher.dart';
 import '../widgets/app_bar_with_back.dart';
 import '../widgets/labeled_action_button.dart';
@@ -190,9 +192,10 @@ class _DietEditPageState extends State<DietEditPage> {
                   controller: _scrollController,
                   padding: const EdgeInsets.all(16),
                   children: [
-                    // Attached recipe PDF banner (shown in both view and edit
-                    // modes when the diet has a recipe).
-                    if (widget.dietDoc.hasRecipe) _buildRecipeBanner(),
+                    // Attached recipe PDF banners (shown in both view and edit
+                    // modes, one per recipe of the diet).
+                    for (final DietRecipe recipe in widget.dietDoc.recipes)
+                      _buildRecipeBanner(recipe),
 
                     // Diet name editor card (only in edit mode)
                     if (!widget.viewOnly)
@@ -270,10 +273,10 @@ class _DietEditPageState extends State<DietEditPage> {
     );
   }
 
-  /// Banner shown at the top of the page when the diet has an attached recipe
-  /// PDF, letting the admin open it directly.
-  Widget _buildRecipeBanner() {
-    final name = widget.dietDoc.recipePdfName?.trim();
+  /// Banner shown at the top of the page for an attached recipe PDF, letting
+  /// the admin open it directly.
+  Widget _buildRecipeBanner(DietRecipe recipe) {
+    final name = recipe.name?.trim();
     final label =
         (name != null && name.isNotEmpty) ? name : 'Görüntülemek için dokunun';
 
@@ -282,7 +285,7 @@ class _DietEditPageState extends State<DietEditPage> {
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
-        onTap: () => openPdfUrl(context, widget.dietDoc.recipePdfUrl),
+        onTap: () => openPdfUrl(context, recipe.url),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -525,9 +528,10 @@ class _DietEditPageState extends State<DietEditPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: MealFormatter.formatMealContentWithOptions(
                       contentList,
-                      onRecipeTap: widget.dietDoc.hasRecipe
-                          ? () => openPdfUrl(context, widget.dietDoc.recipePdfUrl)
-                          : null,
+                      onRecipeLink: openRecipeLinks(
+                        context,
+                        fallback: widget.dietDoc.legacyRecipe,
+                      ),
                     ),
                   )
                 : Column(
@@ -753,16 +757,24 @@ class _DietEditPageState extends State<DietEditPage> {
                     setState(() {
                       final contentList =
                           data[mealName]['content'] as List;
+                      final Object? edited = contentList[index];
+                      final Object? recipes = edited is Map
+                          ? edited[DietRecipe.lineField]
+                          : null;
 
                       if (newContent.contains('\n')) {
                         contentList.removeAt(index);
                         final inserted = _expandLinesIntoEntries(newContent);
+                        _carryRecipes(recipes, inserted);
                         for (int i = 0; i < inserted.length; i++) {
                           contentList.insert(index + i, inserted[i]);
                         }
                       } else {
                         // Simple single-line edit
-                        contentList[index] = {'content': newContent};
+                        contentList[index] = {
+                          'content': newContent,
+                          if (recipes != null) DietRecipe.lineField: recipes,
+                        };
                       }
 
                       _hasChanges = true;
@@ -1204,6 +1216,17 @@ class _DietEditPageState extends State<DietEditPage> {
     }
 
     return out;
+  }
+
+  void _carryRecipes(Object? recipes, List<Map<String, dynamic>> entries) {
+    if (recipes is! List) return;
+    final List<List<Object?>> perLine = distributeLineRecipes(
+      recipes,
+      <String>[for (final entry in entries) '${entry['content']}'],
+    );
+    for (int i = 0; i < entries.length; i++) {
+      if (perLine[i].isNotEmpty) entries[i][DietRecipe.lineField] = perLine[i];
+    }
   }
 
   // Helper method to get display name for meal keys

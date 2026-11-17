@@ -65,7 +65,8 @@ class ChatInputKeyHandler extends StatelessWidget {
       event,
       platform: defaultTargetPlatform,
       isShiftPressed: HardwareKeyboard.instance.isShiftPressed,
-      isComposing: controller.value.composing.isValid,
+      isComposing: controller.value.composing.isValid &&
+          !controller.value.composing.isCollapsed,
       hasReply: hasReply(),
     );
     switch (action) {
