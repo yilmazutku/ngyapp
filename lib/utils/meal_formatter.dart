@@ -1,88 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../models/diet_recipe.dart';
 import '../models/special_line_model.dart';
-
-// ---------------------------------------------------------------------------
-// Recipe reference marker ("*tarifi ektedir")
-//
-// When a diet content line references an attached recipe (e.g. a line like
-// "Kek (*tarifi ektedir)"), that phrase is rendered as a tappable link that
-// opens the diet's attached recipe PDF. The admin attaches the PDF during the
-// diet import flow whenever this phrase is detected.
-// ---------------------------------------------------------------------------
-
-/// Matches the recipe reference phrase ("*tarifi ektedir") inside a diet
-/// content line. Tolerant of an optional leading asterisk, flexible spacing
-/// between the two words and upper/lower case — including the Turkish dotted
-/// and dotless i variants (i / ı / I / İ).
-///
-/// The match starts at the asterisk when one is present (so only the "*…"
-/// phrase, not the text before it, is turned into the link), and at the word
-/// "tarifi" otherwise.
-final RegExp kRecipeMarkerRegex = RegExp(
-  r'(?:\*\s*)?[tT][aA][rR][iıIİ][fF][iıIİ]\s+[eE][kK][tT][eE][dD][iıIİ][rR]',
-);
-
-/// True when [line] references an attached recipe ("*tarifi ektedir").
-bool lineHasRecipeMarker(String? line) =>
-    line != null && kRecipeMarkerRegex.hasMatch(line);
-
-/// The three parts a recipe-marker line splits into: the text before the
-/// marker, the marker phrase itself, and the text after it. Either side may be
-/// empty (e.g. when the whole line is just the marker).
-class RecipeMarkerParts {
-  final String before;
-  final String marker;
-  final String after;
-
-  const RecipeMarkerParts(this.before, this.marker, this.after);
-}
-
-/// Splits [line] around the recipe marker, or returns null when the line has no
-/// recipe reference. The "before" part is normalized so the marker always has
-/// exactly one space in front of it (see [normalizeRecipeMarkerSpacing]).
-RecipeMarkerParts? splitRecipeMarker(String line) {
-  final m = kRecipeMarkerRegex.firstMatch(line);
-  if (m == null) return null;
-  return RecipeMarkerParts(
-    _spacedBeforeMarker(line.substring(0, m.start)),
-    line.substring(m.start, m.end),
-    line.substring(m.end),
-  );
-}
-
-/// Gösterim düzeltmesi: "*tarifi ektedir" ifadesi kendisinden önceki metne
-/// yapışık gelirse araya tek boşluk konur, birden fazla boşluk varsa tek
-/// boşluğa indirilir. İfade parantez içindeyse boşluk parantezin soluna gider
-/// ("Kek(*tarifi ektedir)" -> "Kek (*tarifi ektedir)"). Satır doğrudan ifadeyle
-/// başlıyorsa başa boşluk eklenmez. İşlem tekrar uygulanabilir (idempotent).
-String normalizeRecipeMarkerSpacing(String line) {
-  final m = kRecipeMarkerRegex.firstMatch(line);
-  if (m == null) return line;
-  return _spacedBeforeMarker(line.substring(0, m.start)) +
-      line.substring(m.start);
-}
-
-/// Marker'ın solundaki metni tek boşlukla biter hâle getirir. Marker'a bitişik
-/// açılış parantezleri ifadenin parçası sayılır, boşluk onların da soluna
-/// konur.
-String _spacedBeforeMarker(String before) {
-  if (before.isEmpty) return before;
-
-  int end = before.length;
-  while (end > 0 && _isOpeningBracket(before[end - 1])) {
-    end--;
-  }
-
-  final String head = before.substring(0, end).trimRight();
-  final String brackets = before.substring(end);
-  if (head.isEmpty) return brackets;
-  return '$head $brackets';
-}
-
-bool _isOpeningBracket(String char) =>
-    char == '(' || char == '[' || char == '{';
+import 'recipe_links.dart';
 
 // ---------------------------------------------------------------------------
 // Legacy constants (kept for backward compatibility with files that already
@@ -187,14 +108,15 @@ class MealFormatter {
   /// Formats a list of meal content items into widgets, inserting a styled
   /// divider before each new option introduced by a special marker line.
   ///
-  /// When [onRecipeTap] is provided, any line containing the recipe reference
-  /// phrase ("*tarifi ektedir") renders that phrase as a tappable link that
-  /// invokes [onRecipeTap] (used to open the diet's attached recipe PDF). When
-  /// it is null the phrase is shown as plain text.
+  /// When [onRecipeLink] is provided, every recipe reference phrase
+  /// ("*tarifi ektedir") of a line asks it for its tap action, passing the
+  /// recipe PDF attached to that phrase (the item's `recipes` list, see
+  /// [DietRecipe]); a phrase whose action is null, or every phrase when
+  /// [onRecipeLink] is null, is shown as plain text.
   static List<Widget> formatMealContentWithOptions(
     List<dynamic> contentList, {
     double fontSize = 16,
-    VoidCallback? onRecipeTap,
+    RecipeLinkHandler? onRecipeLink,
   }) {
     final List<Widget> formatted = [];
     final List<int> optionStartIndices = _collectOptionStarts(contentList);
@@ -236,25 +158,39 @@ class MealFormatter {
         final String? displayContent = _displayContentFor(contentList[i]);
         if (displayContent == null) continue;
 
-        formatted.add(_contentLineWidget(displayContent, fontSize, onRecipeTap));
+        formatted.add(_contentLineWidget(
+          displayContent,
+          _recipesOf(contentList[i]),
+          fontSize,
+          onRecipeLink,
+        ));
       }
     }
 
     return formatted;
   }
 
-  /// Builds a single content-line widget. When [onRecipeTap] is non-null and
-  /// [text] contains the recipe phrase, ONLY that phrase ("*…tarifi ektedir")
-  /// is rendered as a tappable, underlined link — the rest of the line stays
+  /// Builds a single content-line widget. When [onRecipeLink] gives an action
+  /// for a recipe phrase of [text], ONLY that phrase ("*…tarifi ektedir") is
+  /// rendered as a tappable, underlined link — the rest of the line stays
   /// plain, non-tappable text. Otherwise a plain [Text].
   static Widget _contentLineWidget(
     String text,
+    List<DietRecipe?> recipes,
     double fontSize,
-    VoidCallback? onRecipeTap,
+    RecipeLinkHandler? onRecipeLink,
   ) {
-    final parts = onRecipeTap == null ? null : splitRecipeMarker(text);
+    final List<RecipeLineSegment> segments = onRecipeLink == null
+        ? const <RecipeLineSegment>[]
+        : splitRecipeMarkers(text);
+    final int markerCount =
+        segments.where((RecipeLineSegment segment) => segment.isMarker).length;
+    final List<VoidCallback?> markerTaps = <VoidCallback?>[
+      for (int i = 0; i < markerCount; i++)
+        onRecipeLink!(i < recipes.length ? recipes[i] : null),
+    ];
 
-    if (parts == null) {
+    if (markerTaps.every((VoidCallback? onTap) => onTap == null)) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4.0),
         child: Text(text, style: TextStyle(fontSize: fontSize)),
@@ -262,11 +198,15 @@ class MealFormatter {
     }
 
     return _RecipeContentLine(
-      parts: parts,
+      segments: segments,
+      markerTaps: markerTaps,
       fontSize: fontSize,
-      onTap: onRecipeTap!,
     );
   }
+
+  static List<DietRecipe?> _recipesOf(dynamic item) => item is Map
+      ? DietRecipe.listFrom(item[DietRecipe.lineField])
+      : const <DietRecipe?>[];
 
   /// Returns a [RichText] widget that formats meal content with options.
   static Widget formatMealContentAsRichText(List<dynamic> contentList) {
@@ -394,19 +334,20 @@ class MealFormatter {
   }
 }
 
-/// Renders a diet content line that contains the recipe reference so that ONLY
-/// the "*…tarifi ektedir" phrase is a tappable link; the surrounding text stays
-/// plain. Owns the [TapGestureRecognizer] applied to the marker span so it is
-/// disposed correctly (a recognizer created inline in a build would leak).
+/// Renders a diet content line that contains recipe references so that ONLY
+/// the "*…tarifi ektedir" phrases are tappable links; the surrounding text
+/// stays plain. Owns the [TapGestureRecognizer]s applied to the phrase spans
+/// so they are disposed correctly (a recognizer created inline in a build
+/// would leak).
 class _RecipeContentLine extends StatefulWidget {
-  final RecipeMarkerParts parts;
+  final List<RecipeLineSegment> segments;
+  final List<VoidCallback?> markerTaps;
   final double fontSize;
-  final VoidCallback onTap;
 
   const _RecipeContentLine({
-    required this.parts,
+    required this.segments,
+    required this.markerTaps,
     required this.fontSize,
-    required this.onTap,
   });
 
   @override
@@ -414,50 +355,77 @@ class _RecipeContentLine extends StatefulWidget {
 }
 
 class _RecipeContentLineState extends State<_RecipeContentLine> {
-  late final TapGestureRecognizer _recognizer;
+  List<TapGestureRecognizer?> _recognizers = const <TapGestureRecognizer?>[];
 
   @override
   void initState() {
     super.initState();
-    _recognizer = TapGestureRecognizer()..onTap = widget.onTap;
+    _syncRecognizers();
   }
 
   @override
   void didUpdateWidget(covariant _RecipeContentLine oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Keep the recognizer pointed at the latest callback across rebuilds.
-    _recognizer.onTap = widget.onTap;
+    _syncRecognizers();
+  }
+
+  void _syncRecognizers() {
+    final List<TapGestureRecognizer?> previous = _recognizers;
+    final List<TapGestureRecognizer?> next = <TapGestureRecognizer?>[
+      for (int i = 0; i < widget.markerTaps.length; i++)
+        if (widget.markerTaps[i] == null)
+          null
+        else
+          ((i < previous.length ? previous[i] : null) ?? TapGestureRecognizer())
+            ..onTap = widget.markerTaps[i],
+    ];
+    for (int i = 0; i < previous.length; i++) {
+      final TapGestureRecognizer? recognizer = previous[i];
+      if (recognizer != null &&
+          (i >= next.length || !identical(next[i], recognizer))) {
+        recognizer.dispose();
+      }
+    }
+    _recognizers = next;
   }
 
   @override
   void dispose() {
-    _recognizer.dispose();
+    for (final TapGestureRecognizer? recognizer in _recognizers) {
+      recognizer?.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final parts = widget.parts;
+    final TextStyle linkStyle = TextStyle(
+      color: Colors.blue.shade700,
+      fontWeight: FontWeight.w600,
+      decoration: TextDecoration.underline,
+    );
+    int markerIndex = 0;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Text.rich(
         TextSpan(
           style: TextStyle(fontSize: widget.fontSize),
-          children: [
-            if (parts.before.isNotEmpty) TextSpan(text: parts.before),
-            TextSpan(
-              text: parts.marker,
-              style: TextStyle(
-                color: Colors.blue.shade700,
-                fontWeight: FontWeight.w600,
-                decoration: TextDecoration.underline,
-              ),
-              recognizer: _recognizer,
-            ),
-            if (parts.after.isNotEmpty) TextSpan(text: parts.after),
+          children: <InlineSpan>[
+            for (final RecipeLineSegment segment in widget.segments)
+              if (!segment.isMarker)
+                TextSpan(text: segment.text)
+              else
+                _markerSpan(segment.text, markerIndex++, linkStyle),
           ],
         ),
       ),
     );
+  }
+
+  TextSpan _markerSpan(String text, int index, TextStyle linkStyle) {
+    final TapGestureRecognizer? recognizer =
+        index < _recognizers.length ? _recognizers[index] : null;
+    if (recognizer == null) return TextSpan(text: text);
+    return TextSpan(text: text, style: linkStyle, recognizer: recognizer);
   }
 }

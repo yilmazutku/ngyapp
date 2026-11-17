@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diet_goals.dart';
+import '../models/diet_recipe.dart';
 import '../models/diet_section.dart';
 import '../models/meal_model.dart';
 import '../providers/daily_data_provider.dart';
@@ -62,9 +63,10 @@ class _MealUploadPageState extends State<MealUploadPage>
   // Weekend (Hafta Sonu) menu. Only populated when the active diet defines one.
   DietMenu _weekendMenu = const DietMenu.empty();
 
-  /// Download URL of the active diet's attached recipe PDF, if any. Drives the
-  /// tappable "*tarifi ektedir" link inside the meal content.
-  String? _recipePdfUrl;
+  /// The active diet's single recipe PDF when it is an older diet (see
+  /// [DietDocument.legacyRecipe]); every "*tarifi ektedir" link without its
+  /// own PDF opens it.
+  DietRecipe? _legacyRecipe;
 
   /// Goal lines of the active diet, shown above the first meal.
   DietGoals _goals = const DietGoals.empty();
@@ -254,7 +256,7 @@ class _MealUploadPageState extends State<MealUploadPage>
       setState(() {
         _weekdayMenu = DietMenu.fromSubtitles(diet?.subtitles);
         _weekendMenu = DietMenu.fromSubtitles(diet?.weekendSubtitles);
-        _recipePdfUrl = diet?.recipePdfUrl;
+        _legacyRecipe = diet?.legacyRecipe;
         _goals = diet?.goals ?? const DietGoals.empty();
       });
 
@@ -834,6 +836,7 @@ class _MealUploadPageState extends State<MealUploadPage>
           ...mealsWithContent.map((meal) => _buildMealTile(
                 mealCategory: meal,
                 contents: menu.linesOf(meal),
+                lineRecipes: menu.recipesOf(meal),
                 mealTime: menu.timeOf(meal),
                 interactive: interactive,
                 expansionKey: _expansionKey(meal, section: section),
@@ -848,6 +851,7 @@ class _MealUploadPageState extends State<MealUploadPage>
   Widget _buildMealTile({
     required Meals mealCategory,
     required List<String> contents,
+    required List<List<DietRecipe?>> lineRecipes,
     required TimeOfDay? mealTime,
     required bool interactive,
     required String expansionKey,
@@ -875,9 +879,8 @@ class _MealUploadPageState extends State<MealUploadPage>
           : (isChecked ? DietMealTone.completed : DietMealTone.active),
       titleFontSize: _titleFontSize,
       contentFontSize: _contentFontSize,
-      onRecipeTap: (_recipePdfUrl == null || _recipePdfUrl!.isEmpty)
-          ? null
-          : () => openPdfUrl(context, _recipePdfUrl),
+      lineRecipes: lineRecipes,
+      onRecipeLink: openRecipeLinks(context, fallback: _legacyRecipe),
       // Tracking controls only for the active (today's) menu.
       trailing: interactive
           ? [

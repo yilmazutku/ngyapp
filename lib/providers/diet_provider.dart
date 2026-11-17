@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import '../models/diet_model.dart';
+import '../models/diet_recipe.dart';
 import '../models/filter_params.dart';
 import '../models/mock_test_run.dart';
 import '../utils/storage_upload.dart';
@@ -260,13 +261,13 @@ class DietProvider extends ChangeNotifier {
 
   /// Uploads a recipe PDF for a diet to Cloud Storage.
   ///
-  /// Stored at `users/{userId}/dietRecipes/recipe_<ts>.pdf`. Returns a map with
-  /// the download `url`, storage `path` (for later cleanup) and original
-  /// `name`, or null when the upload fails.
+  /// Stored at `users/{userId}/dietRecipes/<ts>/<name>`. Returns the attached
+  /// [DietRecipe] (download `url`, storage `path` for later cleanup and the
+  /// original `name`), or null when the upload fails.
   ///
-  /// Called from the diet import flow when the imported diet contains the
-  /// "*tarifi ektedir" reference and the admin attaches a recipe PDF.
-  Future<Map<String, String>?> uploadRecipePdf({
+  /// Called from the diet import flow for every "*tarifi ektedir" reference
+  /// the admin attaches a recipe PDF to.
+  Future<DietRecipe?> uploadRecipePdf({
     required String userId,
     required String fileName,
     String? filePath,
@@ -291,11 +292,7 @@ class DietProvider extends ChangeNotifier {
       );
       final downloadUrl = await ref.getDownloadURL();
 
-      return {
-        'url': downloadUrl,
-        'path': storagePath,
-        'name': safeName,
-      };
+      return DietRecipe(url: downloadUrl, path: storagePath, name: safeName);
     } catch (e) {
       return null;
     }
@@ -363,14 +360,13 @@ class DietProvider extends ChangeNotifier {
           .collection('dietLists')
           .doc(docId);
 
-      // Best-effort: remove the attached files (recipe PDF, imported Word
+      // Best-effort: remove the attached files (recipe PDFs, imported Word
       // document) from Storage first so they don't get orphaned. A
       // missing/failed delete never blocks removing the diet document itself.
       try {
         final snap = await docRef.get();
-        final data = snap.data();
-        for (final field in const ['recipePdfPath', 'sourceFilePath']) {
-          await deleteStorageFile(data?[field] as String?);
+        for (final String path in DietDocument.attachmentPathsOf(snap.data())) {
+          await deleteStorageFile(path);
         }
       } catch (e) {
       }
@@ -551,6 +547,7 @@ class DietProvider extends ChangeNotifier {
     String? recipePdfUrl,
     String? recipePdfPath,
     String? recipePdfName,
+    bool recipesPerLine = false,
     String? sourceFileUrl,
     String? sourceFilePath,
     String? sourceFileName,
@@ -575,6 +572,7 @@ class DietProvider extends ChangeNotifier {
           'recipePdfPath': recipePdfPath,
         if (recipePdfName != null && recipePdfName.isNotEmpty)
           'recipePdfName': recipePdfName,
+        if (recipesPerLine) DietDocument.recipesPerLineField: true,
         if (sourceFileUrl != null && sourceFileUrl.isNotEmpty)
           'sourceFileUrl': sourceFileUrl,
         if (sourceFilePath != null && sourceFilePath.isNotEmpty)

@@ -82,7 +82,7 @@ NGY Dietitian is a private client management app designed exclusively for regist
 | Permission | Purpose | When Requested |
 |------------|---------|----------------|
 | Camera | Taking meal photos | When user taps to take photo |
-| Photo Library | Selecting meal photos and receipts | When user taps to select from gallery |
+| Photo Library | Selecting meal photos and receipts | Never: the system photo picker (PHPicker) is used, so the app only receives the photos the user picks |
 | Push Notifications | Reminders and messages | On first launch / login |
 
 ### Backend Services
