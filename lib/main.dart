@@ -31,6 +31,7 @@ import 'package:ngy_app/pages/admin_chat_page.dart';
 import 'package:ngy_app/pages/chat_page_new.dart';
 import 'package:ngy_app/providers/chat_manager_new.dart';
 import 'package:ngy_app/providers/timeslot_manager.dart';
+import 'package:ngy_app/services/ios_app_on_mac.dart';
 
 import 'firebase_options.dart';
 import 'models/kvkk_consent_model.dart';
@@ -116,6 +117,8 @@ void main() async {
   platformConfig = await PlatformConfigFactory.initializePlatform(
     navigatorKey: navKey,
   );
+
+  await loadIosAppOnMac();
 
   runApp(const MyApp());
 

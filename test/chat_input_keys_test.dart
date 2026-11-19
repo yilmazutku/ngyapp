@@ -3,9 +3,24 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ngy_app/services/ios_app_on_mac.dart';
 import 'package:ngy_app/widgets/chat/chat_input_keys.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const MethodChannel platformInfo = MethodChannel('ngy_app/platform_info');
+
+  void mockPlatformInfo(Future<Object?>? Function(MethodCall call)? handler) {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(platformInfo, handler);
+  }
+
+  Future<void> setIosAppOnMac(bool value) async {
+    mockPlatformInfo((MethodCall call) async => value);
+    await loadIosAppOnMac();
+    mockPlatformInfo(null);
+  }
+
   const Set<TargetPlatform> sendingPlatforms = {
     TargetPlatform.windows,
     TargetPlatform.macOS,
@@ -72,6 +87,7 @@ void main() {
         List<String> sent,
         ValueNotifier<String?> reply,
         TextEditingController controller,
+        FocusNode focusNode,
       })> pumpInput(
     WidgetTester tester,
   ) async {
@@ -97,6 +113,10 @@ void main() {
               focusNode: focusNode,
               minLines: 1,
               maxLines: 4,
+              textInputAction: isIosAppOnMac ? TextInputAction.send : null,
+              onSubmitted:
+                  isIosAppOnMac ? (_) => sent.add(controller.text) : null,
+              onEditingComplete: isIosAppOnMac ? () {} : null,
             ),
           ),
         ),
@@ -104,7 +124,12 @@ void main() {
     );
     await tester.tap(find.byType(TextField));
     await tester.pump();
-    return (sent: sent, reply: reply, controller: controller);
+    return (
+      sent: sent,
+      reply: reply,
+      controller: controller,
+      focusNode: focusNode,
+    );
   }
 
   testWidgets('Enter mesajı gönderir', (tester) async {
@@ -216,5 +241,68 @@ void main() {
     await tester.pump();
 
     expect(focusNode.hasFocus, isFalse);
+  }, variant: TargetPlatformVariant.all());
+
+  group('Mac\'teki iOS uygulaması', () {
+    tearDown(() {
+      mockPlatformInfo(null);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('yalnızca iOS\'ta ve yerel taraf öyle diyorsa Mac sayılır', () async {
+      mockPlatformInfo((MethodCall call) async =>
+          call.method == 'isIosAppOnMac' ? true : null);
+      for (final TargetPlatform platform in TargetPlatform.values) {
+        debugDefaultTargetPlatformOverride = platform;
+        await loadIosAppOnMac();
+        expect(isIosAppOnMac, platform == TargetPlatform.iOS,
+            reason: '$platform');
+      }
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      mockPlatformInfo((MethodCall call) async => false);
+      await loadIosAppOnMac();
+      expect(isIosAppOnMac, isFalse);
+    });
+
+    test('yerel taraf yanıt vermezse Mac sayılmaz', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      mockPlatformInfo(
+          (MethodCall call) async => throw PlatformException(code: 'hata'));
+      await loadIosAppOnMac();
+      expect(isIosAppOnMac, isFalse);
+
+      mockPlatformInfo(null);
+      await loadIosAppOnMac();
+      expect(isIosAppOnMac, isFalse);
+    });
+  });
+
+  testWidgets(
+      'Mac\'teki iOS uygulamasında Return "gönder" eylemiyle gönderir, '
+      'kutu odakta kalır', (tester) async {
+    await setIosAppOnMac(true);
+    addTearDown(() => setIosAppOnMac(false));
+    final input = await pumpInput(tester);
+    expect(tester.testTextInput.setClientArgs?['inputAction'],
+        'TextInputAction.send');
+
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+
+    expect(input.sent, ['merhaba']);
+    expect(input.focusNode.hasFocus, isTrue);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  testWidgets('Mac dışında Return yeni satır eylemi göndermez',
+      (tester) async {
+    final input = await pumpInput(tester);
+    expect(tester.testTextInput.setClientArgs?['inputAction'],
+        'TextInputAction.newline');
+
+    await tester.testTextInput.receiveAction(TextInputAction.newline);
+    await tester.pump();
+
+    expect(input.sent, isEmpty);
+    expect(input.focusNode.hasFocus, isTrue);
   }, variant: TargetPlatformVariant.all());
 }
