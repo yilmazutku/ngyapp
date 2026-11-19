@@ -27,6 +27,7 @@ import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 import 'package:ngy_app/widgets/chat/message_reply_quote.dart';
 import 'package:ngy_app/widgets/chat/pending_upload_bubble.dart';
 import 'package:ngy_app/widgets/full_screen_image_page.dart';
+import 'package:ngy_app/widgets/inline_note.dart';
 import 'package:ngy_app/widgets/meal_image_card.dart';
 import 'package:ngy_app/widgets/meal_thumbnail_image.dart';
 import 'package:ngy_app/widgets/camera_capture_page.dart';
@@ -39,13 +40,16 @@ import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
 import 'package:ngy_app/utils/menu_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
+import 'package:ngy_app/services/ios_app_on_mac.dart';
 
 import '../constants/app_constants.dart';
 
 /// Masaüstü platformu mu (Windows, macOS, Linux). Sağ tık menüsü ve
 /// seçilebilir metin yalnızca burada açılır; dokunmatikte uzun basma
-/// davranışları olduğu gibi kalır. Enter ile gönderme ayrıca iPad ve Mac'teki
-/// iOS uygulamasının donanım klavyesinde de çalışır (bkz. [chatEnterSendsOn]).
+/// davranışları olduğu gibi kalır. Enter ile gönderme ayrıca iPad'in donanım
+/// klavyesinde de çalışır (bkz. [chatEnterSendsOn]); Mac'teki iOS uygulamasında
+/// Return tuş olarak gelmediği için metin girişinin "gönder" eylemiyle
+/// gönderilir (bkz. [isIosAppOnMac]).
 bool get _isDesktopPlatform => const {
       TargetPlatform.windows,
       TargetPlatform.macOS,
@@ -132,6 +136,9 @@ enum _ChatMenuAction { deleteChat }
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const String _uploadErrorTitle = 'Hata';
   static const String _photoLimitTitle = 'Fotoğraf Sınırı';
+  static const String _galleryPrivacyNote =
+      'Galeriden yalnızca seçtiğiniz fotoğraflar gönderilir; uygulama '
+      'galerinizin geri kalanını göremez.';
   static const String _focusNotFoundText =
       'Mesaj sohbette bulunamadı; sohbet en yeni mesajdan açıldı.';
   static const String _focusTooOldText =
@@ -815,8 +822,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return showDialog<ImageSource>(
       context: context,
       builder: (_) => AlertDialog(
+        scrollable: true,
         title: const Text('Kaynak'),
-        content: const Text('Görsel kaynağını seçin.'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InlineNote(
+              icon: Icons.lock_outline,
+              text: _galleryPrivacyNote,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 16),
+            const Text('Görsel kaynağını seçin.'),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () {
@@ -3079,6 +3099,11 @@ class _ChatInputRowState extends State<_ChatInputRow> with SingleTickerProviderS
                       minLines: 1,
                       maxLines: 4,
                       textCapitalization: TextCapitalization.sentences,
+                      textInputAction:
+                          isIosAppOnMac ? TextInputAction.send : null,
+                      onSubmitted:
+                          isIosAppOnMac ? (_) => widget.onSend() : null,
+                      onEditingComplete: isIosAppOnMac ? () {} : null,
                       decoration: InputDecoration(
                         hintText: _hintText,
                         border: OutlineInputBorder(
