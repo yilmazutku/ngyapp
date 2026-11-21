@@ -2,7 +2,6 @@
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, ValueListenable, defaultTargetPlatform;
 import 'package:flutter/material.dart';
@@ -359,8 +358,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Register for app lifecycle changes to handle background/foreground transitions
     WidgetsBinding.instance.addObserver(this);
     
-    _currentUid = FirebaseAuth.instance.currentUser!.uid;
     _chatManager = context.read<ChatManager>();
+    _currentUid = _chatManager.userId;
     
     // Resolve chat ID once and cache it
     _chatId = widget.overrideChatId ?? _currentUid;
