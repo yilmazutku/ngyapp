@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -13,19 +16,20 @@ class DailyTrackingCard extends StatefulWidget {
     required this.userId,
     required this.today,
     required this.onShowHistory,
-    this.healthSteps = const HealthStepsService(),
+    this.healthSteps,
   });
 
   final String userId;
   final DateTime today;
   final VoidCallback onShowHistory;
-  final HealthStepsService healthSteps;
+  final HealthStepsService? healthSteps;
 
   @override
   State<DailyTrackingCard> createState() => _DailyTrackingCardState();
 }
 
-class _DailyTrackingCardState extends State<DailyTrackingCard> {
+class _DailyTrackingCardState extends State<DailyTrackingCard>
+    with WidgetsBindingObserver {
   static const String _titleText = 'Günlük Takip';
   static const String _historyText = 'Geçmiş';
   static const String _waterText = 'Su';
@@ -33,10 +37,17 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
   static const String _savedLabel = 'Kayıtlı';
   static const String _notSavedText = '—';
   static const String _saveText = 'Kaydet';
+  static const String _discardText = 'Kaydetme';
   static const String _previousDayTooltip = 'Önceki gün';
   static const String _nextDayTooltip = 'Sonraki gün';
-  static const String _fromHealthText =
-      'Adım sayısı sağlık uygulamasından alındı.';
+  static const String _healthUsedText = 'Sağlık uygulamasından alındı';
+  static const String _healthAvailableText = 'Sağlık uygulamasında';
+  static const String _stepsUnitText = 'adım';
+  static const String _useHealthText = 'Kullan';
+  static const String _unsavedText = 'Kaydedilmemiş değişiklik var';
+  static const String _unsavedTitle = 'Kaydedilmemiş değişiklik';
+  static const String _unsavedMessage =
+      'için girdiğiniz değerler kaydedilmedi. Kaydedilsin mi?';
   static const String _loadErrorText = 'Kayıtlı veriler yüklenemedi.';
   static const String _retryText = 'Tekrar dene';
   static const String _errorTitle = 'Hata';
@@ -47,13 +58,14 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
   static const String _saveErrorText = 'Veriler kaydedilirken bir hata oluştu.';
 
   static const int _maxDaysBack = 365;
+  static const int _maxStepsDigits = 6;
   static const double _maxWaterLiters = 5;
   static const int _waterDivisions = 20;
   static const double _valueLabelWidth = 48;
   static const double _savedFieldWidth = 84;
+  static const double _progressSize = 14;
   static const EdgeInsets _fieldPadding =
       EdgeInsets.symmetric(horizontal: 8, vertical: 9);
-  static const double _progressSize = 14;
 
   final DateFormat _weekdayFormat = DateFormat('EEEE', 'tr_TR');
   final NumberFormat _stepsFormat = NumberFormat.decimalPattern('tr_TR');
@@ -64,11 +76,15 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
   late DateTime _date;
   double _waterIntakeLiters = 0;
   DailyData? _saved;
+  int? _healthSteps;
   bool _loadFailed = false;
-  bool _stepsFromHealth = false;
+  bool _waterEdited = false;
   bool _stepsEdited = false;
   bool _isSaving = false;
   int _loadRequest = 0;
+
+  HealthStepsService get _health =>
+      widget.healthSteps ?? HealthStepsService.shared;
 
   DateTime get _today => _dayOf(widget.today);
 
@@ -77,9 +93,27 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
 
   bool get _ready => _saved != null && !_isSaving;
 
+  double get _savedWater =>
+      _saved?.isSaved == true ? _clampWater(_saved!.waterIntake) : 0;
+
+  int get _savedSteps => _saved?.isSaved == true ? _saved!.steps : 0;
+
+  int? get _inputSteps {
+    final String text = _stepsController.text.trim();
+    return text.isEmpty ? 0 : int.tryParse(text);
+  }
+
+  bool get _differsFromSaved =>
+      _saved != null &&
+      (_waterIntakeLiters != _savedWater || _inputSteps != _savedSteps);
+
+  bool get _hasUnsavedEdits =>
+      (_waterEdited || _stepsEdited) && _differsFromSaved;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _stepsFocusNode.addListener(_handleStepsFocusChange);
     _date = _today;
     _load();
@@ -87,14 +121,25 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _stepsFocusNode.removeListener(_handleStepsFocusChange);
     _stepsFocusNode.dispose();
     _stepsController.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _ready) {
+      _refreshHealthSteps();
+    }
+  }
+
   static DateTime _dayOf(DateTime date) =>
       DateTime(date.year, date.month, date.day);
+
+  static double _clampWater(double liters) =>
+      liters.clamp(0.0, _maxWaterLiters).toDouble();
 
   void _handleStepsFocusChange() {
     if (_stepsFocusNode.hasFocus) {
@@ -107,10 +152,23 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
   }
 
   void _handleStepsChanged(String _) {
-    _stepsEdited = true;
-    if (_stepsFromHealth) {
-      setState(() => _stepsFromHealth = false);
-    }
+    setState(() => _stepsEdited = true);
+  }
+
+  void _handleWaterChanged(double value) {
+    setState(() {
+      _waterIntakeLiters = value;
+      _waterEdited = true;
+    });
+  }
+
+  void _useHealthSteps() {
+    final int? steps = _healthSteps;
+    if (steps == null) return;
+    setState(() {
+      _stepsController.text = steps.toString();
+      _stepsEdited = true;
+    });
   }
 
   void _selectDate(DateTime date) {
@@ -118,8 +176,9 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
     setState(() {
       _date = _dayOf(date);
       _saved = null;
+      _healthSteps = null;
       _loadFailed = false;
-      _stepsFromHealth = false;
+      _waterEdited = false;
       _stepsEdited = false;
       _waterIntakeLiters = 0;
       _stepsController.text = '0';
@@ -127,15 +186,33 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
     _load();
   }
 
-  void _shiftDate(int days) =>
-      _selectDate(DateTime(_date.year, _date.month, _date.day + days));
+  Future<void> _goToDate(DateTime date) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (_hasUnsavedEdits) {
+      final bool save = await DialogUtils.openConfirm(
+        context,
+        title: _unsavedTitle,
+        message: '${_dateLabel()} $_unsavedMessage',
+        confirmText: _saveText,
+        cancelText: _discardText,
+        barrierDismissible: false,
+      );
+      if (!mounted) return;
+      if (save && !await _save(showSuccess: false)) return;
+      if (!mounted) return;
+    }
+    _selectDate(date);
+  }
+
+  DateTime _shiftedDate(int days) =>
+      DateTime(_date.year, _date.month, _date.day + days);
 
   Future<void> _load() async {
     final int request = ++_loadRequest;
     final DateTime date = _date;
     final DailyDataProvider provider =
         Provider.of<DailyDataProvider>(context, listen: false);
-    final Future<int?> healthSteps = widget.healthSteps.stepsForDay(date);
+    final Future<int?> healthSteps = _health.stepsForDay(date);
 
     try {
       final DailyData saved =
@@ -143,8 +220,7 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
       if (!mounted || request != _loadRequest) return;
       setState(() {
         _saved = saved;
-        _waterIntakeLiters =
-            saved.waterIntake.clamp(0.0, _maxWaterLiters).toDouble();
+        _waterIntakeLiters = _clampWater(saved.waterIntake);
         _stepsController.text = saved.steps.toString();
       });
     } catch (_) {
@@ -153,14 +229,22 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
       return;
     }
 
-    final int? steps = await healthSteps;
-    if (!mounted || request != _loadRequest || _stepsEdited || _isSaving) {
-      return;
-    }
-    if (steps == null || steps <= 0) return;
+    _applyHealthSteps(request, await healthSteps);
+  }
+
+  Future<void> _refreshHealthSteps() async {
+    final int request = _loadRequest;
+    _applyHealthSteps(request, await _health.stepsForDay(_date));
+  }
+
+  void _applyHealthSteps(int request, int? steps) {
+    if (!mounted || request != _loadRequest || _saved == null) return;
     setState(() {
-      _stepsController.text = steps.toString();
-      _stepsFromHealth = true;
+      _healthSteps = steps != null && steps > 0 ? steps : null;
+      final int? health = _healthSteps;
+      if (health != null && !_stepsEdited && !_isSaving) {
+        _stepsController.text = math.max(_savedSteps, health).toString();
+      }
     });
   }
 
@@ -175,22 +259,21 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
     if (!mounted || picked == null || DateFormatter.isSameDay(picked, _date)) {
       return;
     }
-    _selectDate(picked);
+    await _goToDate(picked);
   }
 
-  Future<void> _save() async {
+  Future<bool> _save({bool showSuccess = true}) async {
     FocusManager.instance.primaryFocus?.unfocus();
 
-    final String text = _stepsController.text.trim();
-    final int? steps = text.isEmpty ? 0 : int.tryParse(text);
+    final int? steps = _inputSteps;
     if (steps == null || steps < 0) {
-      if (!mounted) return;
+      if (!mounted) return false;
       await DialogUtils.openError(
         context,
         title: _errorTitle,
         message: _invalidStepsText,
       );
-      return;
+      return false;
     }
 
     final DateTime date = _date;
@@ -207,27 +290,32 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
         steps: steps,
       );
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => _isSaving = false);
       await DialogUtils.openError(
         context,
         title: _errorTitle,
         message: _saveErrorText,
       );
-      return;
+      return false;
     }
 
-    if (!mounted) return;
+    if (!mounted) return true;
     setState(() {
       _isSaving = false;
       _saved = DailyData(waterIntake: water, steps: steps, isSaved: true);
       _stepsController.text = steps.toString();
+      _waterEdited = false;
+      _stepsEdited = false;
     });
-    await DialogUtils.openInfo(
-      context,
-      title: _successTitle,
-      message: _savedText,
-    );
+    if (showSuccess) {
+      await DialogUtils.openInfo(
+        context,
+        title: _successTitle,
+        message: _savedText,
+      );
+    }
+    return true;
   }
 
   String _dateLabel() {
@@ -239,13 +327,13 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
     return '$label ${_weekdayFormat.format(_date)}';
   }
 
-  String _savedWaterText(DailyData? saved) => saved == null || !saved.isSaved
-      ? _notSavedText
-      : '${saved.waterIntake.toStringAsFixed(1)}L';
+  String _savedWaterText() => _saved?.isSaved == true
+      ? '${_saved!.waterIntake.toStringAsFixed(1)}L'
+      : _notSavedText;
 
-  String _savedStepsText(DailyData? saved) => saved == null || !saved.isSaved
-      ? _notSavedText
-      : _stepsFormat.format(saved.steps);
+  String _savedStepsText() => _saved?.isSaved == true
+      ? _stepsFormat.format(_saved!.steps)
+      : _notSavedText;
 
   @override
   Widget build(BuildContext context) {
@@ -264,6 +352,10 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
             _buildWaterRow(),
             const Divider(height: 16, thickness: 0.5),
             _buildStepsRow(),
+            if (_healthSteps != null) ...[
+              const SizedBox(height: 4),
+              _buildHealthHint(),
+            ],
             const SizedBox(height: 8),
             _buildFooter(),
           ],
@@ -312,8 +404,9 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
         IconButton(
           tooltip: _previousDayTooltip,
           visualDensity: VisualDensity.compact,
-          onPressed:
-              !_isSaving && _date.isAfter(_firstDate) ? () => _shiftDate(-1) : null,
+          onPressed: !_isSaving && _date.isAfter(_firstDate)
+              ? () => _goToDate(_shiftedDate(-1))
+              : null,
           icon: const Icon(Icons.chevron_left),
         ),
         Expanded(
@@ -335,7 +428,9 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
         IconButton(
           tooltip: _nextDayTooltip,
           visualDensity: VisualDensity.compact,
-          onPressed: !_isSaving && !isToday ? () => _shiftDate(1) : null,
+          onPressed: !_isSaving && !isToday
+              ? () => _goToDate(_shiftedDate(1))
+              : null,
           icon: const Icon(Icons.chevron_right),
         ),
       ],
@@ -376,9 +471,7 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
               min: 0,
               max: _maxWaterLiters,
               divisions: _waterDivisions,
-              onChanged: _ready
-                  ? (double value) => setState(() => _waterIntakeLiters = value)
-                  : null,
+              onChanged: _ready ? _handleWaterChanged : null,
             ),
           ),
         ),
@@ -395,7 +488,7 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
           ),
         ),
         const SizedBox(width: 8),
-        _buildSavedField(_savedWaterText(_saved)),
+        _buildSavedField(_savedWaterText()),
       ],
     );
   }
@@ -418,6 +511,10 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
             focusNode: _stepsFocusNode,
             enabled: _ready,
             keyboardType: TextInputType.number,
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(_maxStepsDigits),
+            ],
             textInputAction: TextInputAction.done,
             onChanged: _handleStepsChanged,
             onSubmitted: (_) => _stepsFocusNode.unfocus(),
@@ -441,7 +538,7 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
           ),
         ),
         const SizedBox(width: 8),
-        _buildSavedField(_savedStepsText(_saved)),
+        _buildSavedField(_savedStepsText()),
       ],
     );
   }
@@ -483,6 +580,36 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
                 ),
         ),
       ),
+    );
+  }
+
+  Widget _buildHealthHint() {
+    final int health = _healthSteps!;
+    final bool used = _inputSteps == health;
+    final String prefix = used ? _healthUsedText : _healthAvailableText;
+
+    return Row(
+      children: [
+        Icon(Icons.favorite, size: 14, color: Colors.pink.shade400),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            '$prefix: ${_stepsFormat.format(health)} $_stepsUnitText',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+          ),
+        ),
+        if (!used)
+          TextButton(
+            onPressed: _ready ? _useHealthSteps : null,
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+            ),
+            child: const Text(_useHealthText, style: TextStyle(fontSize: 12)),
+          ),
+      ],
     );
   }
 
@@ -541,15 +668,15 @@ class _DailyTrackingCardState extends State<DailyTrackingCard> {
         ],
       );
     }
-    if (!_stepsFromHealth) return const SizedBox.shrink();
+    if (!_differsFromSaved) return const SizedBox.shrink();
     return Row(
       children: [
-        Icon(Icons.favorite, size: 14, color: Colors.pink.shade400),
+        Icon(Icons.edit_note, size: 16, color: Colors.orange.shade800),
         const SizedBox(width: 4),
         Expanded(
           child: Text(
-            _fromHealthText,
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+            _unsavedText,
+            style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
           ),
         ),
       ],

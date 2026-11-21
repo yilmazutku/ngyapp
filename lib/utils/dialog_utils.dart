@@ -229,9 +229,11 @@ class DialogUtils {
     required String message,
     String confirmText = 'Evet',
     String cancelText = 'Hayır',
+    bool barrierDismissible = true,
   }) async {
     final result = await showDialog<bool>(
       context: context,
+      barrierDismissible: barrierDismissible,
       builder: (context) => AlertDialog(
         title: Text(title),
         content: Text(message),
