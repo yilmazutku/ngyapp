@@ -38,23 +38,28 @@ import 'package:ngy_app/pages/user_media_gallery_page.dart';
 import 'package:ngy_app/utils/date_formatter.dart';
 import 'package:ngy_app/utils/dialog_utils.dart';
 import 'package:ngy_app/utils/diet_menu_parser.dart';
-import 'package:ngy_app/utils/menu_utils.dart';
 import 'package:ngy_app/services/fcm_service.dart';
 import 'package:ngy_app/services/ios_app_on_mac.dart';
 
 import '../constants/app_constants.dart';
 
-/// Masaüstü platformu mu (Windows, macOS, Linux). Sağ tık menüsü ve
-/// seçilebilir metin yalnızca burada açılır; dokunmatikte uzun basma
-/// davranışları olduğu gibi kalır. Enter ile gönderme ayrıca iPad'in donanım
-/// klavyesinde de çalışır (bkz. [chatEnterSendsOn]); Mac'teki iOS uygulamasında
-/// Return tuş olarak gelmediği için metin girişinin "gönder" eylemiyle
-/// gönderilir (bkz. [isIosAppOnMac]).
+/// Masaüstü platformu mu (Windows, macOS, Linux). Seçilebilir metin yalnızca
+/// burada açılır; sağ tık menüsü ayrıca Mac'teki iOS uygulamasında da açılır
+/// (bkz. [_menuOnRightClick]); dokunmatikte uzun basma davranışları olduğu
+/// gibi kalır. Enter ile gönderme ayrıca iPad'in donanım klavyesinde de
+/// çalışır (bkz. [chatEnterSendsOn]); Mac'teki iOS uygulamasında Return tuş
+/// olarak gelmediği için metin girişinin "gönder" eylemiyle gönderilir (bkz.
+/// [isIosAppOnMac]).
 bool get _isDesktopPlatform => const {
       TargetPlatform.windows,
       TargetPlatform.macOS,
       TargetPlatform.linux,
     }.contains(defaultTargetPlatform);
+
+bool get _menuOnRightClick => messageMenuOnRightClick(
+      defaultTargetPlatform,
+      iosAppOnMac: isIosAppOnMac,
+    );
 
 /// ChatPage displays the chat interface for both regular users and admins.
 /// 
@@ -2226,11 +2231,26 @@ VoidCallback? _ownReactionTap(
         ? null
         : () => onOwnReactionTap(message);
 
+void _applyMessageChoice(
+  MessageData message,
+  MessageActionChoice? choice, {
+  required void Function(MessageData message, String emoji) onToggleReaction,
+  required void Function(MessageData message, MessageAction action) onAction,
+}) {
+  final String? emoji = choice?.emoji;
+  final MessageAction? action = choice?.action;
+  if (emoji != null) {
+    onToggleReaction(message, emoji);
+  } else if (action != null) {
+    onAction(message, action);
+  }
+}
+
 /// Albüm baloncuğu: aynı öğünün arka arkaya gönderilen fotoğrafları tek
 /// baloncukta, iki sütunlu kare ızgarada (tek kalan son fotoğraf tam
 /// genişlikte). Her fotoğraf kendi mesajıdır: dokununca tam ekranda açılır,
-/// uzun basınca (masaüstünde sağ tıklayınca) o fotoğrafın menüsü açılır ve
-/// ifadesi kendi köşesinde görünür.
+/// uzun basınca (masaüstünde ve Mac'teki iOS uygulamasında sağ tıklayınca da)
+/// o fotoğrafın menüsü açılır ve ifadesi kendi köşesinde görünür.
 class _AlbumBubble extends StatelessWidget {
   /// Albümdeki fotoğraf mesajları, eskiden yeniye.
   final List<MessageData> messages;
@@ -2264,10 +2284,6 @@ class _AlbumBubble extends StatelessWidget {
   /// Izgaradaki fotoğraflar arası boşluk.
   static const double _gap = 3;
   static const double _padding = 4;
-  static const String _reactLabel = 'İfade Bırak';
-
-  /// Masaüstü menüsünde "İfade Bırak" seçeneğinin değeri.
-  static const String _reactMenuValue = 'react';
 
   @override
   Widget build(BuildContext context) {
@@ -2354,7 +2370,7 @@ class _AlbumBubble extends StatelessWidget {
         onTap: () => onImageTap(message),
         onLongPress:
             _isDesktopPlatform ? null : () => _openActionsSheet(context, message),
-        onSecondaryTapDown: _isDesktopPlatform
+        onSecondaryTapDown: _menuOnRightClick
             ? (details) => _openMenuAt(context, message, details.globalPosition)
             : null,
         child: Stack(
@@ -2393,54 +2409,35 @@ class _AlbumBubble extends StatelessWidget {
       actions: actionsFor(message),
       currentEmoji: message.reactions[myUid],
     );
-    if (choice == null || !context.mounted) return;
-
-    final String? emoji = choice.emoji;
-    final MessageAction? action = choice.action;
-    if (emoji != null) {
-      onToggleReaction(message, emoji);
-    } else if (action != null) {
-      onAction(message, action);
-    }
+    if (!context.mounted) return;
+    _applyMessageChoice(
+      message,
+      choice,
+      onToggleReaction: onToggleReaction,
+      onAction: onAction,
+    );
   }
 
-  /// Masaüstünde sağ tıklayınca: "Yanıtla", karşı tarafın fotoğrafıysa
-  /// "İfade Bırak" ve fotoğrafın diğer işlemleri.
+  /// Sağ tıklayınca: fotoğrafın menüsü tıklanan noktada.
   Future<void> _openMenuAt(
     BuildContext context,
     MessageData message,
     Offset position,
   ) async {
-    final List<MessageAction> actions = actionsFor(message);
-    final Object? choice = await showMenuAt<Object>(
+    final MessageActionChoice? choice = await showMessageMenuAt(
       context,
       globalPosition: position,
-      items: [
-        for (final MessageAction action in actions)
-          if (action == MessageAction.reply)
-            PopupMenuItem<Object>(value: action, child: Text(action.label)),
-        if (canReactTo(message))
-          const PopupMenuItem<Object>(
-            value: _reactMenuValue,
-            child: Text(_reactLabel),
-          ),
-        for (final MessageAction action in actions)
-          if (action != MessageAction.reply)
-            PopupMenuItem<Object>(value: action, child: Text(action.label)),
-      ],
-    );
-    if (choice == null || !context.mounted) return;
-
-    if (choice is MessageAction) {
-      onAction(message, choice);
-      return;
-    }
-    final String? emoji = await showReactionPicker(
-      context,
-      globalPosition: position,
+      canReact: canReactTo(message),
+      actions: actionsFor(message),
       currentEmoji: message.reactions[myUid],
     );
-    if (emoji != null) onToggleReaction(message, emoji);
+    if (!context.mounted) return;
+    _applyMessageChoice(
+      message,
+      choice,
+      onToggleReaction: onToggleReaction,
+      onAction: onAction,
+    );
   }
 }
 
@@ -2507,8 +2504,6 @@ class _MessageBubble extends StatelessWidget {
 
   /// Vurgunun açılıp kapanma süresi.
   static const Duration _highlightFadeDuration = Duration(milliseconds: 300);
-
-  static const String _reactLabel = 'İfade Bırak';
 
   @override
   Widget build(BuildContext context) {
@@ -2607,6 +2602,9 @@ class _MessageBubble extends StatelessWidget {
         : GestureDetector(
             behavior: HitTestBehavior.deferToChild,
             onLongPress: () => _openActionsSheet(context),
+            onSecondaryTapDown: _menuOnRightClick
+                ? (details) => _openMenuAt(context, details.globalPosition)
+                : null,
             child: content,
           );
 
@@ -2673,15 +2671,30 @@ class _MessageBubble extends StatelessWidget {
       actions: actions,
       currentEmoji: message.reactions[myUid],
     );
-    if (choice == null || !context.mounted) return;
+    if (!context.mounted) return;
+    _applyMessageChoice(
+      message,
+      choice,
+      onToggleReaction: onToggleReaction,
+      onAction: onAction,
+    );
+  }
 
-    final String? emoji = choice.emoji;
-    final MessageAction? action = choice.action;
-    if (emoji != null) {
-      onToggleReaction(message, emoji);
-    } else if (action != null) {
-      onAction(message, action);
-    }
+  Future<void> _openMenuAt(BuildContext context, Offset position) async {
+    final MessageActionChoice? choice = await showMessageMenuAt(
+      context,
+      globalPosition: position,
+      canReact: canReact,
+      actions: actions,
+      currentEmoji: message.reactions[myUid],
+    );
+    if (!context.mounted) return;
+    _applyMessageChoice(
+      message,
+      choice,
+      onToggleReaction: onToggleReaction,
+      onAction: onAction,
+    );
   }
 
   /// Masaüstü sağ tık menüsü: seçili metin varsa "Kopyala", ardından
@@ -2710,7 +2723,7 @@ class _MessageBubble extends StatelessWidget {
         itemFor(MessageAction.reply),
       if (canReact)
         ContextMenuButtonItem(
-          label: _reactLabel,
+          label: kMessageReactLabel,
           onPressed: closeThen(() => _pickReactionAt(context, anchor)),
         ),
       for (final MessageAction action in actions)

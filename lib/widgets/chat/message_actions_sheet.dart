@@ -1,11 +1,33 @@
 // lib/widgets/chat/message_actions_sheet.dart
 import 'package:flutter/material.dart';
 
+import '../../utils/menu_utils.dart';
 import '../reaction_picker.dart';
 
+const String kMessageReactLabel = 'İfade Bırak';
+
+final Object _reactMenuValue = Object();
+
+bool messageMenuOnRightClick(
+  TargetPlatform platform, {
+  required bool iosAppOnMac,
+}) {
+  switch (platform) {
+    case TargetPlatform.windows:
+    case TargetPlatform.macOS:
+    case TargetPlatform.linux:
+      return true;
+    case TargetPlatform.iOS:
+      return iosAppOnMac;
+    case TargetPlatform.android:
+    case TargetPlatform.fuchsia:
+      return false;
+  }
+}
+
 /// Bir mesaj üzerindeki işlemler. Dokunmatikte uzun basınca açılan menü
-/// ([showMessageActionsSheet]) ve masaüstündeki sağ tık menüsü aynı adları
-/// kullanır.
+/// ([showMessageActionsSheet]) ve sağ tık menüsü ([showMessageMenuAt]) aynı
+/// adları kullanır.
 enum MessageAction {
   reply('Yanıtla', Icons.reply),
   copy('Mesajı Kopyala', Icons.copy),
@@ -89,5 +111,40 @@ Future<MessageActionChoice?> showMessageActionsSheet(
   if (!context.mounted) return null;
   final String? emoji =
       await showAllReactionsSheet(context, currentEmoji: currentEmoji);
+  return emoji == null ? null : MessageActionChoice.emoji(emoji);
+}
+
+Future<MessageActionChoice?> showMessageMenuAt(
+  BuildContext context, {
+  required Offset globalPosition,
+  required bool canReact,
+  required List<MessageAction> actions,
+  String? currentEmoji,
+}) async {
+  final Object? choice = await showMenuAt<Object>(
+    context,
+    globalPosition: globalPosition,
+    items: [
+      for (final MessageAction action in actions)
+        if (action == MessageAction.reply)
+          PopupMenuItem<Object>(value: action, child: Text(action.label)),
+      if (canReact)
+        PopupMenuItem<Object>(
+          value: _reactMenuValue,
+          child: const Text(kMessageReactLabel),
+        ),
+      for (final MessageAction action in actions)
+        if (action != MessageAction.reply)
+          PopupMenuItem<Object>(value: action, child: Text(action.label)),
+    ],
+  );
+  if (choice is MessageAction) return MessageActionChoice.action(choice);
+  if (choice != _reactMenuValue || !context.mounted) return null;
+
+  final String? emoji = await showReactionPicker(
+    context,
+    globalPosition: globalPosition,
+    currentEmoji: currentEmoji,
+  );
   return emoji == null ? null : MessageActionChoice.emoji(emoji);
 }
