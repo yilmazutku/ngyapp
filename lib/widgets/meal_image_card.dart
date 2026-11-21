@@ -1,7 +1,7 @@
 // lib/widgets/meal_image_card.dart
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -354,6 +354,11 @@ class _MealReactionBadge extends StatelessWidget {
   }
 }
 
+typedef MealDetailsFooterBuilder = Widget Function(
+  BuildContext dialogContext,
+  MealModel meal,
+);
+
 /// Shows the enlarged meal detail dialog: the image(s) with pinch-to-zoom, the
 /// meal type and upload date & time in the title, and the description if any.
 ///
@@ -366,99 +371,187 @@ Future<T?> showMealImageDetailsDialog<T>(
   MealModel meal, {
   required double dialogImageHeight,
   required String heroTag,
-  WidgetBuilder? footerBuilder,
+  MealDetailsFooterBuilder? footerBuilder,
+  List<MealModel> gallery = const [],
 }) {
+  final int index = gallery.indexOf(meal);
   return showDialog<T>(
     context: context,
-    builder: (dialogContext) {
-      const double kDialogMaxWidth = 520;
-      final screen = MediaQuery.of(dialogContext).size;
-      final double approxBodyWidth =
-          (screen.width - 64).clamp(280.0, kDialogMaxWidth);
-      final images = meal.imageUrls;
+    builder: (dialogContext) => _MealImageDetailsDialog(
+      meals: index < 0 ? <MealModel>[meal] : gallery,
+      initialIndex: index < 0 ? 0 : index,
+      dialogImageHeight: dialogImageHeight,
+      heroTag: heroTag,
+      footerBuilder: footerBuilder,
+    ),
+  );
+}
 
-      return AlertDialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-        title: Text(
-          '${meal.mealType.displayLabel} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: kDialogMaxWidth),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (images.length == 1)
-                  Hero(
-                    tag: heroTag,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: SizedBox(
-                        width: approxBodyWidth,
-                        height: dialogImageHeight,
-                        child: InteractiveViewer(
-                          minScale: 1.0,
-                          maxScale: 4.0,
-                          child: MealOriginalImage(
-                            url: images.first,
-                            thumbUrl: meal.thumbUrlAt(0),
-                          ),
-                        ),
-                      ),
-                    ),
-                  )
-                else if (images.isNotEmpty)
-                  ...images.asMap().entries.map((entry) {
-                    final idx = entry.key;
-                    final url = entry.value;
-                    return Padding(
-                      padding: EdgeInsets.only(
-                          bottom: idx < images.length - 1 ? 8.0 : 0),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: SizedBox(
-                          width: approxBodyWidth,
-                          height: dialogImageHeight,
-                          child: InteractiveViewer(
-                            minScale: 1.0,
-                            maxScale: 4.0,
-                            child: MealOriginalImage(
-                              url: url,
-                              thumbUrl: meal.thumbUrlAt(idx),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                const SizedBox(height: 16),
-                if (footerBuilder != null) ...[
-                  footerBuilder(dialogContext),
-                  const SizedBox(height: 16),
-                ],
-                if (meal.description != null &&
-                    meal.description!.isNotEmpty) ...[
-                  const Text(
-                    'Açıklama:',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(meal.description!),
-                  const SizedBox(height: 16),
-                ],
+class _MealImageDetailsDialog extends StatefulWidget {
+  final List<MealModel> meals;
+  final int initialIndex;
+  final double dialogImageHeight;
+  final String heroTag;
+  final MealDetailsFooterBuilder? footerBuilder;
+
+  const _MealImageDetailsDialog({
+    required this.meals,
+    required this.initialIndex,
+    required this.dialogImageHeight,
+    required this.heroTag,
+    required this.footerBuilder,
+  });
+
+  @override
+  State<_MealImageDetailsDialog> createState() =>
+      _MealImageDetailsDialogState();
+}
+
+class _MealImageDetailsDialogState extends State<_MealImageDetailsDialog> {
+  static const double _maxWidth = 520;
+  static const double _imageGap = 8;
+  static const double _sectionGap = 16;
+  static const double _navGap = 8;
+  static const String _previousTooltip = 'Önceki fotoğraf';
+  static const String _nextTooltip = 'Sonraki fotoğraf';
+  static const String _descriptionLabel = 'Açıklama:';
+  static const String _closeLabel = 'Kapat';
+
+  late int _index = widget.initialIndex;
+
+  bool get _browsable => widget.meals.length > 1;
+  bool get _hasPrevious => _index > 0;
+  bool get _hasNext => _index < widget.meals.length - 1;
+
+  void _showPrevious() {
+    if (_hasPrevious) setState(() => _index--);
+  }
+
+  void _showNext() {
+    if (_hasNext) setState(() => _index++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final MealModel meal = widget.meals[_index];
+    final double imageWidth =
+        (MediaQuery.sizeOf(context).width - 64).clamp(280.0, _maxWidth);
+    final MealDetailsFooterBuilder? footerBuilder = widget.footerBuilder;
+    final String? description = meal.description;
+
+    final Widget dialog = AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      title: Text(
+        '${meal.mealType.displayLabel} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}',
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _maxWidth),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ..._buildImages(meal, imageWidth),
+              if (_browsable) ...[
+                const SizedBox(height: _navGap),
+                _buildNavigation(context),
               ],
+              const SizedBox(height: _sectionGap),
+              if (footerBuilder != null) ...[
+                KeyedSubtree(
+                  key: ObjectKey(meal),
+                  child: footerBuilder(context, meal),
+                ),
+                const SizedBox(height: _sectionGap),
+              ],
+              if (description != null && description.isNotEmpty) ...[
+                const Text(
+                  _descriptionLabel,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                Text(description),
+                const SizedBox(height: _sectionGap),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text(_closeLabel),
+        ),
+      ],
+    );
+
+    if (!_browsable) return dialog;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): _showPrevious,
+        const SingleActivator(LogicalKeyboardKey.arrowRight): _showNext,
+      },
+      child: Focus(autofocus: true, child: dialog),
+    );
+  }
+
+  List<Widget> _buildImages(MealModel meal, double width) {
+    final List<String> images = meal.imageUrls;
+    return [
+      for (int i = 0; i < images.length; i++)
+        Padding(
+          key: ValueKey<(MealModel, int)>((meal, i)),
+          padding:
+              EdgeInsets.only(bottom: i < images.length - 1 ? _imageGap : 0),
+          child: _withHero(
+            images.length == 1 && _index == widget.initialIndex,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: width,
+                height: widget.dialogImageHeight,
+                child: InteractiveViewer(
+                  minScale: 1.0,
+                  maxScale: 4.0,
+                  child: MealOriginalImage(
+                    url: images[i],
+                    thumbUrl: meal.thumbUrlAt(i),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Kapat'),
+    ];
+  }
+
+  Widget _withHero(bool hero, Widget child) =>
+      hero ? Hero(tag: widget.heroTag, child: child) : child;
+
+  Widget _buildNavigation(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton.filledTonal(
+          tooltip: _previousTooltip,
+          icon: const Icon(Icons.chevron_left),
+          onPressed: _hasPrevious ? _showPrevious : null,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _sectionGap),
+          child: Text(
+            '${_index + 1} / ${widget.meals.length}',
+            style: theme.textTheme.titleSmall,
           ),
-        ],
-      );
-    },
-  );
+        ),
+        IconButton.filledTonal(
+          tooltip: _nextTooltip,
+          icon: const Icon(Icons.chevron_right),
+          onPressed: _hasNext ? _showNext : null,
+        ),
+      ],
+    );
+  }
 }

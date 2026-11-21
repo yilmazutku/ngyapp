@@ -990,28 +990,36 @@ class _AdminMealPhotosPageState extends State<AdminMealPhotosPage> {
   ) async {
     final ChatManager chatManager =
         Provider.of<ChatManager>(context, listen: false);
-    final String imageUrl = photo.imageUrl;
-    final Future<MessageData?> messageFuture =
-        _hasChatMessage(imageUrl) == null
-            ? _lookUpChatMessage(group.user.userId, imageUrl)
-            : SynchronousFuture<MessageData?>(_chatMessageByImageUrl[imageUrl]);
+    final Map<String, Future<MessageData?>> lookups = {};
+
+    Future<MessageData?> messageFutureOf(String imageUrl) {
+      if (_hasChatMessage(imageUrl) != null) {
+        return SynchronousFuture<MessageData?>(
+            _chatMessageByImageUrl[imageUrl]);
+      }
+      return lookups.putIfAbsent(
+        imageUrl,
+        () => _lookUpChatMessage(group.user.userId, imageUrl),
+      );
+    }
 
     final MessageData? goTo = await showMealImageDetailsDialog<MessageData>(
       context,
       photo,
       dialogImageHeight: dialogImageHeight,
       heroTag: MealImageCard.heroTagFor(photo),
-      footerBuilder: (dialogContext) => _PhotoChatActions(
-        messageFuture: messageFuture,
+      gallery: group.photos,
+      footerBuilder: (dialogContext, shown) => _PhotoChatActions(
+        messageFuture: messageFutureOf(shown.imageUrl),
         myUid: chatManager.userId,
         goToChatLabel: _goToChatLabel,
         noMessageText: _viewerNoMessageText,
         lookupErrorText: _viewerLookupErrorText,
         errorText: _reactErrorText,
         reactionsOf: (message) =>
-            _reactionsByImageUrl[imageUrl] ?? const <String, String>{},
+            _reactionsByImageUrl[shown.imageUrl] ?? const <String, String>{},
         onReact: (message, emoji) =>
-            _toggleReactionFromDialog(group, photo, message, emoji),
+            _toggleReactionFromDialog(group, shown, message, emoji),
         onGoToChat: (message) => Navigator.of(dialogContext).pop(message),
       ),
     );
