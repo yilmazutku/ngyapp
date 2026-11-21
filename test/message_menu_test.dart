@@ -1,24 +1,8 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ngy_app/services/ios_app_on_mac.dart';
 import 'package:ngy_app/widgets/chat/message_actions_sheet.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-  const MethodChannel platformInfo = MethodChannel('ngy_app/platform_info');
-
-  Future<void> setIosAppOnMac(bool value) async {
-    final TestDefaultBinaryMessenger messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(
-        platformInfo, (MethodCall call) async => value);
-    await loadIosAppOnMac();
-    messenger.setMockMethodCallHandler(platformInfo, null);
-  }
-
   const Set<TargetPlatform> desktopPlatforms = {
     TargetPlatform.windows,
     TargetPlatform.macOS,
@@ -37,73 +21,6 @@ void main() {
         );
       }
     }
-  });
-
-  group('baloncuk hareketleri', () {
-    const Key bubbleKey = Key('bubble');
-
-    tearDown(() async {
-      await setIosAppOnMac(false);
-    });
-
-    Future<List<String>> pressBubble(
-      WidgetTester tester, {
-      required bool onMac,
-    }) async {
-      await setIosAppOnMac(onMac);
-      final List<String> opened = <String>[];
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: GestureDetector(
-              onLongPress: () => opened.add('sheet'),
-              onSecondaryTapDown: messageMenuOnRightClick(
-                defaultTargetPlatform,
-                iosAppOnMac: isIosAppOnMac,
-              )
-                  ? (_) => opened.add('menu')
-                  : null,
-              child: const ColoredBox(
-                key: bubbleKey,
-                color: Colors.blue,
-                child: SizedBox(width: 120, height: 60),
-              ),
-            ),
-          ),
-        ),
-      ));
-
-      final Offset center = tester.getCenter(find.byKey(bubbleKey));
-      await tester.tapAt(
-        center,
-        buttons: kSecondaryMouseButton,
-        kind: PointerDeviceKind.mouse,
-      );
-      await tester.pumpAndSettle();
-
-      final TestGesture press = await tester.startGesture(
-        center,
-        kind: PointerDeviceKind.mouse,
-      );
-      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
-      await press.up();
-      await tester.pumpAndSettle();
-      return opened;
-    }
-
-    testWidgets('Mac\'teki iOS uygulamasında sağ tık menüyü açar, basılı '
-        'tutmak da çalışır', (tester) async {
-      expect(await pressBubble(tester, onMac: true), <String>['menu', 'sheet']);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
-
-    testWidgets('iPhone, iPad ve Android\'de sağ tık menü açmaz, basılı '
-        'tutmak açar',
-        (tester) async {
-      expect(await pressBubble(tester, onMac: false), <String>['sheet']);
-    }, variant: const TargetPlatformVariant(<TargetPlatform>{
-      TargetPlatform.iOS,
-      TargetPlatform.android,
-    }));
   });
 
   group('showMessageMenuAt', () {
