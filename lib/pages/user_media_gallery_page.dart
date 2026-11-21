@@ -208,7 +208,7 @@ class _UserMediaGalleryPageState extends State<UserMediaGalleryPage> {
       photo,
       dialogImageHeight: dialogImageHeight,
       heroTag: MealImageCard.heroTagFor(photo),
-      footerBuilder: (dialogContext) => Wrap(
+      footerBuilder: (dialogContext, _) => Wrap(
         spacing: _footerButtonGap,
         runSpacing: _footerButtonGap,
         children: [
