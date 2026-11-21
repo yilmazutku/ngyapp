@@ -1,5 +1,7 @@
 // lib/widgets/meal_image_card.dart
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -409,26 +411,84 @@ class _MealImageDetailsDialog extends StatefulWidget {
 
 class _MealImageDetailsDialogState extends State<_MealImageDetailsDialog> {
   static const double _maxWidth = 520;
+  static const double _minImageHeight = 96;
   static const double _imageGap = 8;
   static const double _sectionGap = 16;
   static const double _navGap = 8;
+  static const double _navHeight = kMinInteractiveDimension;
+  static const double _titleTopPadding = 24;
+  static const EdgeInsets _insetPadding =
+      EdgeInsets.symmetric(horizontal: 16, vertical: 24);
+  static const EdgeInsets _titlePadding = EdgeInsets.symmetric(horizontal: 24);
+  static const TextStyle _titleStyle =
+      TextStyle(fontSize: 18, fontWeight: FontWeight.bold);
   static const String _previousTooltip = 'Önceki fotoğraf';
   static const String _nextTooltip = 'Sonraki fotoğraf';
   static const String _descriptionLabel = 'Açıklama:';
   static const String _closeLabel = 'Kapat';
 
+  final GlobalKey _titleKey = GlobalKey();
+
   late int _index = widget.initialIndex;
+  double? _anchoredTop;
+  Size? _anchoredScreen;
 
   bool get _browsable => widget.meals.length > 1;
   bool get _hasPrevious => _index > 0;
   bool get _hasNext => _index < widget.meals.length - 1;
 
-  void _showPrevious() {
-    if (_hasPrevious) setState(() => _index--);
+  @override
+  void initState() {
+    super.initState();
+    if (_browsable) _scheduleAnchor();
   }
 
-  void _showNext() {
-    if (_hasNext) setState(() => _index++);
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final Size? anchoredScreen = _anchoredScreen;
+    if (anchoredScreen != null &&
+        anchoredScreen != MediaQuery.sizeOf(context)) {
+      _anchoredTop = null;
+      _anchoredScreen = null;
+      _scheduleAnchor();
+    }
+  }
+
+  void _scheduleAnchor() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final RenderObject? dialogBox = context.findRenderObject();
+      final RenderObject? titleBox =
+          _titleKey.currentContext?.findRenderObject();
+      if (titleBox is! RenderBox || !titleBox.hasSize) return;
+      setState(() {
+        _anchoredTop =
+            titleBox.localToGlobal(Offset.zero, ancestor: dialogBox).dy;
+        _anchoredScreen = MediaQuery.sizeOf(context);
+      });
+    });
+  }
+
+  void _showAt(int index) {
+    if (index < 0 || index >= widget.meals.length || index == _index) return;
+    setState(() => _index = index);
+  }
+
+  void _showPrevious() => _showAt(_index - 1);
+
+  void _showNext() => _showAt(_index + 1);
+
+  static String _titleOf(MealModel meal) =>
+      '${meal.mealType.displayLabel} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}';
+
+  double _imageHeightFor(BoxConstraints constraints) {
+    if (!constraints.hasBoundedHeight) return widget.dialogImageHeight;
+    final double reserved = _browsable ? _navGap + _navHeight : 0;
+    return math.min(
+      widget.dialogImageHeight,
+      math.max(_minImageHeight, constraints.maxHeight - reserved),
+    );
   }
 
   @override
@@ -438,43 +498,61 @@ class _MealImageDetailsDialogState extends State<_MealImageDetailsDialog> {
         (MediaQuery.sizeOf(context).width - 64).clamp(280.0, _maxWidth);
     final MealDetailsFooterBuilder? footerBuilder = widget.footerBuilder;
     final String? description = meal.description;
+    final double? anchoredTop = _anchoredTop;
 
     final Widget dialog = AlertDialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      title: Text(
-        '${meal.mealType.displayLabel} - ${DateFormat('d MMMM y, HH:mm', 'tr_TR').format(meal.timestamp)}',
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-      ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: _maxWidth),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+      alignment: anchoredTop == null ? null : Alignment.topCenter,
+      insetPadding: _insetPadding,
+      titlePadding: _titlePadding,
+      title: KeyedSubtree(
+        key: _titleKey,
+        child: Padding(
+          padding: const EdgeInsets.only(top: _titleTopPadding),
+          child: IndexedStack(
+            index: _index,
             children: [
-              ..._buildImages(meal, imageWidth),
-              if (_browsable) ...[
-                const SizedBox(height: _navGap),
-                _buildNavigation(context),
-              ],
-              const SizedBox(height: _sectionGap),
-              if (footerBuilder != null) ...[
-                KeyedSubtree(
-                  key: ObjectKey(meal),
-                  child: footerBuilder(context, meal),
-                ),
-                const SizedBox(height: _sectionGap),
-              ],
-              if (description != null && description.isNotEmpty) ...[
-                const Text(
-                  _descriptionLabel,
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                const SizedBox(height: 4),
-                Text(description),
-                const SizedBox(height: _sectionGap),
-              ],
+              for (final MealModel each in widget.meals)
+                Text(_titleOf(each), style: _titleStyle),
             ],
+          ),
+        ),
+      ),
+      content: SizedBox(
+        width: imageWidth,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _buildImages(meal, _imageHeightFor(constraints)),
+                ),
+                if (_browsable) ...[
+                  const SizedBox(height: _navGap),
+                  _buildNavigation(context),
+                ],
+                const SizedBox(height: _sectionGap),
+                if (footerBuilder != null) ...[
+                  KeyedSubtree(
+                    key: ObjectKey(meal),
+                    child: footerBuilder(context, meal),
+                  ),
+                  const SizedBox(height: _sectionGap),
+                ],
+                if (description != null && description.isNotEmpty) ...[
+                  const Text(
+                    _descriptionLabel,
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(description),
+                  const SizedBox(height: _sectionGap),
+                ],
+              ],
+            ),
           ),
         ),
       ),
@@ -486,17 +564,31 @@ class _MealImageDetailsDialogState extends State<_MealImageDetailsDialog> {
       ],
     );
 
-    if (!_browsable) return dialog;
+    final Widget anchored = Padding(
+      padding: EdgeInsets.only(
+        top: anchoredTop == null
+            ? 0
+            : math.max(
+                0,
+                anchoredTop -
+                    _insetPadding.top -
+                    MediaQuery.viewInsetsOf(context).top,
+              ),
+      ),
+      child: dialog,
+    );
+
+    if (!_browsable) return anchored;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.arrowLeft): _showPrevious,
         const SingleActivator(LogicalKeyboardKey.arrowRight): _showNext,
       },
-      child: Focus(autofocus: true, child: dialog),
+      child: Focus(autofocus: true, child: anchored),
     );
   }
 
-  List<Widget> _buildImages(MealModel meal, double width) {
+  List<Widget> _buildImages(MealModel meal, double height) {
     final List<String> images = meal.imageUrls;
     return [
       for (int i = 0; i < images.length; i++)
@@ -509,8 +601,8 @@ class _MealImageDetailsDialogState extends State<_MealImageDetailsDialog> {
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: SizedBox(
-                width: width,
-                height: widget.dialogImageHeight,
+                width: double.infinity,
+                height: height,
                 child: InteractiveViewer(
                   minScale: 1.0,
                   maxScale: 4.0,
@@ -530,28 +622,62 @@ class _MealImageDetailsDialogState extends State<_MealImageDetailsDialog> {
       hero ? Hero(tag: widget.heroTag, child: child) : child;
 
   Widget _buildNavigation(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        IconButton.filledTonal(
-          tooltip: _previousTooltip,
-          icon: const Icon(Icons.chevron_left),
-          onPressed: _hasPrevious ? _showPrevious : null,
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: _sectionGap),
-          child: Text(
-            '${_index + 1} / ${widget.meals.length}',
-            style: theme.textTheme.titleSmall,
+    final TextStyle? counterStyle = Theme.of(context).textTheme.titleSmall;
+    final int count = widget.meals.length;
+    return SizedBox(
+      height: _navHeight,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _buildArrow(
+            visible: _hasPrevious,
+            tooltip: _previousTooltip,
+            icon: Icons.chevron_left,
+            onPressed: _showPrevious,
           ),
-        ),
-        IconButton.filledTonal(
-          tooltip: _nextTooltip,
-          icon: const Icon(Icons.chevron_right),
-          onPressed: _hasNext ? _showNext : null,
-        ),
-      ],
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: _sectionGap),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: IndexedStack(
+                  alignment: Alignment.center,
+                  index: _index,
+                  children: [
+                    for (int i = 1; i <= count; i++)
+                      Text('$i / $count', style: counterStyle),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          _buildArrow(
+            visible: _hasNext,
+            tooltip: _nextTooltip,
+            icon: Icons.chevron_right,
+            onPressed: _showNext,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildArrow({
+    required bool visible,
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return Visibility(
+      visible: visible,
+      maintainSize: true,
+      maintainAnimation: true,
+      maintainState: true,
+      child: IconButton.filledTonal(
+        tooltip: tooltip,
+        icon: Icon(icon),
+        onPressed: visible ? onPressed : null,
+      ),
     );
   }
 }
