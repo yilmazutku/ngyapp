@@ -30,6 +30,8 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         tools:node="remove" />
 
+    <uses-permission android:name="android.permission.health.READ_STEPS"/>
+
      <application
          android:label="Dyt. Nilay Göktepe Yılmaz"
          android:name="${applicationName}"
@@ -61,7 +63,20 @@ Source - https://stackoverflow.com/questions/47453899/w-firebasemessaging-missin
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE"/>
+            </intent-filter>
         </activity>
+         <activity-alias
+             android:name="ViewPermissionUsageActivity"
+             android:exported="true"
+             android:targetActivity=".MainActivity"
+             android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+             <intent-filter>
+                 <action android:name="android.intent.action.VIEW_PERMISSION_USAGE"/>
+                 <category android:name="android.intent.category.HEALTH_PERMISSIONS"/>
+             </intent-filter>
+         </activity-alias>
          <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
              android:exported="false" />
          <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
@@ -86,6 +101,10 @@ Source - https://stackoverflow.com/questions/47453899/w-firebasemessaging-missin
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <package android:name="com.google.android.apps.healthdata"/>
+        <intent>
+            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE"/>
         </intent>
     </queries>
 </manifest>

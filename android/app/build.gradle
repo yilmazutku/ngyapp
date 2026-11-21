@@ -92,8 +92,7 @@ android {
 
     defaultConfig {
         applicationId = "com.utkuyilmaz.ngy_app"
-        // Flutter 3.41 (CI'da kullanilan surum) en az API 24 istiyor.
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName

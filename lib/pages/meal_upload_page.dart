@@ -18,6 +18,7 @@ import '../utils/pdf_launcher.dart';
 import '../services/notification_service.dart';
 import '../services/meal_reminder_service.dart';
 import '../widgets/app_bar_with_back.dart';
+import '../widgets/daily_tracking_card.dart';
 import '../widgets/diet_plan_view.dart';
 import '../widgets/full_screen_image_page.dart';
 import '../widgets/meal_thumbnail_image.dart';
@@ -90,10 +91,6 @@ class _MealUploadPageState extends State<MealUploadPage>
   late Future<void> _mealContentsFuture;
   DateTime now = DateTime.now();
   DateTime? _debugSelectedDate;
-  double _waterIntakeLiters = 0.0; // Water intake in liters
-  final TextEditingController _stepsController = TextEditingController();
-  final FocusNode _stepsFocusNode = FocusNode();
-  bool _isSavingDailyData = false;
   final NotificationService _notificationService = NotificationService();
   final MealReminderService _mealReminderService = MealReminderService();
   
@@ -119,11 +116,6 @@ class _MealUploadPageState extends State<MealUploadPage>
     _notificationService.initialize();
     _mealReminderService.initialize();
 
-    // Clear the leading "0" when the steps field is focused so the user can
-    // type directly (e.g. "100" instead of "0100"), and restore "0" on blur
-    // when left empty to preserve the initial display.
-    _stepsFocusNode.addListener(_handleStepsFocusChange);
-    
     // Load persisted expanded meal states
     _loadExpandedMeals();
     
@@ -156,8 +148,6 @@ class _MealUploadPageState extends State<MealUploadPage>
         for (final meal in Meals.dietValues) meal: false,
       };
       _mealImages.value = {};
-      _waterIntakeLiters = 0.0;
-      _stepsController.text = '0';
       _mealContentsFuture = _fetchMealStatesAndContents();
     });
     _scheduleDayRolloverCheck();
@@ -178,21 +168,6 @@ class _MealUploadPageState extends State<MealUploadPage>
 
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
-
-  /// Prevents a leading zero from being prepended to the steps input.
-  ///
-  /// On focus gained: if the field only shows the placeholder "0", clear it so
-  /// typing starts fresh. On focus lost: if the field is empty, restore "0" to
-  /// keep the display consistent with the initial/loaded state.
-  void _handleStepsFocusChange() {
-    if (_stepsFocusNode.hasFocus) {
-      if (_stepsController.text == '0') {
-        _stepsController.clear();
-      }
-    } else if (_stepsController.text.isEmpty) {
-      _stepsController.text = '0';
-    }
-  }
 
   /// Load persisted expanded meal states from SharedPreferences
   Future<void> _loadExpandedMeals() async {
@@ -262,21 +237,6 @@ class _MealUploadPageState extends State<MealUploadPage>
 
       // Fetch today's meal states and uploaded images
       await _refreshTodayMeals();
-
-      // Fetch daily data using provider
-      // Checked before the await so `context` is safe to read, and again after
-      // it so setState never runs on a disposed widget.
-      if (!mounted) return;
-      final dailyDataProvider =
-          Provider.of<DailyDataProvider>(context, listen: false);
-      final dailyData =
-          await dailyDataProvider.fetchDailyDataForDate(widget.userId, date: now);
-
-      if (!mounted) return;
-      setState(() {
-        _stepsController.text = dailyData.steps.toString();
-        _waterIntakeLiters = (dailyData.waterIntake as num).toDouble();
-      });
     } catch (e) {
     }
   }
@@ -312,59 +272,6 @@ class _MealUploadPageState extends State<MealUploadPage>
     }
   }
 
-  Future<void> _saveDailyData() async {
-    // Validate steps input first
-    // The keyboard has no business staying up over the result of the save.
-    FocusManager.instance.primaryFocus?.unfocus();
-
-    int? steps = int.tryParse(_stepsController.text);
-    if (steps == null && _stepsController.text.isNotEmpty) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Girilen adım sayısı geçerli değildir. Lütfen kontrol ediniz.',
-        );
-        return;
-      }
-
-      setState(() {
-      _isSavingDailyData = true;
-      });
-
-    try {
-      final dailyDataProvider =
-          Provider.of<DailyDataProvider>(context, listen: false);
-      
-      // Save both water intake and steps
-      await Future.wait([
-        dailyDataProvider.saveWaterIntake(widget.userId, now, _waterIntakeLiters),
-        dailyDataProvider.saveSteps(widget.userId, now, steps ?? 0),
-      ]);
-
-      if (!mounted) return;
-
-      await DialogUtils.openInfo(
-        context,
-        title: 'Başarılı',
-        message: 'Günlük verileriniz başarıyla kaydedildi.',
-      );
-    } catch (e) {
-      if (!mounted) return;
-      await DialogUtils.openError(
-        context,
-        title: 'Hata',
-        message: 'Veriler kaydedilirken bir hata oluştu.',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSavingDailyData = false;
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -394,8 +301,11 @@ class _MealUploadPageState extends State<MealUploadPage>
                     // weekend menus and uploads on a chosen date.
                     _buildDebugDateSelector(context),
 
-                    // Combined Daily Tracking Card (Water + Steps)
-                    _buildDailyTrackingCard(),
+                    DailyTrackingCard(
+                      userId: widget.userId,
+                      today: now,
+                      onShowHistory: _showDailyDataHistory,
+                    ),
                     
                     const SizedBox(height: 8),
 
@@ -546,173 +456,6 @@ class _MealUploadPageState extends State<MealUploadPage>
           secondChild: const SizedBox(height: 8),
         ),
       ],
-    );
-  }
-
-  /// Compact combined card for water intake and steps
-  Widget _buildDailyTrackingCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Header row with title and history button
-            Row(
-              children: [
-                Text(
-                  'Günlük Takip',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade800,
-                  ),
-                ),
-                const Spacer(),
-                // History button
-                TextButton.icon(
-                  onPressed: () => _showDailyDataHistory(),
-                  icon: Icon(Icons.history, size: 16, color: Colors.indigo.shade600),
-                  label: Text(
-                    'Geçmiş',
-                    style: TextStyle(fontSize: 12, color: Colors.indigo.shade600),
-                  ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    visualDensity: VisualDensity.compact,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              ],
-            ),
-            const Divider(height: 8, thickness: 0.5),
-            // Water row
-            Row(
-              children: [
-                Icon(Icons.water_drop, color: Colors.blue.shade600, size: 20),
-                const SizedBox(width: 8),
-                const Text(
-                  'Su',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SliderTheme(
-                    data: SliderThemeData(
-                      trackHeight: 4,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                      activeTrackColor: Colors.blue.shade400,
-                      inactiveTrackColor: Colors.blue.shade100,
-                      thumbColor: Colors.blue.shade600,
-                    ),
-                    child: Slider(
-                      value: _waterIntakeLiters,
-                      min: 0,
-                      max: 5,
-                      divisions: 20,
-                      onChanged: (value) => setState(() => _waterIntakeLiters = value),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 48,
-                  child: Text(
-                    '${_waterIntakeLiters.toStringAsFixed(1)}L',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue.shade700,
-                    ),
-                    textAlign: TextAlign.end,
-                  ),
-                ),
-              ],
-            ),
-            
-            const Divider(height: 12, thickness: 0.5),
-            
-            // Steps row
-            Row(
-              children: [
-                Icon(Icons.directions_walk, color: Colors.green.shade600, size: 20),
-                const SizedBox(width: 8),
-                const Text(
-                  'Adım',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SizedBox(
-                    height: 36,
-                    child: TextField(
-                      controller: _stepsController,
-                      focusNode: _stepsFocusNode,
-                      keyboardType: TextInputType.number,
-                      // A number keyboard has no return key on iOS, so the
-                      // field also has to offer a way out of itself.
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _stepsFocusNode.unfocus(),
-                      onTapOutside: (_) => _stepsFocusNode.unfocus(),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText: '0',
-                        hintStyle: TextStyle(color: Colors.grey.shade400),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.grey.shade300),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.grey.shade300),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.green.shade400, width: 1.5),
-                        ),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Save button
-                SizedBox(
-                  height: 32,
-                  child: FilledButton.icon(
-                    onPressed: _isSavingDailyData ? null : _saveDailyData,
-                    icon: _isSavingDailyData
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.save_outlined, size: 16),
-                    label: const Text('Kaydet', style: TextStyle(fontSize: 12)),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.deepOrange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      visualDensity: VisualDensity.compact,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1287,9 +1030,6 @@ class _MealUploadPageState extends State<MealUploadPage>
     _dayRolloverTimer?.cancel();
     _mealManager.removeListener(_refreshTodayMeals);
     _mealImages.dispose();
-    _stepsFocusNode.removeListener(_handleStepsFocusChange);
-    _stepsFocusNode.dispose();
-    _stepsController.dispose();
     super.dispose();
   }
 }
