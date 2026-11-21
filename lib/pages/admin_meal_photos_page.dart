@@ -1700,30 +1700,37 @@ class _ClientPhotoSection extends StatelessWidget {
 
     return SizedBox(
       height: stripHeight,
-      child: Scrollbar(
-        controller: stripController,
-        thumbVisibility: true,
-        child: ListView.separated(
+      child: MediaQuery.removePadding(
+        context: context,
+        removeLeft: true,
+        removeTop: true,
+        removeRight: true,
+        removeBottom: true,
+        child: Scrollbar(
           controller: stripController,
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-          itemCount: group.photos.length,
-          separatorBuilder: (context, index) => const SizedBox(width: _photoGap),
-          itemBuilder: (context, index) {
-            final MealModel photo = group.photos[index];
-            return SizedBox(
-              width: photoWidth,
-              child: MealImageCard(
-                meal: photo,
-                dialogImageHeight: dialogImageHeight,
-                backfillUserId: group.user.userId,
-                reactions: reactionsByImageUrl[photo.imageUrl] ?? const {},
-                highlighted: photo.imageUrl == focusImageUrl,
-                onTap: () => onPhotoTap(photo, dialogImageHeight),
-                onMenu: (globalPosition) => onPhotoMenu(photo, globalPosition),
-              ),
-            );
-          },
+          thumbVisibility: true,
+          child: ListView.separated(
+            controller: stripController,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+            itemCount: group.photos.length,
+            separatorBuilder: (context, index) => const SizedBox(width: _photoGap),
+            itemBuilder: (context, index) {
+              final MealModel photo = group.photos[index];
+              return SizedBox(
+                width: photoWidth,
+                child: MealImageCard(
+                  meal: photo,
+                  dialogImageHeight: dialogImageHeight,
+                  backfillUserId: group.user.userId,
+                  reactions: reactionsByImageUrl[photo.imageUrl] ?? const {},
+                  highlighted: photo.imageUrl == focusImageUrl,
+                  onTap: () => onPhotoTap(photo, dialogImageHeight),
+                  onMenu: (globalPosition) => onPhotoMenu(photo, globalPosition),
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
