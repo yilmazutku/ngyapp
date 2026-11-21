@@ -83,6 +83,7 @@ import 'pages/testing_page.dart';
 import 'utils/dialog_utils.dart';
 import 'widgets/admin_notification_bell.dart';
 import 'widgets/app_update_gate.dart';
+import 'widgets/health_steps_auto_sync.dart';
 import 'widgets/labeled_action_button.dart';
 
 /// Global platform configuration instance
@@ -341,7 +342,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
             
             switch (kvkkSnapshot.data ?? KvkkConsentStatus.unknown) {
               case KvkkConsentStatus.valid:
-                return const HomePage();
+                return HealthStepsAutoSync(
+                  userId: userId,
+                  child: const HomePage(),
+                );
               case KvkkConsentStatus.missing:
                 return KvkkConsentPage(
                   onAccepted: () => setState(() => _kvkkCheckFuture =

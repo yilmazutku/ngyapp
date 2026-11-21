@@ -6,9 +6,15 @@ import 'package:intl/intl.dart';
 class DailyData {
   final double waterIntake; // in liters
   final int steps;
-  final bool isSaved;
+  final bool hasWater;
+  final bool hasSteps;
 
-  DailyData({this.waterIntake = 0.0, this.steps = 0, this.isSaved = false});
+  DailyData({
+    this.waterIntake = 0.0,
+    this.steps = 0,
+    this.hasWater = false,
+    this.hasSteps = false,
+  });
 }
 
 class DailyDataProvider extends ChangeNotifier {
@@ -42,7 +48,8 @@ class DailyDataProvider extends ChangeNotifier {
           return DailyData(
             waterIntake: (data[waterIntakeField] as num?)?.toDouble() ?? 0.0,
             steps: (data[stepsField] as num?)?.toInt() ?? 0,
-            isSaved: true,
+            hasWater: data[waterIntakeField] is num,
+            hasSteps: data[stepsField] is num,
           );
         }
       }
@@ -99,5 +106,25 @@ class DailyDataProvider extends ChangeNotifier {
       waterIntakeField: waterIntake,
       stepsField: steps,
     }, SetOptions(merge: true));
+  }
+
+  Future<int> saveStepsIfHigher(String userId, DateTime date, int steps) async {
+    final DocumentReference<Map<String, dynamic>> ref = _dayDoc(userId, date);
+    bool written = false;
+    final int result = await _firestore.runTransaction<int>((Transaction tx) async {
+      written = false;
+      final DocumentSnapshot<Map<String, dynamic>> snapshot = await tx.get(ref);
+      final int current = (snapshot.data()?[stepsField] as num?)?.toInt() ?? 0;
+      if (steps <= current) return current;
+      if (snapshot.exists) {
+        tx.update(ref, <String, Object>{stepsField: steps});
+      } else {
+        tx.set(ref, <String, Object>{stepsField: steps});
+      }
+      written = true;
+      return steps;
+    });
+    if (written) notifyListeners();
+    return result;
   }
 }

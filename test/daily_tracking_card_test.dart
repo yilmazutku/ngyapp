@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:health/health.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:ngy_app/providers/daily_data_provider.dart';
 import 'package:ngy_app/services/health_steps_service.dart';
@@ -14,114 +13,7 @@ import 'package:ngy_app/services/ios_app_on_mac.dart';
 import 'package:ngy_app/widgets/daily_tracking_card.dart';
 import 'package:provider/provider.dart';
 
-class _FakeHealth extends Health {
-  _FakeHealth({this.iosLike = false});
-
-  final bool iosLike;
-  bool available = true;
-  bool permitted = false;
-  bool grantOnRequest = true;
-  int? steps = 1234;
-  Object? stepsError;
-  Object? permissionError;
-  Completer<void>? requestGate;
-  int availabilityChecks = 0;
-  int permissionChecks = 0;
-  int requests = 0;
-  final List<(DateTime, DateTime)> intervals = <(DateTime, DateTime)>[];
-
-  int get calls =>
-      availabilityChecks + permissionChecks + requests + intervals.length;
-
-  @override
-  Future<bool> isHealthConnectAvailable() async {
-    availabilityChecks++;
-    return available;
-  }
-
-  @override
-  Future<bool?> hasPermissions(
-    List<HealthDataType> types, {
-    List<HealthDataAccess>? permissions,
-  }) async {
-    permissionChecks++;
-    if (permissionError != null) throw permissionError!;
-    if (iosLike) return null;
-    return permitted;
-  }
-
-  @override
-  Future<bool> requestAuthorization(
-    List<HealthDataType> types, {
-    List<HealthDataAccess>? permissions,
-  }) async {
-    requests++;
-    if (requestGate != null) await requestGate!.future;
-    if (grantOnRequest) permitted = true;
-    return grantOnRequest;
-  }
-
-  @override
-  Future<int?> getTotalStepsInInterval(
-    DateTime startTime,
-    DateTime endTime, {
-    bool includeManualEntry = true,
-  }) async {
-    intervals.add((startTime, endTime));
-    if (stepsError != null) throw stepsError!;
-    return steps;
-  }
-}
-
-class _FakeHealthSteps extends HealthStepsService {
-  _FakeHealthSteps([Map<DateTime, FutureOr<int?>>? steps])
-      : steps = steps ?? <DateTime, FutureOr<int?>>{};
-
-  final Map<DateTime, FutureOr<int?>> steps;
-  final List<DateTime> asked = <DateTime>[];
-
-  @override
-  Future<int?> stepsForDay(DateTime day) async {
-    asked.add(day);
-    return steps[day];
-  }
-}
-
-class _ScriptedProvider extends DailyDataProvider {
-  _ScriptedProvider(FakeFirebaseFirestore db) : super(firestore: db);
-
-  int fetchFailures = 0;
-  int saveFailures = 0;
-  final Map<DateTime, Completer<void>> fetchGates =
-      <DateTime, Completer<void>>{};
-
-  @override
-  Future<DailyData> fetchDailyDataForDate(String userId,
-      {DateTime? date}) async {
-    final Completer<void>? gate = fetchGates[date];
-    if (gate != null) await gate.future;
-    if (fetchFailures > 0) {
-      fetchFailures--;
-      throw Exception('offline');
-    }
-    return super.fetchDailyDataForDate(userId, date: date);
-  }
-
-  @override
-  Future<void> saveDailyData(
-    String userId,
-    DateTime date, {
-    required double waterIntake,
-    required int steps,
-  }) async {
-    if (saveFailures > 0) {
-      saveFailures--;
-      throw Exception('offline');
-    }
-    return super.saveDailyData(userId, date,
-        waterIntake: waterIntake, steps: steps);
-  }
-}
+import 'health_fakes.dart';
 
 void main() {
   const String userId = 'u1';
@@ -134,13 +26,13 @@ void main() {
   const MethodChannel platformInfo = MethodChannel('ngy_app/platform_info');
 
   late FakeFirebaseFirestore db;
-  late _ScriptedProvider provider;
+  late ScriptedDailyDataProvider provider;
 
   setUpAll(() => initializeDateFormatting('tr_TR'));
 
   setUp(() {
     db = FakeFirebaseFirestore();
-    provider = _ScriptedProvider(db);
+    provider = ScriptedDailyDataProvider(db);
   });
 
   String dayKey(DateTime day) =>
@@ -154,7 +46,7 @@ void main() {
   Future<Map<String, dynamic>?> readDoc(DateTime day) async =>
       (await db.doc('users/$userId/dailyData/${dayKey(day)}').get()).data();
 
-  Future<void> pumpCard(WidgetTester tester, _FakeHealthSteps health) async {
+  Future<void> pumpCard(WidgetTester tester, FakeHealthSteps health) async {
     await tester.pumpWidget(
       ChangeNotifierProvider<DailyDataProvider>.value(
         value: provider,
@@ -234,20 +126,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> backgroundAndResume(WidgetTester tester) async {
-    for (final AppLifecycleState state in <AppLifecycleState>[
-      AppLifecycleState.inactive,
-      AppLifecycleState.hidden,
-      AppLifecycleState.paused,
-      AppLifecycleState.hidden,
-      AppLifecycleState.inactive,
-      AppLifecycleState.resumed,
-    ]) {
-      tester.binding.handleAppLifecycleStateChanged(state);
-    }
-    await tester.pumpAndSettle();
-  }
-
   Finder healthUsed(String steps) =>
       find.text('Sağlık uygulamasından alındı: $steps adım');
 
@@ -283,7 +161,7 @@ void main() {
         '(iOS dahil her platform denenir)', () async {
       for (final TargetPlatform platform in TargetPlatform.values) {
         debugDefaultTargetPlatformOverride = platform;
-        final _FakeHealth health = _FakeHealth()..permitted = true;
+        final FakeHealth health = FakeHealth()..permitted = true;
         final HealthStepsService service = HealthStepsService(health: health);
         final bool supported = platform == TargetPlatform.android ||
             platform == TargetPlatform.iOS;
@@ -298,9 +176,10 @@ void main() {
     test('Mac\'teki iPad uygulamasında adım okunmaz', () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(platformInfo, (MethodCall call) async => true);
+          .setMockMethodCallHandler(
+              platformInfo, (MethodCall call) async => true);
       await loadIosAppOnMac();
-      final _FakeHealth health = _FakeHealth(iosLike: true);
+      final FakeHealth health = FakeHealth(iosLike: true);
       final HealthStepsService service = HealthStepsService(health: health);
 
       expect(service.isSupported, isFalse);
@@ -311,7 +190,7 @@ void main() {
     test('Android: izin zaten varsa sorulmaz; günün 00:00\'ından ertesi '
         'günün 00:00\'ına kadarki adım okunur', () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final _FakeHealth health = _FakeHealth()
+      final FakeHealth health = FakeHealth()
         ..permitted = true
         ..steps = 7500;
       final HealthStepsService service = HealthStepsService(health: health);
@@ -329,7 +208,7 @@ void main() {
     test('Android: izin yoksa bir kez sorulur, verilince bir daha sorulmaz',
         () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final _FakeHealth health = _FakeHealth();
+      final FakeHealth health = FakeHealth();
       final HealthStepsService service = HealthStepsService(health: health);
 
       expect(await service.stepsForDay(today), 1234);
@@ -340,7 +219,7 @@ void main() {
     test('Android: izin reddedilirse tekrar tekrar sorulmaz; kullanıcı '
         'izni ayarlardan verince uygulama kapanmadan okunur', () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final _FakeHealth health = _FakeHealth()..grantOnRequest = false;
+      final FakeHealth health = FakeHealth()..grantOnRequest = false;
       final HealthStepsService service = HealthStepsService(health: health);
 
       expect(await service.stepsForDay(today), isNull);
@@ -355,7 +234,7 @@ void main() {
     test('Android: Health Connect yoksa izin sorulmaz; sonradan kurulunca '
         'okunur', () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final _FakeHealth health = _FakeHealth()..available = false;
+      final FakeHealth health = FakeHealth()..available = false;
       final HealthStepsService service = HealthStepsService(health: health);
 
       expect(await service.stepsForDay(today), isNull);
@@ -370,12 +249,23 @@ void main() {
     test('iOS: izin durumu bilinemediği için bir kez sorulur, sonra '
         'sorulmadan okunur', () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      final _FakeHealth health = _FakeHealth(iosLike: true)..steps = 3210;
+      final FakeHealth health = FakeHealth(iosLike: true)..steps = 3210;
       final HealthStepsService service = HealthStepsService(health: health);
 
       expect(await service.stepsForDay(today), 3210);
       expect(await service.stepsForDay(yesterday), 3210);
       expect(await service.stepsForDay(twoDaysAgo), 3210);
+      expect(health.requests, 1);
+    });
+
+    test('iOS: izin reddedilince sağlık 0 döner; tekrar sorulmaz',
+        () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      final FakeHealth health = FakeHealth(iosLike: true)..steps = 0;
+      final HealthStepsService service = HealthStepsService(health: health);
+
+      expect(await service.stepsForDay(today), 0);
+      expect(await service.stepsForDay(yesterday), 0);
       expect(health.requests, 1);
     });
 
@@ -385,8 +275,8 @@ void main() {
         TargetPlatform.iOS,
       ]) {
         debugDefaultTargetPlatformOverride = platform;
-        final _FakeHealth health =
-            _FakeHealth(iosLike: platform == TargetPlatform.iOS)
+        final FakeHealth health =
+            FakeHealth(iosLike: platform == TargetPlatform.iOS)
               ..requestGate = Completer<void>();
         final HealthStepsService service = HealthStepsService(health: health);
 
@@ -404,13 +294,13 @@ void main() {
     test('sağlık uygulaması hata verirse adım boş döner, uygulama düşmez',
         () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final _FakeHealth readError = _FakeHealth()
+      final FakeHealth readError = FakeHealth()
         ..permitted = true
         ..stepsError = PlatformException(code: 'STEPS_ERROR');
       expect(await HealthStepsService(health: readError).stepsForDay(today),
           isNull);
 
-      final _FakeHealth permissionError = _FakeHealth()
+      final FakeHealth permissionError = FakeHealth()
         ..permissionError = PlatformException(code: 'NO_CLIENT');
       expect(
           await HealthStepsService(health: permissionError)
@@ -419,10 +309,10 @@ void main() {
     });
   });
 
-  group('Günlük Takip kartı: hangi değer girişe gelir', () {
+  group('Günlük Takip kartı: sağlıktaki adım kendiliğinden kaydedilir', () {
     testWidgets('kayıt yok, sağlıkta veri yok: giriş 0, Kayıtlı "—", '
         'not ve uyarı yok', (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       expect(find.text('Bugün'), findsOneWidget);
       expect(stepsInput(tester), '0');
@@ -430,44 +320,40 @@ void main() {
       expectSaved('—', '—');
       expect(find.textContaining('Sağlık uygulama'), findsNothing);
       expect(find.text(unsaved), findsNothing);
+      expect(await readDoc(today), isNull);
     });
 
-    testWidgets('kayıt yok, sağlıkta 5.234: girişe 5234 gelir, '
-        '"alındı" notu ve kaydedilmemiş uyarısı çıkar',
-        (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps({today: 5234}));
+    testWidgets('kayıt yok, sağlıkta 5.234: yalnızca adım kaydedilir, su '
+        'kaydı açılmaz', (WidgetTester tester) async {
+      await pumpCard(tester, FakeHealthSteps({today: 5234}));
 
       expect(stepsInput(tester), '5234');
-      expectSaved('—', '—');
+      expectSaved('—', '5.234');
       expect(healthUsed('5.234'), findsOneWidget);
       expect(find.text('Kullan'), findsNothing);
-      expect(find.text(unsaved), findsOneWidget);
+      expect(find.text(unsaved), findsNothing);
+      expect(await readDoc(today), <String, Object>{'steps': 5234});
     });
 
-    testWidgets('kayıtlı 4.000, sağlıkta daha çok (5.234): girişe sağlıktaki '
-        'gelir, sağda kayıtlı 4.000 durur', (WidgetTester tester) async {
+    testWidgets('kayıtlı 4.000, sağlıkta daha çok (5.234): 5.234 kaydedilir, '
+        'su olduğu gibi kalır', (WidgetTester tester) async {
       await saveDoc(today, 1.5, 4000);
-      await pumpCard(tester, _FakeHealthSteps({today: 5234}));
+      await pumpCard(tester, FakeHealthSteps({today: 5234}));
 
       expect(stepsInput(tester), '5234');
       expect(waterInput(tester), 1.5);
-      expectSaved('1.5L', '4.000');
-      expect(healthUsed('5.234'), findsOneWidget);
-      expect(find.text(unsaved), findsOneWidget);
-
-      await tapSave(tester);
-      await closeDialog(tester);
       expectSaved('1.5L', '5.234');
+      expect(healthUsed('5.234'), findsOneWidget);
       expect(find.text(unsaved), findsNothing);
       expect(await readDoc(today),
           <String, Object>{'waterIntake': 1.5, 'steps': 5234});
     });
 
-    testWidgets('kayıtlı 12.000 (elle), sağlıkta daha az (8.000): girişte '
-        'kayıtlı kalır, su düzeltilip kaydedilince adım düşmez',
+    testWidgets('kayıtlı 12.000 (elle), sağlıkta daha az (8.000): kayıt '
+        'düşürülmez; su düzeltilip kaydedilince de adım 12.000 kalır',
         (WidgetTester tester) async {
       await saveDoc(yesterday, 1.0, 12000);
-      await pumpCard(tester, _FakeHealthSteps({yesterday: 8000}));
+      await pumpCard(tester, FakeHealthSteps({yesterday: 8000}));
       await tapDay(tester, Icons.chevron_left);
 
       expect(stepsInput(tester), '12000');
@@ -475,6 +361,8 @@ void main() {
       expect(healthAvailable('8.000'), findsOneWidget);
       expect(find.text('Kullan'), findsOneWidget);
       expect(find.text(unsaved), findsNothing);
+      expect(await readDoc(yesterday),
+          <String, Object>{'waterIntake': 1.0, 'steps': 12000});
 
       await setWater(tester, 2.0);
       await tapSave(tester);
@@ -483,10 +371,10 @@ void main() {
           <String, Object>{'waterIntake': 2.0, 'steps': 12000});
     });
 
-    testWidgets('"Kullan" sağlıktaki değeri girişe koyar',
-        (WidgetTester tester) async {
+    testWidgets('"Kullan" sağlıktaki daha düşük değeri girişe koyar; '
+        'Kaydet ile kaydedilir', (WidgetTester tester) async {
       await saveDoc(today, 1.0, 12000);
-      await pumpCard(tester, _FakeHealthSteps({today: 8000}));
+      await pumpCard(tester, FakeHealthSteps({today: 8000}));
 
       await tester.tap(find.text('Kullan'));
       await tester.pump();
@@ -496,23 +384,31 @@ void main() {
       expect(find.text('Kullan'), findsNothing);
       expect(find.text(unsaved), findsOneWidget);
       expectSaved('1.0L', '12.000');
+
+      await tapSave(tester);
+      await closeDialog(tester);
+      expectSaved('1.0L', '8.000');
+      expect(await readDoc(today),
+          <String, Object>{'waterIntake': 1.0, 'steps': 8000});
     });
 
-    testWidgets('kayıtlı ile sağlıktaki eşitse giriş aynı kalır, uyarı çıkmaz',
+    testWidgets('kayıtlı ile sağlıktaki eşitse hiçbir şey yazılmaz',
         (WidgetTester tester) async {
       await saveDoc(today, 2.5, 6000);
-      await pumpCard(tester, _FakeHealthSteps({today: 6000}));
+      await pumpCard(tester, FakeHealthSteps({today: 6000}));
 
       expect(stepsInput(tester), '6000');
       expect(healthUsed('6.000'), findsOneWidget);
       expect(find.text(unsaved), findsNothing);
+      expect(provider.stepsSyncDays, isEmpty);
     });
 
-    testWidgets('sağlıktan 0 ya da hiç değer gelmezse (izin yok, kayıt yok) '
-        'girişte kayıtlı değer kalır, not çıkmaz', (WidgetTester tester) async {
+    testWidgets('sağlıktan 0 ya da hiç değer gelmezse (izin yok) girişte '
+        'kayıtlı değer kalır, not çıkmaz, bir şey yazılmaz',
+        (WidgetTester tester) async {
       for (final int? value in <int?>[0, null]) {
         await saveDoc(today, 1.0, 4000);
-        await pumpCard(tester, _FakeHealthSteps({today: value}));
+        await pumpCard(tester, FakeHealthSteps({today: value}));
 
         expect(stepsInput(tester), '4000', reason: '$value');
         expect(find.textContaining('Sağlık uygulama'), findsNothing,
@@ -520,14 +416,15 @@ void main() {
         expect(find.text(unsaved), findsNothing, reason: '$value');
         await tester.pumpWidget(const SizedBox());
       }
+      expect(provider.stepsSyncDays, isEmpty);
     });
 
     testWidgets('kullanıcı elle yazmaya başladıysa sonradan gelen sağlık '
-        'değeri girişi ezmez, "Kullan" ile alınabilir',
+        'değeri girişi ezmez ve kaydedilmez; "Kullan" ile alınabilir',
         (WidgetTester tester) async {
       await saveDoc(today, 1.0, 4000);
       final Completer<int?> pending = Completer<int?>();
-      await pumpCard(tester, _FakeHealthSteps({today: pending.future}));
+      await pumpCard(tester, FakeHealthSteps({today: pending.future}));
 
       await typeSteps(tester, '1200');
       pending.complete(9000);
@@ -535,15 +432,17 @@ void main() {
 
       expect(stepsInput(tester), '1200');
       expect(healthAvailable('9.000'), findsOneWidget);
+      expect(await readDoc(today),
+          <String, Object>{'waterIntake': 1.0, 'steps': 4000});
 
       await tester.tap(find.text('Kullan'));
       await tester.pump();
       expect(stepsInput(tester), '9000');
     });
 
-    testWidgets('sağlıktan gelen değer elle değiştirilince not "Kullan"a döner',
-        (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps({today: 5234}));
+    testWidgets('sağlıktan gelen değer elle değiştirilince not "Kullan"a '
+        'döner ve kaydedilmemiş uyarısı çıkar', (WidgetTester tester) async {
+      await pumpCard(tester, FakeHealthSteps({today: 5234}));
       expect(healthUsed('5.234'), findsOneWidget);
 
       await typeSteps(tester, '5000');
@@ -551,12 +450,63 @@ void main() {
       expect(healthUsed('5.234'), findsNothing);
       expect(healthAvailable('5.234'), findsOneWidget);
       expect(find.text('Kullan'), findsOneWidget);
+      expect(find.text(unsaved), findsOneWidget);
+    });
+
+    testWidgets('bağlantı yoksa (otomatik kayıt başarısız) sağlıktaki değer '
+        'girişte durur, Kaydet ile kaydedilebilir', (WidgetTester tester) async {
+      await saveDoc(today, 1.0, 4000);
+      provider.stepsSyncFailures = 1;
+      await pumpCard(tester, FakeHealthSteps({today: 5234}));
+
+      expect(stepsInput(tester), '5234');
+      expectSaved('1.0L', '4.000');
+      expect(find.text(unsaved), findsOneWidget);
+
+      await tapSave(tester);
+      await closeDialog(tester);
+      expectSaved('1.0L', '5.234');
+      expect(find.text(unsaved), findsNothing);
+    });
+
+    testWidgets('arka plandaki eşitleme adımı kaydedince açık kart yenilenir; '
+        'kaydedilmemiş su girişi korunur', (WidgetTester tester) async {
+      await saveDoc(today, 1.0, 4000);
+      final FakeHealthSteps health = FakeHealthSteps({today: 4000});
+      await pumpCard(tester, health);
+      await setWater(tester, 2.5);
+
+      health.steps[today] = 7000;
+      await provider.saveStepsIfHigher(userId, today, 7000);
+      await tester.pumpAndSettle();
+
+      expectSaved('1.0L', '7.000');
+      expect(stepsInput(tester), '7000');
+      expect(healthUsed('7.000'), findsOneWidget);
+      expect(waterInput(tester), 2.5);
+      expect(find.text(unsaved), findsOneWidget);
+    });
+
+    testWidgets('arka plandaki eşitleme elle yazılan adımı ezmez',
+        (WidgetTester tester) async {
+      await saveDoc(today, 1.0, 4000);
+      final FakeHealthSteps health = FakeHealthSteps({today: 4000});
+      await pumpCard(tester, health);
+      await typeSteps(tester, '4500');
+
+      health.steps[today] = 7000;
+      await provider.saveStepsIfHigher(userId, today, 7000);
+      await tester.pumpAndSettle();
+
+      expectSaved('1.0L', '7.000');
+      expect(stepsInput(tester), '4500');
+      expect(healthAvailable('7.000'), findsOneWidget);
     });
 
     testWidgets('kayıtlı su 5 litreyi aşıyorsa sürgü 5\'te durur, sağda '
         'gerçek değer görünür, uyarı çıkmaz', (WidgetTester tester) async {
       await saveDoc(today, 6.0, 0);
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       expect(waterInput(tester), 5.0);
       expectSaved('6.0L', '0');
@@ -568,16 +518,18 @@ void main() {
     testWidgets('geçmiş güne girilen su ve adım yalnızca o günün kaydına '
         'yazılır', (WidgetTester tester) async {
       await saveDoc(today, 1.5, 4000);
-      final _FakeHealthSteps health =
-          _FakeHealthSteps({today: 5234, yesterday: 8000});
+      final FakeHealthSteps health =
+          FakeHealthSteps({today: 5234, yesterday: 8000});
       await pumpCard(tester, health);
+      expect(await readDoc(today),
+          <String, Object>{'waterIntake': 1.5, 'steps': 5234});
 
       expect(dayButton(tester, Icons.chevron_right).onPressed, isNull);
       await tapDay(tester, Icons.chevron_left);
 
       expect(find.text('Dün'), findsOneWidget);
       expect(dayButton(tester, Icons.chevron_right).onPressed, isNotNull);
-      expectSaved('—', '—');
+      expectSaved('—', '8.000');
       expect(stepsInput(tester), '8000');
       expect(health.asked, <DateTime>[today, yesterday]);
 
@@ -589,22 +541,22 @@ void main() {
 
       expectSaved('2.5L', '8.000');
       expect(await readDoc(yesterday),
-          <String, Object>{'waterIntake': 2.5, 'steps': 8000});
+          <String, Object>{'steps': 8000, 'waterIntake': 2.5});
       expect(await readDoc(today),
-          <String, Object>{'waterIntake': 1.5, 'steps': 4000});
+          <String, Object>{'waterIntake': 1.5, 'steps': 5234});
 
       await tapDay(tester, Icons.chevron_left);
       expect(find.text('19 Kasım Perşembe'), findsOneWidget);
       await tapDay(tester, Icons.chevron_right);
       await tapDay(tester, Icons.chevron_right);
       expect(find.text('Bugün'), findsOneWidget);
-      expectSaved('1.5L', '4.000');
+      expectSaved('1.5L', '5.234');
       expect(stepsInput(tester), '5234');
     });
 
     testWidgets('takvimden gün seçilir; takvim bugünden sonrasını ve 1 '
         'yıldan eskisini göstermez', (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps({DateTime(2026, 11, 15): 4321}));
+      await pumpCard(tester, FakeHealthSteps({DateTime(2026, 11, 15): 4321}));
 
       await tester.tap(find.text('Bugün'));
       await tester.pumpAndSettle();
@@ -619,11 +571,13 @@ void main() {
 
       expect(find.text('15 Kasım Pazar'), findsOneWidget);
       expect(stepsInput(tester), '4321');
+      expect(await readDoc(DateTime(2026, 11, 15)),
+          <String, Object>{'steps': 4321});
     });
 
     testWidgets('1 yıl öncesine gelince önceki gün düğmesi kapanır',
         (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await tester.tap(find.text('Bugün'));
       await tester.pumpAndSettle();
@@ -643,11 +597,12 @@ void main() {
     });
 
     testWidgets('hızlı gün değişiminde önceki günün geç gelen sonuçları '
-        'yeni güne yazılmaz', (WidgetTester tester) async {
+        'yeni güne yazılmaz ve önceki güne de kaydedilmez',
+        (WidgetTester tester) async {
       await saveDoc(yesterday, 3.0, 11111);
       final Completer<int?> lateHealth = Completer<int?>();
       provider.fetchGates[yesterday] = Completer<void>();
-      await pumpCard(tester, _FakeHealthSteps({
+      await pumpCard(tester, FakeHealthSteps({
         yesterday: lateHealth.future,
         twoDaysAgo: 3000,
       }));
@@ -664,8 +619,10 @@ void main() {
       expect(find.text('19 Kasım Perşembe'), findsOneWidget);
       expect(stepsInput(tester), '3000');
       expect(waterInput(tester), 0);
-      expectSaved('—', '—');
+      expectSaved('—', '3.000');
       expect(healthUsed('3.000'), findsOneWidget);
+      expect(await readDoc(yesterday),
+          <String, Object>{'waterIntake': 3.0, 'steps': 11111});
     });
   });
 
@@ -673,7 +630,7 @@ void main() {
     testWidgets('elle değişiklik varken başka güne geçilince sorulur; '
         '"Kaydetme" değişikliği atar ve geçer', (WidgetTester tester) async {
       await saveDoc(today, 1.0, 4000);
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await setWater(tester, 3.0);
       await tester.tap(find.byIcon(Icons.chevron_left));
@@ -698,7 +655,7 @@ void main() {
 
     testWidgets('"Kaydet" önce kaydeder sonra geçer (ayrıca başarı '
         'penceresi çıkmaz)', (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await typeSteps(tester, '7000');
       await tester.tap(find.byIcon(Icons.chevron_left));
@@ -714,7 +671,7 @@ void main() {
 
     testWidgets('pencerenin dışına dokunmak değişikliği atmaz, soru açık kalır',
         (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await setWater(tester, 2.0);
       await tester.tap(find.byIcon(Icons.chevron_left));
@@ -726,7 +683,7 @@ void main() {
     });
 
     testWidgets('takvimden gün seçerken de sorulur', (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await setWater(tester, 2.0);
       await tester.tap(find.text('Bugün'));
@@ -741,10 +698,10 @@ void main() {
       expect(find.text('15 Kasım Pazar'), findsOneWidget);
     });
 
-    testWidgets('yalnızca sağlıktan gelen değer varken sorulmaz '
-        '(geri dönünce yeniden okunur)', (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps({today: 5234}));
-      expect(find.text(unsaved), findsOneWidget);
+    testWidgets('sağlıktan gelen değer zaten kaydedildiği için gün '
+        'değişirken sorulmaz', (WidgetTester tester) async {
+      await pumpCard(tester, FakeHealthSteps({today: 5234}));
+      expect(find.text(unsaved), findsNothing);
 
       await tapDay(tester, Icons.chevron_left);
       expect(find.text('Dün'), findsOneWidget);
@@ -752,12 +709,13 @@ void main() {
 
       await tapDay(tester, Icons.chevron_right);
       expect(stepsInput(tester), '5234');
+      expectSaved('—', '5.234');
     });
 
     testWidgets('değer eski hâline getirildiyse sorulmaz',
         (WidgetTester tester) async {
       await saveDoc(today, 1.0, 4000);
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await setWater(tester, 3.0);
       await setWater(tester, 1.0);
@@ -771,7 +729,7 @@ void main() {
 
     testWidgets('geçerken kayıt başarısız olursa gün değişmez, hata gösterilir',
         (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await setWater(tester, 2.0);
       provider.saveFailures = 1;
@@ -794,7 +752,7 @@ void main() {
         '"Tekrar dene" ile yüklenir', (WidgetTester tester) async {
       await saveDoc(today, 1.5, 4000);
       provider.fetchFailures = 1;
-      await pumpCard(tester, _FakeHealthSteps({today: 5234}));
+      await pumpCard(tester, FakeHealthSteps({today: 5234}));
 
       expect(find.text('Kayıtlı veriler yüklenemedi.'), findsOneWidget);
       expect(stepsField(tester).enabled, isFalse);
@@ -807,19 +765,20 @@ void main() {
                       (Widget w) => w is ButtonStyleButton)))
               .onPressed,
           isNull);
+      expect(provider.stepsSyncDays, isEmpty);
 
       await tester.tap(find.text('Tekrar dene'));
       await tester.pumpAndSettle();
 
       expect(find.text('Kayıtlı veriler yüklenemedi.'), findsNothing);
-      expectSaved('1.5L', '4.000');
+      expectSaved('1.5L', '5.234');
       expect(stepsInput(tester), '5234');
     });
 
     testWidgets('kaydetme başarısız olursa hata gösterilir, Kayıtlı alanı '
         'değişmez; tekrar Kaydet ile kaydedilir', (WidgetTester tester) async {
       await saveDoc(today, 1.0, 4000);
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await setWater(tester, 2.0);
       provider.saveFailures = 1;
@@ -839,7 +798,7 @@ void main() {
     testWidgets('adım alanına yalnızca rakam girilir, en çok 6 hane; boş '
         'bırakılırsa 0 kaydedilir', (WidgetTester tester) async {
       await saveDoc(today, 1.0, 4000);
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await typeSteps(tester, '12a.3-4');
       expect(stepsInput(tester), '1234');
@@ -857,7 +816,7 @@ void main() {
 
     testWidgets('alana dokununca tek başına duran 0 silinir, boş bırakılınca '
         'geri gelir', (WidgetTester tester) async {
-      await pumpCard(tester, _FakeHealthSteps());
+      await pumpCard(tester, FakeHealthSteps());
 
       await tester.tap(find.byType(TextField));
       await tester.pump();
@@ -870,52 +829,6 @@ void main() {
     });
   });
 
-  group('Günlük Takip kartı: uygulamaya geri dönünce', () {
-    testWidgets('elle değiştirilmediyse bugünün adımı yeniden okunur',
-        (WidgetTester tester) async {
-      await saveDoc(today, 1.0, 4000);
-      final _FakeHealthSteps health = _FakeHealthSteps({today: 5000});
-      await pumpCard(tester, health);
-      expect(stepsInput(tester), '5000');
-
-      health.steps[today] = 9000;
-      await backgroundAndResume(tester);
-
-      expect(stepsInput(tester), '9000');
-      expect(healthUsed('9.000'), findsOneWidget);
-      expectSaved('1.0L', '4.000');
-    });
-
-    testWidgets('elle yazılmışsa ezilmez, yeni değer "Kullan" ile sunulur',
-        (WidgetTester tester) async {
-      final _FakeHealthSteps health = _FakeHealthSteps({today: 5000});
-      await pumpCard(tester, health);
-      await typeSteps(tester, '6500');
-
-      health.steps[today] = 9000;
-      await backgroundAndResume(tester);
-
-      expect(stepsInput(tester), '6500');
-      expect(healthAvailable('9.000'), findsOneWidget);
-    });
-
-    testWidgets('kaydettikten sonra geri dönünce yeni adım girişe gelir, '
-        'Kaydet beklenir', (WidgetTester tester) async {
-      final _FakeHealthSteps health = _FakeHealthSteps({today: 5000});
-      await pumpCard(tester, health);
-      await tapSave(tester);
-      await closeDialog(tester);
-      expectSaved('0.0L', '5.000');
-
-      health.steps[today] = 7000;
-      await backgroundAndResume(tester);
-
-      expect(stepsInput(tester), '7000');
-      expectSaved('0.0L', '5.000');
-      expect(find.text(unsaved), findsOneWidget);
-    });
-  });
-
   testWidgets('dar telefon ekranında (360 px) kart taşmaz',
       (WidgetTester tester) async {
     tester.view.physicalSize = const Size(360, 800);
@@ -923,8 +836,7 @@ void main() {
     addTearDown(tester.view.reset);
 
     await saveDoc(yesterday, 4.5, 123456);
-    await pumpCard(
-        tester, _FakeHealthSteps({today: 123456, yesterday: 98765}));
+    await pumpCard(tester, FakeHealthSteps({today: 123456, yesterday: 98765}));
     expect(tester.takeException(), isNull);
 
     await tapDay(tester, Icons.chevron_left);

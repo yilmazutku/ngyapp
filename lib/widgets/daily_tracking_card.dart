@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -28,8 +26,7 @@ class DailyTrackingCard extends StatefulWidget {
   State<DailyTrackingCard> createState() => _DailyTrackingCardState();
 }
 
-class _DailyTrackingCardState extends State<DailyTrackingCard>
-    with WidgetsBindingObserver {
+class _DailyTrackingCardState extends State<DailyTrackingCard> {
   static const String _titleText = 'Günlük Takip';
   static const String _historyText = 'Geçmiş';
   static const String _waterText = 'Su';
@@ -73,6 +70,7 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
       TextEditingController(text: '0');
   final FocusNode _stepsFocusNode = FocusNode();
 
+  late final DailyDataProvider _provider;
   late DateTime _date;
   double _waterIntakeLiters = 0;
   DailyData? _saved;
@@ -81,6 +79,7 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
   bool _waterEdited = false;
   bool _stepsEdited = false;
   bool _isSaving = false;
+  bool _savingHealthSteps = false;
   int _loadRequest = 0;
 
   HealthStepsService get _health =>
@@ -94,9 +93,9 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
   bool get _ready => _saved != null && !_isSaving;
 
   double get _savedWater =>
-      _saved?.isSaved == true ? _clampWater(_saved!.waterIntake) : 0;
+      _saved?.hasWater == true ? _clampWater(_saved!.waterIntake) : 0;
 
-  int get _savedSteps => _saved?.isSaved == true ? _saved!.steps : 0;
+  int get _savedSteps => _saved?.hasSteps == true ? _saved!.steps : 0;
 
   int? get _inputSteps {
     final String text = _stepsController.text.trim();
@@ -113,7 +112,8 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    _provider = Provider.of<DailyDataProvider>(context, listen: false)
+      ..addListener(_handleDataChanged);
     _stepsFocusNode.addListener(_handleStepsFocusChange);
     _date = _today;
     _load();
@@ -121,18 +121,15 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    _provider.removeListener(_handleDataChanged);
     _stepsFocusNode.removeListener(_handleStepsFocusChange);
     _stepsFocusNode.dispose();
     _stepsController.dispose();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _ready) {
-      _refreshHealthSteps();
-    }
+  void _handleDataChanged() {
+    if (_ready && !_savingHealthSteps) _load();
   }
 
   static DateTime _dayOf(DateTime date) =>
@@ -210,41 +207,55 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
   Future<void> _load() async {
     final int request = ++_loadRequest;
     final DateTime date = _date;
-    final DailyDataProvider provider =
-        Provider.of<DailyDataProvider>(context, listen: false);
     final Future<int?> healthSteps = _health.stepsForDay(date);
 
+    final DailyData saved;
     try {
-      final DailyData saved =
-          await provider.fetchDailyDataForDate(widget.userId, date: date);
-      if (!mounted || request != _loadRequest) return;
-      setState(() {
-        _saved = saved;
-        _waterIntakeLiters = _clampWater(saved.waterIntake);
-        _stepsController.text = saved.steps.toString();
-      });
+      saved = await _provider.fetchDailyDataForDate(widget.userId, date: date);
     } catch (_) {
-      if (!mounted || request != _loadRequest) return;
+      if (!mounted || request != _loadRequest || _saved != null) return;
       setState(() => _loadFailed = true);
       return;
     }
-
-    _applyHealthSteps(request, await healthSteps);
-  }
-
-  Future<void> _refreshHealthSteps() async {
-    final int request = _loadRequest;
-    _applyHealthSteps(request, await _health.stepsForDay(_date));
-  }
-
-  void _applyHealthSteps(int request, int? steps) {
-    if (!mounted || request != _loadRequest || _saved == null) return;
+    if (!mounted || request != _loadRequest) return;
     setState(() {
-      _healthSteps = steps != null && steps > 0 ? steps : null;
-      final int? health = _healthSteps;
-      if (health != null && !_stepsEdited && !_isSaving) {
-        _stepsController.text = math.max(_savedSteps, health).toString();
-      }
+      _saved = saved;
+      if (!_waterEdited) _waterIntakeLiters = _clampWater(saved.waterIntake);
+      if (!_stepsEdited) _stepsController.text = saved.steps.toString();
+    });
+
+    await _applyHealthSteps(request, date, await healthSteps);
+  }
+
+  Future<void> _applyHealthSteps(int request, DateTime date, int? steps) async {
+    if (!mounted || request != _loadRequest || _saved == null) return;
+    final int? health = steps != null && steps > 0 ? steps : null;
+    setState(() => _healthSteps = health);
+    if (health == null || health <= _savedSteps || _stepsEdited || _isSaving) {
+      return;
+    }
+
+    final int savedSteps;
+    _savingHealthSteps = true;
+    try {
+      savedSteps = await _provider.saveStepsIfHigher(widget.userId, date, health);
+    } catch (_) {
+      if (!mounted || request != _loadRequest || _stepsEdited) return;
+      setState(() => _stepsController.text = health.toString());
+      return;
+    } finally {
+      _savingHealthSteps = false;
+    }
+    if (!mounted || request != _loadRequest) return;
+    final DailyData saved = _saved!;
+    setState(() {
+      _saved = DailyData(
+        waterIntake: saved.waterIntake,
+        steps: savedSteps,
+        hasWater: saved.hasWater,
+        hasSteps: true,
+      );
+      if (!_stepsEdited) _stepsController.text = savedSteps.toString();
     });
   }
 
@@ -278,12 +289,10 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
 
     final DateTime date = _date;
     final double water = _waterIntakeLiters;
-    final DailyDataProvider provider =
-        Provider.of<DailyDataProvider>(context, listen: false);
     setState(() => _isSaving = true);
 
     try {
-      await provider.saveDailyData(
+      await _provider.saveDailyData(
         widget.userId,
         date,
         waterIntake: water,
@@ -303,7 +312,12 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
     if (!mounted) return true;
     setState(() {
       _isSaving = false;
-      _saved = DailyData(waterIntake: water, steps: steps, isSaved: true);
+      _saved = DailyData(
+        waterIntake: water,
+        steps: steps,
+        hasWater: true,
+        hasSteps: true,
+      );
       _stepsController.text = steps.toString();
       _waterEdited = false;
       _stepsEdited = false;
@@ -327,11 +341,11 @@ class _DailyTrackingCardState extends State<DailyTrackingCard>
     return '$label ${_weekdayFormat.format(_date)}';
   }
 
-  String _savedWaterText() => _saved?.isSaved == true
+  String _savedWaterText() => _saved?.hasWater == true
       ? '${_saved!.waterIntake.toStringAsFixed(1)}L'
       : _notSavedText;
 
-  String _savedStepsText() => _saved?.isSaved == true
+  String _savedStepsText() => _saved?.hasSteps == true
       ? _stepsFormat.format(_saved!.steps)
       : _notSavedText;
 

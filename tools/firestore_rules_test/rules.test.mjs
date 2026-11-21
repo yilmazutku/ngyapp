@@ -212,6 +212,14 @@ async function run(rulesFile) {
   await check('I9c meal entry delete', true, () => day().collection('mealEntries').doc('lunch').delete());
   await check('I10 water intake (new day)', true, () => u1().collection('dailyData').doc('2026-10-21').set({ waterIntake: 1.5 }, { merge: true }));
   await check('I10b steps', true, () => u1().collection('dailyData').doc('2026-10-21').set({ steps: 4000 }, { merge: true }));
+  const stepsFromHealth = (dateKey, steps) => () => { const d = db('u1'); return d.runTransaction(async (tx) => {
+    const ref = d.collection('users').doc('u1').collection('dailyData').doc(dateKey); const snap = await tx.get(ref);
+    if (snap.exists) tx.update(ref, { steps }); else tx.set(ref, { steps });
+  }); };
+  await check('I10c steps from health app, new day (HealthStepsSync)', true, stepsFromHealth('2026-10-18', 5000));
+  await check('I10d steps from health app, existing day (HealthStepsSync)', true, stepsFromHealth('2026-10-21', 9000));
+  await check('I10e Planım Kaydet: water + steps together', true, () => u1().collection('dailyData').doc('2026-10-19').set({ waterIntake: 2.5, steps: 8000 }, { merge: true }));
+  await check('I10f steps into another user\'s dailyData', false, () => db('u1').collection('users').doc('u2').collection('dailyData').doc('2026-10-21').set({ steps: 1 }, { merge: true }));
   const booking = (extra = {}) => ({
     userId: 'u1', subscriptionId: 's1', meetingType: 'Yüz yüze', appointmentType: 'Kontrol',
     appointmentDateTime: TS.fromDate(new Date('2026-10-23T11:00:00')), durationMinutes: 30, status: 'Planlandı',
