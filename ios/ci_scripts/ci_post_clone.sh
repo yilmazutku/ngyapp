@@ -5,7 +5,23 @@
 
 set -e
 
-echo "=== ci_post_clone.sh ==="
+CURRENT_STEP="ci_post_clone.sh"
+
+step() {
+    CURRENT_STEP="$1"
+    echo "=== $1 ==="
+}
+
+report_failure() {
+    EXIT_CODE=$?
+    if [ "$EXIT_CODE" -ne 0 ]; then
+        echo "ERROR: ci_post_clone.sh \"$CURRENT_STEP\" adımında $EXIT_CODE koduyla durdu."
+    fi
+}
+
+trap report_failure EXIT
+
+step "ci_post_clone.sh"
 echo "CI_PRIMARY_REPOSITORY_PATH: $CI_PRIMARY_REPOSITORY_PATH"
 
 cd "$CI_PRIMARY_REPOSITORY_PATH"
@@ -17,7 +33,7 @@ echo "Working directory: $(pwd)"
 FLUTTER_VERSION="3.47.9"
 
 if [ ! -d "$HOME/flutter" ]; then
-    echo "=== Downloading Flutter $FLUTTER_VERSION ==="
+    step "Downloading Flutter $FLUTTER_VERSION"
 
     ARCH=$(uname -m)
     if [ "$ARCH" = "arm64" ]; then
@@ -28,7 +44,7 @@ if [ ! -d "$HOME/flutter" ]; then
     FLUTTER_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/${ARCHIVE_NAME}"
 
     echo "Downloading $FLUTTER_URL ..."
-    curl -sLO "$FLUTTER_URL"
+    curl -fsSLO --retry 3 --retry-delay 5 "$FLUTTER_URL"
     echo "Extracting Flutter SDK..."
     unzip -oq "$ARCHIVE_NAME" -d "$HOME"
     rm -f "$ARCHIVE_NAME"
@@ -40,19 +56,19 @@ fi
 export PATH="$PATH:$HOME/flutter/bin"
 export FLUTTER_ROOT="$HOME/flutter"
 
-echo "=== Flutter version ==="
+step "Flutter version"
 flutter --version
 
-echo "=== Disabling analytics ==="
+step "Disabling analytics"
 flutter config --no-analytics 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 2. Fetch packages and generate Xcode build configuration
 # ---------------------------------------------------------------------------
-echo "=== flutter pub get ==="
+step "flutter pub get"
 flutter pub get
 
-echo "=== Precaching iOS artifacts ==="
+step "Precaching iOS artifacts"
 flutter precache --ios
 
 # ---------------------------------------------------------------------------
@@ -66,6 +82,7 @@ flutter precache --ios
 #
 # Xcode Cloud disinda (yerel build) CI_BUILD_NUMBER tanimsizdir; o durumda
 # surum oldugu gibi pubspec.yaml'dan gelir.
+step "Build numarası"
 BUILD_NUMBER_ARG=""
 if [ -n "$CI_BUILD_NUMBER" ]; then
     PUBSPEC_BUILD_NUMBER=$(grep '^version:' pubspec.yaml | sed 's/.*+//' | tr -d '[:space:]')
@@ -82,7 +99,26 @@ else
     echo "CI_BUILD_NUMBER tanimsiz (yerel build): surum pubspec.yaml'dan alinacak"
 fi
 
-echo "=== Generating iOS build configuration ==="
+step "CocoaPods"
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
+if ! pod --version >/dev/null 2>&1; then
+    echo "CocoaPods bulunamadı ya da çalışmıyor; Homebrew ile kuruluyor."
+    for BREW_BIN in /opt/homebrew/bin /usr/local/bin; do
+        if [ -x "$BREW_BIN/brew" ]; then
+            PATH="$BREW_BIN:$PATH"
+            break
+        fi
+    done
+    export PATH
+    HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install cocoapods
+    hash -r
+fi
+POD_VERSION=$(pod --version)
+echo "CocoaPods $POD_VERSION"
+
+step "Generating iOS build configuration"
 flutter build ios --config-only --release --no-codesign $BUILD_NUMBER_ARG
 
 # Verify Generated.xcconfig
@@ -129,16 +165,13 @@ ENVEOF
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Install CocoaPods
+# 3. Install CocoaPods dependencies
 # ---------------------------------------------------------------------------
-echo "=== Installing CocoaPods dependencies ==="
+step "Installing CocoaPods dependencies"
 cd ios
 
 rm -rf Pods
 rm -f Podfile.lock
-
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
 
 pod install --repo-update
 
