@@ -44,16 +44,23 @@ Sürüm alanları konsolda **string** tipinde girilir. Sayı tipindeki ya da
 kilitlemez, ama o alan da işe yaramaz. Boş metin (`""`) alan hiç yokmuş gibi
 sayılır.
 
-Önerilen hâl (yalnızca iOS'u 1.0.5'e zorlar, Android'e dokunmaz):
+Önerilen hâl (yalnızca iOS'u 1.0.6'ya zorlar, Android'e dokunmaz):
 
 ```json
 {
   "isCheckVersion": true,
   "iosAppId": "6756973059",
-  "iosLatestVersion": "1.0.5",
-  "iosMinSupportedVersion": "1.0.5"
+  "iosLatestVersion": "1.0.6",
+  "iosMinSupportedVersion": "1.0.6"
 }
 ```
+
+1.0.6, iOS uygulamasının UIScene yaşam döngüsüne geçtiği ilk sürüm. Xcode 27
+(iOS 27 SDK) ile derlenmiş önceki build'ler iOS 27'de açılır açılmaz kapanıyor;
+iOS 27'deki kullanıcıya bu uyarı da gösterilemez, uygulamayı ancak App Store'dan
+güncelleyerek açabilir. Bu yüzden 1.0.6 mağazada yayına çıkınca
+`iosMinSupportedVersion` 1.0.6 yapılır: iOS 26'daki kullanıcılar iOS 27'ye
+geçmeden güncellemiş olur.
 
 Kontrolü tamamen kapatmak için tek yapılacak `isCheckVersion`'ı `false` yapmak;
 uygulama sürümü yeniden yayınlamaya gerek kalmadan eski davranışına döner.
