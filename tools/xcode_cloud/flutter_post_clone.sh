@@ -21,6 +21,25 @@ report_failure() {
 
 trap report_failure EXIT
 
+retry() {
+    RETRY_ATTEMPTS="$1"
+    shift
+    RETRY_ATTEMPT=1
+    while true; do
+        if "$@"; then
+            return 0
+        fi
+        if [ "$RETRY_ATTEMPT" -ge "$RETRY_ATTEMPTS" ]; then
+            echo "ERROR: $RETRY_ATTEMPTS denemenin hiçbiri başarılı olmadı: $*"
+            return 1
+        fi
+        RETRY_WAIT=$((RETRY_ATTEMPT * 60))
+        echo "UYARI: deneme $RETRY_ATTEMPT/$RETRY_ATTEMPTS başarısız (ağ hatası olabilir); $RETRY_WAIT sn sonra yeniden deneniyor: $*"
+        sleep "$RETRY_WAIT"
+        RETRY_ATTEMPT=$((RETRY_ATTEMPT + 1))
+    done
+}
+
 PLATFORM="$1"
 case "$PLATFORM" in
     ios)
@@ -140,7 +159,7 @@ POD_VERSION=$(pod --version)
 echo "CocoaPods $POD_VERSION"
 
 step "Generating $PLATFORM_NAME build configuration"
-flutter build "$PLATFORM" --config-only --release $CONFIG_ONLY_FLAGS $BUILD_NUMBER_ARG
+retry 3 flutter build "$PLATFORM" --config-only --release $CONFIG_ONLY_FLAGS $BUILD_NUMBER_ARG
 
 # Verify Generated.xcconfig
 if [ -f "$GENERATED_XCCONFIG" ]; then
@@ -194,7 +213,7 @@ cd "$PLATFORM"
 rm -rf Pods
 rm -f Podfile.lock
 
-pod install --repo-update
+retry 3 pod install --repo-update
 
 if [ -f "Podfile.lock" ] && [ -d "Pods" ]; then
     echo "Pods installed successfully"
