@@ -31,7 +31,7 @@ Alanların hepsi opsiyoneldir:
 | Alan | Tip | Anlamı |
 | --- | --- | --- |
 | `isCheckVersion` | boolean | Ana anahtar. `false` ise uygulama bu özellik hiç eklenmemiş gibi davranır: karşılaştırma yok, uyarı yok, engelleme yok. Alan yoksa `true` kabul edilir. Konsolda tipi **boolean** kalmalı: metin olarak yazılmış `"false"` kontrolü kapatmaz. |
-| `latestVersion` | string | Yayınlanan en yeni sürüm, ör. `"1.0.5"`. Bundan eskisini kullananlara **kapatılabilir** uyarı çıkar. iOS ve Android'in ikisini de etkiler. |
+| `latestVersion` | string | Yayınlanan en yeni sürüm, ör. `"1.0.4"`. Bundan eskisini kullananlara **kapatılabilir** uyarı çıkar. iOS ve Android'in ikisini de etkiler. |
 | `minSupportedVersion` | string | Çalışmasına izin verilen en eski sürüm. Bundan eskisini kullananlar **güncelleyene kadar** uygulamayı kullanamaz. iOS ve Android'in ikisini de etkiler. |
 | `iosLatestVersion` / `androidLatestVersion` | string | Mağazaya özel `latestVersion`; ortak alanı ezer. Biri hâlâ incelemedeyken diğeri yayına çıktıysa ya da yalnızca bir mağaza hedefleniyorsa kullanılır. |
 | `iosMinSupportedVersion` / `androidMinSupportedVersion` | string | Mağazaya özel `minSupportedVersion`. |
@@ -44,22 +44,24 @@ Sürüm alanları konsolda **string** tipinde girilir. Sayı tipindeki ya da
 kilitlemez, ama o alan da işe yaramaz. Boş metin (`""`) alan hiç yokmuş gibi
 sayılır.
 
-Önerilen hâl (yalnızca iOS'u 1.0.6'ya zorlar, Android'e dokunmaz):
+Önerilen hâl (yalnızca iOS'u 1.0.4'e zorlar, Android'e dokunmaz):
 
 ```json
 {
   "isCheckVersion": true,
   "iosAppId": "6756973059",
-  "iosLatestVersion": "1.0.6",
-  "iosMinSupportedVersion": "1.0.6"
+  "iosLatestVersion": "1.0.4",
+  "iosMinSupportedVersion": "1.0.4"
 }
 ```
 
-1.0.6, iOS uygulamasının UIScene yaşam döngüsüne geçtiği ilk sürüm. Xcode 27
-(iOS 27 SDK) ile derlenmiş önceki build'ler iOS 27'de açılır açılmaz kapanıyor;
+App Store'a çıkan 1.0.4, iOS uygulamasının UIScene yaşam döngüsüne geçtiği ilk
+sürüm (25 Kasım 2026'dan sonraki build'ler; TestFlight'taki 3–5 Kasım tarihli
+eski 1.0.4 build'lerinde bu düzeltme yok). Xcode 27 (iOS 27 SDK) ile derlenmiş
+önceki build'ler (mağazadaki 1.0.3 dahil) iOS 27'de açılır açılmaz kapanıyor;
 iOS 27'deki kullanıcıya bu uyarı da gösterilemez, uygulamayı ancak App Store'dan
-güncelleyerek açabilir. Bu yüzden 1.0.6 mağazada yayına çıkınca
-`iosMinSupportedVersion` 1.0.6 yapılır: iOS 26'daki kullanıcılar iOS 27'ye
+güncelleyerek açabilir. Bu yüzden 1.0.4 mağazada yayına çıkınca
+`iosMinSupportedVersion` 1.0.4 yapılır: iOS 26'daki kullanıcılar iOS 27'ye
 geçmeden güncellemiş olur.
 
 Kontrolü tamamen kapatmak için tek yapılacak `isCheckVersion`'ı `false` yapmak;
@@ -122,16 +124,19 @@ uygulama, kapatılıp yeniden açılana kadar denetlenmez. Zorunlu güncelleme
 ekranındaki kullanıcı ise uygulamaya her dönüşünde yeniden denetlenir; yönetici
 zorunluluğu kaldırırsa yeniden başlatmadan uygulamaya döner.
 
-### 1.0.5 öncesi build'ler
+### 5 Kasım 2026 öncesi build'ler (mağazadaki 1.0.3 dahil)
 
-- 1.0.5'ten önceki build'ler sürümü elle tutulan bir sabitten okuyordu ve 1.0.3
-  ile 1.0.4 dahil hepsi kendini **1.0.2** olarak bildirir. Bu yüzden:
-  - En düşük sürüm 1.0.2'den büyük olduğu sürece bu build'lerin hepsi
-    engellenir; 1.0.5 kurulunca engel kalkar (1.0.5 sürümünü gerçekten okur).
-  - Mağazada 1.0.3 varken en yeni ya da en düşük sürüme `1.0.3` (ya da `1.0.4`)
-    yazılmaz: 1.0.3 kullananlara zaten kurulu olan 1.0.3'e güncellemeleri
-    söylenir, zorunluysa çıkışsız kalırlar. Mağazada 1.0.5 (ya da sonrası)
-    yayına çıkmadan bu build'ler zorunlu güncellemeye alınamaz.
+- 5 Kasım 2026'dan önce derlenen build'ler sürümü elle tutulan bir sabitten
+  okuyordu; mağazadaki 1.0.3 ve TestFlight'taki eski 1.0.4 build'leri dahil
+  hepsi kendini **1.0.2** olarak bildirir. Sonraki build'ler sürümü
+  `package_info_plus` ile gerçekten okur ve mağazaya 1.0.4 olarak çıkar (repoda
+  bir süre 1.0.5 ve 1.0.6 yazan sürüm, mağazada 1.0.3'ten sonra yayına çıkan
+  olmadığı için 1.0.4'e çekildi). Bu yüzden:
+  - En düşük sürüm 1.0.2'den büyük olduğu sürece eski build'lerin hepsi
+    engellenir; mağazadaki 1.0.4 kurulunca engel kalkar.
+  - Mağazada 1.0.4 yayına çıkmadan en yeni ya da en düşük sürüme `1.0.3` ya da
+    `1.0.4` yazılmaz: 1.0.3 kullananlara mağazada daha yenisi yokken güncelleme
+    söylenir, zorunluysa çıkışsız kalırlar.
 - Bu build'lerde App Store numarası uygulamanın içinde boştu: Firestore'da
   `iosAppId: "6756973059"` yoksa kontrol iOS'ta **sessiz kalır** (kullanıcıya
   hiçbir yere gitmeyen bir buton göstermemek için).
@@ -142,7 +147,7 @@ zorunluluğu kaldırırsa yeniden başlatmadan uygulamaya döner.
 
 `AppUpdateConstants.iosAppId` App Store numarasını (`6756973059`) tutar;
 Firestore dökümanındaki `iosAppId` alanı onu ezer, alan yoksa ya da boşsa bu
-sabit kullanılır. 1.0.5 öncesi build'ler için yukarıdaki nota bakın. Android
+sabit kullanılır. 5 Kasım 2026 öncesi build'ler için yukarıdaki nota bakın. Android
 tarafı paket adı bilindiği için ek ayar istemez; ama Play'de yayında değilken
 Android'i hedefleyen alanlar kullanılmaz (bkz. "Android").
 
