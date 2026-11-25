@@ -3,26 +3,28 @@ import Flutter
 import FirebaseCore
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     FirebaseApp.configure()
-    GeneratedPluginRegistrant.register(with: self)
-    if let registrar = registrar(forPlugin: "PlatformInfo") {
-      let platformInfoChannel = FlutterMethodChannel(
-        name: "ngy_app/platform_info",
-        binaryMessenger: registrar.messenger()
-      )
-      platformInfoChannel.setMethodCallHandler { call, result in
-        if call.method == "isIosAppOnMac" {
-          result(ProcessInfo.processInfo.isiOSAppOnMac)
-        } else {
-          result(FlutterMethodNotImplemented)
-        }
+    FLTFirebaseMessagingPlugin.configureNotificationCenterDelegate()
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let platformInfoChannel = FlutterMethodChannel(
+      name: "ngy_app/platform_info",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    platformInfoChannel.setMethodCallHandler { call, result in
+      if call.method == "isIosAppOnMac" {
+        result(ProcessInfo.processInfo.isiOSAppOnMac)
+      } else {
+        result(FlutterMethodNotImplemented)
       }
     }
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
