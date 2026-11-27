@@ -281,9 +281,29 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         !keepsRight &&
         (originalSubscriptionId?.isNotEmpty ?? false);
 
+    final DateTime? postponedDate = _postponedDate;
+    final bool movesPostponedDate = keepsRight &&
+        widget.appointment.canBeRepostponed &&
+        _appointmentStatus == AppointmentStatus.postponed &&
+        postponedDate != null &&
+        postponedDate != widget.appointment.postponedDate;
+
+    bool isRepostponement = false;
+    if (movesPostponedDate) {
+      final bool? repostpone = await PostponementNotices.askRepostponement(
+        context,
+        appointment: widget.appointment,
+        newDate: postponedDate,
+        remainingRights: _remainingPostponements,
+      );
+      if (repostpone == null || !mounted) return;
+      isRepostponement = repostpone;
+    }
+
     // Warn the admin when a user-originated postponement is applied but the
     // customer has no postponement rights left.
-    if (isNewUserPostponement && _selectedSubscriptionId != null) {
+    if ((isNewUserPostponement || isRepostponement) &&
+        _selectedSubscriptionId != null) {
       final remaining = _remainingPostponements ?? 0;
       if (remaining <= 0) {
         final proceedAnyway =
@@ -292,6 +312,15 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         if (!proceedAnyway) return;
       }
     }
+
+    final List<DateTime> repostponedFrom = !keepsRight
+        ? const <DateTime>[]
+        : isRepostponement
+            ? <DateTime>[
+                ...widget.appointment.repostponedFrom,
+                widget.appointment.postponedDate!,
+              ]
+            : widget.appointment.repostponedFrom;
     
     startLoading();
 
@@ -318,6 +347,7 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         updateUser: 'admin', // Assuming admin is updating
         postponedDate: clearsPostponement ? null : _postponedDate,
         postponedBy: clearsPostponement ? null : _postponedBy,
+        repostponedFrom: repostponedFrom,
         durationMinutes: durationMinutes,
       );
 
@@ -329,12 +359,14 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
       // adjustment, which also keeps the counter at or above zero.
       if (!mounted) return;
       final subProvider = Provider.of<SubProvider>(context, listen: false);
+      final int rightsBefore = widget.appointment.postponementRightsSpent;
+      final int rightsAfter = updatedAppointment.postponementRightsSpent;
 
-      if (isNewUserPostponement && _selectedSubscriptionId != null) {
+      if (rightsAfter > rightsBefore && _selectedSubscriptionId != null) {
         await subProvider.adjustPostponementsUsed(
           userId: widget.appointment.userId,
           subscriptionId: _selectedSubscriptionId!,
-          delta: 1,
+          delta: rightsAfter - rightsBefore,
         );
       }
 
@@ -342,16 +374,18 @@ class _EditAppointmentDialogState extends State<EditAppointmentDialog>
         await subProvider.adjustPostponementsUsed(
           userId: widget.appointment.userId,
           subscriptionId: originalSubscriptionId!,
-          delta: -1,
+          delta: -rightsBefore,
         );
         if (!mounted) return;
         // The right comes back either because the appointment is planned again
         // or because the postponement is no longer the customer's doing; the
         // notice has to name the one that actually happened.
         if (clearsPostponement) {
-          await PostponementNotices.informRightReturnedByReschedule(context);
+          await PostponementNotices.informRightReturnedByReschedule(context,
+              count: rightsBefore);
         } else {
-          await PostponementNotices.informRightReturnedBySourceChange(context);
+          await PostponementNotices.informRightReturnedBySourceChange(context,
+              count: rightsBefore);
         }
         if (!mounted) return;
       }

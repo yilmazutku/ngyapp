@@ -8,6 +8,8 @@ import 'appointment_duration_config.dart';
 import '../widgets/labeled_action_button.dart';
 
 class AppointmentModel {
+  static const String repostponedFromField = 'repostponedFrom';
+
   final String appointmentId;
   final String userId;
   final String? subscriptionId;
@@ -23,6 +25,7 @@ class AppointmentModel {
   String? updateUser;
   DateTime? postponedDate; // New date when appointment is postponed
   PostponeSource? postponedBy; // Who initiated the postponement (see PostponeSource)
+  final List<DateTime> repostponedFrom;
   UserModel?
       user; //sonradan eklendi, userid var ama user yok gosterirken hangi username e ait old icin
   bool? isDeleted = false;
@@ -43,6 +46,7 @@ class AppointmentModel {
     this.updateUser,
     this.postponedDate,
     this.postponedBy,
+    this.repostponedFrom = const <DateTime>[],
     this.user,
     this.isDeleted,
     required this.durationMinutes,
@@ -90,9 +94,35 @@ class AppointmentModel {
           ? (data['postponedDate'] as Timestamp).toDate()
           : null,
       postponedBy: PostponeSource.fromValue(data['postponedBy'] as String?),
+      repostponedFrom: _datesFrom(data[repostponedFromField]),
       isDeleted: data['isDeleted'],
     );
   }
+
+  static List<DateTime> _datesFrom(Object? raw) => raw is List
+      ? <DateTime>[
+          for (final Object? item in raw)
+            if (item is Timestamp) item.toDate(),
+        ]
+      : const <DateTime>[];
+
+  static int _postponementRights(
+          PostponeSource? postponedBy, int repostponements) =>
+      postponedBy == PostponeSource.user ? 1 + repostponements : 0;
+
+  int get postponementRightsSpent =>
+      _postponementRights(postponedBy, repostponedFrom.length);
+
+  static int postponementRightsSpentIn(Map<String, dynamic> data) =>
+      _postponementRights(
+        PostponeSource.fromValue(data['postponedBy'] as String?),
+        _datesFrom(data[repostponedFromField]).length,
+      );
+
+  bool get canBeRepostponed =>
+      status == AppointmentStatus.postponed &&
+      postponedBy == PostponeSource.user &&
+      postponedDate != null;
 
   /// Whether this appointment consumes a subscription meeting right. "Tartım"
   /// visits never do — see [AppointmentType.countsTowardMeetings].
@@ -140,6 +170,7 @@ class AppointmentModel {
   }) {
     final bool countsAsPostponed =
         status == AppointmentStatus.postponed || deductPostponementRight;
+    final bool repostpones = deductPostponementRight && canBeRepostponed;
     return AppointmentModel(
       appointmentId: appointmentId,
       userId: userId,
@@ -156,6 +187,9 @@ class AppointmentModel {
       postponedDate: countsAsPostponed ? newStart : postponedDate,
       postponedBy:
           deductPostponementRight ? PostponeSource.user : postponedBy,
+      repostponedFrom: repostpones
+          ? <DateTime>[...repostponedFrom, postponedDate!]
+          : repostponedFrom,
       user: user,
       isDeleted: isDeleted,
       durationMinutes: durationMinutes,
@@ -164,7 +198,7 @@ class AppointmentModel {
 
   @override
   String toString() {
-    return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, postponedDate: $postponedDate, postponedBy: $postponedBy, duration: $durationMinutes}';
+    return 'AppointmentModel{appointmentId: $appointmentId, userId: $userId, subscriptionId: $subscriptionId, meetingType: $meetingType, appointmentType: $appointmentType, appointmentDateTime: $appointmentDateTime, status: $status, notes: $notes, createDate: $createDate, updateDate: $updateDate, createUser: $createUser, updateUser: $updateUser, postponedDate: $postponedDate, postponedBy: $postponedBy, repostponedFrom: $repostponedFrom, duration: $durationMinutes}';
   }
 
   Map<String, dynamic> toMap() {
@@ -183,9 +217,18 @@ class AppointmentModel {
       'updateUser': updateUser,
       'postponedDate': postponedDate != null ? Timestamp.fromDate(postponedDate!) : null,
       'postponedBy': postponedBy?.value,
+      if (repostponedFrom.isNotEmpty)
+        repostponedFromField: <Timestamp>[
+          for (final DateTime date in repostponedFrom) Timestamp.fromDate(date),
+        ],
       'isDeleted': isDeleted,
     };
   }
+
+  Map<String, dynamic> toUpdateMap() => <String, dynamic>{
+        repostponedFromField: FieldValue.delete(),
+        ...toMap(),
+      };
 
 
   // Common appointment card widget
