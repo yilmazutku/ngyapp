@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ngy_app/models/appointment_model.dart';
 import 'package:ngy_app/providers/appointment_manager.dart';
@@ -40,6 +41,7 @@ AppointmentModel _appointment({
   AppointmentStatus status = AppointmentStatus.scheduled,
   DateTime? postponedDate,
   PostponeSource? postponedBy,
+  List<DateTime> repostponedFrom = const <DateTime>[],
   String? subscriptionId = 's1',
 }) =>
     AppointmentModel(
@@ -55,6 +57,7 @@ AppointmentModel _appointment({
       createUser: 'kuran',
       postponedDate: postponedDate,
       postponedBy: postponedBy,
+      repostponedFrom: repostponedFrom,
       durationMinutes: 20,
     );
 
@@ -141,6 +144,45 @@ void main() {
       expect(moved.appointmentDateTime, _firstDate);
     });
 
+    test(
+        'danışan kaynaklı ertelenmiş randevuda tekrar erteleme seçilirse '
+        'önceki ertelendiği tarih tekrar ertelemelere eklenir', () {
+      final AppointmentModel moved = _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: _postponedDate,
+        postponedBy: PostponeSource.user,
+      ).rescheduledTo(_newStart, deductPostponementRight: true);
+
+      expect(moved.status, AppointmentStatus.postponed);
+      expect(moved.postponedBy, PostponeSource.user);
+      expect(moved.appointmentDateTime, _firstDate);
+      expect(moved.postponedDate, _newStart);
+      expect(moved.repostponedFrom, [_postponedDate]);
+      expect(moved.postponementRightsSpent, 2);
+
+      final DateTime later = DateTime(2026, 11, 20, 9);
+      final AppointmentModel movedAgain =
+          moved.rescheduledTo(later, deductPostponementRight: true);
+      expect(movedAgain.repostponedFrom, [_postponedDate, _newStart]);
+      expect(movedAgain.postponedDate, later);
+      expect(movedAgain.postponementRightsSpent, 3);
+    });
+
+    test(
+        'tekrar erteleme seçilmezse yalnızca ertelendiği tarih değişir, '
+        'tekrar ertelemeler korunur', () {
+      final AppointmentModel moved = _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: _postponedDate,
+        postponedBy: PostponeSource.user,
+        repostponedFrom: [_firstDate.add(const Duration(days: 1))],
+      ).rescheduledTo(_newStart, deductPostponementRight: false);
+
+      expect(moved.postponedDate, _newStart);
+      expect(moved.repostponedFrom, [_firstDate.add(const Duration(days: 1))]);
+      expect(moved.postponementRightsSpent, 2);
+    });
+
     test('diğer alanlar korunur, güncelleme bilgisi yazılır', () {
       final AppointmentModel original = _appointment();
       final AppointmentModel moved =
@@ -157,6 +199,112 @@ void main() {
       expect(moved.createUser, original.createUser);
       expect(moved.updateUser, 'admin');
       expect(moved.updateDate, isNotNull);
+    });
+  });
+
+  group('erteleme hakları', () {
+    test('randevunun harcadığı erteleme hakkı sayısı', () {
+      expect(_appointment().postponementRightsSpent, 0);
+      expect(
+          _appointment(
+            status: AppointmentStatus.postponed,
+            postponedBy: PostponeSource.admin,
+          ).postponementRightsSpent,
+          0);
+      expect(
+          _appointment(
+            status: AppointmentStatus.postponed,
+            postponedBy: PostponeSource.user,
+          ).postponementRightsSpent,
+          1);
+      expect(
+          _appointment(
+            status: AppointmentStatus.completed,
+            postponedDate: _newStart,
+            postponedBy: PostponeSource.user,
+            repostponedFrom: [_postponedDate],
+          ).postponementRightsSpent,
+          2);
+    });
+
+    test('ham dokümandan da aynı sayı okunur', () {
+      expect(AppointmentModel.postponementRightsSpentIn(<String, dynamic>{}),
+          0);
+      expect(
+          AppointmentModel.postponementRightsSpentIn(<String, dynamic>{
+            'postponedBy': 'user',
+          }),
+          1);
+      expect(
+          AppointmentModel.postponementRightsSpentIn(<String, dynamic>{
+            'postponedBy': 'user',
+            AppointmentModel.repostponedFromField: <Timestamp>[
+              Timestamp.fromDate(_postponedDate),
+              Timestamp.fromDate(_newStart),
+            ],
+          }),
+          3);
+    });
+
+    test('yalnızca tekrar ertelenmiş randevu tekrar ertelemeleri yazar', () {
+      expect(
+          _appointment().toMap().containsKey(
+              AppointmentModel.repostponedFromField),
+          isFalse);
+
+      final Map<String, dynamic> map = _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: _newStart,
+        postponedBy: PostponeSource.user,
+        repostponedFrom: [_postponedDate],
+      ).toMap();
+      expect(map[AppointmentModel.repostponedFromField],
+          [Timestamp.fromDate(_postponedDate)]);
+    });
+
+    test('güncellemede boşalan tekrar ertelemeler dokümandan silinir', () {
+      expect(_appointment().toUpdateMap()[AppointmentModel.repostponedFromField],
+          FieldValue.delete());
+
+      final Map<String, dynamic> map = _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: _newStart,
+        postponedBy: PostponeSource.user,
+        repostponedFrom: [_postponedDate],
+      ).toUpdateMap();
+      expect(map[AppointmentModel.repostponedFromField],
+          [Timestamp.fromDate(_postponedDate)]);
+    });
+
+    test('tekrar erteleme yalnızca tarihi belli danışan kaynaklı ertelemede '
+        'sorulur', () {
+      expect(
+          _appointment(
+            status: AppointmentStatus.postponed,
+            postponedDate: _postponedDate,
+            postponedBy: PostponeSource.user,
+          ).canBeRepostponed,
+          isTrue);
+      expect(
+          _appointment(
+            status: AppointmentStatus.postponed,
+            postponedBy: PostponeSource.user,
+          ).canBeRepostponed,
+          isFalse);
+      expect(
+          _appointment(
+            status: AppointmentStatus.postponed,
+            postponedDate: _postponedDate,
+            postponedBy: PostponeSource.admin,
+          ).canBeRepostponed,
+          isFalse);
+      expect(
+          _appointment(
+            status: AppointmentStatus.completed,
+            postponedDate: _postponedDate,
+            postponedBy: PostponeSource.user,
+          ).canBeRepostponed,
+          isFalse);
     });
   });
 
@@ -206,8 +354,8 @@ void main() {
     });
 
     test(
-        'hakkı daha önce düşülmüş randevu yeniden taşınınca ikinci kez '
-        'düşülmez', () async {
+        'hakkı daha önce düşülmüş randevu yalnızca tarihi değiştirilerek '
+        'taşınırsa ikinci kez düşülmez', () async {
       final AppointmentModel alreadySpent = _appointment(
         status: AppointmentStatus.postponed,
         postponedDate: _postponedDate,
@@ -216,12 +364,44 @@ void main() {
 
       await manager.rescheduleAppointment(alreadySpent, _newStart,
           deductPostponementRight: false);
+
+      expect(manager.updates.single.postponedDate, _newStart);
+      expect(manager.updates.single.repostponedFrom, isEmpty);
+      expect(subs.adjustments, isEmpty);
+    });
+
+    test(
+        'hakkı daha önce düşülmüş randevu tekrar ertelenirse paketten bir '
+        'erteleme hakkı daha düşülür', () async {
+      final AppointmentModel alreadySpent = _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: _postponedDate,
+        postponedBy: PostponeSource.user,
+      );
+
       await manager.rescheduleAppointment(alreadySpent, _newStart,
           deductPostponementRight: true);
 
-      expect(manager.updates, hasLength(2));
+      expect(manager.updates.single.postponedDate, _newStart);
+      expect(manager.updates.single.repostponedFrom, [_postponedDate]);
       expect(
-          manager.updates.every((a) => a.postponedDate == _newStart), isTrue);
+          subs.adjustments, [(userId: 'u1', subscriptionId: 's1', delta: 1)]);
+    });
+
+    test(
+        'yeni tarihi seçilmemiş danışan kaynaklı ertelemede tarih '
+        'doldurulurken hak yeniden düşülmez', () async {
+      await manager.rescheduleAppointment(
+        _appointment(
+          status: AppointmentStatus.postponed,
+          postponedBy: PostponeSource.user,
+        ),
+        _newStart,
+        deductPostponementRight: true,
+      );
+
+      expect(manager.updates.single.postponedDate, _newStart);
+      expect(manager.updates.single.repostponedFrom, isEmpty);
       expect(subs.adjustments, isEmpty);
     });
 

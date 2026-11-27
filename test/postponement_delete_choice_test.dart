@@ -122,6 +122,41 @@ void main() {
     }
   });
 
+  testWidgets(
+      'tekrar ertelenmiş randevuda soru ve seçenek düşülen hak sayısını söyler',
+      (tester) async {
+    bool? result;
+    final AppointmentModel twice = AppointmentModel(
+      appointmentId: 'a1',
+      userId: 'u1',
+      subscriptionId: 's1',
+      meetingType: MeetingType.online,
+      appointmentType: AppointmentType.haftalik,
+      appointmentDateTime: DateTime(2030, 1, 10, 10),
+      status: AppointmentStatus.postponed,
+      createDate: DateTime(2030, 1, 1),
+      postponedDate: DateTime(2030, 1, 24, 10),
+      postponedBy: PostponeSource.user,
+      repostponedFrom: [DateTime(2030, 1, 17, 10)],
+      durationMinutes: 30,
+    );
+    await ask(tester, twice, (value) => result = value);
+
+    expect(find.textContaining('2 KEZ ERTELENDİ'), findsOneWidget);
+    expect(find.textContaining('2 ERTELEME HAKKI DANIŞANA GERİ VERİLSİN Mİ'),
+        findsOneWidget);
+    await tester.tap(find.text('Danışana 2 Erteleme Hakkını Geri Ver'));
+    await tester.pump();
+    await tester.tap(find.text(deleteButton));
+    await tester.pumpAndSettle();
+    expect(result, isTrue);
+
+    expect(PostponementNotices.deleteResultNote(twice, returned: true),
+        ' 2 erteleme hakkı danışana geri verildi.');
+    expect(PostponementNotices.deleteResultNote(twice, returned: false),
+        ' 2 erteleme hakkı danışana geri verilmedi.');
+  });
+
   test('silme mesajının erteleme notu', () {
     expect(PostponementNotices.deleteResultNote(consumed, returned: true),
         contains('geri verildi'));

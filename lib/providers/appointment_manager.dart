@@ -182,7 +182,7 @@ class AppointmentManager extends ChangeNotifier {
       if (prev == null) {
         batch.set(apptRef, updated.toMap());
       } else {
-        batch.update(apptRef, updated.toMap());
+        batch.update(apptRef, updated.toUpdateMap());
       }
       final bool subChanged = _queueCounterUpdates(batch, updated.userId, deltas);
       await batch.commit();
@@ -207,13 +207,15 @@ class AppointmentManager extends ChangeNotifier {
     await updateAppointment(updated);
 
     final String? subscriptionId = updated.subscriptionId;
-    final bool spendsRight = updated.postponedBy == PostponeSource.user &&
-        appointment.postponedBy != PostponeSource.user;
-    if (spendsRight && subscriptionId != null && subscriptionId.isNotEmpty) {
+    final int spentRights = updated.postponementRightsSpent -
+        appointment.postponementRightsSpent;
+    if (spentRights > 0 &&
+        subscriptionId != null &&
+        subscriptionId.isNotEmpty) {
       await subProvider.adjustPostponementsUsed(
         userId: updated.userId,
         subscriptionId: subscriptionId,
-        delta: 1,
+        delta: spentRights,
       );
     }
   }
@@ -246,9 +248,10 @@ class AppointmentManager extends ChangeNotifier {
   /// away from the appointments that are actually stored.
   ///
   /// [returnPostponementRight] true ise ve randevu danışan kaynaklı
-  /// ertelendiyse danışanın erteleme hakkı (`postponementsUsed`, sıfırın
-  /// altına inmeden) aynı batch'te geri verilir. Sonuç: randevu bulunup
-  /// silindi mi, hak gerçekten geri verildi mi.
+  /// ertelendiyse randevu için düşülen bütün erteleme hakları (tekrar
+  /// ertelemeler dahil; `postponementsUsed`, sıfırın altına inmeden) aynı
+  /// batch'te geri verilir. Sonuç: randevu bulunup silindi mi, hak gerçekten
+  /// geri verildi mi.
   Future<({bool deleted, bool rightReturned})> deleteAppointment(
       String appointmentId,
       String userId, {
@@ -269,9 +272,9 @@ class AppointmentManager extends ChangeNotifier {
       // Tartım visits never incremented the counters, so they must not be
       // decremented here either.
       final String? counterField = _meetingCounterFieldOfDoc(data);
-      final bool wantsRightBack = returnPostponementRight &&
-          PostponeSource.fromValue(data['postponedBy'] as String?) ==
-              PostponeSource.user;
+      final int spentRights =
+          AppointmentModel.postponementRightsSpentIn(data);
+      final bool wantsRightBack = returnPostponementRight && spentRights > 0;
 
       final DocumentSnapshot<Map<String, dynamic>>? subSnap =
           (counterField != null || wantsRightBack) &&
@@ -284,12 +287,14 @@ class AppointmentManager extends ChangeNotifier {
           usedRaw is int ? usedRaw : int.tryParse('$usedRaw') ?? 0;
       final bool returnsRight =
           wantsRightBack && subExists && postponementsUsed > 0;
+      final int returnedRights =
+          spentRights < postponementsUsed ? spentRights : postponementsUsed;
 
       final Map<String, Object?> subUpdates = <String, Object?>{
         if (counterField != null && subExists)
           counterField: FieldValue.increment(-1),
         if (returnsRight) ...<String, Object?>{
-          'postponementsUsed': FieldValue.increment(-1),
+          'postponementsUsed': FieldValue.increment(-returnedRights),
           'updateDate': Timestamp.fromDate(DateTime.now()),
           'updateUser': deletedBy,
         },

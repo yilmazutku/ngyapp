@@ -14,6 +14,11 @@ const String _title = 'Randevuyu Taşı';
 const String _deductOption = 'Evet, erteleme hakkından düş';
 const String _moveOnlyOption = 'Hayır, yalnızca tarihi ve saati değiştir';
 const String _rightQuestion = 'Danışanın erteleme hakkından düşülsün mü?';
+const String _repostponeQuestion =
+    'Tekrar erteleme mi yapılıyor? Danışanın erteleme hakkından bir kez daha '
+    'düşülsün mü?';
+const String _repostponeOption =
+    'Evet, tekrar erteleme: erteleme hakkından düş';
 const String _cancel = 'Vazgeç';
 
 class _FakeSubProvider extends SubProvider {
@@ -56,6 +61,7 @@ AppointmentModel _appointment({
   AppointmentStatus status = AppointmentStatus.scheduled,
   DateTime? postponedDate,
   PostponeSource? postponedBy,
+  List<DateTime> repostponedFrom = const <DateTime>[],
   String? subscriptionId = 's1',
 }) =>
     AppointmentModel(
@@ -78,6 +84,7 @@ AppointmentModel _appointment({
       createDate: DateTime(2026, 11, 1),
       postponedDate: postponedDate,
       postponedBy: postponedBy,
+      repostponedFrom: repostponedFrom,
       durationMinutes: 30,
     );
 
@@ -313,19 +320,20 @@ void main() {
   });
 
   testWidgets(
-      'hakkı daha önce düşülmüş randevuda soru sorulmaz; yeniden '
-      'düşülmeyeceği yazar ve false döner', (WidgetTester tester) async {
+      'yeni tarihi seçilmemiş danışan kaynaklı ertelemede soru sorulmaz; '
+      'yeniden düşülmeyeceği yazar ve false döner',
+      (WidgetTester tester) async {
     final _Outcome outcome = await _open(
       tester,
       _appointment(
         status: AppointmentStatus.postponed,
-        postponedDate: DateTime(2026, 11, 10, 15, 40),
         postponedBy: PostponeSource.user,
       ),
       subscriptions: [_subscription('s1', allowed: 2, used: 2)],
     );
 
     expect(find.text(_rightQuestion), findsNothing);
+    expect(find.text(_repostponeQuestion), findsNothing);
     expect(find.byType(RadioListTile<bool>), findsNothing);
     expect(find.byType(InlineNote), findsOneWidget);
     expect(find.textContaining('yeniden düşülmez'), findsOneWidget);
@@ -334,6 +342,80 @@ void main() {
     await _confirm(tester);
     expect(outcome.answered, isTrue);
     expect(outcome.deductRight, isFalse);
+  });
+
+  testWidgets(
+      'danışan kaynaklı ertelenmiş randevu taşınırken tekrar erteleme mi '
+      'diye sorulur; "Evet" true döner', (WidgetTester tester) async {
+    final _Outcome outcome = await _open(
+      tester,
+      _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: DateTime(2026, 11, 10, 15, 40),
+        postponedBy: PostponeSource.user,
+      ),
+      subscriptions: [_subscription('s1', allowed: 3, used: 1)],
+    );
+
+    expect(find.textContaining('daha önce düşüldü'), findsOneWidget);
+    expect(find.text(_repostponeQuestion), findsOneWidget);
+    expect(find.text(_rightQuestion), findsNothing);
+    expect(find.text('Kalan erteleme hakkı: 2'), findsOneWidget);
+    expect(find.text('Danışanın erteleme hakkından bir kez daha düşülür.'),
+        findsOneWidget);
+    expect(
+        find.text('Randevu “Ertelendi” olarak kalır; erteleme hakkı '
+            'değişmez.'),
+        findsOneWidget);
+    expect(_confirmButton(tester).onPressed, isNull);
+
+    await _choose(tester, _repostponeOption);
+    await _confirm(tester);
+
+    expect(outcome.answered, isTrue);
+    expect(outcome.deductRight, isTrue);
+  });
+
+  testWidgets('tekrar ertelemede "Hayır" seçilince false döner',
+      (WidgetTester tester) async {
+    final _Outcome outcome = await _open(
+      tester,
+      _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: DateTime(2026, 11, 10, 15, 40),
+        postponedBy: PostponeSource.user,
+        repostponedFrom: [DateTime(2026, 11, 9, 15, 40)],
+      ),
+      subscriptions: [_subscription('s1', allowed: 3, used: 2)],
+    );
+
+    expect(find.textContaining('daha önce 2 kez düşüldü'), findsOneWidget);
+    await _choose(tester, _moveOnlyOption);
+    await _confirm(tester);
+
+    expect(outcome.deductRight, isFalse);
+  });
+
+  testWidgets(
+      'tekrar ertelemede hak kalmadıysa "Evet" onaylanmadan önce uyarılır',
+      (WidgetTester tester) async {
+    final _Outcome outcome = await _open(
+      tester,
+      _appointment(
+        status: AppointmentStatus.postponed,
+        postponedDate: DateTime(2026, 11, 10, 15, 40),
+        postponedBy: PostponeSource.user,
+      ),
+      subscriptions: [_subscription('s1', allowed: 1, used: 1)],
+    );
+
+    await _choose(tester, _repostponeOption);
+    await _confirm(tester);
+    expect(find.text('Evet'), findsOneWidget);
+    await tester.tap(find.text('Evet'));
+    await tester.pumpAndSettle();
+
+    expect(outcome.deductRight, isTrue);
   });
 
   testWidgets('seçeneklerin açıklaması randevunun durumuna göre yazılır',

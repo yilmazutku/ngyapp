@@ -303,7 +303,10 @@ class CustomerSummaryProvider extends ChangeNotifier {
   /// - Postponement-use dates: the **originally planned** date
   ///   ([appointmentDateTime]) of every appointment carrying a user-originated
   ///   postponement ([PostponeSource.user]) — only those consume a
-  ///   postponement right, so this is when the customer spent one. The status
+  ///   postponement right, so this is when the customer spent one — plus every
+  ///   date such an appointment was postponed again from
+  ///   ([AppointmentModel.repostponedFrom]), each of which spent one more
+  ///   right. The status
   ///   is deliberately not filtered on: the marker survives the appointment
   ///   being completed, and so does the spent right, so the dates listed here
   ///   always add up to the package's `postponementsUsed`. The new date the
@@ -364,6 +367,17 @@ class CustomerSummaryProvider extends ChangeNotifier {
             postponementUseDates.add(_SummaryDate(rawDate.toDate()));
           } else {
             postponementUseNullCount++;
+          }
+          final Object? repostponed =
+              data[AppointmentModel.repostponedFromField];
+          if (repostponed is List) {
+            for (final Object? date in repostponed) {
+              if (date is Timestamp) {
+                postponementUseDates.add(_SummaryDate(date.toDate()));
+              } else {
+                postponementUseNullCount++;
+              }
+            }
           }
         }
       }

@@ -48,7 +48,16 @@ class _RescheduleAppointmentDialogState
       'Randevu yeni tarih ve saate taşınsın mı?';
   static const String _rightQuestion =
       'Danışanın erteleme hakkından düşülsün mü?';
+  static const String _repostponeQuestion =
+      'Tekrar erteleme mi yapılıyor? Danışanın erteleme hakkından bir kez daha '
+      'düşülsün mü?';
   static const String _deductOption = 'Evet, erteleme hakkından düş';
+  static const String _repostponeOption =
+      'Evet, tekrar erteleme: erteleme hakkından düş';
+  static const String _repostponeHint =
+      'Danışanın erteleme hakkından bir kez daha düşülür.';
+  static const String _repostponeMoveOnlyHint =
+      'Randevu “Ertelendi” olarak kalır; erteleme hakkı değişmez.';
   static const String _moveOnlyOption =
       'Hayır, yalnızca tarihi ve saati değiştir';
   static const String _remainingLabel = 'Kalan erteleme hakkı';
@@ -76,20 +85,35 @@ class _RescheduleAppointmentDialogState
 
   bool get _hasPackage => _appointment.subscriptionId?.isNotEmpty ?? false;
 
+  bool get _asksRepostponement => _appointment.canBeRepostponed;
+
   bool get _rightAlreadyDeducted =>
-      _appointment.postponedBy == PostponeSource.user;
+      _appointment.postponedBy == PostponeSource.user && !_asksRepostponement;
+
+  String get _deductedBeforeNote {
+    final int count = _appointment.postponementRightsSpent;
+    return count > 1
+        ? 'Bu randevu için danışanın erteleme hakkından daha önce $count kez '
+            'düşüldü.'
+        : 'Bu randevu için danışanın erteleme hakkı daha önce düşüldü.';
+  }
 
   bool get _isPostponed => _appointment.status == AppointmentStatus.postponed;
 
-  String get _deductHint => _isPostponed
-      ? 'Erteleme kaynağı “$_customerSourceLabel” olur.'
-      : 'Randevu “$_postponedLabel” olur; erteleme kaynağı '
-          '“$_customerSourceLabel” seçilir.';
+  String get _deductHint => _asksRepostponement
+      ? _repostponeHint
+      : _isPostponed
+          ? 'Erteleme kaynağı “$_customerSourceLabel” olur.'
+          : 'Randevu “$_postponedLabel” olur; erteleme kaynağı '
+              '“$_customerSourceLabel” seçilir.';
 
-  String get _moveOnlyHint => _isPostponed
-      ? 'Randevu “$_postponedLabel” olarak kalır; erteleme kaynağı değişmez.'
-      : 'Randevu “${_appointment.status.label}” olarak kalır; erteleme '
-          'sayılmaz.';
+  String get _moveOnlyHint => _asksRepostponement
+      ? _repostponeMoveOnlyHint
+      : _isPostponed
+          ? 'Randevu “$_postponedLabel” olarak kalır; erteleme kaynağı '
+              'değişmez.'
+          : 'Randevu “${_appointment.status.label}” olarak kalır; erteleme '
+              'sayılmaz.';
 
   @override
   void initState() {
@@ -250,8 +274,17 @@ class _RescheduleAppointmentDialogState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_asksRepostponement)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: InlineNote(
+              icon: Icons.info_outline,
+              text: _deductedBeforeNote,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
         Text(
-          _rightQuestion,
+          _asksRepostponement ? _repostponeQuestion : _rightQuestion,
           style: Theme.of(context)
               .textTheme
               .titleSmall
@@ -268,7 +301,10 @@ class _RescheduleAppointmentDialogState
           child: Column(
             children: [
               _option(context,
-                  value: true, title: _deductOption, hint: _deductHint),
+                  value: true,
+                  title:
+                      _asksRepostponement ? _repostponeOption : _deductOption,
+                  hint: _deductHint),
               _option(context,
                   value: false, title: _moveOnlyOption, hint: _moveOnlyHint),
             ],

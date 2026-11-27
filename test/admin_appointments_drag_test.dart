@@ -26,6 +26,8 @@ import 'package:provider/provider.dart';
 const String _dialogTitle = 'Randevuyu Taşı';
 const String _deductOption = 'Evet, erteleme hakkından düş';
 const String _moveOnlyOption = 'Hayır, yalnızca tarihi ve saati değiştir';
+const String _repostponeOption =
+    'Evet, tekrar erteleme: erteleme hakkından düş';
 const String _cancel = 'Vazgeç';
 const String _loadingMessage = 'Randevu taşınıyor...';
 const String _notDraggableTitle = 'Randevu Taşınamaz';
@@ -756,34 +758,42 @@ void main() {
   });
 
   group('durumlar', () {
-    testWidgets('hakkı düşülmüş ertelenmiş randevu soru sorulmadan taşınır',
-        (WidgetTester tester) async {
-      final _FakeAppointmentManager manager = await _pumpPage(tester, [
-        _appointment(
-          _at(_weekDay(0), 9),
-          status: AppointmentStatus.postponed,
-          postponedDate: _at(_weekDay(1), 10),
-          postponedBy: PostponeSource.user,
-        ),
-      ]);
+    for (final bool repostpone in const <bool>[false, true]) {
+      testWidgets(
+          'hakkı düşülmüş ertelenmiş randevu taşınırken tekrar erteleme mi '
+          'diye sorulur (${repostpone ? 'evet' : 'hayır'})',
+          (WidgetTester tester) async {
+        final _FakeAppointmentManager manager = await _pumpPage(tester, [
+          _appointment(
+            _at(_weekDay(0), 9),
+            status: AppointmentStatus.postponed,
+            postponedDate: _at(_weekDay(1), 10),
+            postponedBy: PostponeSource.user,
+          ),
+        ]);
 
-      final TestGesture gesture =
-          await _pickUp(tester, '10:00-10:30 Ali Veli $kPostponedMark');
-      await gesture.moveBy(const Offset(0, 120 * kPixelsPerMinute));
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
+        final TestGesture gesture =
+            await _pickUp(tester, '10:00-10:30 Ali Veli $kPostponedMark');
+        await gesture.moveBy(const Offset(0, 120 * kPixelsPerMinute));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
 
-      expect(find.text(_deductOption), findsNothing);
-      await _confirmMove(tester);
+        expect(find.text(_deductOption), findsNothing);
+        expect(find.text(_repostponeOption), findsOneWidget);
+        await _choose(tester, repostpone ? _repostponeOption : _moveOnlyOption);
+        await _confirmMove(tester);
 
-      expect(manager.moves, <_Move>[
-        (id: 'a1', newStart: _at(_weekDay(1), 12), deductRight: false),
-      ]);
-      expect(
-          manager.appointments.single.appointmentDateTime, _at(_weekDay(0), 9));
-      expect(_card('12:00-12:30 Ali Veli $kPostponedMark'), findsOneWidget);
-    });
+        expect(manager.moves, <_Move>[
+          (id: 'a1', newStart: _at(_weekDay(1), 12), deductRight: repostpone),
+        ]);
+        expect(manager.appointments.single.appointmentDateTime,
+            _at(_weekDay(0), 9));
+        expect(manager.appointments.single.repostponedFrom,
+            repostpone ? [_at(_weekDay(1), 10)] : isEmpty);
+        expect(_card('12:00-12:30 Ali Veli $kPostponedMark'), findsOneWidget);
+      });
+    }
 
     testWidgets(
         'ofis kaynaklı ertelenmiş randevunun kartında da (E) yazar; hak '
